@@ -1,0 +1,29 @@
+{
+  "name": "hypercdr-platform-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 3002",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 3002",
+    "visual:compare": "env -u DISPLAY -u WAYLAND_DISPLAY -u XAUTHORITY PLAYWRIGHT_BROWSERS_PATH=/data/software/ms-playwright node scripts/visual-compare.mjs"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "^4.1.14",
+    "@tanstack/react-table": "^8.21.3",
+    "@vitejs/plugin-react": "^5.0.4",
+    "lucide-react": "^0.546.0",
+    "motion": "^12.23.24",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1",
+    "tailwindcss": "^4.1.14",
+    "vite": "^6.2.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@types/react": "^19.2.16",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "~5.8.2"
+  }
+}

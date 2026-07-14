@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HyperCDR Bootstrap Portal</title>
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark">H</span>
+          <div>
+            <strong>HyperCDR</strong>
+            <small>Bootstrap distribution</small>
+          </div>
+        </div>
+        <nav class="topnav" aria-label="Portal sections">
+          <a href="#deploy">Deploy</a>
+          <a href="#artifacts">Artifacts</a>
+          <a href="#boundary">Boundary</a>
+        </nav>
+      </header>
+
+      <section class="hero">
+        <div>
+          <p class="eyebrow">HyperCDR Bootstrap Portal</p>
+          <h1>Install the HyperCDR control plane</h1>
+          <p class="summary">
+            Generate deployment commands and download release artifacts for Kubernetes or standalone host deployments.
+          </p>
+          <div class="hero-actions">
+            <a class="button" href="#deploy">Configure deployment</a>
+            <a class="button secondary" href="./releases/dev/hypercdr-bootstrap.tar.gz" download>Download bootstrap package</a>
+          </div>
+        </div>
+        <div class="version-card" aria-label="Release metadata">
+          <span class="status-dot"></span>
+          <span>Release channel</span>
+          <strong id="release-version">Loading</strong>
+          <small id="release-build">Reading manifest</small>
+        </div>
+      </section>
+
+      <section class="status-strip" aria-label="Bootstrap operating model">
+        <div>
+          <span>Current host</span>
+          <strong id="current-host">Detecting</strong>
+        </div>
+        <div>
+          <span>Portal type</span>
+          <strong>Static, portable</strong>
+        </div>
+        <div>
+          <span>Runtime dependency</span>
+          <strong>None after install</strong>
+        </div>
+      </section>
+
+      <section id="deploy" class="deploy-layout">
+        <article class="panel panel-primary">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Kubernetes</p>
+              <h2>Helm deployment</h2>
+              <p class="panel-copy">Recommended path. Set the public address and registry, then run the generated command with kubectl and Helm access.</p>
+            </div>
+            <span class="badge">Recommended</span>
+          </div>
+
+          <div class="mode-steps">
+            <span>1. Review values</span>
+            <span>2. Copy command</span>
+            <span>3. Run with kubectl access</span>
+          </div>
+
+          <div class="form-grid">
+            <label>
+              Access mode
+              <select id="k8s-access-mode">
+                <option value="nodeport">Node IP + NodePort</option>
+                <option value="custom">Custom URL</option>
+              </select>
+              <small>Use NodePort when DNS is not ready.</small>
+            </label>
+            <label class="k8s-nodeport-field">
+              Cluster node IP
+              <input id="k8s-node-ip" value="" placeholder="192.168.8.158" />
+              <small>Reachable by users and agents.</small>
+            </label>
+            <label class="k8s-nodeport-field">
+              NodePort
+              <input id="k8s-node-port" value="30080" />
+              <small>Exposes the platform service.</small>
+            </label>
+            <label class="k8s-custom-url-field hidden">
+              Public base URL
+              <input id="k8s-public-url" value="" placeholder="https://node-ip:30080" />
+              <small>Use a LoadBalancer IP or DNS name reachable by users and agents.</small>
+            </label>
+            <label>
+              Image registry
+              <input id="k8s-registry" value="" placeholder="harbor.example.com:5000/hypercdr" />
+              <small>The platform and future agent installs use this registry by default.</small>
+            </label>
+            <div class="derived-url">
+              <span>Generated public base URL</span>
+              <strong id="k8s-derived-url">https://node-ip:30080</strong>
+            </div>
+          </div>
+
+          <div class="command-window">
+            <div class="command-title">
+              <span></span><span></span><span></span>
+              <strong>kubernetes-install.sh</strong>
+            </div>
+            <pre id="k8s-command" class="command" tabindex="0"></pre>
+          </div>
+          <div class="actions">
+            <button type="button" data-copy-target="k8s-command">Copy command</button>
+            <a id="download-installer-k8s" class="button secondary" href="./releases/dev/install-platform.sh" download>Download script</a>
+          </div>
+        </article>
+
+        <article class="panel panel-secondary">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Standalone Host</p>
+              <h2>Docker Compose deployment</h2>
+              <p class="panel-copy">Alternative for quick validation on a single Linux host.</p>
+            </div>
+            <span class="badge muted">Preview</span>
+          </div>
+
+          <div class="mode-steps">
+            <span>1. Install Harbor CA</span>
+            <span>2. Verify Harbor</span>
+            <span>3. Install platform</span>
+          </div>
+
+          <div class="form-grid">
+            <label>
+              Public base URL
+              <input id="host-public-url" value="" placeholder="http://host-ip:3002" />
+              <small>Host IP and port reachable by browsers and agents.</small>
+            </label>
+            <label>
+              Image registry
+              <input id="host-registry" value="" placeholder="harbor.example.com:5000/hypercdr" />
+              <small>The platform and future agent installs use this registry by default.</small>
+            </label>
+          </div>
+
+          <div class="command-window">
+            <div class="command-title">
+              <span></span><span></span><span></span>
+              <strong>step-1-install-ca.sh</strong>
+            </div>
+            <pre id="host-prepare-command" class="command" tabindex="0"></pre>
+          </div>
+          <div class="actions">
+            <button type="button" data-copy-target="host-prepare-command">Copy step 1</button>
+          </div>
+
+          <div class="command-window">
+            <div class="command-title">
+              <span></span><span></span><span></span>
+              <strong>step-2-verify-harbor.sh</strong>
+            </div>
+            <pre id="host-check-command" class="command" tabindex="0"></pre>
+          </div>
+          <div class="actions">
+            <button type="button" data-copy-target="host-check-command">Copy step 2</button>
+          </div>
+
+          <div class="command-window">
+            <div class="command-title">
+              <span></span><span></span><span></span>
+              <strong>step-3-install-platform.sh</strong>
+            </div>
+            <pre id="host-install-command" class="command" tabindex="0"></pre>
+          </div>
+          <div class="actions">
+            <button type="button" data-copy-target="host-install-command">Copy step 3</button>
+            <a class="button secondary" href="./releases/dev/compose.yaml" download>Download compose</a>
+          </div>
+        </article>
+      </section>
+
+      <section id="artifacts" class="panel artifacts-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Artifacts</p>
+            <h2>Release downloads</h2>
+            <p class="panel-copy">Portable static assets that can be hosted here or moved under another product portal.</p>
+          </div>
+          <span class="badge muted">Portable</span>
+        </div>
+        <div id="artifact-list" class="artifact-list"></div>
+      </section>
+
+      <section id="boundary" class="notes">
+        <h2>Operational boundary</h2>
+        <p>
+          This portal is a bootstrap distribution point only. A deployed HyperCDR control plane must not depend on this
+          host at runtime unless you intentionally keep using it as an image registry or artifact mirror.
+        </p>
+      </section>
+    </main>
+    <script src="./assets/app.js"></script>
+  </body>
+</html>

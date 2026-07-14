@@ -1,0 +1,6 @@
+# source-image target-repository target-tag
+docker.m.daocloud.io/library/debian:bookworm-slim debian bookworm-slim
+docker.m.daocloud.io/library/node:22-bookworm-slim node 22-bookworm-slim
+docker.m.daocloud.io/library/golang:1.24-bookworm golang 1.24-bookworm
+docker.m.daocloud.io/library/golang:1.24 golang 1.24
+gcr.m.daocloud.io/distroless/static-debian12:nonroot static-debian12 nonroot

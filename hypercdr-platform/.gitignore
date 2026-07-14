@@ -1,0 +1,61 @@
+# Dependencies
+node_modules/
+
+# Frontend build output
+dist/
+platform/frontend/dist/
+platform/frontend/visual-diffs/
+
+# Go build and module caches
+.gocache/
+.gocache-test/
+.gomodcache/
+
+# Temporary work directories
+.tmp/
+tmp/
+
+# Compiled binaries
+/comm-agent
+platform/backend/bin/
+cmd/platform-api/platform-api-new*
+platform/backend/cmd/platform-api/platform-api-new*
+*.exe
+*.test
+
+# Logs and process files
+*.log
+*.pid
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+deployments/release/release.conf
+*.key
+*.pem
+*.crt
+kubeconfig*
+kubeconfigs/
+
+# Archives and backups
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.bak
+*.bak-*
+backup/
+backups/
+
+# Database dumps and local state
+*.dump
+*.db
+*.sqlite
+*.sqlite3
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

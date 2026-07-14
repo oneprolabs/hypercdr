@@ -1,0 +1,49 @@
+global:
+  publicBaseURL: https://127.0.0.1:30080
+  agentWebSocketURL: wss://127.0.0.1:30080/ws/agent
+  imageRegistry: 192.168.8.149:5001/hypercdr
+
+platform:
+  replicaCount: 1
+  image:
+    repository: platform-api
+    tag: v20260714.5
+    pullPolicy: IfNotPresent
+  service:
+    type: NodePort
+    port: 80
+    targetPort: 18080
+    nodePort: 30080
+  resources: {}
+  logLevel: info
+  agentNamespace: hypercdr-agent
+  registryCA:
+    enabled: true
+  tls:
+    enabled: false
+    cert: ""
+    key: ""
+
+postgresql:
+  mode: bundled
+  image:
+    repository: 192.168.8.149:5001/hypercdr/postgres
+    tag: "16"
+    pullPolicy: IfNotPresent
+  database: hypercdr
+  username: hypercdr
+  password: hypercdr
+  storageClass: longhorn
+  size: 20Gi
+  resources: {}
+  external:
+    host: ""
+    port: 5432
+    database: hypercdr
+    username: hypercdr
+    password: ""
+    existingSecret: ""
+    existingSecretPasswordKey: password
+
+secrets:
+  secretKey: dev-secret-change-me

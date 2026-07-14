@@ -1,0 +1,22 @@
+# Generated Bootstrap release artifacts
+site/releases/
+
+# Local runtime and temporary files
+.tmp/
+tmp/
+*.log
+*.pid
+*.bak
+*.swp
+
+# Local secrets and certificates; the bundled public Harbor CA is intentional.
+*.key
+*.pem
+*.crt
+!charts/hypercdr-platform/files/registry-ca.crt
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

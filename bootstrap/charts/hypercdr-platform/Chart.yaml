@@ -1,0 +1,6 @@
+apiVersion: v2
+name: hypercdr-platform
+description: HyperCDR control plane
+type: application
+version: 0.1.0-dev
+appVersion: 0.1.0-dev

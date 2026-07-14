@@ -1,0 +1,25 @@
+# HyperCDR release configuration.
+# Copy this file to release.conf and adjust values for the target environment.
+
+# Required: Harbor project prefix used for all HyperCDR release images.
+HCDR_IMAGE_REGISTRY=192.168.8.149:5001/hypercdr
+
+# Optional: Docker login server. Defaults to the host part of HCDR_IMAGE_REGISTRY.
+HCDR_HARBOR_SERVER=192.168.8.149:5001
+HCDR_HARBOR_USERNAME=admin
+HCDR_HARBOR_PASSWORD_FILE=/data/harbor/harbor_admin_password
+
+# Build dependency mirrors.
+HCDR_BUILD_GOPROXY=https://goproxy.cn,direct
+HCDR_BUILD_NPM_REGISTRY=https://registry.npmmirror.com
+
+# External work and dependency caches. Builds do not write generated files into source.
+HCDR_BUILD_ROOT=/data/hypercdr/.build/platform
+HCDR_CACHE_ROOT=/data/hypercdr/.cache
+
+# Optional runtime images exposed by /install.sh. Defaults derive from HCDR_IMAGE_REGISTRY.
+# HCDR_VELERO_IMAGE=192.168.8.149:5001/hypercdr/velero:v1.17.1-helperfix
+# HCDR_VELERO_AWS_PLUGIN_IMAGE=192.168.8.149:5001/hypercdr/velero-plugin-for-aws:v1.13.0
+
+# Optional behavior defaults. CLI flags override these.
+HCDR_RELEASE_SKIP_TESTS=false

@@ -1,0 +1,11 @@
+# Ignore everything by default
+*
+
+# Keep repository-level ignore rules
+!.gitignore
+
+# Include the two source projects
+!hypercdr-platform/
+!hypercdr-platform/**
+!bootstrap/
+!bootstrap/**

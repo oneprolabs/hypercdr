@@ -1,0 +1,5 @@
+# source-image target-repository target-tag
+hypercdr/platform-api:dev platform-api dev
+hypercdr/comm-agent:dev comm-agent dev
+hypercdr/velero:v1.17.1-helperfix velero v1.17.1-helperfix
+hypercdr/postgres:16 postgres 16

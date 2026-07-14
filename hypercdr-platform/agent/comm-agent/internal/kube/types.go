@@ -1,0 +1,120 @@
+package kube
+
+import (
+	"context"
+	"time"
+)
+
+type ClusterReader interface {
+	ReadCluster(ctx context.Context) (ClusterState, error)
+}
+
+type VeleroBackupWaiter interface {
+	WaitForVeleroBackup(ctx context.Context, namespace string, name string, timeout time.Duration) error
+}
+
+type VeleroBackupDeletionWaiter interface {
+	WaitForVeleroBackupDeleted(ctx context.Context, namespace string, name string, timeout time.Duration) error
+}
+
+type ClusterState struct {
+	Name            string
+	KubeVersion     string
+	Nodes           []Node
+	StorageClasses  []StorageClass
+	Namespaces      []Namespace
+	Workloads       []Workload
+	Services        []NamespacedResource
+	Ingresses       []NamespacedResource
+	NetworkPolicies []NamespacedResource
+	ConfigMaps      []NamespacedResource
+	Secrets         []NamespacedResource
+	ServiceAccounts []NamespacedResource
+	PVCs            []PVC
+	OtherResources  []TypedNamespacedResource
+	Velero          VeleroState
+	CollectedAt     time.Time
+}
+
+type Node struct {
+	Name           string
+	Labels         map[string]string
+	Ready          bool
+	KubeletVersion string
+	Capacity       map[string]string
+	AgeSeconds     int64
+}
+
+type StorageClass struct {
+	Name                 string
+	Provisioner          string
+	ReclaimPolicy        string
+	VolumeBindingMode    string
+	AllowVolumeExpansion string
+	Default              bool
+	AgeSeconds           int64
+}
+
+type Namespace struct {
+	Name       string
+	Phase      string
+	Labels     map[string]string
+	AgeSeconds int64
+}
+
+type Workload struct {
+	Namespace         string
+	Name              string
+	Kind              string
+	Labels            map[string]string
+	Ready             bool
+	DesiredReplicas   int32
+	ReadyReplicas     int32
+	UpdatedReplicas   int32
+	AvailableReplicas int32
+	AgeSeconds        int64
+	Containers        []string
+	Images            []string
+	Selector          string
+	Fields            map[string]string
+}
+
+type NamespacedResource struct {
+	Namespace  string
+	Name       string
+	Labels     map[string]string
+	AgeSeconds int64
+	Fields     map[string]string
+}
+
+type TypedNamespacedResource struct {
+	Namespace  string
+	Name       string
+	Kind       string
+	APIVersion string
+	ShortName  string
+	Labels     map[string]string
+	AgeSeconds int64
+	Fields     map[string]string
+}
+
+type PVC struct {
+	Namespace     string
+	Name          string
+	Labels        map[string]string
+	CapacityBytes int64
+	AgeSeconds    int64
+	Fields        map[string]string
+}
+
+type PVInfo struct {
+	VolumeType string
+}
+
+type VeleroState struct {
+	Status                  string
+	BackupStorageLocations  []map[string]any
+	VolumeSnapshotLocations []map[string]any
+	RecentBackups           []map[string]any
+	RecentRestores          []map[string]any
+}

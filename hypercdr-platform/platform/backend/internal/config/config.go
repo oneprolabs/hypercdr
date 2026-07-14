@@ -1,0 +1,87 @@
+package config
+
+import (
+	"log/slog"
+	"os"
+	"strings"
+)
+
+type Config struct {
+	HTTPAddr        string
+	TLSEnabled      bool
+	TLSCertFile     string
+	TLSKeyFile      string
+	DatabaseURL     string
+	PublicBaseURL   string
+	AgentWSEndpoint string
+	AgentImage      string
+	ImageRegistry   string
+	AgentNamespace  string
+	VeleroVersion   string
+	VeleroImage     string
+	VeleroAWSPlugin string
+	RegistryCAPath  string
+	FrontendDir     string
+	SecretKey       string
+	LogLevel        slog.Level
+}
+
+func Load() Config {
+	imageRegistry := strings.TrimRight(getEnv("HCDR_IMAGE_REGISTRY", ""), "/")
+	return Config{
+		HTTPAddr:        getEnv("HCDR_HTTP_ADDR", ":8080"),
+		TLSEnabled:      parseBool("HCDR_TLS_ENABLED", false),
+		TLSCertFile:     os.Getenv("HCDR_TLS_CERT_FILE"),
+		TLSKeyFile:      os.Getenv("HCDR_TLS_KEY_FILE"),
+		DatabaseURL:     os.Getenv("HCDR_DATABASE_URL"),
+		PublicBaseURL:   strings.TrimRight(getEnv("HCDR_PUBLIC_BASE_URL", ""), "/"),
+		AgentWSEndpoint: getEnv("HCDR_AGENT_WS_ENDPOINT", ""),
+		AgentImage:      getEnv("HCDR_AGENT_IMAGE", defaultImage(imageRegistry, "comm-agent:dev")),
+		ImageRegistry:   imageRegistry,
+		AgentNamespace:  getEnv("HCDR_AGENT_NAMESPACE", "hypercdr-agent"),
+		VeleroVersion:   getEnv("HCDR_VELERO_VERSION", "v1.17.1"),
+		VeleroImage:     getEnv("HCDR_VELERO_IMAGE", defaultImage(imageRegistry, "velero:v1.17.1-helperfix")),
+		VeleroAWSPlugin: getEnv("HCDR_VELERO_AWS_PLUGIN_IMAGE", defaultImage(imageRegistry, "velero-plugin-for-aws:v1.13.0")),
+		RegistryCAPath:  getEnv("HCDR_REGISTRY_CA_PATH", "/data/harbor/cert/hypercdr-ca.crt"),
+		FrontendDir:     os.Getenv("HCDR_FRONTEND_DIR"),
+		SecretKey:       os.Getenv("HCDR_SECRET_KEY"),
+		LogLevel:        parseLogLevel(getEnv("HCDR_LOG_LEVEL", "info")),
+	}
+}
+
+func defaultImage(registry string, image string) string {
+	registry = strings.TrimRight(strings.TrimSpace(registry), "/")
+	if registry == "" {
+		return ""
+	}
+	return registry + "/" + image
+}
+
+func getEnv(key string, fallback string) string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func parseLogLevel(value string) slog.Level {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}
+
+func parseBool(key string, fallback bool) bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	if value == "" {
+		return fallback
+	}
+	return value == "1" || value == "true" || value == "yes" || value == "on"
+}
