@@ -9,3 +9,5 @@
 !hypercdr-platform/**
 !bootstrap/
 !bootstrap/**
+!hypercdr-velero/
+!hypercdr-velero/**

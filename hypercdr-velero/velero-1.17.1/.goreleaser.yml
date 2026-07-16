@@ -1,0 +1,68 @@
+# Copyright 2018 the Velero contributors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+dist: _output
+builds:
+  - main: ./cmd/velero/velero.go
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm
+      - arm64
+      - ppc64le
+      - s390x
+    ignore:
+      # don't build arm for darwin and arm/arm64 for windows
+      - goos: darwin
+        goarch: arm
+      - goos: darwin
+        goarch: ppc64le
+      - goos: darwin
+        goarch: s390x
+      - goos: windows
+        goarch: arm
+      - goos: windows
+        goarch: arm64
+      - goos: windows
+        goarch: ppc64le
+      - goos: windows
+        goarch: s390x
+    ldflags:
+      - -X "github.com/vmware-tanzu/velero/pkg/buildinfo.Version={{ .Tag }}" -X "github.com/vmware-tanzu/velero/pkg/buildinfo.GitSHA={{ .FullCommit }}" -X "github.com/vmware-tanzu/velero/pkg/buildinfo.GitTreeState={{ .Env.GIT_TREE_STATE }}" -X "github.com/vmware-tanzu/velero/pkg/buildinfo.ImageRegistry={{ .Env.REGISTRY }}"
+archives:
+  - name_template: "{{ .ProjectName }}-{{ .Tag }}-{{ .Os }}-{{ .Arch }}"
+    wrap_in_directory: true
+    files:
+      - LICENSE
+      - examples/**/*
+checksum:
+  name_template: 'CHECKSUM'
+release:
+  github:
+    owner: vmware-tanzu
+    name: velero
+  draft: true
+  prerelease: auto
+
+git:
+  # What should be used to sort tags when gathering the current and previous
+  # tags if there are more than one tag in the same commit.
+  #
+  # Default: `-version:refname`
+  tag_sort: -version:creatordate
