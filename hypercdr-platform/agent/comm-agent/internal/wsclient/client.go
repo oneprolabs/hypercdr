@@ -654,7 +654,7 @@ func (c *Client) executeBackupTask(task protocol.TaskDispatchPayload) {
 		message  string
 	}{
 		{15, "backup command accepted"},
-		{45, "velero backup manifest generated"},
+		{45, "Backup operation prepared."},
 		{75, "backup data transfer running"},
 	}
 	for _, step := range steps {
@@ -931,7 +931,7 @@ func (c *Client) executeRestoreTask(task protocol.TaskDispatchPayload) {
 		message  string
 	}{
 		{15, task.Type + " command accepted"},
-		{45, "velero restore manifest generated"},
+		{45, "Restore operation prepared."},
 		{75, task.Type + " resources running"},
 	}
 	for _, step := range steps {
@@ -1370,6 +1370,19 @@ func (c *Client) pollVeleroStatus(task protocol.TaskDispatchPayload, object kube
 		volumeReady := !usesVolumeProgress(object)
 		if volumePayload, volumeProgress, volumeMessage, ready := c.buildVolumeProgressPayload(context.Background(), object, &samples); volumePayload != nil {
 			payload["volumeProgress"] = volumePayload
+			if failedCount := int64FromAny(volumePayload["failedCount"]); object.Kind == "Restore" && failedCount > 0 {
+				failureMessage := "Volume data restore validation failed."
+				if items, ok := volumePayload["items"].([]map[string]any); ok {
+					for _, item := range items {
+						if detail := strings.TrimSpace(fmt.Sprint(item["message"])); detail != "" {
+							failureMessage = detail
+							break
+						}
+					}
+				}
+				_ = c.sendTaskFailedWithDetails(task, "RESTORE_VOLUME_DEPENDENCY_MISSING", failureMessage, map[string]any{"velero": payload})
+				return
+			}
 			volumeReady = ready
 			if ready && volumeProgress > progress {
 				progress = volumeProgress
@@ -1454,6 +1467,19 @@ func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, 
 		volumeReady := !usesVolumeProgress(object)
 		if volumePayload, volumeProgress, volumeMessage, ready := c.buildVolumeProgressPayload(context.Background(), object, &samples); volumePayload != nil {
 			payload["volumeProgress"] = volumePayload
+			if failedCount := int64FromAny(volumePayload["failedCount"]); object.Kind == "Restore" && failedCount > 0 {
+				failureMessage := "Volume data restoration did not start because a required dependency is unavailable."
+				if items, ok := volumePayload["items"].([]map[string]any); ok {
+					for _, item := range items {
+						if detail := strings.TrimSpace(fmt.Sprint(item["message"])); detail != "" {
+							failureMessage = detail
+							break
+						}
+					}
+				}
+				_ = c.sendTaskFailedWithDetails(task, "RESTORE_VOLUME_DEPENDENCY_MISSING", failureMessage, map[string]any{"velero": payload})
+				return
+			}
 			volumeReady = ready
 			if ready && volumeProgress > progress {
 				progress = volumeProgress
@@ -1496,12 +1522,27 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, b
 	if deadline.IsZero() {
 		deadline = time.Now().UTC().Add(30 * time.Minute)
 	}
+	startPayload := cloneVeleroPayload(basePayload)
+	startPayload["readinessStage"] = "started"
+	if err := c.sendTaskProgress(task, startPayload, 100, "Resource and volume data restoration completed; restored application readiness validation started."); err != nil {
+		c.logger.Error("failed to send restore readiness start event", "task_id", task.TaskID, "error", err)
+		return
+	}
 	for {
 		readiness, err := c.readiness.GetNamespaceReadiness(context.Background(), namespace)
 		payload := cloneVeleroPayload(basePayload)
 		if err == nil {
 			payload["readiness"] = readiness
+			if readiness.FailureCode != "" {
+				_ = c.sendTaskFailedWithDetails(task, readiness.FailureCode, readiness.FailureMessage, map[string]any{"velero": payload})
+				return
+			}
 			if readiness.Ready {
+				payload["readinessStage"] = "succeeded"
+				if err := c.sendTaskProgress(task, payload, 100, "Restored application readiness validation completed successfully."); err != nil {
+					c.logger.Error("failed to send restore readiness success event", "task_id", task.TaskID, "error", err)
+					return
+				}
 				if err := c.sendTaskCompleted(task, payload, restoreMessage+"; restored application is ready"); err != nil {
 					c.logger.Error("failed to send task completed", "task_id", task.TaskID, "error", err)
 				}
@@ -1511,7 +1552,7 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, b
 				_ = c.sendTaskFailedWithDetails(task, "RESTORE_READINESS_TIMEOUT", "timed out waiting for restored application readiness", map[string]any{"velero": payload})
 				return
 			}
-			if err := c.sendTaskProgress(task, payload, 95, readiness.Message); err != nil {
+			if err := c.sendTaskProgress(task, payload, 100, restoreReadinessProgressMessage(readiness)); err != nil {
 				c.logger.Error("failed to send restore readiness progress", "task_id", task.TaskID, "error", err)
 				return
 			}
@@ -1527,6 +1568,22 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, b
 		}
 		time.Sleep(5 * time.Second)
 	}
+}
+
+func restoreReadinessProgressMessage(readiness kube.NamespaceReadiness) string {
+	message := fmt.Sprintf(
+		"Restored application readiness validation is in progress: namespace %s is %s; pods %d/%d ready; workloads %d/%d ready",
+		readiness.Namespace,
+		strings.ToLower(readiness.NamespacePhase),
+		readiness.ReadyPodCount,
+		readiness.PodCount,
+		readiness.ReadyWorkloads,
+		readiness.WorkloadCount,
+	)
+	if strings.TrimSpace(readiness.Message) != "" {
+		message += "; " + strings.TrimSuffix(strings.TrimSpace(readiness.Message), ".")
+	}
+	return message + "."
 }
 
 func (c *Client) enrichVeleroFailure(ctx context.Context, object kube.AppliedObject, payload map[string]any, status kube.ManifestStatus, fallback string) (string, map[string]any) {
@@ -1653,34 +1710,34 @@ func (c *Client) waitForBackupStorageLocation(ctx context.Context, name string, 
 func backupStatusResult(status kube.ManifestStatus, elapsed time.Duration) (bool, bool, int, string, string) {
 	switch status.Phase {
 	case "Completed":
-		return true, true, 100, "velero backup completed", ""
+		return true, true, 100, "Backup completed successfully.", ""
 	case "FailedValidation", "Failed", "PartiallyFailed":
 		return true, false, 100, "velero backup failed", "BACKUP_FAILED"
 	case "InProgress":
-		return false, false, 70, "velero backup running", ""
+		return false, false, 70, "Application resource backup is in progress.", ""
 	case "Finalizing", "FinalizingPartiallyFailed":
-		return false, false, 90, "velero backup finalizing", ""
+		return false, false, 90, "Backup finalization is in progress.", ""
 	case "New":
-		return false, false, 30, "velero backup queued", ""
+		return false, false, 30, "Backup operation queued.", ""
 	default:
-		return false, false, progressFromElapsed(elapsed), "waiting for velero backup status", ""
+		return false, false, progressFromElapsed(elapsed), "Waiting for the backup operation to start.", ""
 	}
 }
 
 func restoreStatusResult(status kube.ManifestStatus, elapsed time.Duration) (bool, bool, int, string, string) {
 	switch status.Phase {
 	case "Completed":
-		return true, true, 90, "velero restore completed", ""
+		return true, true, 90, "Resource restoration completed successfully.", ""
 	case "FailedValidation", "Failed", "PartiallyFailed":
 		return true, false, 100, "velero restore failed", "RESTORE_FAILED"
 	case "InProgress":
-		return false, false, 70, "velero restore running", ""
+		return false, false, 70, "Application resource restoration is in progress.", ""
 	case "Finalizing", "FinalizingPartiallyFailed":
-		return false, false, 85, "velero restore finalizing", ""
+		return false, false, 85, "Resource restoration finalization is in progress.", ""
 	case "New":
-		return false, false, 30, "velero restore queued", ""
+		return false, false, 30, "Restore operation queued.", ""
 	default:
-		return false, false, progressFromElapsed(elapsed), "waiting for velero restore status", ""
+		return false, false, progressFromElapsed(elapsed), "Waiting for the restore operation to start.", ""
 	}
 }
 
@@ -2160,7 +2217,7 @@ func volumeProgressMessage(operation string, progress kube.VolumeProgress, speed
 		return message
 	}
 	if progress.BytesDone <= 0 {
-		return "waiting for Velero volume progress"
+		return "Volume data transfer is being prepared."
 	}
 	message := verb + " volume data " + formatBytes(progress.BytesDone)
 	if speedBytesPerSecond > 0 {

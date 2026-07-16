@@ -110,8 +110,8 @@ func (e KubernetesRestoreExecutor) SubmitRestore(ctx context.Context, manifest v
 		if !ok {
 			return errors.New("kubernetes namespace replacement is not supported by this executor")
 		}
-		if err := replacer.DeleteNamespaceAndWait(ctx, targetNamespace); err != nil {
-			return err
+		if err := replacer.ReplaceNamespaceAndWait(ctx, targetNamespace); err != nil {
+			return fmt.Errorf("failed to replace target namespace %q: %w", targetNamespace, err)
 		}
 	}
 	modifier, err := kube.ManifestFromStruct(velero.BuildRestoreResourceModifierConfigMap(manifest))

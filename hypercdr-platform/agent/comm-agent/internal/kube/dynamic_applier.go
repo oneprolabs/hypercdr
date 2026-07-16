@@ -104,14 +104,21 @@ func (a *DynamicManifestApplier) DeleteObject(ctx context.Context, object Applie
 	return err
 }
 
-func (a *DynamicManifestApplier) DeleteNamespaceAndWait(ctx context.Context, namespace string) error {
+func (a *DynamicManifestApplier) ReplaceNamespaceAndWait(ctx context.Context, namespace string) error {
 	if namespace == "" {
 		return fmt.Errorf("namespace is required")
 	}
 	resource := a.client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "namespaces"})
-	err := resource.Delete(ctx, namespace, v1.DeleteOptions{})
+	var oldUID string
+	oldNamespace, err := resource.Get(ctx, namespace, v1.GetOptions{})
+	if err == nil {
+		oldUID = string(oldNamespace.GetUID())
+	} else if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to inspect target namespace %q: %w", namespace, err)
+	}
+	err = resource.Delete(ctx, namespace, v1.DeleteOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
-		return err
+		return fmt.Errorf("failed to delete target namespace %q: %w", namespace, err)
 	}
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -120,7 +127,7 @@ func (a *DynamicManifestApplier) DeleteNamespaceAndWait(ctx context.Context, nam
 	for {
 		_, err := resource.Get(ctx, namespace, v1.GetOptions{})
 		if apierrors.IsNotFound(err) {
-			return nil
+			break
 		}
 		if err != nil {
 			return err
@@ -130,6 +137,57 @@ func (a *DynamicManifestApplier) DeleteNamespaceAndWait(ctx context.Context, nam
 			return ctx.Err()
 		case <-timeout.C:
 			return fmt.Errorf("timed out waiting for namespace %q to be deleted", namespace)
+		case <-ticker.C:
+		}
+	}
+
+	created, err := resource.Create(ctx, &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata":   map[string]any{"name": namespace},
+	}}, v1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to recreate target namespace %q: %w", namespace, err)
+	}
+	newUID := string(created.GetUID())
+	if newUID == "" {
+		return fmt.Errorf("recreated target namespace %q has no UID", namespace)
+	}
+	if oldUID != "" && oldUID == newUID {
+		return fmt.Errorf("recreated target namespace %q retained stale UID %q", namespace, newUID)
+	}
+
+	// Require two consecutive healthy observations. This prevents a restore from
+	// being submitted against a namespace that is still terminating or has only
+	// just become visible through the API server.
+	stableObservations := 0
+	for {
+		current, getErr := resource.Get(ctx, namespace, v1.GetOptions{})
+		if getErr != nil {
+			return fmt.Errorf("failed to verify recreated target namespace %q: %w", namespace, getErr)
+		}
+		currentUID := string(current.GetUID())
+		phase, _, _ := unstructured.NestedString(current.Object, "status", "phase")
+		healthy := current.GetDeletionTimestamp() == nil && phase == "Active"
+		if newUID != "" && currentUID != newUID {
+			return fmt.Errorf("recreated target namespace %q changed UID from %q to %q", namespace, newUID, currentUID)
+		}
+		if oldUID != "" && currentUID == oldUID {
+			return fmt.Errorf("recreated target namespace %q still has stale UID %q", namespace, oldUID)
+		}
+		if healthy {
+			stableObservations++
+			if stableObservations >= 2 {
+				return nil
+			}
+		} else {
+			stableObservations = 0
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timeout.C:
+			return fmt.Errorf("timed out waiting for recreated namespace %q to become Active", namespace)
 		case <-ticker.C:
 		}
 	}

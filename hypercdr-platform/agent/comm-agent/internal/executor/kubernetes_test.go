@@ -143,8 +143,14 @@ func TestKubernetesRestoreExecutorReplacesNamespaceBeforeRestore(t *testing.T) {
 	if applier.cleanedCurrentRestore == "" {
 		t.Fatalf("cleanup should receive current restore name")
 	}
+	if applier.replacedNamespace != "default" {
+		t.Fatalf("replaced namespace = %q, want default", applier.replacedNamespace)
+	}
 	if len(applier.manifests) != 2 {
 		t.Fatalf("expected ConfigMap and Restore manifests, got %d", len(applier.manifests))
+	}
+	if applier.manifests[0]["kind"] != "ConfigMap" || applier.manifests[1]["kind"] != "Restore" {
+		t.Fatalf("unexpected restore manifest order: %#v, %#v", applier.manifests[0]["kind"], applier.manifests[1]["kind"])
 	}
 }
 
@@ -311,6 +317,7 @@ func (a *fakeManifestApplier) last(t *testing.T) kube.Manifest {
 type fakeNamespaceReplacingApplier struct {
 	fakeManifestApplier
 	deletedNamespace       string
+	replacedNamespace      string
 	cleanedAgentNamespace  string
 	cleanedSourceNamespace string
 	cleanedTargetNamespace string
@@ -325,7 +332,8 @@ func (a *fakeNamespaceReplacingApplier) CleanupStaleRestoreState(ctx context.Con
 	return nil
 }
 
-func (a *fakeNamespaceReplacingApplier) DeleteNamespaceAndWait(ctx context.Context, namespace string) error {
+func (a *fakeNamespaceReplacingApplier) ReplaceNamespaceAndWait(ctx context.Context, namespace string) error {
 	a.deletedNamespace = namespace
+	a.replacedNamespace = namespace
 	return nil
 }

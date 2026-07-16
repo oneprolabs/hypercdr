@@ -650,6 +650,7 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 	for _, expected := range []string{
 		"/assets/velero/v1.17.1/crds.yaml",
 		"kind: Deployment",
+		"type: Recreate",
 		"name: velero",
 		"kind: DaemonSet",
 		"name: node-agent",
@@ -658,12 +659,20 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 		"name: VELERO_NAMESPACE",
 		"fieldPath: metadata.namespace",
 		"registry.local:5000/hypercdr/velero:v1.17.1",
+		"registry.local:5000/hypercdr/velero-plugin-for-aws:v1.13.0",
+		"name: velero-plugin-for-aws",
+		"mountPath: /target",
+		"mountPath: /plugins",
+		"Velero AWS ObjectStore plugin is installed",
+		`if ! kubectl -n "$NAMESPACE" get pvc hypercdr-agent-state`,
+		"Keeping existing comm-agent state PVC and StorageClass",
 		"--registry-server",
 		"create secret docker-registry",
 		"IMAGE_PULL_SECRETS_BLOCK",
 		"--reset-agent-credential",
 		"delete secret hypercdr-agent-credential",
-		"rollout restart deployment/hypercdr-comm-agent",
+		`kubectl_retry kubectl -n "$NAMESPACE" rollout restart deployment/hypercdr-comm-agent`,
+		"Existing comm-agent deployment restarted with the new bootstrap token",
 		"name: HCDR_PLATFORM_TLS_INSECURE_SKIP_VERIFY",
 		"value: \"true\"",
 		"download_url \"$VELERO_CRDS_URL\" \"$crds_file\"",
@@ -676,8 +685,13 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 	if strings.Contains(text, "kubectl_retry kubectl apply -f \"$VELERO_CRDS_URL\"") {
 		t.Fatal("expected install script to download Velero CRDs before kubectl apply so self-signed HTTPS works")
 	}
-	if strings.Contains(text, "name: velero-plugin-for-aws") {
-		t.Fatal("expected install script to use Velero image with built-in AWS plugin instead of plugin initContainer")
+}
+
+func TestDetailedTaskFailureMessageDoesNotDuplicateStatusMessage(t *testing.T) {
+	message := `BackupStorageLocation "minio" is unavailable: unable to locate ObjectStore plugin named velero.io/aws`
+	details := map[string]any{"velero": map[string]any{"status": map[string]any{"message": message}}}
+	if got := detailedTaskFailureMessage(message, details); got != message {
+		t.Fatalf("expected one failure message, got %q", got)
 	}
 }
 

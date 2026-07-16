@@ -5,9 +5,12 @@ import (
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic/fake"
+	clienttesting "k8s.io/client-go/testing"
 )
 
 func TestDynamicManifestApplierCreatesAndUpdatesVeleroBackup(t *testing.T) {
@@ -87,6 +90,60 @@ func TestDynamicManifestApplierRejectsUnsupportedKind(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected unsupported kind error")
+	}
+}
+
+func TestDynamicManifestApplierRejectsNamespaceManifest(t *testing.T) {
+	client := fake.NewSimpleDynamicClient(runtime.NewScheme())
+	applier := NewDynamicManifestApplierWithClient(client)
+	_, err := applier.ApplyManifest(context.Background(), Manifest{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata": map[string]any{
+			"name": "target",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected Namespace to remain outside the generic manifest allowlist")
+	}
+}
+
+func TestDynamicManifestApplierReplacesNamespaceThroughDedicatedAPI(t *testing.T) {
+	namespaceGVR := schema.GroupVersionResource{Version: "v1", Resource: "namespaces"}
+	oldNamespace := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata": map[string]any{
+			"name": "target",
+			"uid":  "old-uid",
+		},
+		"status": map[string]any{"phase": "Active"},
+	}}
+	client := fake.NewSimpleDynamicClient(runtime.NewScheme(), oldNamespace)
+	client.PrependReactor("create", "namespaces", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		createAction := action.(clienttesting.CreateAction)
+		object := createAction.GetObject().(*unstructured.Unstructured)
+		object.SetUID(types.UID("new-uid"))
+		if err := unstructured.SetNestedField(object.Object, "Active", "status", "phase"); err != nil {
+			t.Fatal(err)
+		}
+		return false, nil, nil
+	})
+	applier := NewDynamicManifestApplierWithClient(client)
+
+	if err := applier.ReplaceNamespaceAndWait(context.Background(), "target"); err != nil {
+		t.Fatal(err)
+	}
+	recreated, err := client.Resource(namespaceGVR).Get(context.Background(), "target", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recreated.GetUID() != types.UID("new-uid") {
+		t.Fatalf("recreated namespace UID = %q, want new-uid", recreated.GetUID())
+	}
+	phase, _, _ := unstructured.NestedString(recreated.Object, "status", "phase")
+	if phase != "Active" || recreated.GetDeletionTimestamp() != nil {
+		t.Fatalf("recreated namespace is not stable and Active: %#v", recreated.Object)
 	}
 }
 

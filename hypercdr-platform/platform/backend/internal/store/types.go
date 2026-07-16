@@ -18,11 +18,18 @@ var (
 	ErrTokenInvalid = errors.New("install token is invalid")
 	ErrTokenExpired = errors.New("install token is expired")
 	ErrTokenUsed    = errors.New("install token is already used")
+	ErrUserExists   = errors.New("user already exists")
+	ErrResetInvalid = errors.New("password reset token is invalid or expired")
 )
 
 type Store interface {
 	AuthenticateUser(input UserAuthInput) (User, bool, error)
+	CreateUser(email string, password string) (User, error)
+	CreatePasswordResetToken(email string, ttl time.Duration) (string, bool, error)
+	ResetPassword(token string, password string) (User, error)
+	FindOrCreateGoogleUser(email string) (User, error)
 	CreateAgentToken(description string, ttl time.Duration) (AgentToken, error)
+	ValidateAgentToken(token string) error
 	RegisterCluster(input RegisterClusterInput) (Cluster, string, error)
 	AuthenticateAgentCredential(input AgentCredentialInput) (Cluster, bool, error)
 	ListClusters() ([]Cluster, error)
@@ -109,6 +116,7 @@ type Cluster struct {
 	LatestAgentImageDigest string                `json:"latestAgentImageDigest,omitempty"`
 	AgentUpgradeAvailable  bool                  `json:"agentUpgradeAvailable,omitempty"`
 	AgentUpgradeStatus     string                `json:"agentUpgradeStatus,omitempty"`
+	AgentUpgradeProgress   int                   `json:"agentUpgradeProgress,omitempty"`
 	VeleroVersion          string                `json:"veleroVersion,omitempty"`
 	VeleroStatus           string                `json:"veleroStatus"`
 	InventoryHash          string                `json:"inventoryHash,omitempty"`

@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: ${HCDR_IMAGE_REGISTRY:?HCDR_IMAGE_REGISTRY is required}/postgres:16
+    container_name: hypercdr-dev-postgres
+    environment:
+      POSTGRES_DB: hypercdr
+      POSTGRES_USER: hypercdr
+      POSTGRES_PASSWORD: hypercdr
+    ports:
+      - ${HCDR_DEV_POSTGRES_PORT:-15432}:5432
+    volumes:
+      - ${HCDR_DEV_DIR:?HCDR_DEV_DIR is required}/data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hypercdr -d hypercdr"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped

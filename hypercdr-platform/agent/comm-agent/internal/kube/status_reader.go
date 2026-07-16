@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -148,6 +149,8 @@ type NamespaceReadiness struct {
 	ServiceCount    int
 	UnreadyPods     []string
 	UnreadyWorkload []string
+	FailureCode     string
+	FailureMessage  string
 }
 
 func (a *DynamicManifestApplier) GetManifestStatus(ctx context.Context, object AppliedObject) (ManifestStatus, error) {
@@ -299,6 +302,16 @@ func (a *DynamicManifestApplier) getVolumeProgress(ctx context.Context, namespac
 				continue
 			}
 			progress := volumeProgressFromItem(resource.Kind, item)
+			if resource.Kind == "PodVolumeRestore" && progress.Phase == "" && time.Since(item.GetCreationTimestamp().Time) >= 30*time.Second {
+				if message := a.podVolumeRestoreDependencyFailure(ctx, item); message != "" {
+					progress.Phase = "FailedValidation"
+					progress.Message = message
+				}
+			}
+			if resource.Kind == "PodVolumeRestore" && progress.Phase == "" && time.Since(item.GetCreationTimestamp().Time) >= 2*time.Minute {
+				progress.Phase = "FailedValidation"
+				progress.Message = "volume data restoration did not start within 2 minutes; verify that the restored PVC exists, is bound, and can be mounted by a target node"
+			}
 			result.Items = append(result.Items, progress)
 			result.BytesDone += progress.BytesDone
 			if progress.KnownTotal {
@@ -320,6 +333,36 @@ func (a *DynamicManifestApplier) getVolumeProgress(ctx context.Context, namespac
 	}
 	result.AllTotalsKnown = len(result.Items) > 0 && result.UnknownTotalCount == 0
 	return result, nil
+}
+
+func (a *DynamicManifestApplier) podVolumeRestoreDependencyFailure(ctx context.Context, item unstructured.Unstructured) string {
+	podNamespace, _, _ := unstructured.NestedString(item.Object, "spec", "pod", "namespace")
+	podName, _, _ := unstructured.NestedString(item.Object, "spec", "pod", "name")
+	volumeName, _, _ := unstructured.NestedString(item.Object, "spec", "volume")
+	if podNamespace == "" || podName == "" || volumeName == "" {
+		return ""
+	}
+	pod, err := a.client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "pods"}).Namespace(podNamespace).Get(ctx, podName, metav1.GetOptions{})
+	if err != nil {
+		return ""
+	}
+	volumes, _, _ := unstructured.NestedSlice(pod.Object, "spec", "volumes")
+	for _, raw := range volumes {
+		volume, _ := raw.(map[string]any)
+		if stringField(volume, "name") != volumeName {
+			continue
+		}
+		claimName, _, _ := unstructured.NestedString(volume, "persistentVolumeClaim", "claimName")
+		if claimName == "" {
+			return ""
+		}
+		_, err = a.client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumeclaims"}).Namespace(podNamespace).Get(ctx, claimName, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return fmt.Sprintf("volume restore cannot start because persistent volume claim %s/%s does not exist", podNamespace, claimName)
+		}
+		return ""
+	}
+	return ""
 }
 
 func volumeProgressBelongsTo(item unstructured.Unstructured, label string, ownerName string) bool {
@@ -411,6 +454,12 @@ func (a *DynamicManifestApplier) readPodReadiness(ctx context.Context, namespace
 		}
 		name := pod.GetName()
 		result.PodCount++
+		if code, message := podTerminalReadinessFailure(pod.Object); code != "" {
+			result.FailureCode = code
+			result.FailureMessage = message
+			result.UnreadyPods = append(result.UnreadyPods, name)
+			continue
+		}
 		if isPodReady(pod.Object) {
 			result.ReadyPodCount++
 			continue
@@ -418,6 +467,33 @@ func (a *DynamicManifestApplier) readPodReadiness(ctx context.Context, namespace
 		result.UnreadyPods = append(result.UnreadyPods, name)
 	}
 	return nil
+}
+
+func podTerminalReadinessFailure(object map[string]any) (string, string) {
+	podName, _, _ := unstructured.NestedString(object, "metadata", "name")
+	for _, statusPath := range [][]string{{"status", "initContainerStatuses"}, {"status", "containerStatuses"}} {
+		statuses, _, _ := unstructured.NestedSlice(object, statusPath...)
+		for _, raw := range statuses {
+			status, _ := raw.(map[string]any)
+			waiting, _, _ := unstructured.NestedMap(status, "state", "waiting")
+			reason := stringField(waiting, "reason")
+			switch reason {
+			case "ErrImagePull", "ImagePullBackOff", "InvalidImageName", "CreateContainerConfigError":
+				containerName := stringField(status, "name")
+				image := stringField(status, "image")
+				detail := stringField(waiting, "message")
+				message := fmt.Sprintf("restored pod %s container %s cannot start: %s", podName, containerName, reason)
+				if image != "" {
+					message += fmt.Sprintf(" (image %s)", image)
+				}
+				if detail != "" {
+					message += ": " + detail
+				}
+				return "RESTORE_WORKLOAD_IMAGE_PULL_FAILED", message
+			}
+		}
+	}
+	return "", ""
 }
 
 func (a *DynamicManifestApplier) readWorkloadReadiness(ctx context.Context, namespace string, result *NamespaceReadiness) error {

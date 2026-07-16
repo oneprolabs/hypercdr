@@ -8,9 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/big"
 	"net/http"
+	"net/smtp"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -38,6 +41,8 @@ type Router struct {
 	hub           *sessionHub
 	captchaMu     sync.Mutex
 	captchas      map[string]captchaChallenge
+	oauthMu       sync.Mutex
+	oauthStates   map[string]time.Time
 	inventoryMu   sync.Mutex
 	inventory     map[string]inventoryRequestStatus
 	schedulerOnce sync.Once
@@ -70,13 +75,14 @@ type inventoryRequestStatus struct {
 
 func NewRouter(cfg config.Config, logger *slog.Logger, repo store.Store) http.Handler {
 	router := &Router{
-		cfg:       cfg,
-		logger:    logger,
-		mux:       http.NewServeMux(),
-		store:     repo,
-		hub:       newSessionHub(),
-		captchas:  map[string]captchaChallenge{},
-		inventory: map[string]inventoryRequestStatus{},
+		cfg:         cfg,
+		logger:      logger,
+		mux:         http.NewServeMux(),
+		store:       repo,
+		hub:         newSessionHub(),
+		captchas:    map[string]captchaChallenge{},
+		oauthStates: map[string]time.Time{},
+		inventory:   map[string]inventoryRequestStatus{},
 	}
 	router.routes()
 	router.startScheduler()
@@ -101,6 +107,12 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("GET /readyz", r.readyz)
 	r.mux.HandleFunc("GET /api/v1/auth/captcha", r.createCaptcha)
 	r.mux.HandleFunc("POST /api/v1/auth/login", r.login)
+	r.mux.HandleFunc("GET /api/v1/auth/config", r.authConfig)
+	r.mux.HandleFunc("POST /api/v1/auth/register", r.registerUser)
+	r.mux.HandleFunc("POST /api/v1/auth/forgot-password", r.forgotPassword)
+	r.mux.HandleFunc("POST /api/v1/auth/reset-password", r.resetPassword)
+	r.mux.HandleFunc("GET /api/v1/auth/google/start", r.googleStart)
+	r.mux.HandleFunc("GET /api/v1/auth/google/callback", r.googleCallback)
 	r.mux.HandleFunc("GET /api/v1/clusters", r.listClusters)
 	r.mux.HandleFunc("PATCH /api/v1/clusters/{id}", r.updateCluster)
 	r.mux.HandleFunc("DELETE /api/v1/clusters/{id}", r.deleteCluster)
@@ -134,6 +146,7 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("POST /api/v1/tasks/drill", r.createDrillTask)
 	r.mux.HandleFunc("POST /api/v1/tasks/takeover", r.createTakeoverTask)
 	r.mux.HandleFunc("POST /api/v1/agent-tokens", r.createAgentToken)
+	r.mux.HandleFunc("POST /api/v1/agent-tokens/validate", r.validateAgentToken)
 	r.mux.HandleFunc("GET /prepare-node.sh", r.prepareNodeScript)
 	r.mux.HandleFunc("GET /install.sh", r.installScript)
 	r.mux.HandleFunc("GET /assets/velero/v1.17.1/crds.yaml", r.veleroCRDs)
@@ -228,11 +241,7 @@ func (r *Router) login(w http.ResponseWriter, req *http.Request) {
 	}
 
 	now := time.Now().UTC()
-	r.captchaMu.Lock()
-	challenge, ok := r.captchas[body.CaptchaID]
-	delete(r.captchas, body.CaptchaID)
-	r.captchaMu.Unlock()
-	if !ok || now.After(challenge.ExpiresAt) || challenge.Code != strings.TrimSpace(body.CaptchaCode) {
+	if !r.consumeCaptcha(body.CaptchaID, body.CaptchaCode) {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "captcha_invalid", "message": "Verification code is incorrect"})
 		return
 	}
@@ -258,6 +267,183 @@ func (r *Router) login(w http.ResponseWriter, req *http.Request) {
 			"expiresAt": now.Add(time.Hour).Format(time.RFC3339),
 		},
 	})
+}
+
+func (r *Router) consumeCaptcha(id, code string) bool {
+	r.captchaMu.Lock()
+	challenge, ok := r.captchas[id]
+	delete(r.captchas, id)
+	r.captchaMu.Unlock()
+	return ok && time.Now().UTC().Before(challenge.ExpiresAt) && challenge.Code == strings.TrimSpace(code)
+}
+
+func validUserPassword(password string) bool { return len(password) >= 8 && len(password) <= 128 }
+
+func (r *Router) authConfig(w http.ResponseWriter, req *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"googleEnabled": strings.TrimSpace(r.cfg.GoogleClientID) != "" && strings.TrimSpace(r.cfg.GoogleClientSecret) != ""})
+}
+
+func (r *Router) registerUser(w http.ResponseWriter, req *http.Request) {
+	var body struct{ Email, Password, CaptchaID, CaptchaCode string }
+	if decodeJSON(req, &body) != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
+		return
+	}
+	email := strings.ToLower(strings.TrimSpace(body.Email))
+	if !strings.Contains(email, "@") || len(email) > 254 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "email_invalid", "message": "Enter a valid email address"})
+		return
+	}
+	if !validUserPassword(body.Password) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "password_invalid", "message": "Password must be 8 to 128 characters"})
+		return
+	}
+	if !r.consumeCaptcha(body.CaptchaID, body.CaptchaCode) {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "captcha_invalid", "message": "Verification code is incorrect"})
+		return
+	}
+	u, err := r.store.CreateUser(email, body.Password)
+	if errors.Is(err, store.ErrUserExists) {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "user_exists", "message": "An account with this email already exists"})
+		return
+	}
+	if err != nil {
+		r.logger.Error("failed to register user", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "registration_failed"})
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"user": u, "message": "Account created. You can now sign in."})
+}
+
+func (r *Router) forgotPassword(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Email string `json:"email"`
+	}
+	if decodeJSON(req, &body) != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
+		return
+	}
+	token, found, err := r.store.CreatePasswordResetToken(body.Email, 15*time.Minute)
+	if err != nil {
+		r.logger.Error("failed to create reset token", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "reset_request_failed"})
+		return
+	}
+	response := map[string]any{"message": "If the account exists, password reset instructions are available."}
+	if found && strings.TrimSpace(r.cfg.SMTPHost) != "" {
+		if err := r.sendPasswordResetEmail(strings.ToLower(strings.TrimSpace(body.Email)), token); err != nil {
+			r.logger.Error("failed to send password reset email", "error", err)
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "reset_email_failed", "message": "Password reset email could not be sent. Please contact the administrator."})
+			return
+		}
+	}
+	if found && r.cfg.PasswordResetRevealToken {
+		response["resetToken"] = token
+		response["expiresInSeconds"] = 900
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (r *Router) sendPasswordResetEmail(recipient, token string) error {
+	base := strings.TrimRight(r.cfg.PublicBaseURL, "/")
+	resetURL := base + "/?reset_token=" + url.QueryEscape(token)
+	fromAddress := r.cfg.SMTPFrom
+	if start := strings.LastIndex(fromAddress, "<"); start >= 0 && strings.HasSuffix(fromAddress, ">") {
+		fromAddress = fromAddress[start+1 : len(fromAddress)-1]
+	}
+	message := []byte("From: " + r.cfg.SMTPFrom + "\r\nTo: " + recipient + "\r\nSubject: Reset your HyperCDR password\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\nUse this link within 15 minutes to reset your HyperCDR password:\r\n" + resetURL + "\r\n\r\nIf you did not request this, you can ignore this email.\r\n")
+	address := r.cfg.SMTPHost + ":" + r.cfg.SMTPPort
+	var auth smtp.Auth
+	if r.cfg.SMTPUsername != "" {
+		auth = smtp.PlainAuth("", r.cfg.SMTPUsername, r.cfg.SMTPPassword, r.cfg.SMTPHost)
+	}
+	return smtp.SendMail(address, auth, fromAddress, []string{recipient}, message)
+}
+
+func (r *Router) resetPassword(w http.ResponseWriter, req *http.Request) {
+	var body struct{ Token, Password string }
+	if decodeJSON(req, &body) != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
+		return
+	}
+	if !validUserPassword(body.Password) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "password_invalid", "message": "Password must be 8 to 128 characters"})
+		return
+	}
+	_, err := r.store.ResetPassword(strings.TrimSpace(body.Token), body.Password)
+	if errors.Is(err, store.ErrResetInvalid) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "reset_invalid", "message": "Reset link is invalid or expired"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "reset_failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"message": "Password updated. You can now sign in."})
+}
+
+func (r *Router) googleStart(w http.ResponseWriter, req *http.Request) {
+	if r.cfg.GoogleClientID == "" || r.cfg.GoogleClientSecret == "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "google_not_configured", "message": "Google sign-in is not configured"})
+		return
+	}
+	state := store.NewPublicID() + store.NewPublicID()
+	r.oauthMu.Lock()
+	r.oauthStates[state] = time.Now().UTC().Add(10 * time.Minute)
+	r.oauthMu.Unlock()
+	callback := r.cfg.PublicBaseURL + "/api/v1/auth/google/callback"
+	q := url.Values{"client_id": {r.cfg.GoogleClientID}, "redirect_uri": {callback}, "response_type": {"code"}, "scope": {"openid email profile"}, "state": {state}, "prompt": {"select_account"}}
+	http.Redirect(w, req, "https://accounts.google.com/o/oauth2/v2/auth?"+q.Encode(), http.StatusFound)
+}
+
+func (r *Router) googleCallback(w http.ResponseWriter, req *http.Request) {
+	state := req.URL.Query().Get("state")
+	r.oauthMu.Lock()
+	expiry, ok := r.oauthStates[state]
+	delete(r.oauthStates, state)
+	r.oauthMu.Unlock()
+	if !ok || time.Now().UTC().After(expiry) {
+		http.Redirect(w, req, "/?auth_error=google_state", http.StatusFound)
+		return
+	}
+	callback := r.cfg.PublicBaseURL + "/api/v1/auth/google/callback"
+	form := url.Values{"code": {req.URL.Query().Get("code")}, "client_id": {r.cfg.GoogleClientID}, "client_secret": {r.cfg.GoogleClientSecret}, "redirect_uri": {callback}, "grant_type": {"authorization_code"}}
+	resp, err := http.PostForm("https://oauth2.googleapis.com/token", form)
+	if err != nil {
+		http.Redirect(w, req, "/?auth_error=google_exchange", http.StatusFound)
+		return
+	}
+	defer resp.Body.Close()
+	var token struct {
+		AccessToken string `json:"access_token"`
+	}
+	if resp.StatusCode != 200 || json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&token) != nil {
+		http.Redirect(w, req, "/?auth_error=google_exchange", http.StatusFound)
+		return
+	}
+	userReq, _ := http.NewRequestWithContext(req.Context(), http.MethodGet, "https://openidconnect.googleapis.com/v1/userinfo", nil)
+	userReq.Header.Set("Authorization", "Bearer "+token.AccessToken)
+	userResp, err := http.DefaultClient.Do(userReq)
+	if err != nil {
+		http.Redirect(w, req, "/?auth_error=google_profile", http.StatusFound)
+		return
+	}
+	defer userResp.Body.Close()
+	var profile struct {
+		Email         string `json:"email"`
+		EmailVerified bool   `json:"email_verified"`
+	}
+	if userResp.StatusCode != 200 || json.NewDecoder(io.LimitReader(userResp.Body, 1<<20)).Decode(&profile) != nil || !profile.EmailVerified {
+		http.Redirect(w, req, "/?auth_error=google_profile", http.StatusFound)
+		return
+	}
+	u, err := r.store.FindOrCreateGoogleUser(profile.Email)
+	if err != nil {
+		http.Redirect(w, req, "/?auth_error=google_account", http.StatusFound)
+		return
+	}
+	payload, _ := json.Marshal(map[string]any{"user": u, "session": map[string]any{"token": "hcs_" + store.NewPublicID() + store.NewPublicID(), "expiresAt": time.Now().UTC().Add(time.Hour).Format(time.RFC3339)}})
+	http.Redirect(w, req, "/#google_auth="+url.QueryEscape(base64.RawURLEncoding.EncodeToString(payload)), http.StatusFound)
 }
 
 func randomDigits(length int) (string, error) {
@@ -302,6 +488,10 @@ func (r *Router) listClusters(w http.ResponseWriter, req *http.Request) {
 	if digestErr != nil {
 		r.logger.Warn("failed to resolve latest agent image digest", "image", latestAgentImage, "error", digestErr)
 	}
+	upgradeTasks, taskErr := r.store.ListTasks("")
+	if taskErr != nil {
+		r.logger.Warn("failed to load agent upgrade status", "error", taskErr)
+	}
 	for i := range clusters {
 		if r.hub.has(clusters[i].ID) {
 			clusters[i].ConnectionStatus = "online"
@@ -312,6 +502,14 @@ func (r *Router) listClusters(w http.ResponseWriter, req *http.Request) {
 		clusters[i].LatestAgentImage = latestAgentImage
 		clusters[i].LatestAgentImageDigest = latestAgentDigest
 		clusters[i].AgentUpgradeAvailable = clusters[i].AgentImageDigest != "" && latestAgentDigest != "" && clusters[i].AgentImageDigest != latestAgentDigest
+		for _, task := range upgradeTasks {
+			if task.ClusterID != clusters[i].ID || task.Type != "agent-upgrade" || isTerminalTaskStatus(task.Status) {
+				continue
+			}
+			clusters[i].AgentUpgradeStatus = "upgrading"
+			clusters[i].AgentUpgradeProgress = task.Progress
+			break
+		}
 		if clusters[i].AgentUpgradeAvailable && clusters[i].AgentUpgradeStatus == "" {
 			clusters[i].AgentUpgradeStatus = "available"
 		}
@@ -319,6 +517,47 @@ func (r *Router) listClusters(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items": nonNilSlice(clusters),
 	})
+}
+
+func isTerminalTaskStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "succeeded", "failed", "cancelled", "canceled":
+		return true
+	default:
+		return false
+	}
+}
+
+func (r *Router) completeAgentUpgradeAfterHeartbeat(cluster store.Cluster) {
+	tasks, err := r.store.ListTasks(cluster.ID)
+	if err != nil {
+		r.logger.Warn("failed to reconcile agent upgrade after heartbeat", "cluster_id", cluster.ID, "error", err)
+		return
+	}
+	for _, task := range tasks {
+		if task.Type != "agent-upgrade" || isTerminalTaskStatus(task.Status) {
+			continue
+		}
+		expectedDigest := strings.TrimSpace(stringPayload(task.Payload, "expectedDigest"))
+		expectedImage := strings.TrimSpace(stringPayload(task.Payload, "image"))
+		expectedVersion := strings.TrimSpace(stringPayload(task.Payload, "version"))
+		digestMatches := expectedDigest != "" && strings.TrimSpace(cluster.AgentImageDigest) == expectedDigest
+		identityMatches := expectedDigest == "" && expectedImage != "" && cluster.AgentImage == expectedImage && (expectedVersion == "" || cluster.AgentVersion == expectedVersion)
+		if !digestMatches && !identityMatches {
+			continue
+		}
+		if _, _, err := r.store.UpdateTaskStatus(store.TaskStatusInput{
+			TaskID: task.ID, Status: "succeeded", Progress: 100, MarkDone: true,
+		}); err != nil {
+			r.logger.Warn("failed to complete verified agent upgrade", "cluster_id", cluster.ID, "task_id", task.ID, "error", err)
+			continue
+		}
+		_ = r.addTaskEventIfChanged(store.TaskEventInput{
+			TaskID: task.ID, Level: "info", Reason: "completed",
+			Message: "new agent reconnected and reported the expected image digest",
+			Payload: map[string]any{"image": cluster.AgentImage, "digest": cluster.AgentImageDigest, "version": cluster.AgentVersion},
+		})
+	}
 }
 
 func (r *Router) resolveImageDigest(ctx context.Context, image string) (string, error) {
@@ -1072,6 +1311,32 @@ func (r *Router) createAgentToken(w http.ResponseWriter, req *http.Request) {
 	})
 }
 
+func (r *Router) validateAgentToken(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Token string `json:"token"`
+	}
+	if decodeJSON(req, &body) != nil || strings.TrimSpace(body.Token) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"valid": false, "error": "TOKEN_INVALID", "message": store.ErrTokenInvalid.Error()})
+		return
+	}
+	err := r.store.ValidateAgentToken(strings.TrimSpace(body.Token))
+	if err == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"valid": true})
+		return
+	}
+	status, code := http.StatusUnauthorized, "TOKEN_INVALID"
+	if errors.Is(err, store.ErrTokenExpired) {
+		status, code = http.StatusGone, "TOKEN_EXPIRED"
+	} else if errors.Is(err, store.ErrTokenUsed) {
+		status, code = http.StatusConflict, "TOKEN_USED"
+	} else if !errors.Is(err, store.ErrTokenInvalid) {
+		r.logger.Error("failed to validate agent token", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"valid": false, "error": "TOKEN_CHECK_FAILED", "message": "install token could not be validated"})
+		return
+	}
+	writeJSON(w, status, map[string]any{"valid": false, "error": code, "message": err.Error()})
+}
+
 func (r *Router) prepareNodeScript(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
@@ -1086,6 +1351,7 @@ func (r *Router) installScript(w http.ResponseWriter, req *http.Request) {
 	script := strings.ReplaceAll(installScriptTemplate, "{{AGENT_IMAGE}}", r.cfg.AgentImage)
 	script = strings.ReplaceAll(script, "{{AGENT_NAMESPACE}}", r.cfg.AgentNamespace)
 	script = strings.ReplaceAll(script, "{{AGENT_WS_ENDPOINT}}", r.agentWSEndpoint(req))
+	script = strings.ReplaceAll(script, "{{TOKEN_VALIDATE_URL}}", r.publicBaseURL(req)+"/api/v1/agent-tokens/validate")
 	script = strings.ReplaceAll(script, "{{VELERO_CRDS_URL}}", r.publicBaseURL(req)+"/assets/velero/v1.17.1/crds.yaml")
 	script = strings.ReplaceAll(script, "{{REGISTRY_CA_URL}}", r.publicBaseURL(req)+"/assets/registry/ca.crt")
 	script = strings.ReplaceAll(script, "{{VELERO_IMAGE}}", r.cfg.VeleroImage)
@@ -4320,6 +4586,7 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 				r.logger.Warn("heartbeat for unknown cluster", "cluster_id", clusterID)
 				return
 			}
+			r.completeAgentUpgradeAfterHeartbeat(updated)
 			r.logger.Info("agent heartbeat",
 				"cluster_id", updated.ID,
 				"status", updated.Status,
@@ -4525,6 +4792,27 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 					}
 					return
 				}
+				if completed.Payload.AckRequired {
+					_ = r.writeEventAck(conn, clusterID, completed.AgentID, completed.MessageID, completed.Type, completed.Payload.TaskID, completed.Payload.CommandID)
+				}
+				continue
+			}
+			if existingTask.Type == "agent-upgrade" {
+				_, _, err = r.store.UpdateTaskStatus(store.TaskStatusInput{
+					TaskID:      existingTask.ID,
+					Status:      "running",
+					Progress:    70,
+					Payload:     taskCompletedPayloadPatch(completed.Payload),
+					MarkStarted: true,
+				})
+				if err != nil {
+					r.logger.Error("failed to mark agent upgrade waiting for reconnect", "task_id", existingTask.ID, "error", err)
+					return
+				}
+				_ = r.addTaskEventIfChanged(store.TaskEventInput{
+					TaskID: existingTask.ID, Level: "info", Reason: "waiting_for_reconnect",
+					Message: "agent deployment updated; waiting for the new agent to reconnect",
+				})
 				if completed.Payload.AckRequired {
 					_ = r.writeEventAck(conn, clusterID, completed.AgentID, completed.MessageID, completed.Type, completed.Payload.TaskID, completed.Payload.CommandID)
 				}
@@ -5821,6 +6109,11 @@ func detailedTaskFailureMessage(fallback string, details map[string]any) string 
 	}
 	if prefix == "" {
 		return strings.Join(messages, "\n")
+	}
+	for _, message := range messages {
+		if strings.EqualFold(strings.TrimSpace(message), strings.TrimSpace(prefix)) {
+			return strings.Join(messages, "\n")
+		}
 	}
 	return prefix + "\n" + strings.Join(messages, "\n")
 }
@@ -7177,6 +7470,7 @@ set -euo pipefail
 
 TOKEN=""
 ENDPOINT="{{AGENT_WS_ENDPOINT}}"
+TOKEN_VALIDATE_URL="{{TOKEN_VALIDATE_URL}}"
 NAMESPACE="{{AGENT_NAMESPACE}}"
 AGENT_IMAGE="{{AGENT_IMAGE}}"
 VELERO_IMAGE="{{VELERO_IMAGE}}"
@@ -7366,12 +7660,33 @@ fi
 if [[ -z "$ENDPOINT" ]]; then
   fail "Missing required argument: --endpoint" 2
 fi
+if ! command -v curl >/dev/null 2>&1; then
+  fail "curl is required but was not found in PATH"
+fi
 if ! command -v kubectl >/dev/null 2>&1; then
   fail "kubectl is required but was not found in PATH"
 fi
 print_install_summary
 
 log_section "Preflight checks"
+log_info "Validating install token before changing the cluster"
+token_check_file="$(mktemp)"
+token_check_status="$(curl -k -sS -o "$token_check_file" -w '%{http_code}' \
+  -H 'Content-Type: application/json' \
+  --data "{\"token\":\"${TOKEN}\"}" \
+  "$TOKEN_VALIDATE_URL" || true)"
+if [[ "$token_check_status" != "200" ]]; then
+  token_check_error="$(grep -o '"error"[[:space:]]*:[[:space:]]*"[^"]*"' "$token_check_file" | head -n1 | cut -d'"' -f4 || true)"
+  rm -f "$token_check_file"
+  case "$token_check_error" in
+    TOKEN_EXPIRED) fail "Install token has expired. Generate a new registration command in the platform." ;;
+    TOKEN_USED) fail "Install token has already been used. Generate a new registration command in the platform." ;;
+    TOKEN_INVALID) fail "Install token is invalid. Generate a new registration command in the platform." ;;
+    *) fail "Could not validate the install token with the platform (HTTP ${token_check_status:-000}). Check platform connectivity and try again." ;;
+  esac
+fi
+rm -f "$token_check_file"
+log_ok "Install token is valid"
 log_info "Checking kubectl access to the current Kubernetes cluster"
 if ! kubectl version --client >/dev/null 2>&1; then
   fail "kubectl is installed, but kubectl version --client failed"
@@ -7668,14 +7983,15 @@ kubectl_apply_retry() {
   local manifest
   manifest="$(mktemp)"
   cat >"$manifest"
-  if kubectl_retry kubectl apply -f "$manifest"; then
-    rm -f "$manifest"
-    return 0
-  fi
-  local status=$?
-  log_error "Failed to apply Kubernetes manifest"
-  rm -f "$manifest"
-  return "$status"
+	if kubectl_retry kubectl apply -f "$manifest"; then
+		rm -f "$manifest"
+		return 0
+	else
+		local status=$?
+		log_error "Failed to apply Kubernetes manifest"
+		rm -f "$manifest"
+		return "$status"
+	fi
 }
 
 preflight_image_pull() {
@@ -7777,11 +8093,31 @@ if [[ "$SKIP_IMAGE_PREFLIGHT" != "true" ]]; then
   log_ok "Registry host resolution check passed"
 fi
 
+NAMESPACE_EXISTS="false"
+if kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
+  NAMESPACE_EXISTS="true"
+fi
 AGENT_DEPLOYMENT_EXISTS="false"
 if kubectl -n "$NAMESPACE" get deployment hypercdr-comm-agent >/dev/null 2>&1; then
   AGENT_DEPLOYMENT_EXISTS="true"
 fi
 check_existing_velero_installation
+
+rollback_failed_registration() {
+  log_warn "Rolling back changes because comm-agent registration did not complete"
+  if [[ "$NAMESPACE_EXISTS" == "false" && "$AGENT_DEPLOYMENT_EXISTS" == "false" ]]; then
+    kubectl delete namespace "$NAMESPACE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+    kubectl delete clusterrolebinding hypercdr-agent hypercdr-velero --ignore-not-found >/dev/null 2>&1 || true
+    kubectl delete clusterrole hypercdr-agent hypercdr-velero --ignore-not-found >/dev/null 2>&1 || true
+    for crd in backuprepositories.velero.io backups.velero.io backupstoragelocations.velero.io datadownloads.velero.io datauploads.velero.io deletebackuprequests.velero.io downloadrequests.velero.io podvolumebackups.velero.io podvolumerestores.velero.io restores.velero.io schedules.velero.io serverstatusrequests.velero.io volumesnapshotlocations.velero.io; do
+      kubectl delete crd "$crd" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+    done
+    log_ok "Failed first-time installation was rolled back"
+  else
+    kubectl -n "$NAMESPACE" delete secret hypercdr-agent-credential --ignore-not-found >/dev/null 2>&1 || true
+    log_ok "Existing installation was left retryable; rerun with a new registration command"
+  fi
+}
 
 log_section "Registry trust"
 REGISTRY_HOST="$(image_registry_host "$AGENT_IMAGE")"
@@ -7816,6 +8152,7 @@ if [[ "$IMAGE_PULL_PREFLIGHT" == "true" ]]; then
   preflight_image_pull "hypercdr-image-check-agent" "$AGENT_IMAGE" '      command: ["/comm-agent"]'
   if [[ "$INSTALL_VELERO" == "true" ]]; then
     preflight_image_pull "hypercdr-image-check-velero" "$VELERO_IMAGE" '      command: ["/velero", "version", "--client-only"]'
+    preflight_image_pull "hypercdr-image-check-velero-aws-plugin" "$VELERO_AWS_PLUGIN_IMAGE" '      command: ["/plugins/velero-plugin-for-aws"]'
   fi
 fi
 if [[ -n "$VELERO_CRDS_URL" ]]; then
@@ -7829,7 +8166,7 @@ if [[ -n "$VELERO_CRDS_URL" ]]; then
   kubectl_retry kubectl apply -f "$crds_file" || {
     rm -f "$crds_file"
     log_error "Failed to apply Velero CRDs"
-    exit 1
+        return 1
   }
   rm -f "$crds_file"
   log_ok "Velero CRDs are ready"
@@ -7893,6 +8230,13 @@ spec:
     spec:
       serviceAccountName: velero
 ${IMAGE_PULL_SECRETS_BLOCK}
+      initContainers:
+        - name: velero-plugin-for-aws
+          image: ${VELERO_AWS_PLUGIN_IMAGE}
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: plugins
+              mountPath: /target
       containers:
         - name: velero
           image: ${VELERO_IMAGE}
@@ -7920,6 +8264,8 @@ ${IMAGE_PULL_SECRETS_BLOCK}
             - name: metrics
               containerPort: 8085
           volumeMounts:
+            - name: plugins
+              mountPath: /plugins
             - name: scratch
               mountPath: /scratch
             - name: tmp
@@ -7927,6 +8273,8 @@ ${IMAGE_PULL_SECRETS_BLOCK}
             - name: udmrepo
               mountPath: /udmrepo
       volumes:
+        - name: plugins
+          emptyDir: {}
         - name: scratch
           emptyDir: {}
         - name: tmp
@@ -8001,7 +8349,26 @@ if [[ "$RESET_AGENT_CREDENTIAL" == "true" ]]; then
   kubectl -n "$NAMESPACE" delete secret hypercdr-agent-credential --ignore-not-found
 fi
 
-log_info "Creating or updating comm-agent RBAC, state PVC, and deployment"
+if ! kubectl -n "$NAMESPACE" get pvc hypercdr-agent-state >/dev/null 2>&1; then
+  log_info "Creating comm-agent state PVC"
+  cat <<YAML | kubectl_apply_retry
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hypercdr-agent-state
+  namespace: ${NAMESPACE}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+YAML
+else
+  log_info "Keeping existing comm-agent state PVC and StorageClass"
+fi
+
+log_info "Creating or updating comm-agent RBAC and deployment"
 cat <<YAML | kubectl_apply_retry
 apiVersion: v1
 kind: ServiceAccount
@@ -8073,18 +8440,6 @@ subjects:
     name: hypercdr-agent
     namespace: ${NAMESPACE}
 ---
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: hypercdr-agent-state
-  namespace: ${NAMESPACE}
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 1Gi
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -8092,6 +8447,8 @@ metadata:
   namespace: ${NAMESPACE}
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: hypercdr-comm-agent
@@ -8147,7 +8504,8 @@ YAML
 
 if [[ "$AGENT_DEPLOYMENT_EXISTS" == "true" && "$RESET_AGENT_CREDENTIAL" == "true" ]]; then
   log_info "Restarting existing comm-agent deployment to use the new bootstrap token"
-  kubectl -n "$NAMESPACE" rollout restart deployment/hypercdr-comm-agent >/dev/null 2>&1 || true
+  kubectl_retry kubectl -n "$NAMESPACE" rollout restart deployment/hypercdr-comm-agent
+  log_ok "Existing comm-agent deployment restarted with the new bootstrap token"
 fi
 log_ok "comm-agent deployment submitted in namespace ${NAMESPACE}"
 if [[ "$WAIT_READY" == "true" ]]; then
@@ -8156,12 +8514,22 @@ if [[ "$WAIT_READY" == "true" ]]; then
   if [[ "$INSTALL_VELERO" == "true" ]]; then
     kubectl -n "$NAMESPACE" rollout status deployment/velero --timeout="$WAIT_TIMEOUT" || { log_error "Velero deployment did not become ready within ${WAIT_TIMEOUT}"; print_diagnostics; exit 1; }
     log_ok "Velero deployment is ready"
+    aws_plugin_exit_code="$(kubectl -n "$NAMESPACE" get pod -l app.kubernetes.io/name=velero -o jsonpath='{.items[0].status.initContainerStatuses[?(@.name=="velero-plugin-for-aws")].state.terminated.exitCode}' 2>/dev/null || true)"
+    if [[ "$aws_plugin_exit_code" != "0" ]]; then
+      log_error "Velero AWS ObjectStore plugin was not installed successfully"
+      kubectl -n "$NAMESPACE" describe pod -l app.kubernetes.io/name=velero >&2 || true
+  return 1
+    fi
+    log_ok "Velero AWS ObjectStore plugin is installed"
     kubectl -n "$NAMESPACE" rollout status daemonset/node-agent --timeout="$WAIT_TIMEOUT" || { log_error "Velero node-agent daemonset did not become ready within ${WAIT_TIMEOUT}"; print_diagnostics; exit 1; }
     log_ok "Velero node-agent daemonset is ready"
   fi
   kubectl -n "$NAMESPACE" rollout status deployment/hypercdr-comm-agent --timeout="$WAIT_TIMEOUT" || { log_error "comm-agent deployment did not become ready within ${WAIT_TIMEOUT}"; print_diagnostics; exit 1; }
   log_ok "comm-agent deployment is ready"
-  wait_agent_registration
+  if ! wait_agent_registration; then
+    rollback_failed_registration
+    exit 1
+  fi
   log_section "Completed"
   log_ok "HyperCDR agent installation is ready"
 fi

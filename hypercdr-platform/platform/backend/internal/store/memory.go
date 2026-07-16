@@ -21,6 +21,17 @@ type MemoryStore struct {
 	restorePoints map[string]RestorePoint
 	tasks         map[string]Task
 	taskEvents    []TaskEvent
+	users         map[string]memoryUser
+	resetTokens   map[string]memoryResetToken
+}
+
+type memoryUser struct {
+	User
+	Password string
+}
+type memoryResetToken struct {
+	Email     string
+	ExpiresAt time.Time
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -37,20 +48,69 @@ func NewMemoryStore() *MemoryStore {
 		restorePoints: map[string]RestorePoint{},
 		tasks:         map[string]Task{},
 		taskEvents:    []TaskEvent{},
+		users:         map[string]memoryUser{DefaultAdminEmail: {User: User{ID: "00000000-0000-0000-0000-00000000a001", TenantID: DefaultTenantID, Email: DefaultAdminEmail, Role: "admin", Status: "active"}, Password: DefaultAdminPassword}},
+		resetTokens:   map[string]memoryResetToken{},
 	}
 }
 
 func (s *MemoryStore) AuthenticateUser(input UserAuthInput) (User, bool, error) {
-	if strings.TrimSpace(input.Email) != DefaultAdminEmail || input.Password != DefaultAdminPassword {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u, ok := s.users[strings.ToLower(strings.TrimSpace(input.Email))]
+	if !ok || u.Password != input.Password {
 		return User{}, false, nil
 	}
-	return User{
-		ID:       "00000000-0000-0000-0000-00000000a001",
-		TenantID: DefaultTenantID,
-		Email:    DefaultAdminEmail,
-		Role:     "admin",
-		Status:   "active",
-	}, true, nil
+	return u.User, true, nil
+}
+
+func (s *MemoryStore) CreateUser(email, password string) (User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	email = strings.ToLower(strings.TrimSpace(email))
+	if _, ok := s.users[email]; ok {
+		return User{}, ErrUserExists
+	}
+	u := User{ID: newID(), TenantID: DefaultTenantID, Email: email, Role: "member", Status: "active"}
+	s.users[email] = memoryUser{User: u, Password: password}
+	return u, nil
+}
+
+func (s *MemoryStore) CreatePasswordResetToken(email string, ttl time.Duration) (string, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	email = strings.ToLower(strings.TrimSpace(email))
+	if _, ok := s.users[email]; !ok {
+		return "", false, nil
+	}
+	token := "hpr_" + newID() + newID()
+	s.resetTokens[token] = memoryResetToken{Email: email, ExpiresAt: time.Now().UTC().Add(ttl)}
+	return token, true, nil
+}
+
+func (s *MemoryStore) ResetPassword(token, password string) (User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.resetTokens[token]
+	if !ok || time.Now().UTC().After(r.ExpiresAt) {
+		return User{}, ErrResetInvalid
+	}
+	delete(s.resetTokens, token)
+	u := s.users[r.Email]
+	u.Password = password
+	s.users[r.Email] = u
+	return u.User, nil
+}
+
+func (s *MemoryStore) FindOrCreateGoogleUser(email string) (User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	email = strings.ToLower(strings.TrimSpace(email))
+	if u, ok := s.users[email]; ok {
+		return u.User, nil
+	}
+	u := User{ID: newID(), TenantID: DefaultTenantID, Email: email, Role: "member", Status: "active"}
+	s.users[email] = memoryUser{User: u}
+	return u, nil
 }
 
 func (s *MemoryStore) CreateAgentToken(description string, ttl time.Duration) (AgentToken, error) {
@@ -66,6 +126,22 @@ func (s *MemoryStore) CreateAgentToken(description string, ttl time.Duration) (A
 	defer s.mu.Unlock()
 	s.tokens[token.Token] = token
 	return token, nil
+}
+
+func (s *MemoryStore) ValidateAgentToken(value string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	token, ok := s.tokens[value]
+	if !ok {
+		return ErrTokenInvalid
+	}
+	if !token.UsedAt.IsZero() {
+		return ErrTokenUsed
+	}
+	if time.Now().UTC().After(token.ExpiresAt) {
+		return ErrTokenExpired
+	}
+	return nil
 }
 
 func (s *MemoryStore) RegisterCluster(input RegisterClusterInput) (Cluster, string, error) {

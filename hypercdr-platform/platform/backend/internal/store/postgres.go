@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -73,7 +74,7 @@ func (s *PostgresStore) ensureDefaultAdmin(ctx context.Context) error {
 }
 
 func (s *PostgresStore) AuthenticateUser(input UserAuthInput) (User, bool, error) {
-	email := strings.TrimSpace(input.Email)
+	email := strings.ToLower(strings.TrimSpace(input.Email))
 	if email == "" || input.Password == "" {
 		return User{}, false, nil
 	}
@@ -96,6 +97,78 @@ func (s *PostgresStore) AuthenticateUser(input UserAuthInput) (User, bool, error
 	return user, true, nil
 }
 
+func (s *PostgresStore) CreateUser(email, password string) (User, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return User{}, err
+	}
+	u := User{ID: newID(), TenantID: DefaultTenantID, Email: email, Role: "member", Status: "active"}
+	_, err = s.db.Exec(`insert into users (id, tenant_id, email, password_hash, role, status) values ($1,$2,$3,$4,$5,$6)`, u.ID, u.TenantID, u.Email, string(hash), u.Role, u.Status)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			return User{}, ErrUserExists
+		}
+		return User{}, err
+	}
+	return u, nil
+}
+
+func (s *PostgresStore) CreatePasswordResetToken(email string, ttl time.Duration) (string, bool, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	token := "hpr_" + newID() + newID()
+	result, err := s.db.Exec(`insert into password_reset_tokens (id,user_id,token_hash,expires_at) select $1,id,$2,$3 from users where tenant_id=$4 and email=$5 and status='active'`, newID(), resetTokenDigest(token), time.Now().UTC().Add(ttl), DefaultTenantID, email)
+	if err != nil {
+		return "", false, err
+	}
+	n, _ := result.RowsAffected()
+	return token, n > 0, nil
+}
+
+func (s *PostgresStore) ResetPassword(token, password string) (User, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return User{}, err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return User{}, err
+	}
+	defer tx.Rollback()
+	var u User
+	digest := resetTokenDigest(token)
+	err = tx.QueryRow(`update users u set password_hash=$1,updated_at=now() from password_reset_tokens t where t.user_id=u.id and t.token_hash=$2 and t.used_at is null and t.expires_at>now() returning u.id,u.tenant_id,u.email,u.role,u.status`, string(hash), digest).Scan(&u.ID, &u.TenantID, &u.Email, &u.Role, &u.Status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, ErrResetInvalid
+	}
+	if err != nil {
+		return User{}, err
+	}
+	if _, err = tx.Exec(`update password_reset_tokens set used_at=now() where token_hash=$1`, digest); err != nil {
+		return User{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return User{}, err
+	}
+	return u, nil
+}
+
+func resetTokenDigest(token string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(token))) }
+
+func (s *PostgresStore) FindOrCreateGoogleUser(email string) (User, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	var u User
+	err := s.db.QueryRow(`select id,tenant_id,email,role,status from users where tenant_id=$1 and email=$2`, DefaultTenantID, email).Scan(&u.ID, &u.TenantID, &u.Email, &u.Role, &u.Status)
+	if err == nil {
+		return u, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return User{}, err
+	}
+	randomPassword := "google:" + newID() + newID()
+	return s.CreateUser(email, randomPassword)
+}
+
 func (s *PostgresStore) CreateAgentToken(description string, ttl time.Duration) (AgentToken, error) {
 	now := time.Now().UTC()
 	token := AgentToken{
@@ -110,6 +183,29 @@ func (s *PostgresStore) CreateAgentToken(description string, ttl time.Duration) 
 		values ($1, $2, $3, $4, $5, $6)
 	`, token.ID, DefaultTenantID, token.Token, token.Description, token.ExpiresAt, now)
 	return token, err
+}
+
+func (s *PostgresStore) ValidateAgentToken(value string) error {
+	var expiresAt time.Time
+	var usedAt sql.NullTime
+	err := s.db.QueryRow(`
+		select expires_at, used_at
+		from agent_tokens
+		where token_hash = $1 and revoked_at is null
+	`, value).Scan(&expiresAt, &usedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrTokenInvalid
+	}
+	if err != nil {
+		return err
+	}
+	if usedAt.Valid {
+		return ErrTokenUsed
+	}
+	if time.Now().UTC().After(expiresAt) {
+		return ErrTokenExpired
+	}
+	return nil
 }
 
 func (s *PostgresStore) RegisterCluster(input RegisterClusterInput) (Cluster, string, error) {

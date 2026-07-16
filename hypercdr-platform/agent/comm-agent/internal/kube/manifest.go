@@ -24,7 +24,7 @@ type ObjectDeleter interface {
 }
 
 type NamespaceReplacer interface {
-	DeleteNamespaceAndWait(ctx context.Context, namespace string) error
+	ReplaceNamespaceAndWait(ctx context.Context, namespace string) error
 }
 
 type RestoreStateCleaner interface {

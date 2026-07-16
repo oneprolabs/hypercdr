@@ -4,6 +4,28 @@
 
 本文记录 `192.168.8.149` 当前 HyperCDR 中控平台的实际部署状态。该环境是原 149 主机损坏后，基于 `/data/hypercdr` 源码目录重新恢复的全新部署；旧 Harbor 数据和 PostgreSQL 数据未恢复。
 
+## 当前运行模式
+
+2026-07-14 已从标准 Compose 中控平台切换到源码开发模式：
+
+- 标准 Compose 平台容器已卸载，`/data/hypercdr/deploy` 数据保留。
+- 开发 PostgreSQL 容器为 `hypercdr-dev-postgres`，数据在 `/data/hypercdr/.dev/data/postgres`。
+- 后端源码编译到 `/data/hypercdr/.dev/bin`，以 transient systemd service `hypercdr-dev-api` 运行。
+- 前端 Vite 从 `/data/hypercdr/.dev/frontend` 运行，源码通过软链接热更新，service 为 `hypercdr-dev-frontend`。
+- 开发入口为 `https://192.168.8.149:3002`，Vite 终止 TLS 后代理到内部 HTTP 后端 `127.0.0.1:18080`，Agent 使用 `wss://192.168.8.149:3002/ws/agent`。该拓扑与标准 nginx 终止 TLS 后代理 API 一致。
+- 标准镜像构建、Harbor 推送和 Bootstrap 安装流程仍然保留，和开发模式互不覆盖。
+
+开发模式操作：
+
+```bash
+cd /data/hypercdr/hypercdr-platform/deployments/dev
+./start-dev.sh
+./status-dev.sh
+./stop-dev.sh
+```
+
+下文“标准部署”部分保留最近一次标准 Compose 配置，供切回发布验收模式时参考，并不表示对应平台容器当前正在运行。
+
 ## 总体部署方式
 
 当前标准部署方式是：

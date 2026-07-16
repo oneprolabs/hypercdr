@@ -7,7 +7,6 @@ import {
   AlertCircle,
   AlertTriangle,
   ArrowDown,
-  ArrowUp,
   Archive,
   Bell,
   Boxes,
@@ -22,6 +21,7 @@ import {
   Database,
   Edit2,
   Eye,
+  EyeOff,
   FileCode,
   FileCog,
   Filter,
@@ -33,6 +33,7 @@ import {
   Layers,
   Lock,
   Languages,
+  LogOut,
   MoreVertical,
   Network,
   Play,
@@ -70,6 +71,7 @@ type View =
   | 'tags'
   | 'alerts'
   | 'settings'
+  | 'upgrades'
   | 'tenants';
 
 type TopModule = 'overview' | 'dr' | 'config' | 'ops' | 'monitor' | 'settings';
@@ -182,6 +184,7 @@ const locales: Record<LocaleCode, {
       tags: ['Tag Management', 'Create and maintain reusable application tags'],
       alerts: ['Alerts', 'Cluster DR risks and event alerts'],
       settings: ['System', 'Platform parameters and security policies'],
+      upgrades: ['Upgrade Management', 'Plan and audit platform and agent upgrades'],
       tenants: ['Tenants', 'Tenants and administrator accounts'],
       login: ['', ''],
       dashboard: ['', ''],
@@ -350,6 +353,7 @@ interface Cluster {
   latestAgentImageDigest?: string;
   agentUpgradeAvailable?: boolean;
   agentUpgradeStatus?: string;
+  agentUpgradeProgress?: number;
   veleroStatus?: string;
   lastSeenAt?: string;
   role?: 'source' | 'target' | 'both';
@@ -451,6 +455,7 @@ type ApiCluster = {
   latestAgentImageDigest?: string;
   agentUpgradeAvailable?: boolean;
   agentUpgradeStatus?: string;
+  agentUpgradeProgress?: number;
   veleroVersion?: string;
   veleroStatus: string;
   role?: 'source' | 'target' | 'both';
@@ -609,6 +614,8 @@ type ApiLoginResponse = {
 type AuthSession = ApiLoginResponse & {
   signedInAt: string;
 };
+type AuthFlow = 'login' | 'register' | 'forgot' | 'reset';
+type ApiAuthConfig = { googleEnabled: boolean };
 
 type ClusterTaskLog = {
   task: ApiTask;
@@ -1036,6 +1043,13 @@ const ERROR_MESSAGE_CATALOG: ErrorMessageDefinition[] = [
     detail: 'The cluster could not complete BackupStorageLocation setup. Check Velero namespace resources, repository credentials, and object storage connectivity.',
   },
   {
+    code: '120005',
+    aliases: ['BSL_UNAVAILABLE'],
+    title: 'Backup storage location is unavailable',
+    description: 'Velero could not validate the configured BackupStorageLocation.',
+    detail: 'Review the displayed reason. Verify the ObjectStore plugin, endpoint, bucket, credentials, TLS trust, and network access, then use the reconfigure icon to retry.',
+  },
+  {
     code: '130002',
     aliases: ['VOLUME_BACKUP_FAILED', 'BACKUP_FAILED', 'VELERO_BACKUP_FAILED'],
     title: 'Volume data backup failed',
@@ -1099,6 +1113,20 @@ const ERROR_MESSAGE_CATALOG: ErrorMessageDefinition[] = [
     title: 'Recovery task failed',
     description: 'The recovery task failed. Review task details for the root cause.',
     detail: 'The recovery workflow failed. Review the original error, task events, and technical payload.',
+  },
+  {
+    code: '140005',
+    aliases: ['RESTORE_WORKLOAD_IMAGE_PULL_FAILED'],
+    title: 'Restored workload image pull failed',
+    description: 'A restored Pod cannot start because its container image could not be pulled.',
+    detail: 'Verify that the image exists in the configured registry, the restored image reference includes the correct registry port and project, registry CA trust is installed on every target node, and image pull credentials are available.',
+  },
+  {
+    code: '140006',
+    aliases: ['RESTORE_VOLUME_DEPENDENCY_MISSING'],
+    title: 'Volume restore dependency is missing',
+    description: 'Volume data restoration cannot start because a required persistent volume claim is missing.',
+    detail: 'Retry the drill with Replace conflict handling after the previous target namespace is fully removed. Verify that the target StorageClass and provisioner are healthy and that the restored PVC is created before the workload Pod starts.',
   },
 ];
 
@@ -1196,17 +1224,13 @@ function TaskErrorStatus({
   onClick?: (event: React.MouseEvent<HTMLElement>) => void;
 }) {
   const errorCode = normalizeErrorCode(code);
-  const summary = description && description.trim() ? description.trim() : detail && detail.trim() ? detail.trim() : 'Open task details to view the complete error information.';
   const stopTableEvent = (event: React.SyntheticEvent<HTMLElement>) => {
     event.stopPropagation();
   };
   const content = (
-    <>
-      <span className="hbdr-dr-task-error-title">
-        <strong><b>[{errorCode}]</b> {title}</strong>
-      </span>
-      <em>{summary}</em>
-    </>
+    <span className="hbdr-dr-task-error-title">
+      <strong><b>[{errorCode}]</b> {title}</strong>
+    </span>
   );
   if (onClick) {
     return (
@@ -1239,13 +1263,26 @@ function TaskErrorDetailBlock({
   details?: string[];
 }) {
   const fullDetails = details && details.length > 0 ? details : failure.fullText ? [failure.fullText] : [];
+  const definition = errorMessageDefinition(failure.code);
+  const possibleCause = productTaskMessage(fullDetails[0] || failure.description || 'No specific cause was reported.');
   return (
     <div className="hbdr-task-detail-error">
-      <div>
+      <header>
+        <small>Error summary</small>
         <strong>[{failure.code}] {failure.title}</strong>
-        <span>{failure.description}</span>
+        <span>{productTaskMessage(failure.description)}</span>
+      </header>
+      <div className="hbdr-task-detail-error-sections">
         <section>
-          <b>Detail</b>
+          <b>Possible cause</b>
+          <p>{possibleCause}</p>
+        </section>
+        <section>
+          <b>Solution</b>
+          <p>{productTaskMessage(definition.detail)}</p>
+        </section>
+        <section>
+          <b>Technical details</b>
           {fullDetails.length > 0 ? (
             fullDetails.map((detail, index) => <p key={`${index}-${detail}`}>{detail}</p>)
           ) : (
@@ -1253,6 +1290,81 @@ function TaskErrorDetailBlock({
           )}
         </section>
       </div>
+    </div>
+  );
+}
+
+function TaskProcessTimeline({ task, events }: { task: ApiTask; events: ApiTaskEvent[] }) {
+  const terminal = !isActiveTaskStatus(task.status);
+  return (
+    <div className="hbdr-task-detail-section">
+      <div className="hbdr-task-detail-section-title">
+        <strong>Execution process</strong>
+        <span>{terminal ? `${events.length} records` : `Live · ${events.length} records`}</span>
+      </div>
+      <div className="hbdr-task-detail-events" aria-live="polite">
+        {events.length > 0 ? events.map(event => {
+          const errors = eventRestoreResultErrors(event);
+          const eventMessage = taskProcessEventMessage(event);
+          return (
+            <section key={event.id} className="hbdr-task-log-entry">
+              <div className="hbdr-task-log-line" title={`${formatLocalDateTime(event.createdAt) || '-'} · ${eventMessage}`}>
+                <time>{formatLocalDateTime(event.createdAt) || '-'}</time>
+                <p className={event.level === 'error' ? 'is-error' : ''}>{eventMessage}</p>
+              </div>
+              {errors.length > 0 && <ul>{errors.map((error, index) => <li key={`${index}-${error}`}>{error}</li>)}</ul>}
+            </section>
+          );
+        }) : <p className="hbdr-task-detail-empty">Waiting for task events...</p>}
+      </div>
+    </div>
+  );
+}
+
+function taskProcessEventMessage(event: ApiTaskEvent): string {
+  const message = String(event.message || '').trim();
+  const messages: Record<string, string> = {
+    storage_preflight_started: 'Storage readiness check started.',
+    storage_preflight_succeeded: 'Storage readiness check completed successfully.',
+    storage_preflight_skipped: message || 'Storage is already configured; readiness check skipped.',
+    dispatched: 'Task was dispatched to the cluster agent.',
+    accepted: 'Cluster agent accepted the task and started processing.',
+    backup_completed: 'Backup and restore point creation completed successfully.',
+    restore_completed: 'Resource and volume data restoration completed successfully.',
+    application_readiness_check_started: 'Restored application readiness validation started.',
+    application_ready: 'Restored application readiness validation completed successfully.',
+    completed: message || 'Task completed successfully.',
+  };
+  return productTaskMessage(messages[event.reason] || message || `${String(event.reason || 'Task event').replace(/_/g, ' ')}.`);
+}
+
+function productTaskMessage(message: string): string {
+  const cleaned = String(message || '')
+    .replace(/\bHyperCDR Agent\s+/gi, '')
+    .replace(/\bVelero\s+/gi, '')
+    .trim();
+  return cleaned ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1) : cleaned;
+}
+
+function TaskFinalResult({ task, events }: { task: ApiTask; events: ApiTaskEvent[] }) {
+  if (isActiveTaskStatus(task.status)) return null;
+  const failed = isFailedStatus(task.status);
+  const warning = taskHasWarning(task);
+  const lastEvent = events.at(-1);
+  const failure = failed || warning ? taskFailureSummary(task, events) : null;
+  const title = failed
+    ? `[${failure?.code || normalizeErrorCode(task.errorCode)}] ${failure?.title || 'Task failed'}`
+    : warning
+      ? `Completed with warning · ${failure?.title || 'Review task details'}`
+      : `${taskDetailLabel(task.type)} completed successfully`;
+  const message = productTaskMessage(failed || warning
+    ? failure?.description || task.errorMessage || lastEvent?.message || 'The task did not complete successfully.'
+    : lastEvent?.message || 'All task stages completed successfully.');
+  return (
+    <div className={`hbdr-task-final-result ${failed ? 'is-failed' : warning ? 'is-warning' : 'is-succeeded'}`}>
+      <small>Final result</small>
+      <strong>{title}</strong>
+      <span>{message}</span>
     </div>
   );
 }
@@ -1573,6 +1685,22 @@ function drStatusForPlan(status: string | undefined): { label: string; tone: 'ok
     default:
       return { label: status || 'Pending activation', tone: 'muted', title: status || 'Pending activation' };
   }
+}
+
+function storageFailurePresentation(task: ApiTask | undefined): { message: string; solution: string } | null {
+  if (!task || task.status.toLowerCase() !== 'failed') return null;
+  const raw = (task.errorMessage || task.errorCode || '').trim();
+  if (raw.toLowerCase().includes('unable to locate objectstore plugin named velero.io/aws')) {
+    return {
+      message: 'AWS object storage plugin is missing; Velero cannot access S3/MinIO.',
+      solution: 'Install velero-plugin-for-aws, confirm velero.io/aws is registered, then reconfigure the BSL.',
+    };
+  }
+  const firstLine = raw.split('\n').map(line => line.trim()).find(Boolean);
+  return {
+    message: firstLine || 'BackupStorageLocation configuration failed.',
+    solution: 'Correct the reported BSL, credentials, endpoint, bucket, plugin, or network problem, then reconfigure storage.',
+  };
 }
 
 function isProtectionPlanReady(status: string | undefined): boolean {
@@ -2069,6 +2197,7 @@ function mapCluster(cluster: ApiCluster, apps: AppItem[] = []): Cluster {
     latestAgentImageDigest: cluster.latestAgentImageDigest,
     agentUpgradeAvailable: Boolean(cluster.agentUpgradeAvailable),
     agentUpgradeStatus: cluster.agentUpgradeStatus,
+    agentUpgradeProgress: cluster.agentUpgradeProgress,
     veleroStatus: cluster.veleroStatus || 'unknown',
     lastSeenAt: cluster.lastSeenAt,
     role: cluster.role || 'both',
@@ -2670,11 +2799,19 @@ export default function App() {
   const [timeZoneLabel] = useState(() => currentTimeZoneLabel());
   const [loginEmail, setLoginEmail] = useState('admin');
   const [loginPassword, setLoginPassword] = useState('');
+  const [loginPasswordVisible, setLoginPasswordVisible] = useState(false);
   const [loginCaptchaCode, setLoginCaptchaCode] = useState('');
   const [loginCaptcha, setLoginCaptcha] = useState<ApiCaptcha | null>(null);
   const [loginError, setLoginError] = useState('');
   const [loginSubmitting, setLoginSubmitting] = useState(false);
+  const [authFlow, setAuthFlow] = useState<AuthFlow>('login');
+  const [authMessage, setAuthMessage] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [resetToken, setResetToken] = useState('');
+  const [googleEnabled, setGoogleEnabled] = useState(false);
   const [locale, setLocale] = useState<LocaleCode>('en');
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const [clusters, setClusters] = useState<Cluster[]>(initialClusters);
   const [liveClusters, setLiveClusters] = useState<Cluster[] | null>(null);
   const [storage, setStorage] = useState<StorageRepo[]>(initialStorage);
@@ -2718,6 +2855,50 @@ export default function App() {
     const timer = window.setTimeout(() => setToast(null), 2600);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  useEffect(() => {
+    void apiGet<ApiAuthConfig>('/api/v1/auth/config').then(config => setGoogleEnabled(config.googleEnabled)).catch(() => setGoogleEnabled(false));
+    const resetFromURL = new URLSearchParams(window.location.search).get('reset_token');
+    if (resetFromURL) {
+      setResetToken(resetFromURL); setAuthFlow('reset');
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+    const hash = window.location.hash;
+    if (hash.startsWith('#google_auth=')) {
+      try {
+        const encoded = decodeURIComponent(hash.slice('#google_auth='.length));
+        const normalized = encoded.replace(/-/g, '+').replace(/_/g, '/');
+        const response = JSON.parse(atob(normalized)) as ApiLoginResponse;
+        const nextSession: AuthSession = { ...response, signedInAt: new Date().toISOString() };
+        setAuthSession(nextSession);
+        writeStoredAuthSession(nextSession);
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        clearStoredView();
+        setView('dashboard');
+      } catch {
+        setLoginError('Google sign-in response could not be verified');
+      }
+    } else if (new URLSearchParams(window.location.search).has('auth_error')) {
+      setLoginError('Google sign-in failed. Please try again.');
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!accountMenuOpen) return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!accountMenuRef.current?.contains(event.target as Node)) setAccountMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setAccountMenuOpen(false);
+    };
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [accountMenuOpen]);
 
   useEffect(() => {
     if (!selectedCluster?.id) return;
@@ -2864,7 +3045,64 @@ export default function App() {
     }
   }, [enterAfterLogin, loginCaptcha?.id, loginCaptchaCode, loginEmail, loginPassword, loginSubmitting, refreshLoginCaptcha]);
 
+  const applyAuthFlow = useCallback((next: AuthFlow) => {
+    setAuthFlow(next); setLoginError(''); setAuthMessage(''); setLoginPassword(''); setConfirmPassword(''); setLoginCaptchaCode('');
+    if (next === 'register') setLoginEmail('');
+    if (next === 'login' || next === 'register') void refreshLoginCaptcha(false);
+  }, [refreshLoginCaptcha]);
+
+  const switchAuthFlow = useCallback((next: AuthFlow) => {
+    const url = next === 'login' ? window.location.pathname : `${window.location.pathname}?auth=${next}`;
+    window.history.pushState({ authFlow: next }, '', url);
+    applyAuthFlow(next);
+  }, [applyAuthFlow]);
+
+  useEffect(() => {
+    const flowFromURL = new URLSearchParams(window.location.search).get('auth');
+    if (flowFromURL === 'register' || flowFromURL === 'forgot' || flowFromURL === 'reset') applyAuthFlow(flowFromURL);
+    const handleHistoryNavigation = (event: PopStateEvent) => {
+      const queryFlow = new URLSearchParams(window.location.search).get('auth');
+      const next = event.state?.authFlow || queryFlow || 'login';
+      applyAuthFlow(next === 'register' || next === 'forgot' || next === 'reset' ? next : 'login');
+    };
+    window.addEventListener('popstate', handleHistoryNavigation);
+    return () => window.removeEventListener('popstate', handleHistoryNavigation);
+  }, [applyAuthFlow]);
+
+  const submitRegistration = useCallback(async () => {
+    if (loginSubmitting) return;
+    if (!loginEmail.trim() || !loginPassword || !loginCaptchaCode.trim()) { setLoginError('Email, password, and verification code are required'); return; }
+    if (loginPassword !== confirmPassword) { setLoginError('Passwords do not match'); return; }
+    setLoginSubmitting(true); setLoginError(''); setAuthMessage('');
+    try {
+      const result = await apiPost<{message: string}>('/api/v1/auth/register', { email: loginEmail.trim(), password: loginPassword, captchaId: loginCaptcha?.id, captchaCode: loginCaptchaCode.trim() });
+      switchAuthFlow('login'); setAuthMessage(result.message);
+    } catch (error) { setLoginError(error instanceof Error ? error.message : 'Registration failed'); await refreshLoginCaptcha(false); }
+    finally { setLoginSubmitting(false); }
+  }, [confirmPassword, loginCaptcha?.id, loginCaptchaCode, loginEmail, loginPassword, loginSubmitting, refreshLoginCaptcha, switchAuthFlow]);
+
+  const submitForgotPassword = useCallback(async () => {
+    if (!loginEmail.trim() || loginSubmitting) { if (!loginEmail.trim()) setLoginError('Email is required'); return; }
+    setLoginSubmitting(true); setLoginError(''); setAuthMessage('');
+    try {
+      const result = await apiPost<{message: string; resetToken?: string}>('/api/v1/auth/forgot-password', { email: loginEmail.trim() });
+      setAuthMessage(result.message);
+      if (result.resetToken) { setResetToken(result.resetToken); setAuthFlow('reset'); }
+    } catch (error) { setLoginError(error instanceof Error ? error.message : 'Reset request failed'); }
+    finally { setLoginSubmitting(false); }
+  }, [loginEmail, loginSubmitting]);
+
+  const submitPasswordReset = useCallback(async () => {
+    if (!resetToken.trim() || !loginPassword) { setLoginError('Reset token and new password are required'); return; }
+    if (loginPassword !== confirmPassword) { setLoginError('Passwords do not match'); return; }
+    setLoginSubmitting(true); setLoginError('');
+    try { const result = await apiPost<{message: string}>('/api/v1/auth/reset-password', { token: resetToken.trim(), password: loginPassword }); switchAuthFlow('login'); setAuthMessage(result.message); }
+    catch (error) { setLoginError(error instanceof Error ? error.message : 'Password reset failed'); }
+    finally { setLoginSubmitting(false); }
+  }, [confirmPassword, loginPassword, resetToken, switchAuthFlow]);
+
   const signOut = useCallback(() => {
+    setAccountMenuOpen(false);
     setAuthSession(null);
     clearStoredAuthSession();
     clearStoredView();
@@ -3155,6 +3393,7 @@ export default function App() {
       title: 'Settings',
       items: [
         { label: 'System', desc: 'Platform parameters and security policies', view: 'settings' as View, icon: Settings },
+        { label: 'Upgrade Management', desc: 'Plan and audit platform and agent upgrades', view: 'upgrades' as View, icon: Upload },
         { label: 'Tenants', desc: 'Tenants and administrator accounts', view: 'tenants' as View, icon: User },
       ],
     };
@@ -3300,9 +3539,10 @@ export default function App() {
 
             <div className="premium-login-card">
               <h2>
-                <span>Welcome to HyperCDR</span>
+                <span>{authFlow === 'login' ? 'Welcome to HyperCDR' : authFlow === 'register' ? 'Create your account' : authFlow === 'forgot' ? 'Forgot your password?' : 'Set a new password'}</span>
                 <LanguageSwitcher locale={locale} setLocale={setLocale} compact />
               </h2>
+              {authFlow !== 'login' && <p className="hbdr-auth-description">{authFlow === 'register' ? 'Create an account to access the HyperCDR console.' : authFlow === 'forgot' ? 'Enter your account email and we will send reset instructions.' : 'Enter the reset token from your email and choose a new password.'}</p>}
               <div className="hbdr-login-form grid gap-4">
                 <label className="hbdr-login-field">
                   <User size={15} />
@@ -3313,11 +3553,11 @@ export default function App() {
                     autoComplete="username"
                   />
                 </label>
-                <label className="hbdr-login-field">
+                {(authFlow === 'login' || authFlow === 'register' || authFlow === 'reset') && <div className="hbdr-login-field hbdr-login-password-field">
                   <ShieldCheck size={15} />
                   <input
-                    placeholder="Password"
-                    type="password"
+                    placeholder={authFlow === 'reset' ? 'New Password' : 'Password'}
+                    type={loginPasswordVisible ? 'text' : 'password'}
                     value={loginPassword}
                     onChange={event => setLoginPassword(event.target.value)}
                     onKeyDown={event => {
@@ -3325,10 +3565,26 @@ export default function App() {
                     }}
                     autoComplete="current-password"
                   />
-                  <Eye size={15} className="hbdr-login-eye" />
-                </label>
+                  <button
+                    type="button"
+                    className="hbdr-login-eye"
+                    aria-label={loginPasswordVisible ? 'Hide password' : 'Show password'}
+                    title={loginPasswordVisible ? 'Hide password' : 'Show password'}
+                    onClick={() => setLoginPasswordVisible(visible => !visible)}
+                  >
+                    {loginPasswordVisible ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>}
+                {(authFlow === 'register' || authFlow === 'reset') && <label className="hbdr-login-field">
+                  <ShieldCheck size={15} />
+                  <input placeholder="Confirm Password" type="password" value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} autoComplete="new-password" />
+                </label>}
+                {authFlow === 'reset' && <label className="hbdr-login-field">
+                  <KeyRound size={15} />
+                  <input placeholder="Reset Token" value={resetToken} onChange={event => setResetToken(event.target.value)} autoComplete="off" />
+                </label>}
               </div>
-              <div className="hbdr-login-captcha-code" aria-label="Verification code">
+              {(authFlow === 'login' || authFlow === 'register') && <div className="hbdr-login-captcha-code" aria-label="Verification code">
                 <label className="hbdr-login-field">
                   <CheckCircle2 size={15} />
                   <input
@@ -3345,24 +3601,27 @@ export default function App() {
                 <button type="button" className="hbdr-login-captcha-image" aria-label="Refresh verification code" title="Refresh verification code" onClick={() => void refreshLoginCaptcha()}>
                   {loginCaptcha?.image ? <img src={loginCaptcha.image} alt="Verification code" /> : <span>----</span>}
                 </button>
-              </div>
+              </div>}
               {loginError && <div className="hbdr-login-error">{loginError}</div>}
+              {authMessage && <div className="hbdr-auth-success">{authMessage}</div>}
               <button
                 className="w-full bg-blue-600 text-white"
                 disabled={loginSubmitting}
-                onClick={() => void submitLogin()}
+                onClick={() => void (authFlow === 'login' ? submitLogin() : authFlow === 'register' ? submitRegistration() : authFlow === 'forgot' ? submitForgotPassword() : submitPasswordReset())}
               >
-                {loginSubmitting ? 'Signing In...' : 'Sign In'}
+                {loginSubmitting ? 'Please wait...' : authFlow === 'login' ? 'Sign In' : authFlow === 'register' ? 'Create Account' : authFlow === 'forgot' ? 'Send Reset Instructions' : 'Update Password'}
               </button>
-              <div className="hbdr-login-forgot"><button type="button">Forgot Password?</button></div>
-              <div className="hbdr-login-divider"><span>or</span></div>
-              <button type="button" className="hbdr-login-google">
-                <span>G</span>
-                Continue with Google
-              </button>
-              <p className="hbdr-login-sso-note">Use your work Google account</p>
-              <div className="hbdr-login-signup">Do not have an account? <button type="button">Sign Up</button></div>
-              <p className="hbdr-login-eula">By continuing, you agree to our Terms and Privacy Policy.</p>
+              {authFlow === 'login' ? <>
+                <div className="hbdr-login-forgot"><button type="button" onClick={() => switchAuthFlow('forgot')}>Forgot Password?</button></div>
+                <div className="hbdr-login-divider"><span>or</span></div>
+                <button type="button" className="hbdr-login-google" disabled={!googleEnabled} onClick={() => { window.location.href = '/api/v1/auth/google/start'; }} title={googleEnabled ? 'Continue with Google' : 'Google sign-in is not configured by the administrator'}>
+                  <span>G</span>
+                  {googleEnabled ? 'Continue with Google' : 'Google sign-in unavailable'}
+                </button>
+                <p className="hbdr-login-sso-note">{googleEnabled ? 'Use your work Google account' : 'Configure Google OAuth to enable this option'}</p>
+                <div className="hbdr-login-signup">Do not have an account? <button type="button" onClick={() => switchAuthFlow('register')}>Sign Up</button></div>
+                <p className="hbdr-login-eula">By continuing, you agree to our Terms and Privacy Policy.</p>
+              </> : <div className="hbdr-login-signup hbdr-auth-back">Already have an account? <button type="button" onClick={() => switchAuthFlow('login')}>Back to Sign In</button></div>}
             </div>
           </div>
         </div>
@@ -3446,22 +3705,47 @@ export default function App() {
           </nav>
         </div>
         <div>
-          <button className="hbdr-timezone-button">{timeZoneLabel}</button>
-          <button className="hbdr-top-status hbdr-top-status-upgrade" onClick={() => setToast('No upgrade tasks are pending')}>
-            <ArrowUp size={16} />
-            <span>0</span>
-          </button>
-          <button className="hbdr-top-status hbdr-top-status-alert" onClick={() => setToast('No new alerts in Notification Center')}>
+          <button className="hbdr-timezone-button hbdr-top-tooltip" data-tooltip={`Timezone · ${timeZoneLabel}`} aria-label={`Current timezone: ${timeZoneLabel}`}>{timeZoneLabel}</button>
+          <button className="hbdr-top-status hbdr-top-status-alert hbdr-top-tooltip" data-tooltip="Notifications" aria-label="Notifications: 0" onClick={() => setToast('No new alerts in Notification Center')}>
             <AlertCircle size={16} />
             <span>0</span>
           </button>
-          <LanguageSwitcher locale={locale} setLocale={setLocale} compact />
-          <button type="button" className="hbdr-top-user" onClick={signOut} title="Sign out">
-            <User size={15} />
-            <span>{authSession?.user.email || 'admin'}</span>
-            <ChevronDown size={13} />
-          </button>
-          <button type="button" className="hbdr-top-avatar" onClick={signOut} title="Sign out"><User size={20} /></button>
+          <span className="hbdr-top-tooltip hbdr-language-tooltip" data-tooltip="Switch language">
+            <LanguageSwitcher locale={locale} setLocale={setLocale} compact />
+          </span>
+          <div className="hbdr-account" ref={accountMenuRef}>
+            <button
+              type="button"
+              className={`hbdr-top-user ${accountMenuOpen ? 'is-open' : ''}`}
+              onClick={() => setAccountMenuOpen(open => !open)}
+              aria-label="Open account menu"
+              aria-haspopup="menu"
+              aria-expanded={accountMenuOpen}
+            >
+              <span className="hbdr-top-user-avatar"><User size={15} /></span>
+              <span>{authSession?.user.email || 'admin'}</span>
+              <ChevronDown size={13} />
+            </button>
+            {accountMenuOpen && (
+              <div className="hbdr-account-menu" role="menu">
+                <div className="hbdr-account-summary">
+                  <span><User size={18} /></span>
+                  <div>
+                    <strong>{authSession?.user.email || 'admin'}</strong>
+                    <small>{authSession?.user.role || 'User'}</small>
+                  </div>
+                </div>
+                <button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); openView('settings'); }}>
+                  <Settings size={16} />
+                  <span>Account settings</span>
+                </button>
+                <button type="button" role="menuitem" className="hbdr-account-signout" onClick={signOut}>
+                  <LogOut size={16} />
+                  <span>Sign out</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </aside>
 
@@ -3588,6 +3872,7 @@ export default function App() {
                   liveRecoveryTasks={liveRecoveryTasks}
                   setLiveRecoveryTasks={setLiveRecoveryTasks}
                   liveRestorePoints={liveRestorePoints}
+                  platformTasks={liveApiTasks}
                 />
               </motion.div>
             ))}
@@ -3691,6 +3976,7 @@ export default function App() {
             {view === 'tags' && (onboarding !== 'ready' ? onboardingGate : <TagManagementPage tags={tags} setTags={setTags} clusters={clusters} setClusters={setClusters} toast={setToast} />)}
             {view === 'alerts' && <AlertsPage />}
             {view === 'settings' && <SettingsPage />}
+            {view === 'upgrades' && <UpgradeManagementPage />}
             {view === 'tenants' && <TenantPage />}
           </AnimatePresence>
         </section>
@@ -4309,8 +4595,9 @@ function ApplicationDrPage(props: {
   liveRecoveryTasks: Record<string, ApiTask>;
   setLiveRecoveryTasks: React.Dispatch<React.SetStateAction<Record<string, ApiTask>>>;
   liveRestorePoints: ApiRestorePointView[];
+  platformTasks: ApiTask[];
 }) {
-  const { apps, clusters, currentCluster, storage, policies, protectionPlans, setProtectionPlans, tags, stage, setStage, currentClusterId, updateAppTags, openRestorePoints, openStorage, openClusters, openPolicies, toast, refreshPlatformData, liveAppTasks, setLiveAppTasks, liveRecoveryTasks, setLiveRecoveryTasks, liveRestorePoints } = props;
+  const { apps, clusters, currentCluster, storage, policies, protectionPlans, setProtectionPlans, tags, stage, setStage, currentClusterId, updateAppTags, openRestorePoints, openStorage, openClusters, openPolicies, toast, refreshPlatformData, liveAppTasks, setLiveAppTasks, liveRecoveryTasks, setLiveRecoveryTasks, liveRestorePoints, platformTasks } = props;
   const [selectedSelectApps, setSelectedSelectApps] = useState<string[]>([]);
   const [selectedConfigApps, setSelectedConfigApps] = useState<string[]>([]);
   const [selectedRunApps, setSelectedRunApps] = useState<string[]>([]);
@@ -4523,6 +4810,15 @@ function ApplicationDrPage(props: {
     return label ? <small className="hbdr-dr-next-sync">{label}</small> : null;
   };
   const drStatusMetaForApp = (app: AppItem) => drStatusForPlan(protectionPlanForApp(app)?.status);
+  const storageFailureForApp = (app: AppItem) => {
+    const plan = protectionPlanForApp(app);
+    if (!plan) return null;
+    const task = platformTasks
+      .filter(item => item.type === 'storage-sync' && item.protectionPlanId === plan.id && item.status.toLowerCase() === 'failed')
+      .sort((a, b) => (b.completedAt || b.createdAt || '').localeCompare(a.completedAt || a.createdAt || ''))[0];
+    const presentation = storageFailurePresentation(task);
+    return task && presentation ? { task, presentation } : null;
+  };
   const retryDrActivation = async (app: AppItem) => {
     const plan = protectionPlanForApp(app);
     if (!plan) {
@@ -4593,6 +4889,31 @@ function ApplicationDrPage(props: {
       window.clearInterval(timer);
     };
   }, [activeDrTaskKey, refreshPlatformData]);
+  useEffect(() => {
+    const taskId = syncTaskDetail?.task.id;
+    if (!taskId) return;
+    let cancelled = false;
+    const refreshOpenTask = async () => {
+      try {
+        const [eventResult, taskResult] = await Promise.all([
+          apiGet<ApiList<ApiTaskEvent>>(`/api/v1/tasks/${taskId}/events`),
+          apiGet<ApiList<ApiTask>>('/api/v1/tasks'),
+        ]);
+        if (cancelled) return;
+        setDrTaskEvents(prev => ({ ...prev, [taskId]: listItems(eventResult) }));
+        const latest = listItems(taskResult).find(task => task.id === taskId);
+        if (latest) setSyncTaskDetail(prev => prev?.task.id === taskId ? { ...prev, task: latest } : prev);
+      } catch {
+        // Keep the last successful snapshot visible while the next live refresh retries.
+      }
+    };
+    void refreshOpenTask();
+    const timer = window.setInterval(refreshOpenTask, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [syncTaskDetail?.task.id]);
   const unitMembers = (app: AppItem) => app.memberApps?.length ? app.memberApps : [app];
   const unitNamespaces = (app: AppItem) => unitMembers(app).map(item => item.namespace || item.name);
   const taskForUnit = (tasks: Record<string, ApiTask>, app: AppItem) => {
@@ -5316,9 +5637,9 @@ function ApplicationDrPage(props: {
         id: 'drStatus',
         header: 'DR Config',
         accessorFn: app => appSortValue(app, 'drStatus'),
-        size: 168,
-        minSize: 144,
-        maxSize: 260,
+        size: 300,
+        minSize: 240,
+        maxSize: 400,
         cell: info => {
           const app = info.row.original;
           const plan = protectionPlanForApp(app);
@@ -5329,42 +5650,54 @@ function ApplicationDrPage(props: {
           const reconfigureTitle = normalizedPlanStatus === 'active_with_warning'
             ? 'Retry target BackupStorageLocation configuration'
             : 'Reconfigure BackupStorageLocation';
-          const reconfigureLabel = normalizedPlanStatus === 'active_with_warning' ? 'Retry BSL' : 'Reconfigure';
+          const storageFailure = canReconfigureStorage ? storageFailureForApp(app) : null;
           return (
             <span className="hbdr-dr-status-cell">
-              <span className={`hbdr-dr-status hbdr-dr-status-${meta.tone}`} title={meta.title}>
-                {meta.tone === 'ok' && <CheckCircle2 size={14} />}
-                {meta.tone === 'progress' && <RefreshCw size={14} />}
-                {meta.tone === 'warn' && <AlertTriangle size={14} />}
-                {meta.label}
-              </span>
+              {storageFailure ? (
+                <TaskErrorStatus
+                  code={storageFailure.task.errorCode}
+                  title={storageFailure.presentation.message}
+                  onClick={() => setSyncTaskDetail({ app, task: storageFailure.task, failure: taskFailureSummary(storageFailure.task) })}
+                />
+              ) : <span className="hbdr-dr-status-line">
+                <span className={`hbdr-dr-status hbdr-dr-status-${meta.tone}`} title={meta.title}>
+                  {meta.tone === 'ok' && <CheckCircle2 size={14} />}
+                  {meta.tone === 'progress' && <RefreshCw size={14} />}
+                  {meta.tone === 'warn' && <AlertTriangle size={14} />}
+                  {meta.label}
+                </span>
+              </span>}
               {retryable && (
-                <button
-                  type="button"
-                  className="hbdr-dr-status-retry"
-                  title="Retry activation"
-                  onClick={event => {
-                    event.stopPropagation();
-                    void retryDrActivation(app);
-                  }}
-                >
-                  <RefreshCw size={12} />
-                  Retry
-                </button>
+                <span className="hbdr-dr-status-actions">
+                  <button
+                    type="button"
+                    className="hbdr-dr-status-retry"
+                    title="Retry activation"
+                    onClick={event => {
+                      event.stopPropagation();
+                      void retryDrActivation(app);
+                    }}
+                  >
+                    <RefreshCw size={12} />
+                    Retry
+                  </button>
+                </span>
               )}
               {canReconfigureStorage && (
-                <button
-                  type="button"
-                  className="hbdr-dr-status-retry"
-                  title={reconfigureTitle}
-                  onClick={event => {
-                    event.stopPropagation();
-                    void reconfigureDrStorage(app);
-                  }}
-                >
-                  <RefreshCw size={12} />
-                  {reconfigureLabel}
-                </button>
+                <span className="hbdr-dr-status-actions">
+                  <button
+                    type="button"
+                    className="hbdr-dr-status-retry"
+                    aria-label={reconfigureTitle}
+                    title={storageFailure ? `${reconfigureTitle}. ${storageFailure.presentation.solution}` : reconfigureTitle}
+                    onClick={event => {
+                      event.stopPropagation();
+                      void reconfigureDrStorage(app);
+                    }}
+                  >
+                    <RefreshCw size={12} />
+                  </button>
+                </span>
               )}
             </span>
           );
@@ -5515,7 +5848,7 @@ function ApplicationDrPage(props: {
       });
     }
     return columns;
-  }, [allVisibleSelected, selectedNames, visibleRunColumns, tags, syncTasks, liveRecoveryTasks, liveRestorePoints, protectionPlans]);
+  }, [allVisibleSelected, selectedNames, visibleRunColumns, tags, syncTasks, liveRecoveryTasks, liveRestorePoints, protectionPlans, platformTasks]);
   const singleSelectedApp = selectedNames.length === 1 ? currentRows.find(app => app.name === selectedNames[0]) || apps.find(app => app.name === selectedNames[0]) || null : null;
   const selectedRunRows = selectedRunApps
     .map(name => protectedRows.find(app => app.name === name) || apps.find(app => app.name === name))
@@ -5754,38 +6087,38 @@ function ApplicationDrPage(props: {
             ].filter(Boolean).join(' · ')
           : '';
       return (
-        <span className={`hbdr-dr-progress-cell ${canceling ? 'is-stopped' : 'is-syncing'}`}>
-          <em className="hbdr-sync-label">{primary}</em>
-          {showProgressBar && <i><b style={{ width: `${progress}%` }} /></i>}
+        <button type="button" className={`hbdr-dr-progress-cell hbdr-task-status-clickable ${canceling ? 'is-stopped' : 'is-syncing'}`} aria-label="View sync process" onPointerDown={event => { event.stopPropagation(); setSyncTaskDetail({ app, task }); }} onMouseDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}>
+          {!showProgressBar && <em className="hbdr-sync-label">{primary}</em>}
+          {showProgressBar && <i className="hbdr-progress-track"><b style={{ width: `${progress}%` }} /><span>{formatPercent(progress)}%</span></i>}
           {details && <small>{details}</small>}
-        </span>
+        </button>
       );
     }
 
     if (isCompletedTaskStatus(task.status)) {
       if (taskHasWarning(task)) {
+        const warning = taskFailureSummary(task, drTaskEvents[task.id] || []);
         return (
-          <button
-            type="button"
-            className="hbdr-dr-task-warning"
+          <TaskErrorStatus
+            code={warning.code}
+            title={warning.title}
+            description={warning.description}
+            detail={warning.fullText}
             onClick={event => {
               event.stopPropagation();
-              setSyncTaskDetail({ app, task });
+              setSyncTaskDetail({ app, task, failure: warning });
             }}
-          >
-            <span>Sync complete with warning</span>
-            <em>{task.errorMessage || task.errorCode || 'View details'}</em>
-          </button>
+          />
         );
       }
       const completedPoint = taskVisibleRestorePoint;
       const completedPointLabel = restorePointDisplayLabel(completedPoint) || 'Restore point creating...';
       return (
-        <span className="hbdr-dr-last-snapshot">
+        <button type="button" className="hbdr-dr-last-snapshot hbdr-task-status-clickable" aria-label="View sync process" onPointerDown={event => { event.stopPropagation(); setSyncTaskDetail({ app, task }); }} onMouseDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}>
           <strong>Sync complete</strong>
           <em title={completedPoint?.veleroBackupName || completedPoint?.title || completedPointLabel}>{completedPointLabel}</em>
           {nextSyncHint}
-        </span>
+        </button>
       );
     }
 
@@ -5830,11 +6163,11 @@ function ApplicationDrPage(props: {
       const preparingMessage = recoveryPreparingMessage(events, task.type);
       const primary = configuringStorage ? preparingMessage : `${actionText.running} ${formatPercent(progress)}%`;
       return (
-        <span className="hbdr-dr-progress-cell hbdr-recovery-task-progress is-syncing">
-          <em className="hbdr-sync-label">{primary}</em>
-          {showProgressBar && <i><b style={{ width: `${progress}%` }} /></i>}
+        <button type="button" className="hbdr-dr-progress-cell hbdr-recovery-task-progress hbdr-task-status-clickable is-syncing" aria-label="View recovery process" onPointerDown={event => { event.stopPropagation(); setSyncTaskDetail({ app, task }); }} onMouseDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}>
+          {!showProgressBar && <em className="hbdr-sync-label">{primary}</em>}
+          {showProgressBar && <i className="hbdr-progress-track"><b style={{ width: `${progress}%` }} /><span>{formatPercent(progress)}%</span></i>}
           {details && <small>{details}</small>}
-        </span>
+        </button>
       );
     }
 
@@ -5845,10 +6178,10 @@ function ApplicationDrPage(props: {
       const completedTitle = recoveryCompletedTargetTitle(restorePointLabel, task.completedAt, targetClusterName, targetNamespace, actionText.complete);
       const targetLabel = recoveryCompletedTargetLabel(targetClusterName, targetNamespace);
       return (
-        <span className="hbdr-recovery-task-complete">
+        <button type="button" className="hbdr-recovery-task-complete hbdr-task-status-clickable" aria-label="View recovery process" onPointerDown={event => { event.stopPropagation(); setSyncTaskDetail({ app, task }); }} onMouseDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}>
           <strong title={completedTitle}>[{restorePointLabel}] {actionText.complete.toLowerCase()}</strong>
           <em title={completedTitle}>{targetLabel}</em>
-        </span>
+        </button>
       );
     }
 
@@ -6863,9 +7196,12 @@ function ApplicationDrPage(props: {
               const events = drTaskEvents[syncTaskDetail.task.id] || [];
               const failure = syncTaskDetail.failure || taskFailureSummary(syncTaskDetail.task, events);
               const details = taskFailureDetails(syncTaskDetail.task, events);
+              const showError = isFailedStatus(syncTaskDetail.task.status) || taskHasWarning(syncTaskDetail.task);
               return (
                 <div className="hbdr-sync-detail">
-                  <TaskErrorDetailBlock failure={failure} details={details} />
+                  <TaskProcessTimeline task={syncTaskDetail.task} events={events} />
+                  {showError && <TaskErrorDetailBlock failure={failure} details={details} />}
+                  <TaskFinalResult task={syncTaskDetail.task} events={events} />
                 </div>
               );
             })()}
@@ -7776,7 +8112,7 @@ function ClusterPage(props: {
                 <div>
                   <span className="block text-[9px] font-semibold uppercase tracking-wider text-slate-400">Agent</span>
                   <p className="truncate font-mono text-[11px] font-semibold leading-tight text-slate-700">{cluster.agentVersion}</p>
-                  {cluster.agentUpgradeAvailable && cluster.connectionStatus === 'online' && (
+                  {cluster.agentUpgradeAvailable && cluster.agentUpgradeStatus !== 'upgrading' && cluster.connectionStatus === 'online' && (
                     <button
                       type="button"
                       onClick={(event) => openUpgrade(cluster, event)}
@@ -7786,13 +8122,24 @@ function ClusterPage(props: {
                       Update available: {cluster.latestAgentVersion || 'new'}{cluster.latestAgentImageDigest ? `@${shortDigest(cluster.latestAgentImageDigest)}` : ''}
                     </button>
                   )}
-                  {cluster.agentUpgradeStatus === 'upgrading' && !cluster.agentUpgradeAvailable && (
+                  {cluster.agentUpgradeStatus === 'upgrading' && (
                     <span className="mt-0.5 block truncate text-[10px] font-semibold leading-tight text-blue-600">Upgrading...</span>
                   )}
                 </div>
                 <div><span className="block text-[9px] font-semibold uppercase tracking-wider text-slate-400">Status</span><p className={`truncate text-[11px] font-semibold leading-tight ${readiness.className}`}>{readiness.label}</p></div>
                 <div><span className="block text-[9px] font-semibold uppercase tracking-wider text-slate-400">Last Seen</span><p className="text-[11px] font-semibold leading-tight text-slate-700">{formatLastSeen(cluster.lastSeenAt)}</p></div>
               </div>
+              {cluster.agentUpgradeStatus === 'upgrading' && (
+                <div className="mb-2 rounded-md border border-blue-100 bg-blue-50/70 px-2.5 py-2">
+                  <div className="mb-1.5 flex items-center justify-between text-[10px] font-semibold text-blue-700">
+                    <span>{(cluster.agentUpgradeProgress || 0) >= 70 ? 'Waiting for agent to reconnect' : 'Updating agent deployment'}</span>
+                    <span>{formatPercent(cluster.agentUpgradeProgress || 0)}%</span>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-blue-100">
+                    <div className="h-full rounded-full bg-blue-600 transition-all duration-500" style={{ width: `${Math.max(4, Math.min(100, cluster.agentUpgradeProgress || 0))}%` }} />
+                  </div>
+                </div>
+              )}
               <div className="cluster-metrics-grid grid grid-cols-3 gap-2 border-t border-slate-50 pt-2 text-xs">
                 <Metric label="Namespaces" value={cluster.namespaces} onClick={() => setClusterResourceDetail({ cluster, type: 'namespaces' })} />
                 <Metric label="Nodes" value={cluster.nodes} onClick={() => setClusterResourceDetail({ cluster, type: 'nodes' })} />
@@ -10007,16 +10354,21 @@ function RealRestorePointPage({
     let cancelled = false;
     const loadEvents = async () => {
       try {
-        const result = await apiGet<ApiList<ApiTaskEvent>>(`/api/v1/tasks/${recoveryTaskDetail.task.id}/events`);
-        if (!cancelled) setRecoveryTaskDetailEvents(listItems(result));
+        const [eventResult, taskResult] = await Promise.all([
+          apiGet<ApiList<ApiTaskEvent>>(`/api/v1/tasks/${recoveryTaskDetail.task.id}/events`),
+          apiGet<ApiList<ApiTask>>('/api/v1/tasks'),
+        ]);
+        if (!cancelled) {
+          setRecoveryTaskDetailEvents(listItems(eventResult));
+          const latest = listItems(taskResult).find(task => task.id === recoveryTaskDetail.task.id);
+          if (latest) setRecoveryTaskDetail(prev => prev?.task.id === latest.id ? { ...prev, task: latest } : prev);
+        }
       } catch {
-        if (!cancelled) setRecoveryTaskDetailEvents([]);
+        // Preserve the last successful live snapshot and retry on the next interval.
       }
     };
     void loadEvents();
-    const timer = isActiveTaskStatus(recoveryTaskDetail.task.status)
-      ? window.setInterval(loadEvents, 3000)
-      : undefined;
+    const timer = window.setInterval(loadEvents, 2000);
     return () => {
       cancelled = true;
       if (timer) window.clearInterval(timer);
@@ -10747,35 +11099,11 @@ function RealRestorePointPage({
               const details = taskFailureDetails(recoveryTaskDetail.task, recoveryTaskDetailEvents);
               return (
                 <div className="hbdr-task-detail">
-                  <TaskErrorDetailBlock failure={failure} details={details} />
-
-                  <div className="hbdr-task-detail-section">
-                    <div className="hbdr-task-detail-section-title">
-                      <strong>Task events</strong>
-                      <span>{recoveryTaskDetailEvents.length} records</span>
-                    </div>
-                    <div className="hbdr-task-detail-events">
-                      {recoveryTaskDetailEvents.length > 0 ? recoveryTaskDetailEvents.map(event => {
-                        const errors = eventRestoreResultErrors(event);
-                        return (
-                          <section key={event.id}>
-                            <div>
-                              <strong className={event.level === 'error' ? 'is-error' : ''}>{(event.reason || event.level || 'event').replace(/_/g, ' ')}</strong>
-                              <span>{formatLocalDateTime(event.createdAt) || '-'}</span>
-                            </div>
-                            <p>{event.message}</p>
-                            {errors.length > 0 && (
-                              <ul>
-                                {errors.map((error, index) => <li key={`${index}-${error}`}>{error}</li>)}
-                              </ul>
-                            )}
-                          </section>
-                        );
-                      }) : (
-                        <p className="hbdr-task-detail-empty">No task events recorded.</p>
-                      )}
-                    </div>
-                  </div>
+                  <TaskProcessTimeline task={recoveryTaskDetail.task} events={recoveryTaskDetailEvents} />
+                  {(isFailedStatus(recoveryTaskDetail.task.status) || taskHasWarning(recoveryTaskDetail.task)) && (
+                    <TaskErrorDetailBlock failure={failure} details={details} />
+                  )}
+                  <TaskFinalResult task={recoveryTaskDetail.task} events={recoveryTaskDetailEvents} />
 
                   <details className="hbdr-task-detail-raw">
                     <summary>Technical payload</summary>
@@ -12210,6 +12538,21 @@ function SettingsPage() {
   );
 }
 
+function UpgradeManagementPage() {
+  return (
+    <motion.div key="upgrades" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
+      <SearchBar title="Upgrade Management" desc="Plan and audit platform and cluster agent upgrades." />
+      <div className="hbdr-section-card">
+        <div className="flex min-h-[260px] flex-col items-center justify-center px-6 py-12 text-center">
+          <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-blue-600"><Upload size={22} /></span>
+          <h3 className="mt-4 text-sm font-black text-slate-900">Upgrade management is being prepared</h3>
+          <p className="mt-2 max-w-lg text-xs font-semibold leading-6 text-slate-500">This section will provide version discovery, compatibility checks, scheduled upgrades, execution progress, and upgrade history.</p>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 function TenantPage() {
   const [tenants, setTenants] = useState([
     { id: 'tenant-prod', name: 'Production Tenant', domain: 'prod', admin: 'prod-admin', users: 12, status: 'Enabled' },
@@ -12337,15 +12680,15 @@ function ModalFrame({ title, subtitle, icon, children, onClose, maxWidthClass = 
 
 function ErrorDetailModalFrame({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-5">
+    <div className="fixed inset-0 z-50 flex justify-end">
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-slate-950/18" onClick={onClose} />
-      <motion.div initial={{ opacity: 0, y: 10, scale: 0.99 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 10, scale: 0.99 }} transition={{ duration: 0.14, ease: 'easeOut' }} className="relative w-full max-w-xl overflow-hidden rounded-xl bg-white shadow-xl ring-1 ring-slate-900/8">
+      <motion.aside initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }} transition={{ duration: 0.18, ease: 'easeOut' }} className="hbdr-error-detail-drawer" role="dialog" aria-modal="true" aria-label={title}>
         <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
           <h3 className="text-sm font-black text-slate-900">{title}</h3>
           <button onClick={onClose} className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-700" aria-label="Close"><X size={16} /></button>
         </div>
         <div className="p-4">{children}</div>
-      </motion.div>
+      </motion.aside>
     </div>
   );
 }
