@@ -14415,8 +14415,18 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   white-space: nowrap;
 }
 .premium-app.hbdr-workspace .premium-content .hbdr-dr-support-cell {
+  position: relative;
   overflow: visible !important;
   z-index: 4;
+}
+.premium-app.hbdr-workspace .premium-content .hbdr-dr-support-cell:has(.hbdr-dr-support-wrap:hover),
+.premium-app.hbdr-workspace .premium-content .hbdr-dr-support-cell:has(.hbdr-dr-support-wrap:focus-within) {
+  z-index: 120;
+}
+.premium-app.hbdr-workspace .premium-content .hbdr-dr-main-table .hbdr-hyper-table-row:has(.hbdr-dr-support-wrap:hover),
+.premium-app.hbdr-workspace .premium-content .hbdr-dr-main-table .hbdr-hyper-table-row:has(.hbdr-dr-support-wrap:focus-within) {
+  position: relative;
+  z-index: 100;
 }
 .premium-app.hbdr-workspace .premium-content .hbdr-dr-support-wrap {
   position: relative;
@@ -14451,15 +14461,16 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   position: absolute;
   left: 0;
   top: calc(100% + 8px);
-  z-index: 80;
+  z-index: 140;
   display: none;
-  width: min(420px, 72vw);
+  width: min(350px, 72vw);
   padding: 12px 14px;
   border: 1px solid #fecaca;
   border-radius: 8px;
   background: #fff;
   box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
   color: #334155;
+  font-weight: 400;
   white-space: normal;
 }
 .premium-app.hbdr-workspace .premium-content .hbdr-dr-support-error-popover::before {
@@ -14485,14 +14496,14 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   gap: 7px;
   color: #b42318;
   font-size: 13px;
-  font-weight: 850;
+  font-weight: 750;
   line-height: 1.25;
 }
 .premium-app.hbdr-workspace .premium-content .hbdr-dr-support-error-popover > em {
   color: #64748b;
   font-size: 11.5px;
   font-style: normal;
-  font-weight: 650;
+  font-weight: 400;
   line-height: 1.45;
 }
 .premium-app.hbdr-workspace .premium-content .hbdr-dr-support-error-section {
@@ -14502,16 +14513,21 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   border-top: 1px solid #fee2e2;
 }
 .premium-app.hbdr-workspace .premium-content .hbdr-dr-support-error-section b {
-  color: #475569;
-  font-size: 10px;
-  font-weight: 850;
-  letter-spacing: 0.04em;
+  width: fit-content;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #334155;
+  background: #f1f5f9;
+  font-size: 10.5px;
+  font-weight: 650;
+  line-height: 1.35;
+  letter-spacing: 0.035em;
   text-transform: uppercase;
 }
 .premium-app.hbdr-workspace .premium-content .hbdr-dr-support-error-section small {
   color: #334155;
   font-size: 11px;
-  font-weight: 650;
+  font-weight: 400;
   line-height: 1.45;
 }
 .premium-app.hbdr-workspace .premium-content .hbdr-dr-support-error-list {
@@ -19753,6 +19769,17 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   box-shadow: 0 26px 76px rgba(17, 34, 51, 0.24) !important;
 }
 
+.hbdr-recovery-dialog.hbdr-protect-drawer {
+  position: fixed !important;
+  inset: 0 0 0 auto !important;
+  width: min(760px, calc(100vw - 48px)) !important;
+  height: 100dvh !important;
+  max-height: none !important;
+  border-width: 0 0 0 1px !important;
+  border-radius: 0 !important;
+  box-shadow: -18px 0 44px rgba(15, 23, 42, 0.16) !important;
+}
+
 .hbdr-recovery-dialog .hbdr-protect-body {
   flex: 1;
   min-height: 0;
@@ -19947,12 +19974,33 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 }
 
 .hbdr-recovery-source-tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   border: 0;
   border-radius: 4px;
   background: transparent;
   color: #526170;
   font-size: 12px;
   font-weight: 760;
+}
+
+.hbdr-recovery-source-tabs button em {
+  border-radius: 999px;
+  background: #e8edf3;
+  color: #7b8795;
+  padding: 2px 6px;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 760;
+  line-height: 1.2;
+}
+
+.hbdr-recovery-source-tabs button:disabled {
+  color: #8a96a3;
+  cursor: not-allowed;
+  opacity: 0.78;
 }
 
 .hbdr-recovery-source-tabs button.is-active {
@@ -22765,14 +22813,25 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 }
 
 .hbdr-config-drawer .hbdr-config-settings-list {
-  gap: 8px !important;
+  gap: 10px !important;
 }
 
 .hbdr-config-drawer .hbdr-config-setting-row {
-  grid-template-columns: 128px minmax(0, 1fr) !important;
-  gap: 10px !important;
-  min-height: 38px !important;
-  padding: 0 !important;
+  grid-template-columns: 118px minmax(0, 1fr) 64px !important;
+  gap: 9px !important;
+  min-height: 58px !important;
+  padding: 9px 10px !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 8px !important;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%) !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.035) !important;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease !important;
+}
+
+.hbdr-config-drawer .hbdr-config-setting-row:hover,
+.hbdr-config-drawer .hbdr-config-setting-row:focus-within {
+  border-color: #cbd8e7 !important;
+  box-shadow: 0 4px 12px rgba(30, 64, 104, 0.07) !important;
 }
 
 .hbdr-config-drawer .hbdr-config-setting-row > span {
@@ -22787,19 +22846,36 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 
 .hbdr-config-drawer .hbdr-config-select-action select {
   min-width: 0;
-  height: 36px !important;
-  border-color: #dce3ec !important;
-  border-radius: 5px !important;
+  height: 38px !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 6px !important;
+  background-color: #ffffff !important;
+  box-shadow: inset 0 1px 1px rgba(15, 23, 42, 0.025), 0 1px 2px rgba(15, 23, 42, 0.03) !important;
   color: #1f2937 !important;
   font-size: 12px !important;
   font-weight: 620 !important;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease !important;
+}
+
+.hbdr-config-drawer .hbdr-config-select-action select:hover {
+  border-color: #aebdce !important;
+}
+
+.hbdr-config-drawer .hbdr-config-select-action select:focus {
+  border-color: #4f8fc9 !important;
+  box-shadow: 0 0 0 3px rgba(47, 111, 174, 0.12) !important;
+  outline: none !important;
 }
 
 .hbdr-config-drawer .hbdr-config-select-action button {
-  height: 36px !important;
-  border: 0 !important;
-  border-radius: 5px !important;
-  background: transparent !important;
+  width: 64px !important;
+  justify-self: stretch !important;
+  padding: 0 !important;
+  text-align: center !important;
+  height: 38px !important;
+  border: 1px solid #c7d6e6 !important;
+  border-radius: 6px !important;
+  background: linear-gradient(180deg, #f8fbff 0%, #edf4fa 100%) !important;
   color: #2f6fae !important;
   font-size: 12px !important;
   font-weight: 760 !important;
@@ -22807,20 +22883,19 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 }
 
 .hbdr-config-drawer .hbdr-config-select-action button:hover {
-  border: 0 !important;
-  background: transparent !important;
+  border: 1px solid #8fb1d2 !important;
+  background: linear-gradient(180deg, #f3f8fd 0%, #e4eff9 100%) !important;
   color: #1f5f98 !important;
-  box-shadow: none !important;
-  text-decoration: underline !important;
-  text-underline-offset: 3px !important;
+  box-shadow: 0 3px 8px rgba(47, 111, 174, 0.12) !important;
+  text-decoration: none !important;
 }
 
 .hbdr-config-drawer .hbdr-config-select-action button:focus,
 .hbdr-config-drawer .hbdr-config-select-action button:focus-visible,
 .hbdr-config-drawer .hbdr-config-select-action button:active {
-  border: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
+  border: 1px solid #77a2ca !important;
+  background: #e5eff8 !important;
+  box-shadow: 0 0 0 3px rgba(47, 111, 174, 0.12) !important;
   outline: none !important;
 }
 
@@ -22828,18 +22903,18 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 .premium-app.hbdr-workspace .premium-content .hbdr-config-drawer .hbdr-config-select-action button:not(:disabled):focus,
 .premium-app.hbdr-workspace .premium-content .hbdr-config-drawer .hbdr-config-select-action button:not(:disabled):focus-visible,
 .premium-app.hbdr-workspace .premium-content .hbdr-config-drawer .hbdr-config-select-action button:not(:disabled):active {
-  border: 0 !important;
-  background: transparent !important;
+  border: 1px solid #8fb1d2 !important;
+  background: linear-gradient(180deg, #f3f8fd 0%, #e4eff9 100%) !important;
   color: #1f5f98 !important;
-  box-shadow: none !important;
+  box-shadow: 0 3px 8px rgba(47, 111, 174, 0.12) !important;
   outline: none !important;
 }
 
 .premium-app.hbdr-workspace .premium-content .hbdr-config-drawer .hbdr-config-select-action button:not(:disabled):not(.hbdr-stage-card):not(.hbdr-subnav button):not(.hbdr-primary-nav button):not(.hbdr-secondary-menu button):not(.hbdr-overview-summary button):hover {
-  border: 0 !important;
-  background: transparent !important;
+  border: 1px solid #8fb1d2 !important;
+  background: linear-gradient(180deg, #f3f8fd 0%, #e4eff9 100%) !important;
   color: #1f5f98 !important;
-  box-shadow: none !important;
+  box-shadow: 0 3px 8px rgba(47, 111, 174, 0.12) !important;
   outline: none !important;
 }
 
@@ -22883,6 +22958,36 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   background: transparent !important;
 }
 
+.hbdr-config-drawer .hbdr-config-hooks-unavailable {
+  border-color: #e5eaf0 !important;
+  background: #f8fafc !important;
+}
+
+.hbdr-config-drawer .hbdr-config-hooks-unavailable .hbdr-config-advanced-toggle {
+  color: #64748b !important;
+  cursor: default;
+}
+
+.hbdr-config-drawer .hbdr-config-hooks-unavailable .hbdr-config-advanced-toggle em {
+  border: 1px solid #d9e0e8;
+  border-radius: 999px;
+  background: #eef2f6;
+  color: #667789;
+  padding: 3px 8px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 760;
+  line-height: 1.2;
+}
+
+.hbdr-config-drawer .hbdr-config-hooks-unavailable > p {
+  margin: -3px 14px 12px !important;
+  color: #8794a3 !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  line-height: 1.45 !important;
+}
+
 .hbdr-config-drawer .hbdr-config-advanced-body {
   padding: 0 14px 14px !important;
   gap: 10px !important;
@@ -22921,4 +23026,735 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   border-color: #2f72ad !important;
   background: #3e7fb9 !important;
   color: #ffffff !important;
+}
+
+/* DR Drill / Takeover drawer — refined visual hierarchy */
+.hbdr-recovery-dialog.hbdr-protect-drawer {
+  width: min(760px, calc(100vw - 48px)) !important;
+  border-left: 1px solid #d8e2ec !important;
+  box-shadow: -24px 0 60px rgba(15, 23, 42, 0.18) !important;
+}
+
+.hbdr-recovery-dialog.hbdr-protect-drawer .hbdr-protect-header {
+  min-height: 72px !important;
+  padding: 14px 24px !important;
+  border-bottom-color: #e2e8f0 !important;
+}
+
+.hbdr-recovery-dialog .hbdr-protect-title-icon {
+  width: 40px !important;
+  height: 40px !important;
+  border-color: #cfe1f4 !important;
+  border-radius: 10px !important;
+  background: linear-gradient(145deg, #f5faff, #e8f3ff) !important;
+  box-shadow: 0 4px 12px rgba(51, 122, 183, 0.1) !important;
+}
+
+.hbdr-recovery-dialog .hbdr-protect-header h3 {
+  font-size: 17px !important;
+  letter-spacing: -0.012em !important;
+}
+
+.hbdr-recovery-dialog .hbdr-protect-header button {
+  width: 34px !important;
+  height: 34px !important;
+  border-radius: 8px !important;
+}
+
+.hbdr-recovery-dialog.hbdr-protect-drawer .hbdr-protect-body {
+  padding: 22px 24px 28px !important;
+  background:
+    radial-gradient(circle at 100% 0, rgba(219, 234, 254, 0.42), transparent 34%),
+    #f6f8fb !important;
+}
+
+.hbdr-recovery-single-page {
+  gap: 16px !important;
+}
+
+.hbdr-recovery-body .hbdr-protect-section {
+  gap: 16px !important;
+  padding: 18px !important;
+  border-color: #dbe4ee !important;
+  border-radius: 12px !important;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.045), 0 1px 2px rgba(15, 23, 42, 0.03) !important;
+}
+
+.hbdr-recovery-dialog .hbdr-protect-section-title {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 10px !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 0 13px !important;
+  border: 0 !important;
+  border-bottom: 1px solid #e8edf3 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  text-align: left !important;
+}
+
+.hbdr-recovery-dialog .hbdr-protect-section-title::before {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  place-items: center;
+  border-radius: 7px;
+  background: #edf6ff;
+  color: #337ab7;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.hbdr-recovery-single-page > .hbdr-protect-section:nth-child(1) .hbdr-protect-section-title::before {
+  content: "01";
+}
+
+.hbdr-recovery-single-page > .hbdr-protect-section:nth-child(2) .hbdr-protect-section-title::before {
+  content: "02";
+}
+
+.hbdr-recovery-dialog .hbdr-protect-section-title strong {
+  color: #172638 !important;
+  font-size: 13px !important;
+  font-weight: 780 !important;
+  letter-spacing: -0.005em !important;
+}
+
+.hbdr-recovery-point-picker {
+  gap: 14px !important;
+}
+
+.hbdr-recovery-point-picker label > span {
+  color: #64748b !important;
+  font-size: 10px !important;
+  letter-spacing: 0.055em !important;
+}
+
+.hbdr-recovery-source-tabs {
+  width: 100% !important;
+  min-height: 42px !important;
+  gap: 4px !important;
+  padding: 4px !important;
+  border-color: #d7e1eb !important;
+  border-radius: 9px !important;
+  background: #f4f7fa !important;
+}
+
+.hbdr-recovery-source-tabs button {
+  border-radius: 7px !important;
+  transition: background 150ms ease, box-shadow 150ms ease, color 150ms ease !important;
+}
+
+.hbdr-recovery-source-tabs button.is-active {
+  background: #ffffff !important;
+  color: #256da8 !important;
+  box-shadow: 0 2px 8px rgba(30, 64, 94, 0.1), inset 0 0 0 1px #d8e7f5 !important;
+}
+
+.hbdr-recovery-point-picker select,
+.hbdr-recovery-plain-field select {
+  min-height: 42px !important;
+  border-color: #cbd7e3 !important;
+  border-radius: 8px !important;
+  background-color: #ffffff !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.035) !important;
+}
+
+.hbdr-recovery-plain-field {
+  grid-template-columns: 120px minmax(0, 1fr) !important;
+  gap: 14px !important;
+  padding: 12px 14px !important;
+  border: 1px solid #e0e7ef !important;
+  border-radius: 10px !important;
+  background: #f8fafc !important;
+}
+
+.hbdr-recovery-target-main {
+  gap: 14px !important;
+}
+
+.hbdr-recovery-target-section {
+  border-color: #dbe4ee !important;
+  border-radius: 10px !important;
+  background: #f8fafc !important;
+  box-shadow: none !important;
+}
+
+.hbdr-recovery-target-section-head {
+  padding: 12px 14px !important;
+  border-bottom-color: #e5ebf1 !important;
+}
+
+.hbdr-recovery-namespace-options {
+  gap: 8px !important;
+  padding: 8px !important;
+}
+
+.hbdr-recovery-namespace-options button {
+  min-height: 66px !important;
+  padding: 12px !important;
+  border-color: #e3e9f0 !important;
+  border-radius: 8px !important;
+  background: #ffffff !important;
+  transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease !important;
+}
+
+.hbdr-recovery-namespace-options button:hover {
+  border-color: #c7d9e9 !important;
+  background: #fbfdff !important;
+}
+
+.hbdr-recovery-namespace-options button.is-active {
+  border-color: #9fc6e8 !important;
+  background: linear-gradient(145deg, #f3f9ff, #eaf5ff) !important;
+  box-shadow: 0 3px 10px rgba(51, 122, 183, 0.09) !important;
+}
+
+.hbdr-recovery-target-section > .hbdr-recovery-namespace-input {
+  width: calc(100% - 16px) !important;
+  min-height: 42px !important;
+  margin: 0 8px 8px !important;
+  border-color: #cbd7e3 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.035) !important;
+}
+
+.hbdr-recovery-dialog.hbdr-protect-drawer .hbdr-protect-footer {
+  min-height: 66px !important;
+  padding: 13px 24px !important;
+  border-top-color: #dfe7ef !important;
+  box-shadow: 0 -8px 22px rgba(15, 23, 42, 0.035) !important;
+}
+
+.hbdr-recovery-dialog .hbdr-protect-footer button {
+  min-width: 92px !important;
+  height: 38px !important;
+  border-radius: 7px !important;
+  font-weight: 720 !important;
+}
+
+.hbdr-recovery-dialog .hbdr-protect-footer .hbdr-protect-primary {
+  border-color: #2f72ad !important;
+  background: linear-gradient(180deg, #4b8bc3, #3478b4) !important;
+  box-shadow: 0 4px 10px rgba(51, 122, 183, 0.2) !important;
+}
+
+/* DR Configuration drawer — aligned with the DR Drill visual language */
+.hbdr-config-drawer.hbdr-config-dialog {
+  width: min(720px, calc(100vw - 48px)) !important;
+  border-left-color: #d8e2ec !important;
+  box-shadow: -24px 0 60px rgba(15, 23, 42, 0.18) !important;
+}
+
+.hbdr-config-drawer .hbdr-config-header {
+  min-height: 72px !important;
+  align-items: center !important;
+  padding: 14px 24px !important;
+  border-bottom-color: #e2e8f0 !important;
+}
+
+.hbdr-config-drawer .hbdr-config-header > div {
+  position: relative;
+  min-width: 0;
+  padding-left: 52px;
+}
+
+.hbdr-config-drawer .hbdr-config-header > div::before {
+  content: "DR";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  transform: translateY(-50%);
+  border: 1px solid #cfe1f4;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #f5faff, #e8f3ff);
+  box-shadow: 0 4px 12px rgba(51, 122, 183, 0.1);
+  color: #337ab7;
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+}
+
+.hbdr-config-drawer .hbdr-config-header h3 {
+  font-size: 17px !important;
+  letter-spacing: -0.012em !important;
+}
+
+.hbdr-config-drawer .hbdr-config-header p {
+  margin-top: 4px !important;
+  color: #748294 !important;
+  font-weight: 600 !important;
+}
+
+.hbdr-config-drawer .hbdr-config-header button {
+  width: 34px !important;
+  height: 34px !important;
+  border-radius: 8px !important;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease !important;
+}
+
+.hbdr-config-drawer .hbdr-config-header button:hover {
+  border-color: #c4d2e0 !important;
+  background: #f5f8fb !important;
+  color: #334155 !important;
+}
+
+.hbdr-config-drawer .hbdr-config-body {
+  padding: 22px 24px 28px !important;
+  background:
+    radial-gradient(circle at 100% 0, rgba(219, 234, 254, 0.42), transparent 34%),
+    #f6f8fb !important;
+}
+
+.hbdr-config-drawer .hbdr-config-main {
+  gap: 16px !important;
+}
+
+.hbdr-config-drawer .hbdr-config-section,
+.hbdr-config-drawer .hbdr-config-selected-namespaces,
+.hbdr-config-drawer .hbdr-config-advanced {
+  border-color: #dbe4ee !important;
+  border-radius: 12px !important;
+  background: #ffffff !important;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.045), 0 1px 2px rgba(15, 23, 42, 0.03) !important;
+}
+
+.hbdr-config-drawer .hbdr-config-section {
+  padding: 18px !important;
+}
+
+.hbdr-config-drawer .hbdr-config-section-head {
+  gap: 10px !important;
+  margin: 0 0 14px !important;
+  padding: 0 0 13px !important;
+  border-bottom: 1px solid #e8edf3 !important;
+}
+
+.hbdr-config-drawer .hbdr-config-section-head > svg,
+.hbdr-config-drawer .hbdr-config-selected-title > svg {
+  box-sizing: content-box;
+  width: 15px !important;
+  height: 15px !important;
+  padding: 5px;
+  border-radius: 7px;
+  background: #edf6ff;
+  color: #337ab7 !important;
+}
+
+.hbdr-config-drawer .hbdr-config-section-head strong,
+.hbdr-config-drawer .hbdr-config-selected-head strong {
+  color: #172638 !important;
+  font-size: 13px !important;
+  font-weight: 780 !important;
+  letter-spacing: -0.005em !important;
+}
+
+.hbdr-config-drawer .hbdr-config-scope-grid {
+  gap: 10px !important;
+}
+
+.hbdr-config-drawer .hbdr-config-scope-grid button {
+  min-height: 82px !important;
+  border-color: #e0e7ef !important;
+  border-radius: 10px !important;
+  background: #f8fafc !important;
+  transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease !important;
+}
+
+.hbdr-config-drawer .hbdr-config-scope-grid button:hover:not(:disabled) {
+  border-color: #c7d9e9 !important;
+  background: #fbfdff !important;
+}
+
+.hbdr-config-drawer .hbdr-config-scope-grid button.is-active {
+  border-color: #9fc6e8 !important;
+  background: linear-gradient(145deg, #f3f9ff, #eaf5ff) !important;
+  box-shadow: 0 3px 10px rgba(51, 122, 183, 0.09) !important;
+}
+
+.hbdr-config-drawer .hbdr-config-settings-list {
+  gap: 10px !important;
+}
+
+.hbdr-config-drawer .hbdr-config-setting-row {
+  grid-template-columns: 126px minmax(0, 1fr) 68px !important;
+  min-height: 62px !important;
+  padding: 10px 12px !important;
+  border-color: #e0e7ef !important;
+  border-radius: 10px !important;
+  background: #f8fafc !important;
+  box-shadow: none !important;
+}
+
+.hbdr-config-drawer .hbdr-config-setting-row:hover,
+.hbdr-config-drawer .hbdr-config-setting-row:focus-within {
+  border-color: #c7d9e9 !important;
+  background: #fbfdff !important;
+  box-shadow: 0 3px 10px rgba(51, 122, 183, 0.06) !important;
+}
+
+.hbdr-config-drawer .hbdr-config-select-action select,
+.hbdr-config-drawer .hbdr-config-select-action button {
+  height: 40px !important;
+  border-radius: 8px !important;
+}
+
+.hbdr-config-drawer .hbdr-config-select-action select {
+  border-color: #cbd7e3 !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.035) !important;
+}
+
+.hbdr-config-drawer .hbdr-config-select-action button {
+  width: 68px !important;
+  border-color: #bfd3e6 !important;
+  background: #ffffff !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03) !important;
+}
+
+.hbdr-config-drawer .hbdr-config-selected-namespaces {
+  padding: 16px 18px !important;
+}
+
+.hbdr-config-drawer .hbdr-config-advanced {
+  overflow: hidden !important;
+  box-shadow: none !important;
+}
+
+.hbdr-config-drawer .hbdr-config-hooks-unavailable {
+  border-color: #dfe6ee !important;
+  background: rgba(248, 250, 252, 0.86) !important;
+}
+
+.hbdr-config-drawer .hbdr-config-advanced-toggle {
+  min-height: 46px !important;
+  padding: 0 16px !important;
+}
+
+.hbdr-config-drawer .hbdr-config-hooks-unavailable > p {
+  margin: -2px 16px 14px !important;
+}
+
+.hbdr-config-drawer .hbdr-config-footer {
+  min-height: 66px !important;
+  padding: 13px 24px !important;
+  border-top-color: #dfe7ef !important;
+  box-shadow: 0 -8px 22px rgba(15, 23, 42, 0.035) !important;
+}
+
+.hbdr-config-drawer .hbdr-config-footer button {
+  min-width: 92px !important;
+  height: 38px !important;
+  border-radius: 7px !important;
+  font-weight: 720 !important;
+}
+
+.hbdr-config-drawer .hbdr-config-footer .hbdr-config-save {
+  border-color: #2f72ad !important;
+  background: linear-gradient(180deg, #4b8bc3, #3478b4) !important;
+  box-shadow: 0 4px 10px rgba(51, 122, 183, 0.2) !important;
+}
+
+.hbdr-config-drawer .hbdr-config-footer .hbdr-config-save:disabled {
+  border-color: #d5dee7 !important;
+  background: #e8edf2 !important;
+  box-shadow: none !important;
+  color: #9aa7b5 !important;
+}
+
+/* Platform drawers — shared polished presentation baseline */
+.premium-app :where(.hbdr-filter-drawer) {
+  border-left: 1px solid #d8e2ec !important;
+  background: #ffffff !important;
+  box-shadow: -24px 0 60px rgba(15, 23, 42, 0.18) !important;
+}
+
+.premium-app :where(.hbdr-filter-drawer-backdrop) {
+  background: rgba(15, 23, 42, 0.3) !important;
+  backdrop-filter: none !important;
+}
+
+.premium-app :where(.hbdr-filter-drawer-head) {
+  min-height: 72px !important;
+  padding: 14px 24px !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  background: #ffffff !important;
+}
+
+.premium-app :where(.hbdr-filter-drawer-head) strong,
+.premium-app :where(.hbdr-filter-drawer-head) h3 {
+  color: #172638 !important;
+  font-size: 17px !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.012em !important;
+}
+
+.premium-app :where(.hbdr-filter-drawer-head) p,
+.premium-app :where(.hbdr-filter-drawer-head) span {
+  color: #748294 !important;
+}
+
+.premium-app :where(.hbdr-filter-drawer-head) > button {
+  display: inline-grid !important;
+  width: 34px !important;
+  height: 34px !important;
+  flex: 0 0 34px;
+  place-items: center;
+  border: 1px solid #d9e3ee !important;
+  border-radius: 8px !important;
+  background: #ffffff !important;
+  color: #5f6f82 !important;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease !important;
+}
+
+.premium-app :where(.hbdr-filter-drawer-head) > button:hover {
+  border-color: #c4d2e0 !important;
+  background: #f5f8fb !important;
+  color: #334155 !important;
+}
+
+.premium-app :where(.hbdr-filter-drawer-body) {
+  background:
+    radial-gradient(circle at 100% 0, rgba(219, 234, 254, 0.38), transparent 34%),
+    #f6f8fb !important;
+}
+
+.premium-app :where(.hbdr-filter-drawer-actions) {
+  min-height: 66px !important;
+  padding: 13px 24px !important;
+  border-top: 1px solid #dfe7ef !important;
+  background: #ffffff !important;
+  box-shadow: 0 -8px 22px rgba(15, 23, 42, 0.035) !important;
+}
+
+.premium-app :where(.hbdr-filter-drawer-actions) button {
+  min-width: 92px !important;
+  height: 38px !important;
+  border-radius: 7px !important;
+  font-weight: 720 !important;
+}
+
+.premium-app :where(.hbdr-filter-drawer-actions) button:last-child:not(:disabled) {
+  border-color: #2f72ad !important;
+  background: linear-gradient(180deg, #4b8bc3, #3478b4) !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 10px rgba(51, 122, 183, 0.2) !important;
+}
+
+.premium-app :where(.hbdr-resource-drawer, .hbdr-app-detail-drawer, .hbdr-cluster-detail-drawer, .hbdr-storage-drawer, .hbdr-policy-drawer) {
+  border-left-color: #d8e2ec !important;
+  box-shadow: -24px 0 60px rgba(15, 23, 42, 0.18) !important;
+}
+
+.premium-app :where(.hbdr-resource-detail, .hbdr-app-detail-drawer-body, .hbdr-cluster-detail-drawer-body, .hbdr-storage-drawer-body, .hbdr-policy-drawer-body) {
+  background:
+    radial-gradient(circle at 100% 0, rgba(219, 234, 254, 0.38), transparent 34%),
+    #f6f8fb !important;
+}
+
+.hbdr-error-detail-drawer {
+  border-left: 1px solid #d8e2ec !important;
+  background: #ffffff !important;
+  box-shadow: -24px 0 60px rgba(15, 23, 42, 0.18) !important;
+}
+
+/* Storage and policy creation drawers — detailed form treatment */
+.premium-app .hbdr-storage-drawer,
+.premium-app .hbdr-policy-drawer {
+  width: min(760px, calc(100vw - 48px)) !important;
+}
+
+.premium-app .hbdr-storage-drawer-body,
+.premium-app .hbdr-policy-drawer-body {
+  gap: 16px !important;
+  padding: 22px 24px 28px !important;
+}
+
+.premium-app .hbdr-storage-drawer-body .hbdr-advanced-filter-section,
+.premium-app .hbdr-policy-drawer-body .hbdr-advanced-filter-section {
+  gap: 10px !important;
+  padding: 18px !important;
+  border: 1px solid #dbe4ee !important;
+  border-radius: 12px !important;
+  background: #ffffff !important;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.045), 0 1px 2px rgba(15, 23, 42, 0.03) !important;
+}
+
+.premium-app .hbdr-storage-drawer-body .hbdr-advanced-filter-section > h4,
+.premium-app .hbdr-policy-drawer-body .hbdr-advanced-filter-section > h4 {
+  min-height: 28px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e8edf3;
+  color: #172638 !important;
+  font-size: 13px !important;
+  font-weight: 780 !important;
+  letter-spacing: -0.005em;
+}
+
+.premium-app .hbdr-storage-drawer-body .hbdr-advanced-filter-box,
+.premium-app .hbdr-policy-drawer-body .hbdr-advanced-filter-box {
+  padding: 4px 0 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.premium-app .hbdr-storage-drawer :where(input, select, textarea),
+.premium-app .hbdr-policy-drawer :where(input, select, textarea) {
+  border: 1px solid #cbd7e3 !important;
+  border-radius: 8px !important;
+  background-color: #ffffff !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.035) !important;
+  transition: border-color 150ms ease, box-shadow 150ms ease !important;
+}
+
+.premium-app .hbdr-storage-drawer :where(input, select, textarea):hover,
+.premium-app .hbdr-policy-drawer :where(input, select, textarea):hover {
+  border-color: #aebfd0 !important;
+}
+
+.premium-app .hbdr-storage-drawer :where(input, select, textarea):focus,
+.premium-app .hbdr-policy-drawer :where(input, select, textarea):focus {
+  border-color: #4f8fc9 !important;
+  box-shadow: 0 0 0 3px rgba(47, 111, 174, 0.12) !important;
+  outline: none !important;
+}
+
+.premium-app .hbdr-storage-drawer .hbdr-storage-field-stack {
+  gap: 14px !important;
+  padding-top: 2px;
+}
+
+.premium-app .hbdr-storage-drawer .hbdr-storage-field-stack > div,
+.premium-app .hbdr-policy-drawer .hbdr-policy-form-box > div.rounded-xl {
+  border-color: #e0e7ef !important;
+  border-radius: 10px !important;
+  background: #f8fafc !important;
+}
+
+.premium-app .hbdr-policy-drawer .hbdr-policy-composition-card,
+.premium-app .hbdr-policy-drawer-body button.rounded-xl {
+  border-radius: 9px !important;
+}
+
+.premium-app .hbdr-policy-drawer .hbdr-policy-composition-card {
+  min-height: 76px;
+  border-color: #e0e7ef !important;
+  background: #f8fafc !important;
+}
+
+.premium-app .hbdr-policy-drawer .hbdr-policy-composition-card[aria-pressed="true"] {
+  border-color: #b7cada !important;
+  background: #f5f8fb !important;
+  box-shadow: 0 2px 6px rgba(30, 64, 94, 0.055) !important;
+}
+
+.premium-app .hbdr-policy-drawer .hbdr-policy-composition-card[aria-pressed="true"] span > span:first-child {
+  background: #e5eef6 !important;
+  color: #416b8d !important;
+}
+
+.premium-app .hbdr-policy-drawer .hbdr-policy-composition-card[aria-pressed="true"] > span:last-child {
+  border-color: #6f98b9 !important;
+  background: #6f98b9 !important;
+}
+
+.premium-app .hbdr-policy-drawer-body button.border-indigo-600 {
+  border-color: #b7cada !important;
+  background: #f5f8fb !important;
+  box-shadow: 0 2px 6px rgba(30, 64, 94, 0.055) !important;
+}
+
+.premium-app .hbdr-policy-drawer-body button.border-indigo-600 > span:first-child {
+  background: #e5eef6 !important;
+  color: #416b8d !important;
+}
+
+.premium-app .hbdr-policy-drawer-body button.border-indigo-600 > span:last-child {
+  color: #365d7d !important;
+}
+
+.premium-app .hbdr-storage-drawer-actions,
+.premium-app .hbdr-policy-drawer-actions {
+  justify-content: flex-end !important;
+}
+
+.premium-app .hbdr-storage-drawer-actions button:first-child,
+.premium-app .hbdr-policy-drawer-actions button:first-child {
+  border-color: #2f72ad !important;
+  background: linear-gradient(180deg, #4b8bc3, #3478b4) !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 10px rgba(51, 122, 183, 0.2) !important;
+}
+
+.premium-app .hbdr-storage-drawer-actions button:last-child,
+.premium-app .hbdr-policy-drawer-actions button:last-child {
+  border-color: #d6e0ea !important;
+  background: #ffffff !important;
+  color: #526174 !important;
+  box-shadow: none !important;
+}
+
+.premium-app .hbdr-storage-drawer-actions .hbdr-storage-test-button {
+  border-color: #bfd3e6 !important;
+  background: #f5f9fd !important;
+  color: #2f6fae !important;
+  box-shadow: none !important;
+}
+
+.premium-app .hbdr-storage-drawer-actions button:last-child,
+.premium-app .hbdr-policy-drawer-actions button:last-child {
+  order: 1;
+}
+
+.premium-app .hbdr-storage-drawer-actions .hbdr-storage-test-button {
+  order: 2;
+}
+
+.premium-app .hbdr-storage-drawer-actions button:first-child,
+.premium-app .hbdr-policy-drawer-actions button:first-child {
+  order: 3;
+}
+
+.premium-app .hbdr-storage-connection-check {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e8edf3;
+}
+
+.premium-app .hbdr-storage-connection-check .hbdr-storage-test-result {
+  margin: 0 auto 0 0 !important;
+  font-size: 11px;
+}
+
+.premium-app .hbdr-storage-connection-check .hbdr-storage-test-button {
+  display: inline-flex;
+  min-width: 126px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid #bfd3e6 !important;
+  border-radius: 7px !important;
+  background: #f5f9fd !important;
+  color: #2f6fae !important;
+  font-size: 12px;
+  font-weight: 720;
+  box-shadow: none !important;
+}
+
+.premium-app .hbdr-storage-connection-check .hbdr-storage-test-button:hover:not(:disabled) {
+  border-color: #9bbbd7 !important;
+  background: #edf5fb !important;
 }

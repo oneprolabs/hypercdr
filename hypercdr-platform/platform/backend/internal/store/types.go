@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -13,6 +14,17 @@ const DefaultAdminEmail = "admin"
 const DefaultAdminPassword = "admin123"
 
 const clusterConnectionStaleAfter = 10 * time.Minute
+
+func restorePointDisplayName(explicit string, taskCreatedAt, createdAt time.Time) string {
+	if value := strings.TrimSpace(explicit); value != "" {
+		return value
+	}
+	timestamp := taskCreatedAt
+	if timestamp.IsZero() {
+		timestamp = createdAt
+	}
+	return "RP-" + timestamp.In(time.Local).Format("2006-01-02 15:04:05")
+}
 
 var (
 	ErrTokenInvalid = errors.New("install token is invalid")
@@ -440,6 +452,7 @@ type RestorePoint struct {
 	SourceClusterID   string         `json:"sourceClusterId"`
 	AppID             string         `json:"appId,omitempty"`
 	StorageRepoID     string         `json:"storageRepoId,omitempty"`
+	DisplayName       string         `json:"displayName"`
 	VeleroBackupName  string         `json:"veleroBackupName"`
 	PointType         string         `json:"pointType"`
 	Status            string         `json:"status"`
@@ -460,6 +473,8 @@ type RestorePointInput struct {
 	SourceClusterID   string
 	AppID             string
 	StorageRepoID     string
+	DisplayName       string
+	TaskCreatedAt     time.Time
 	VeleroBackupName  string
 	PointType         string
 	Status            string

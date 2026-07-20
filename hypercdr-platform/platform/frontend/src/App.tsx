@@ -618,7 +618,7 @@ type AuthSession = ApiLoginResponse & {
   signedInAt: string;
 };
 type AuthFlow = 'login' | 'register' | 'forgot' | 'reset';
-type ApiAuthConfig = { googleEnabled: boolean };
+type ApiAuthConfig = { googleEnabled: boolean; timeZone: string };
 
 type ClusterTaskLog = {
   task: ApiTask;
@@ -633,6 +633,7 @@ type ApiRestorePoint = {
   protectionPlanId?: string;
   appId?: string;
   storageRepoId?: string;
+  displayName: string;
   veleroBackupName: string;
   pointType: string;
   status: string;
@@ -661,6 +662,7 @@ const RESTORABLE_VIEWS = new Set<View>([
   'tags',
   'alerts',
   'settings',
+  'upgrades',
   'tenants',
 ]);
 
@@ -741,7 +743,7 @@ async function readApiError(response: Response): Promise<Error> {
 }
 
 async function apiGet<T>(path: string): Promise<T> {
-  const response = await fetch(path);
+  const response = await fetch(path, { cache: 'no-store' });
   if (!response.ok) throw await readApiError(response);
   return response.json() as Promise<T>;
 }
@@ -1999,6 +2001,7 @@ type ApiRestorePointView = {
   appId?: string;
   backupTaskId?: string;
   sourceNamespace: string;
+  displayName: string;
   title: string;
   time: string;
   pointType: 'local' | 'remote';
@@ -2049,6 +2052,7 @@ function mapRestorePoint(raw: any): ApiRestorePointView {
     appId: raw?.appId,
     backupTaskId: raw?.backupTaskId || raw?.metadata?.backupTaskId || '',
     sourceNamespace: ns,
+    displayName: raw?.displayName || '',
     title: `${storageName} · ${raw?.veleroBackupName || raw?.id?.slice(0, 8) || 'restore point'}`,
     time,
     pointType,
@@ -2258,11 +2262,14 @@ function formatLastSeen(value?: string) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+let platformTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
 function formatDateTime(value?: string) {
   if (!value) return '-';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '-';
   return date.toLocaleString(undefined, {
+    timeZone: platformTimeZone,
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -2276,6 +2283,7 @@ function formatLocalDateTime(value?: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
   const parts = new Intl.DateTimeFormat(undefined, {
+    timeZone: platformTimeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -2292,24 +2300,26 @@ function formatNextSyncTime(value?: string) {
   if (!value) return '';
   const date = new Date(value);
   if (Number.isNaN(date.getTime()) || date.getFullYear() <= 1) return '';
-  const now = new Date();
-  const sameDay = date.getFullYear() === now.getFullYear()
-    && date.getMonth() === now.getMonth()
-    && date.getDate() === now.getDate();
+  const dayKey = (input: Date) => new Intl.DateTimeFormat('en-CA', {
+    timeZone: platformTimeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(input);
+  const sameDay = dayKey(date) === dayKey(new Date());
   const options: Intl.DateTimeFormatOptions = sameDay
     ? { hour: '2-digit', minute: '2-digit', hour12: false }
     : { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false };
-  return date.toLocaleString(undefined, options);
+  return date.toLocaleString(undefined, { ...options, timeZone: platformTimeZone });
 }
 
-function currentTimeZoneLabel() {
-  const offsetMinutes = -new Date().getTimezoneOffset();
-  const sign = offsetMinutes >= 0 ? '+' : '-';
-  const abs = Math.abs(offsetMinutes);
-  const hours = String(Math.floor(abs / 60)).padStart(2, '0');
-  const minutes = String(abs % 60).padStart(2, '0');
-  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  return `My Time Zone: GMT${sign}${hours}:${minutes}${zone ? ` (${zone})` : ''}`;
+function platformTimeZoneLabel(timeZone = platformTimeZone) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    timeZoneName: 'longOffset',
+  }).formatToParts(new Date());
+  const offset = parts.find(part => part.type === 'timeZoneName')?.value || 'GMT';
+  return `Platform Time Zone: ${offset} (${timeZone})`;
 }
 
 function recoveryCompletedTargetTitle(restorePointLabel: string, completedAt: string | undefined, clusterName: string, namespace: string, actionLabel: string) {
@@ -2325,17 +2335,13 @@ function recoveryCompletedTargetLabel(clusterName: string, namespace: string) {
 
 function restorePointDisplayLabel(point?: {
   id?: string;
-  time?: string;
+  displayName?: string;
   title?: string;
   veleroBackupName?: string;
-  completedAt?: string;
-  startedAt?: string;
-  createdAt?: string;
 } | null) {
   if (!point) return '';
-  const rawTime = point.time || point.completedAt || point.startedAt || point.createdAt || '';
-  const localTime = formatLocalDateTime(rawTime);
-  const label = localTime || point.title || point.veleroBackupName || (point.id ? point.id.slice(0, 8) : '');
+  if (point.displayName?.trim()) return point.displayName.trim();
+  const label = point.title || point.veleroBackupName || (point.id ? point.id.slice(0, 8) : '');
   return label ? `RP-${label}` : '';
 }
 
@@ -2810,7 +2816,7 @@ function ListToolbarControls(props: {
 export default function App() {
   const [authSession, setAuthSession] = useState<AuthSession | null>(() => readStoredAuthSession());
   const [view, setView] = useState<View>(() => readStoredAuthSession() ? (readStoredView() || 'dashboard') : 'login');
-  const [timeZoneLabel] = useState(() => currentTimeZoneLabel());
+  const [timeZoneLabel, setTimeZoneLabel] = useState(() => platformTimeZoneLabel());
   const [loginEmail, setLoginEmail] = useState('admin');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginPasswordVisible, setLoginPasswordVisible] = useState(false);
@@ -2865,7 +2871,13 @@ export default function App() {
   }, [toast]);
 
   useEffect(() => {
-    void apiGet<ApiAuthConfig>('/api/v1/auth/config').then(config => setGoogleEnabled(config.googleEnabled)).catch(() => setGoogleEnabled(false));
+    void apiGet<ApiAuthConfig>('/api/v1/auth/config').then(config => {
+      setGoogleEnabled(config.googleEnabled);
+      if (config.timeZone) {
+        platformTimeZone = config.timeZone;
+        setTimeZoneLabel(platformTimeZoneLabel(config.timeZone));
+      }
+    }).catch(() => setGoogleEnabled(false));
     const resetFromURL = new URLSearchParams(window.location.search).get('reset_token');
     if (resetFromURL) {
       setResetToken(resetFromURL); setAuthFlow('reset');
@@ -3069,13 +3081,29 @@ export default function App() {
     const flowFromURL = new URLSearchParams(window.location.search).get('auth');
     if (flowFromURL === 'register' || flowFromURL === 'forgot' || flowFromURL === 'reset') applyAuthFlow(flowFromURL);
     const handleHistoryNavigation = (event: PopStateEvent) => {
+      if (authSession) {
+        const historyView = event.state?.view as View | undefined;
+        if (historyView && RESTORABLE_VIEWS.has(historyView)) {
+          writeStoredView(historyView);
+          setView(historyView);
+          if (historyView === 'applications') setAppStage('select');
+          setSearch('');
+          setClusterMenuId(null);
+        }
+        return;
+      }
       const queryFlow = new URLSearchParams(window.location.search).get('auth');
       const next = event.state?.authFlow || queryFlow || 'login';
       applyAuthFlow(next === 'register' || next === 'forgot' || next === 'reset' ? next : 'login');
     };
     window.addEventListener('popstate', handleHistoryNavigation);
     return () => window.removeEventListener('popstate', handleHistoryNavigation);
-  }, [applyAuthFlow]);
+  }, [applyAuthFlow, authSession]);
+
+  useEffect(() => {
+    if (!authSession || !RESTORABLE_VIEWS.has(view)) return;
+    window.history.replaceState({ ...window.history.state, view }, '', window.location.href);
+  }, [authSession, view]);
 
   const submitRegistration = useCallback(async () => {
     if (loginSubmitting) return;
@@ -3401,6 +3429,9 @@ export default function App() {
     if (!options.preserveSelectedCluster && (nextView === 'dashboard' || nextView === 'applications' || nextView === 'failback')) {
       const target = defaultWorkspaceCluster;
       if (target) setSelectedCluster(target);
+    }
+    if (nextView !== view) {
+      window.history.pushState({ ...window.history.state, view: nextView }, '', window.location.href);
     }
     writeStoredView(nextView);
     setView(nextView);
@@ -3757,7 +3788,8 @@ export default function App() {
             </div>
             <div className="hbdr-secondary-menu">
               {secondaryNav.items.map(item => {
-                const blocked = navBlockedViews.has(item.view) && onboarding !== 'ready' && item.view !== 'clusters';
+                const availableBeforeClusterRegistration = onboarding === 'register' && (item.view === 'storage' || item.view === 'policies');
+                const blocked = navBlockedViews.has(item.view) && onboarding !== 'ready' && item.view !== 'clusters' && !availableBeforeClusterRegistration;
                 const disabled = blocked;
                 return (
                   <button
@@ -3908,11 +3940,11 @@ export default function App() {
                 toast={setToast}
               />
             )}
-            {view === 'storage' && (onboarding !== 'ready' ? onboardingGate : <StoragePage storage={liveStorage ?? storage} clusters={liveClusters ?? clusters} onStorageCreated={(repo) => {
+            {view === 'storage' && (onboarding !== 'ready' && onboarding !== 'register' ? onboardingGate : <StoragePage storage={liveStorage ?? storage} clusters={liveClusters ?? clusters} onStorageCreated={(repo) => {
               setLiveStorage(prev => prev ? [repo, ...prev.filter(item => item.id !== repo.id)] : [repo]);
               setStorage(prev => [repo, ...prev.filter(item => item.id !== repo.id)]);
             }} />)}
-            {view === 'policies' && (onboarding !== 'ready' ? onboardingGate : <PolicyPage policies={policies} setPolicies={setPolicies} />)}
+            {view === 'policies' && (onboarding !== 'ready' && onboarding !== 'register' ? onboardingGate : <PolicyPage policies={policies} setPolicies={setPolicies} />)}
             {view === 'restore_points' && (onboarding !== 'ready' ? onboardingGate : (
               <RealRestorePointPage
                 openDr={() => openView('applications')}
@@ -4592,7 +4624,10 @@ function ApplicationDrPage(props: {
   const [selectedSelectApps, setSelectedSelectApps] = useState<string[]>([]);
   const [selectedConfigApps, setSelectedConfigApps] = useState<string[]>([]);
   const [selectedRunApps, setSelectedRunApps] = useState<string[]>([]);
+  const [submittingSyncTasks, setSubmittingSyncTasks] = useState<Record<string, ApiTask>>({});
   const [submittingRecoveryTasks, setSubmittingRecoveryTasks] = useState<Record<string, ApiTask>>({});
+  const [syncSubmitting, setSyncSubmitting] = useState(false);
+  const [recoverySubmitting, setRecoverySubmitting] = useState(false);
   const [configAppNames, setConfigAppNames] = useState<string[]>([]);
   const [protectedAppNames, setProtectedAppNames] = useState<string[]>(() => apps.filter(app => app.stage === 'run').map(app => app.name));
   const [appUiOverrides, setAppUiOverrides] = useState<Record<string, Partial<AppItem>>>({});
@@ -4620,7 +4655,7 @@ function ApplicationDrPage(props: {
   const [showAddRuleForm, setShowAddRuleForm] = useState(false);
   const [newExcludeRule, setNewExcludeRule] = useState({ group: '', resource: '', name: '', version: '', labels: '' });
   const [editingRuleIndex, setEditingRuleIndex] = useState<number | null>(null);
-  const syncTasks: Record<string, ApiTask> = liveAppTasks;
+  const syncTasks: Record<string, ApiTask> = { ...liveAppTasks, ...submittingSyncTasks };
   const setSyncTasks = (updater: any) => {
     if (typeof updater === 'function') {
       setLiveAppTasks(prev => updater(prev));
@@ -4654,6 +4689,9 @@ function ApplicationDrPage(props: {
     setSelectedDetailApp(null);
     setDrSupportErrorDetail(null);
     setSyncTaskDetail(null);
+    setSubmittingSyncTasks({});
+    setSyncSubmitting(false);
+    setRecoverySubmitting(false);
     setRestoreAction(null);
     setTagAction(null);
     setShowAddRuleForm(false);
@@ -4922,6 +4960,17 @@ function ApplicationDrPage(props: {
   };
   const recoveryTaskForUnit = (app: AppItem) =>
     taskForUnit(submittingRecoveryTasks, app) || taskForUnit(liveRecoveryTasks, app);
+  useEffect(() => {
+    const confirmedTaskIds = new Set(platformTasks.map(task => task.id));
+    setSubmittingSyncTasks(prev => {
+      const next = Object.fromEntries(Object.entries(prev).filter(([, task]) => !confirmedTaskIds.has(task.id)));
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+    });
+    setSubmittingRecoveryTasks(prev => {
+      const next = Object.fromEntries(Object.entries(prev).filter(([, task]) => !confirmedTaskIds.has(task.id)));
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+    });
+  }, [platformTasks]);
   const normalizedQuery = query.trim().toLowerCase();
   const queryValueForApp = (app: AppItem, field: string) => {
     const profile = profileOf(app);
@@ -5063,7 +5112,9 @@ function ApplicationDrPage(props: {
       .filter(check => (check.status || '').toLowerCase() === 'unsupported')
       .map(check => ({
         namespace: member.namespace || member.name,
-        pvc: check.name || 'PVC',
+        kind: check.kind || 'PVC',
+        resource: check.name || 'unknown',
+        reason: check.reason || 'The application uses a non-portable storage type.',
         storageClass: check.storageClass || 'unknown',
         pvType: check.volumeType || 'unknown',
         provisioner: check.provisioner || 'unknown',
@@ -5088,7 +5139,7 @@ function ApplicationDrPage(props: {
       'Storage type is not supported for DR.',
       'Supported: stateless namespaces, or PVCs backed by portable CSI storage such as Longhorn.',
       'Unsupported: local-path, hostPath, and local PV storage.',
-      ...checks.map(check => `${check.namespace} / ${check.pvc}: storageClass=${check.storageClass}, volumeType=${check.pvType}, provisioner=${check.provisioner}`),
+      ...checks.map(check => `${check.namespace} / ${check.kind}/${check.resource}: storageClass=${check.storageClass}, volumeType=${check.pvType}, provisioner=${check.provisioner}`),
       'Impact: this namespace cannot be moved to Setup DR until its PVCs use supported storage.',
     ];
   };
@@ -5096,6 +5147,10 @@ function ApplicationDrPage(props: {
     const meta = drSupportMetaForApp(app);
     const Icon = meta.tone === 'unsupported' ? AlertTriangle : meta.tone === 'warning' ? AlertCircle : meta.tone === 'unknown' ? Clock : CheckCircle2;
     const checks = unsupportedDRChecksForApp(app);
+    const reasons = Array.from(new Set(checks.map(check => check.reason).filter(Boolean)));
+    const recommendation = checks.some(check => check.kind.toLowerCase() === 'pvc' || check.storageClass !== 'unknown')
+      ? 'Move the affected PVC to portable CSI storage, such as Longhorn.'
+      : 'Replace or reconfigure the affected resource before enabling DR.';
     const badgeContent = (
       <>
         <Icon size={13} />
@@ -5105,17 +5160,9 @@ function ApplicationDrPage(props: {
     return (
       <span className="hbdr-dr-support-wrap">
         {meta.tone === 'unsupported' ? (
-          <button
-            type="button"
-            className={`hbdr-dr-support-badge hbdr-dr-support-${meta.tone}`}
-            aria-label={meta.title}
-            onClick={event => {
-              event.stopPropagation();
-              setDrSupportErrorDetail(app);
-            }}
-          >
+          <span className={`hbdr-dr-support-badge hbdr-dr-support-${meta.tone}`} aria-label={meta.title}>
             {badgeContent}
-          </button>
+          </span>
         ) : (
           <span className={`hbdr-dr-support-badge hbdr-dr-support-${meta.tone}`} aria-label={meta.title}>
             {badgeContent}
@@ -5123,29 +5170,30 @@ function ApplicationDrPage(props: {
         )}
         {meta.tone === 'unsupported' && (
           <span className="hbdr-dr-support-error-popover" role="tooltip">
-            <strong><AlertTriangle size={15} /> Storage type is not supported</strong>
-            <em>This namespace cannot be moved to Setup DR until its PVCs use supported storage.</em>
+            <strong><AlertTriangle size={15} /> DR is not supported</strong>
+            <em>This application does not meet the requirements for DR.</em>
             <span className="hbdr-dr-support-error-section">
-              <b>Supported storage</b>
-              <small>Stateless namespaces, or PVCs backed by portable CSI storage such as Longhorn.</small>
-            </span>
-            <span className="hbdr-dr-support-error-section">
-              <b>Unsupported storage</b>
-              <small>local-path, hostPath, and local PV storage.</small>
+              <b>Reason</b>
+              <small>{reasons[0] || 'One or more application resources are not supported for DR.'}</small>
+              {reasons.length > 1 && <small>+{reasons.length - 1} more reason{reasons.length > 2 ? 's' : ''}</small>}
             </span>
             {checks.length > 0 && (
               <span className="hbdr-dr-support-error-section">
-                <b>Detected in this namespace</b>
+                <b>Affected resources</b>
                 <span className="hbdr-dr-support-error-list">
-                  {checks.slice(0, 6).map((check, index) => (
-                    <small key={`${check.namespace}-${check.pvc}-${index}`}>
-                      {check.namespace} / {check.pvc}: {check.storageClass} · {check.pvType} · {check.provisioner}
+                  {checks.slice(0, 3).map((check, index) => (
+                    <small key={`${check.namespace}-${check.resource}-${index}`}>
+                      {check.kind}/{check.resource} · {check.storageClass !== 'unknown' ? check.storageClass : check.pvType}
                     </small>
                   ))}
-                  {checks.length > 6 && <small>+{checks.length - 6} more PVCs</small>}
+                  {checks.length > 3 && <small>+{checks.length - 3} more resources</small>}
                 </span>
               </span>
             )}
+            <span className="hbdr-dr-support-error-section">
+              <b>Recommendation</b>
+              <small>{recommendation}</small>
+            </span>
           </span>
         )}
       </span>
@@ -5638,9 +5686,9 @@ function ApplicationDrPage(props: {
         id: 'drStatus',
         header: 'DR Config',
         accessorFn: app => appSortValue(app, 'drStatus'),
-        size: 300,
-        minSize: 240,
-        maxSize: 400,
+        size: 220,
+        minSize: 190,
+        maxSize: 300,
         cell: info => {
           const app = info.row.original;
           const plan = protectionPlanForApp(app);
@@ -5865,7 +5913,7 @@ function ApplicationDrPage(props: {
       .map(task => [task.id, task] as const),
   ).values());
   const selectedRunHasRunningSync = selectedRunActiveSyncTasks.length > 0;
-  const canStartSync = selectedRunApps.length > 0 && !selectedRunHasRunningSync && !selectedRunHasCleanupRunning && selectedRunNotReadyRows.length === 0;
+  const canStartSync = selectedRunApps.length > 0 && !syncSubmitting && !selectedRunHasRunningSync && !selectedRunHasCleanupRunning && selectedRunNotReadyRows.length === 0;
   const canStopSync = selectedRunCancelableSyncTasks.length > 0;
   const restorePointsForApp = (app: AppItem) => {
     const realPoints = liveRestorePoints
@@ -5879,6 +5927,7 @@ function ApplicationDrPage(props: {
       .sort((a, b) => (b.time || '').localeCompare(a.time || ''))
       .map(point => ({
         id: point.id,
+        displayName: point.displayName,
         backupTaskId: point.backupTaskId,
         veleroBackupName: point.veleroBackupName,
         title: point.title || point.veleroBackupName || 'Restore point',
@@ -5970,20 +6019,7 @@ function ApplicationDrPage(props: {
     }
     const action = restoreAction;
     const submittedMessage = `${action.mode === 'drill' ? 'Drill' : 'Takeover'} job submitted: ${action.config.targetCluster} / ${targetNamespace} / ${point?.time || 'selected recovery point'}`;
-    const optimisticTask: ApiTask = {
-      id: `submitting-${action.mode}-${Date.now()}`,
-      clusterId: targetCluster.id,
-      protectionPlanId: livePoint.protectionPlanId || action.app.protectionPlanId,
-      restorePointId: livePoint.id,
-      type: action.mode,
-      status: 'queued',
-      progress: 0,
-      payload: { targetNamespace, sourceNamespace: sourceNamespaces[0] || action.app.namespace },
-      createdAt: new Date().toISOString(),
-    };
-    setSubmittingRecoveryTasks(prev => ({ ...prev, [action.app.name]: optimisticTask }));
-    setRestoreAction(null);
-    toast(submittedMessage);
+    setRecoverySubmitting(true);
     try {
       const createdTask = await apiPost<ApiTask>(`/api/v1/tasks/${action.mode}`, {
           clusterId: targetCluster.id,
@@ -6006,19 +6042,18 @@ function ApplicationDrPage(props: {
           alternateProfileId: action.config.alternateProfileId,
       });
       setLiveRecoveryTasks(prev => ({ ...prev, [action.app.name]: createdTask }));
-      setSubmittingRecoveryTasks(prev => Object.fromEntries(
-        Object.entries(prev).filter(([key, task]) => key !== action.app.name || task.id !== optimisticTask.id),
-      ));
+      setSubmittingRecoveryTasks(prev => ({ ...prev, [action.app.name]: createdTask }));
       setDrTaskEvents(prev => ({
         ...prev,
         [createdTask.id]: prev[createdTask.id] || [],
       }));
+      setRestoreAction(null);
+      toast(submittedMessage);
       void refreshPlatformData();
     } catch (error) {
-      setSubmittingRecoveryTasks(prev => prev[action.app.name]?.id === optimisticTask.id
-        ? Object.fromEntries(Object.entries(prev).filter(([key]) => key !== action.app.name))
-        : prev);
       toast('Failed to submit recovery task: ' + (error instanceof Error ? error.message : 'unknown error'));
+    } finally {
+      setRecoverySubmitting(false);
     }
   };
   const renderSyncTaskStatus = (app: AppItem) => {
@@ -6337,6 +6372,7 @@ function ApplicationDrPage(props: {
       return;
     }
     let syncWarning = '';
+    setSyncSubmitting(true);
     try {
       const responses = await Promise.all(selectedRunRows.map(app => {
         const plan = protectionPlanForApp(app);
@@ -6364,9 +6400,23 @@ function ApplicationDrPage(props: {
         });
         return next;
       });
+      setSubmittingSyncTasks(prev => {
+        const next = { ...prev };
+        selectedRunRows.forEach((app, index) => {
+          const response = responses[index];
+          const task = 'task' in response ? response.task : response;
+          if (!task?.id) return;
+          [app.name, ...unitMembers(app).map(member => member.name)].forEach(key => {
+            next[key] = task;
+          });
+        });
+        return next;
+      });
     } catch (error) {
       toast('Failed to submit sync job: ' + (error instanceof Error ? error.message : 'unknown error'));
       return;
+    } finally {
+      setSyncSubmitting(false);
     }
     void refreshPlatformData();
     window.setTimeout(() => {
@@ -6847,7 +6897,7 @@ function ApplicationDrPage(props: {
             )}
             {isRunStage && (
               <>
-                <button onClick={handlePrimaryAction} disabled={!canStartSync} className="hbdr-dr-action-primary">Start Sync</button>
+                <button onClick={handlePrimaryAction} disabled={!canStartSync} className="hbdr-dr-action-primary">{syncSubmitting ? 'Submitting…' : 'Start Sync'}</button>
                 <button disabled={!canRestoreAction} title={hasSelectedRunActiveRecoveryTask ? 'A recovery task is already running' : undefined} onClick={() => openRestoreAction('drill')} className="hbdr-dr-action-primary hbdr-dr-action-ghost">Drill</button>
                 <button disabled={!canRestoreAction} title={hasSelectedRunActiveRecoveryTask ? 'A recovery task is already running' : undefined} onClick={() => openRestoreAction('takeover')} className="hbdr-dr-action-danger">Takeover</button>
               </>
@@ -7250,6 +7300,7 @@ function ApplicationDrPage(props: {
             }}
             onClose={() => setRestoreAction(null)}
             onSubmit={confirmRestoreAction}
+            submitting={recoverySubmitting}
           />
         )}
       </AnimatePresence>
@@ -9358,6 +9409,41 @@ function StoragePage({ storage, clusters, onStorageCreated }: { storage: Storage
     );
   };
 
+  const handleStorageConnectionTest = async () => {
+    if (!editingRepo) return;
+    const isDraft = !editingRepo.id || editingRepo.id.startsWith('repo-');
+    if (isDraft) {
+      if (!editingRepo.endpoint || !editingRepo.bucket) {
+        setStorageTestMessage({ tone: 'fail', text: 'Enter endpoint and bucket first.' });
+        return;
+      }
+      setSyncingStorage(true);
+      setStorageTestMessage(null);
+      try {
+        const input = buildStorageRepositoryInput(editingRepo);
+        const result = await apiPost<{ status: string; detail: string }>('/api/v1/storage-repositories/test', input);
+        setStorageTestMessage(result.status === 'connected'
+          ? { tone: 'ok', text: `Reachability OK: ${result.detail}` }
+          : { tone: 'fail', text: result.detail || 'Reachability test failed' });
+      } catch (e) {
+        setStorageTestMessage({ tone: 'fail', text: e instanceof Error ? e.message : 'Test connection failed' });
+      } finally {
+        setSyncingStorage(false);
+      }
+      return;
+    }
+    setSyncingStorage(true);
+    try {
+      const result = await testStorageConnection(editingRepo.id);
+      setStorageTestMessage({ tone: result.status === 'connected' ? 'ok' : 'fail', text: result.detail || (result.status === 'connected' ? 'Reachability OK' : 'Test failed') });
+      setStorageError(null);
+    } catch (e) {
+      setStorageTestMessage({ tone: 'fail', text: e instanceof Error ? e.message : 'Test connection failed' });
+    } finally {
+      setSyncingStorage(false);
+    }
+  };
+
   return (
     <motion.div key="storage" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
       <div className="hbdr-page-hero">
@@ -9377,7 +9463,7 @@ function StoragePage({ storage, clusters, onStorageCreated }: { storage: Storage
         <div className="hbdr-dr-table-head">
             <div className="hbdr-dr-toolbar">
               <div className="hbdr-dr-action-group">
-                <button onClick={() => { setEditingRepo(createStorageDraft('S3-Compatible')); setStorageTestMessage(null); setStorageError(null); setStorageTypeOpen(true); }} className="hbdr-dr-action-primary">New Storage</button>
+                <button aria-label="Create storage repository" title="Create storage repository" onClick={() => { setEditingRepo(createStorageDraft('S3-Compatible')); setStorageTestMessage(null); setStorageError(null); setStorageTypeOpen(true); }} className="hbdr-dr-action-primary">New</button>
               <div className="relative">
                 <button disabled={selectedRepos.length === 0} onClick={() => setStorageBulkMenuOpen(prev => !prev)} className="hbdr-dr-more">
                   More <ChevronDown size={15} className={storageBulkMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
@@ -9537,52 +9623,23 @@ function StoragePage({ storage, clusters, onStorageCreated }: { storage: Storage
                   <section className="hbdr-advanced-filter-section">
                     <h4>Configuration</h4>
                     <div className="hbdr-advanced-filter-box hbdr-storage-config-box">{renderStorageFields(true)}</div>
+                    <div className="hbdr-storage-connection-check">
+                      {storageTestMessage && (
+                        <div className={`hbdr-storage-test-result ${storageTestMessage.tone === 'ok' ? 'is-ok' : 'is-fail'}`}>
+                          {storageTestMessage.text}
+                        </div>
+                      )}
+                      <button type="button" onClick={handleStorageConnectionTest} disabled={syncingStorage} className="hbdr-storage-test-button">
+                        <Activity size={14} />{syncingStorage ? 'Testing...' : 'Test Connection'}
+                      </button>
+                    </div>
                   </section>
                 )}
               </div>
               {editingRepo && (
                 <div className="hbdr-storage-drawer-footer">
-                  {storageTestMessage && (
-                    <div className={`hbdr-storage-test-result ${storageTestMessage.tone === 'ok' ? 'is-ok' : 'is-fail'}`}>
-                      {storageTestMessage.text}
-                    </div>
-                  )}
                   <div className="hbdr-filter-drawer-actions hbdr-storage-drawer-actions">
                     <button type="button" onClick={saveStorage} disabled={!storageReady(editingRepo) || savingStorage}>{savingStorage ? "Saving..." : "Create Storage"}</button>
-                    <button type="button" onClick={async () => {
-  if (!editingRepo) return;
-  const isDraft = !editingRepo.id || editingRepo.id.startsWith("repo-");
-  if (isDraft) {
-    if (!editingRepo.endpoint || !editingRepo.bucket) {
-      setStorageTestMessage({ tone: "fail", text: "Enter endpoint and bucket first." });
-      return;
-    }
-    setSyncingStorage(true);
-    setStorageTestMessage(null);
-    try {
-      const input = buildStorageRepositoryInput(editingRepo);
-      const result = await apiPost<{ status: string; detail: string }>("/api/v1/storage-repositories/test", input);
-      if (result.status === "connected") {
-        setStorageTestMessage({ tone: "ok", text: `Reachability OK: ${result.detail}` });
-      } else {
-        setStorageTestMessage({ tone: "fail", text: result.detail || "Reachability test failed" });
-      }
-    } catch (e) {
-      setStorageTestMessage({ tone: "fail", text: e instanceof Error ? e.message : "Test connection failed" });
-    } finally {
-      setSyncingStorage(false);
-    }
-    return;
-  }
-  setSyncingStorage(true);
-  try {
-    const result = await testStorageConnection(editingRepo.id);
-    setStorageTestMessage({ tone: result.status === "connected" ? "ok" : "fail", text: result.detail || (result.status === "connected" ? "Reachability OK" : "Test failed") });
-    setStorageError(null);
-  } catch (e) {
-    setStorageTestMessage({ tone: "fail", text: e instanceof Error ? e.message : "Test connection failed" });
-  } finally { setSyncingStorage(false); }
-}} disabled={syncingStorage} className="hbdr-storage-test-button"><Activity size={14} />{syncingStorage ? "Testing..." : "Test Connection"}</button>
                     <button type="button" onClick={closeStorageWizard}>Cancel</button>
                   </div>
                 </div>
@@ -9625,17 +9682,21 @@ function StoragePage({ storage, clusters, onStorageCreated }: { storage: Storage
                 <section className="hbdr-advanced-filter-section">
                   <h4>Configuration</h4>
                   <div className="hbdr-advanced-filter-box hbdr-storage-config-box">{renderStorageFields(false)}</div>
+                  <div className="hbdr-storage-connection-check">
+                    {storageTestMessage && (
+                      <div className={`hbdr-storage-test-result ${storageTestMessage.tone === 'ok' ? 'is-ok' : 'is-fail'}`}>
+                        {storageTestMessage.text}
+                      </div>
+                    )}
+                    <button type="button" onClick={runSavedStorageConnectionTest} disabled={syncingStorage} className="hbdr-storage-test-button">
+                      <Activity size={14} />{syncingStorage ? 'Testing...' : 'Test Connection'}
+                    </button>
+                  </div>
                 </section>
               </div>
               <div className="hbdr-storage-drawer-footer">
-                {storageTestMessage && (
-                  <div className={`hbdr-storage-test-result ${storageTestMessage.tone === 'ok' ? 'is-ok' : 'is-fail'}`}>
-                    {storageTestMessage.text}
-                  </div>
-                )}
                 <div className="hbdr-filter-drawer-actions hbdr-storage-drawer-actions">
                   <button type="button" onClick={saveEditedStorage} disabled={!storageReady(editingRepo)}>Save Changes</button>
-                  <button type="button" onClick={runSavedStorageConnectionTest} disabled={syncingStorage} className="hbdr-storage-test-button"><Activity size={14} />{syncingStorage ? 'Testing...' : 'Test Connection'}</button>
                   <button type="button" onClick={closeEditStorage}>Cancel</button>
                 </div>
               </div>
@@ -9950,7 +10011,7 @@ function PolicyPage({ policies, setPolicies }: { policies: PolicyItem[]; setPoli
           <div className="hbdr-dr-table-head">
             <div className="hbdr-dr-toolbar">
               <div className="hbdr-dr-action-group">
-                <button onClick={openCreatePolicy} className="hbdr-dr-action-primary">New DR Policy</button>
+                <button aria-label="Create DR policy" title="Create DR policy" onClick={openCreatePolicy} className="hbdr-dr-action-primary">New</button>
                 <div className="relative">
                   <button disabled={selectedPolicies.length === 0} onClick={() => setPolicyBulkMenuOpen(prev => !prev)} className="hbdr-dr-more">
                     More <ChevronDown size={15} className={policyBulkMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
@@ -10290,7 +10351,7 @@ function RealRestorePointPage({
   const [storageRepos, setStorageRepos] = useState<ApiStorageRepo[]>(initialStorageRepos);
   const [plans, setPlans] = useState<ApiProtectionPlan[]>(initialPlans);
   const [tasks, setTasks] = useState<ApiTask[]>(initialTasks);
-  const [submittingRecoveryTasks, setSubmittingRecoveryTasks] = useState<Record<string, ApiTask>>({});
+  const [recoverySubmitting, setRecoverySubmitting] = useState(false);
   const [loading, setLoading] = useState(initialPoints.length === 0);
   const [selectedRestorePoints, setSelectedRestorePoints] = useState<string[]>([]);
   const [activeRestorePointId, setActiveRestorePointId] = useState('');
@@ -10312,8 +10373,7 @@ function RealRestorePointPage({
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const [visibleColumns, setVisibleColumns] = useState<string[]>(['time', 'storage', 'size', 'storageSize', 'media', 'backupMode', 'task']);
   const [restoreBulkMenuOpen, setRestoreBulkMenuOpen] = useState(false);
-  const visibleRecoveryTask = (restorePointId: string) =>
-    submittingRecoveryTasks[restorePointId] || latestTaskForRestorePoint(tasks, restorePointId);
+  const visibleRecoveryTask = (restorePointId: string) => latestTaskForRestorePoint(tasks, restorePointId);
 
   const load = async () => {
     const [pointRes, clusterRes, storageRes, planRes, taskRes] = await Promise.all([
@@ -11144,24 +11204,12 @@ function RealRestorePointPage({
             });
           }}
           onClose={() => setRestoreAction(null)}
+          submitting={recoverySubmitting}
           onSubmit={async () => {
             const action = restoreAction;
             const targetNamespace = action.config.namespaceMode === 'original' ? action.row.namespace : action.config.targetNamespace;
             const targetCluster = clusters.find(cluster => cluster.name === action.config.targetCluster);
-            const optimisticTask: ApiTask = {
-              id: `submitting-${action.mode}-${Date.now()}`,
-              clusterId: targetCluster?.id || action.row.targetClusterId,
-              protectionPlanId: action.row.protectionPlanId,
-              restorePointId: action.row.id,
-              type: action.mode,
-              status: 'queued',
-              progress: 0,
-              payload: { targetNamespace, sourceNamespace: action.row.namespace },
-              createdAt: new Date().toISOString(),
-            };
-            setSubmittingRecoveryTasks(prev => ({ ...prev, [action.row.id]: optimisticTask }));
-            setRestoreAction(null);
-            toast(action.mode === 'drill' ? 'DR drill job submitted' : 'DR takeover job submitted');
+            setRecoverySubmitting(true);
             try {
               const createdTask = await apiPost<ApiTask>(`/api/v1/tasks/${action.mode}`, {
                 clusterId: targetCluster?.id || action.row.targetClusterId,
@@ -11183,15 +11231,13 @@ function RealRestorePointPage({
                 alternateProfileId: action.config.alternateProfileId,
               });
               setTasks(prev => [createdTask, ...prev.filter(task => task.id !== createdTask.id)]);
-              setSubmittingRecoveryTasks(prev => prev[action.row.id]?.id === optimisticTask.id
-                ? Object.fromEntries(Object.entries(prev).filter(([key]) => key !== action.row.id))
-                : prev);
+              setRestoreAction(null);
+              toast(action.mode === 'drill' ? 'DR drill job submitted' : 'DR takeover job submitted');
               void load();
             } catch (error) {
-              setSubmittingRecoveryTasks(prev => prev[action.row.id]?.id === optimisticTask.id
-                ? Object.fromEntries(Object.entries(prev).filter(([key]) => key !== action.row.id))
-                : prev);
               toast('Failed to submit recovery task: ' + (error instanceof Error ? error.message : 'unknown error'));
+            } finally {
+              setRecoverySubmitting(false);
             }
           }}
         />

@@ -279,6 +279,7 @@ create table restore_points (
   source_cluster_id uuid not null references clusters(id),
   app_id uuid not null references applications(id),
   storage_repo_id uuid references storage_repositories(id),
+  display_name text not null,
   velero_backup_name text not null,
   point_type text not null,
   status text not null,
@@ -318,6 +319,7 @@ Recommended first-phase enums:
 - `tasks.type`: `inventory_scan`, `backup`, `restore_drill`, `takeover`, `validate_storage`, `agent_upgrade`, `unregister`.
 - `tasks.status`: `queued`, `dispatching`, `dispatched`, `accepted`, `running`, `succeeded`, `failed`, `canceled`, `timeout`.
 - `restore_points.status`: `creating`, `available`, `expired`, `failed`, `deleting`.
+- `restore_points.display_name`: generated from the originating sync task `created_at` in the control-plane server's local timezone; clients display this stored name directly.
 
 ## Indexes
 

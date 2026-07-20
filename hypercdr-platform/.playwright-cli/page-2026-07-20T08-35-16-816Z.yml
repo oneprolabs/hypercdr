@@ -1,0 +1,214 @@
+- generic [ref=f2e3]:
+  - complementary [ref=f2e4]:
+    - generic [ref=f2e5]:
+      - heading "HyperCDR" [level=1] [ref=f2e11]
+      - navigation [ref=f2e12]:
+        - button "Dashboard" [ref=f2e13]
+        - button "DR" [ref=f2e16]
+        - button "Configuration" [ref=f2e19]
+        - button "Operations" [ref=f2e22]
+        - button "Monitor & Alerts" [ref=f2e25]
+        - button "Settings" [ref=f2e28]
+    - generic [ref=f2e31]:
+      - 'button "Current timezone: Platform Time Zone: GMT+08:00 (Asia/Shanghai)" [ref=f2e32]': "Platform Time Zone: GMT+08:00 (Asia/Shanghai) Timezone · Platform Time Zone: GMT+08:00 (Asia/Shanghai)"
+      - 'button "Notifications: 0" [ref=f2e33]': Notifications
+      - generic [ref=f2e36]:
+        - 'button "Language: English" [ref=f2e37]'
+        - text: Switch language
+      - button "Open account menu" [ref=f2e43]:
+        - generic [ref=f2e48]: admin
+  - main [ref=f2e51]:
+    - generic [ref=f2e54]:
+      - generic [ref=f2e55]:
+        - generic [ref=f2e56]:
+          - generic [ref=f2e57]:
+            - generic [ref=f2e60]:
+              - heading "Cluster DR" [level=2] [ref=f2e61]
+              - paragraph [ref=f2e62]: Updates when you switch the active cluster
+            - button [ref=f2e65]:
+              - generic [ref=f2e70]:
+                - heading "No default cluster selected" [level=4] [ref=f2e71]
+                - paragraph [ref=f2e72]: Select a cluster to activate the DR workspace
+          - generic [ref=f2e75]:
+            - generic [ref=f2e76]:
+              - strong [ref=f2e82]: Production
+              - generic [ref=f2e83]: Backup
+              - strong [ref=f2e91]: Storage
+              - generic [ref=f2e92]: DR Drill
+              - strong [ref=f2e98]: DR Site
+            - generic [ref=f2e99]:
+              - generic [ref=f2e100]:
+                - generic [ref=f2e101]:
+                  - heading "Production" [level=3] [ref=f2e102]
+                  - button "Details>" [ref=f2e104]
+                - generic [ref=f2e105]:
+                  - strong [ref=f2e106]: "0"
+                  - generic [ref=f2e107]: Namespaces
+                - generic [ref=f2e108]:
+                  - paragraph [ref=f2e110]: Protected
+                  - strong [ref=f2e111]: "0"
+                - generic [ref=f2e112]:
+                  - paragraph [ref=f2e114]: Unprotected
+                  - strong [ref=f2e115]: "0"
+              - generic [ref=f2e116]:
+                - heading "RPO" [level=3] [ref=f2e118]
+                - generic [ref=f2e119]:
+                  - strong [ref=f2e120]: "0"
+                  - generic [ref=f2e121]: At SLA Risk
+                - generic [ref=f2e122]:
+                  - paragraph [ref=f2e124]: Meeting SLA
+                  - strong [ref=f2e125]: "0"
+                - generic [ref=f2e126]:
+                  - paragraph [ref=f2e128]: Not Protected
+                  - strong [ref=f2e129]: "0"
+              - generic [ref=f2e130]:
+                - generic [ref=f2e131]:
+                  - heading "Data Sync" [level=3] [ref=f2e132]
+                  - button "Details>" [ref=f2e134]
+                - generic [ref=f2e135]:
+                  - strong [ref=f2e136]: 0%
+                  - generic [ref=f2e137]: Sync Completion
+                - generic [ref=f2e138]:
+                  - paragraph [ref=f2e140]: Not Started
+                  - strong [ref=f2e141]: "0"
+                - generic [ref=f2e142]:
+                  - paragraph [ref=f2e144]: In Progress
+                  - strong [ref=f2e145]: "0"
+                - generic [ref=f2e146]:
+                  - paragraph [ref=f2e148]: Completed
+                  - strong [ref=f2e149]: "0"
+                - generic [ref=f2e150]:
+                  - paragraph [ref=f2e152]: Failed
+                  - strong [ref=f2e153]: "0"
+              - generic [ref=f2e154]:
+                - generic [ref=f2e155]:
+                  - heading "Restore Points" [level=3] [ref=f2e156]
+                  - button "Details>" [ref=f2e158]
+                - generic [ref=f2e159]:
+                  - strong [ref=f2e160]: "0"
+                  - generic [ref=f2e161]: Restore Points
+                - generic [ref=f2e162]:
+                  - paragraph [ref=f2e164]: In Progress
+                  - strong [ref=f2e165]: "0"
+                - generic [ref=f2e166]:
+                  - paragraph [ref=f2e168]: Completed
+                  - strong [ref=f2e169]: "0"
+                - generic [ref=f2e170]:
+                  - paragraph [ref=f2e172]: Failed
+                  - strong [ref=f2e173]: "0"
+              - generic [ref=f2e174]:
+                - generic [ref=f2e175]:
+                  - heading "DR Drill" [level=3] [ref=f2e176]
+                  - button "Details>" [ref=f2e178]
+                - generic [ref=f2e179]:
+                  - strong [ref=f2e180]: "0"
+                  - generic [ref=f2e181]: Drills in 30 Days
+                - generic [ref=f2e182]:
+                  - paragraph [ref=f2e184]: In Progress
+                  - strong [ref=f2e185]: "0"
+                - generic [ref=f2e186]:
+                  - paragraph [ref=f2e188]: Completed
+                  - strong [ref=f2e189]: "0"
+                - generic [ref=f2e190]:
+                  - paragraph [ref=f2e192]: Failed
+                  - strong [ref=f2e193]: "0"
+              - generic [ref=f2e194]:
+                - generic [ref=f2e195]:
+                  - heading "DR Site" [level=3] [ref=f2e196]
+                  - button "Details>" [ref=f2e198]
+                - generic [ref=f2e199]:
+                  - strong [ref=f2e200]: N/A
+                  - generic [ref=f2e201]: Target Cluster
+                - generic [ref=f2e202]:
+                  - paragraph [ref=f2e204]: Kubernetes
+                  - strong [ref=f2e205]: "-"
+                - generic [ref=f2e206]:
+                  - paragraph [ref=f2e208]: Nodes
+                  - strong [ref=f2e209]: "0"
+                - generic [ref=f2e210]:
+                  - paragraph [ref=f2e212]: Namespaces
+                  - strong [ref=f2e213]: "0"
+        - complementary [ref=f2e214]:
+          - generic [ref=f2e218]:
+            - heading "Platform Overview" [level=2] [ref=f2e219]
+            - paragraph [ref=f2e220]: Shared resources across all clusters
+          - generic [ref=f2e222]:
+            - generic [ref=f2e223]:
+              - heading "Storage Repositories" [level=3] [ref=f2e225]
+              - generic [ref=f2e226]:
+                - strong [ref=f2e227]: "0"
+                - generic [ref=f2e228]: Repositories
+              - generic [ref=f2e229]:
+                - paragraph [ref=f2e231]: Connected
+                - strong [ref=f2e232]: "0"
+              - generic [ref=f2e233]:
+                - paragraph [ref=f2e235]: Unavailable
+                - strong [ref=f2e236]: "0"
+            - generic [ref=f2e237]:
+              - heading "DR Policy" [level=3] [ref=f2e239]
+              - generic [ref=f2e240]:
+                - strong [ref=f2e241]: "0"
+                - generic [ref=f2e242]: Protection Plans
+              - generic [ref=f2e243]:
+                - paragraph [ref=f2e245]: In Use
+                - strong [ref=f2e246]: "0"
+              - generic [ref=f2e247]:
+                - paragraph [ref=f2e249]: Available
+                - strong [ref=f2e250]: "0"
+            - generic [ref=f2e251]:
+              - generic [ref=f2e252]:
+                - heading "License Status" [level=3] [ref=f2e253]
+                - button "Details>" [ref=f2e255]
+              - generic [ref=f2e257]:
+                - paragraph [ref=f2e261]: No license data available
+                - generic [ref=f2e262]: License metrics will appear after the platform license API is connected.
+            - generic [ref=f2e263]:
+              - heading "Registered Clusters" [level=3] [ref=f2e265]
+              - generic [ref=f2e266]:
+                - strong [ref=f2e267]: "0"
+                - generic [ref=f2e268]: Clusters
+              - generic [ref=f2e269]:
+                - paragraph [ref=f2e271]: Default
+                - strong [ref=f2e272]: "0"
+              - generic [ref=f2e273]:
+                - paragraph [ref=f2e275]: Registered
+                - strong [ref=f2e276]: "0"
+      - generic [ref=f2e277]:
+        - generic [ref=f2e281]:
+          - heading "Operations" [level=2] [ref=f2e282]
+          - paragraph [ref=f2e283]: Monitoring, events, and alerts
+        - generic [ref=f2e284]:
+          - generic [ref=f2e285]:
+            - generic [ref=f2e286]:
+              - heading "DR Resources Monitoring & Analysis" [level=3] [ref=f2e287]
+              - button "Details >" [ref=f2e288]
+            - generic [ref=f2e289]:
+              - button "DR Agent" [ref=f2e290]
+              - generic [ref=f2e293]: Filter
+              - button "All clusters" [ref=f2e294]
+              - button [ref=f2e297]
+            - generic [ref=f2e303]:
+              - generic [ref=f2e304]:
+                - strong [ref=f2e305]: CPU Usage
+                - generic [ref=f2e308]: No monitoring data yet
+              - generic [ref=f2e309]:
+                - strong [ref=f2e310]: Network (bytes)
+                - generic [ref=f2e313]: No monitoring data yet
+          - generic [ref=f2e314]:
+            - generic [ref=f2e315]:
+              - heading "Events" [level=3] [ref=f2e316]
+              - button "Logs >" [ref=f2e317]
+            - paragraph [ref=f2e323]: No recent task events
+          - generic [ref=f2e324]:
+            - heading "Alert" [level=3] [ref=f2e326]
+            - generic [ref=f2e327]:
+              - generic [ref=f2e328]:
+                - strong [ref=f2e329]: "0"
+                - text: Critical
+              - generic [ref=f2e330]:
+                - strong [ref=f2e331]: "0"
+                - text: Urgent
+              - generic [ref=f2e332]:
+                - strong [ref=f2e333]: "0"
+                - text: Alert
+            - paragraph [ref=f2e339]: No active alerts

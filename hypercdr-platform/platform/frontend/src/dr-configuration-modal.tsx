@@ -3,7 +3,6 @@ import { AnimatePresence, motion } from 'motion/react';
 import {
   Check,
   ChevronDown,
-  FileCode,
   Filter,
   Grid3X3,
   Layers3,
@@ -11,8 +10,6 @@ import {
   PlusCircle,
   Settings2,
   ShieldCheck,
-  Trash2,
-  Upload,
   X,
 } from 'lucide-react';
 
@@ -193,12 +190,6 @@ const RESOURCE_KIND_ALIASES: Record<string, string> = {
   persistentvolumeclaims: 'persistentvolumeclaim',
 };
 const LABEL_OPERATORS: LabelOperator[] = ['Equals', 'Not Equals'];
-const DEFAULT_HOOK_TEMPLATE = `#!/bin/sh
-set -e
-
-# Add application-specific hook commands here.
-`;
-
 function labelConditionsToSelector(conditions: LabelCondition[]) {
   return conditions
     .filter(condition => condition.key && condition.value)
@@ -317,17 +308,10 @@ export function DrConfigurationModal(props: Props) {
     wizardPolicyTotalPages,
     targetClusterOptions,
     labelOptions,
-    preScriptRef,
-    postScriptRef,
-    handleFileUpload,
-    saveScript,
-    removeScript,
-    setEntryScript,
     onCreateStorage,
     onRegisterCluster,
     onCreatePolicy,
   } = props;
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [includeFilterOpen, setIncludeFilterOpen] = useState(false);
   const [editingIncludeIndex, setEditingIncludeIndex] = useState<number | null>(null);
   const [includeFilterType, setIncludeFilterType] = useState<'resource' | 'label'>('resource');
@@ -589,15 +573,6 @@ export function DrConfigurationModal(props: Props) {
   const handleSaveExcludeRule = () => {
     saveExcludeRule();
   };
-  const createManualScript = (type: 'preScripts' | 'postScripts') => {
-    const name = `${type === 'preScripts' ? 'pre' : 'post'}-hook-${Date.now()}.sh`;
-    saveScript(type, {
-      name,
-      size: DEFAULT_HOOK_TEMPLATE.length,
-      content: DEFAULT_HOOK_TEMPLATE,
-      source: 'manual',
-    });
-  };
   const navigateFromConfig = (handler?: () => void) => {
     if (!handler) return;
     onClose();
@@ -766,7 +741,7 @@ export function DrConfigurationModal(props: Props) {
                           <option value="">Select repository</option>
                           {storage.map(repo => <option key={repo.id} value={repo.id}>{repo.name} ({repo.type})</option>)}
                         </select>
-                        <button type="button" onClick={() => navigateFromConfig(onCreateStorage)}>New storage</button>
+                        <button type="button" aria-label="Create new storage" onClick={() => navigateFromConfig(onCreateStorage)}>+ New</button>
                       </div>
                     </label>
                     <label className="hbdr-config-setting-row">
@@ -776,7 +751,7 @@ export function DrConfigurationModal(props: Props) {
                           <option value="">Select target cluster</option>
                           {targetClusterOptions.map(cluster => <option key={cluster.id} value={cluster.name}>{cluster.name}{cluster.isCurrent ? ' (source)' : ''}</option>)}
                         </select>
-                        <button type="button" onClick={() => navigateFromConfig(onRegisterCluster)}>Register cluster</button>
+                        <button type="button" aria-label="Register new cluster" onClick={() => navigateFromConfig(onRegisterCluster)}>+ New</button>
                       </div>
                     </label>
                     <label className="hbdr-config-setting-row">
@@ -786,49 +761,18 @@ export function DrConfigurationModal(props: Props) {
                           <option value="">Select policy</option>
                           {policyOptions.map(policy => <option key={policy.id} value={policy.id}>{policy.name} - {policy.schedule} / {policy.retention}</option>)}
                         </select>
-                        <button type="button" onClick={() => navigateFromConfig(onCreatePolicy)}>Create policy</button>
+                        <button type="button" aria-label="Create new backup policy" onClick={() => navigateFromConfig(onCreatePolicy)}>+ New</button>
                       </div>
                     </label>
                   </div>
                 </section>
 
-                <section className={`hbdr-config-advanced ${advancedOpen ? 'is-open' : ''}`}>
-                  <button type="button" className="hbdr-config-advanced-toggle" onClick={() => setAdvancedOpen(prev => !prev)}>
+                <section className="hbdr-config-advanced hbdr-config-hooks-unavailable" aria-disabled="true">
+                  <div className="hbdr-config-advanced-toggle">
                     <span><Settings2 size={16} />Hooks</span>
-                    <ChevronDown size={16} />
-                  </button>
-                  {advancedOpen && (
-                    <div className="hbdr-config-advanced-body">
-                      {(['preScripts', 'postScripts'] as const).map(type => {
-                        const list = protectConfig[type];
-                        return (
-                          <div key={type} className="hbdr-config-advanced-block">
-                            <div className="hbdr-config-advanced-head">
-                              <strong>{type === 'preScripts' ? 'Pre hooks' : 'Post hooks'}</strong>
-                              <div>
-                                <input ref={type === 'preScripts' ? preScriptRef : postScriptRef} type="file" accept=".sh,.bash,.txt" onChange={event => handleFileUpload(type, event)} hidden />
-                                <button type="button" onClick={() => (type === 'preScripts' ? preScriptRef : postScriptRef).current?.click()}><Upload size={14} />Upload</button>
-                                <button type="button" onClick={() => createManualScript(type)}><FileCode size={14} />Manual</button>
-                              </div>
-                            </div>
-                            <div className="hbdr-config-script-list">
-                              {list.length === 0 ? <span>No hooks configured</span> : list.map((script, index) => {
-                                const isEntry = script.isEntry ?? index === 0;
-                                return (
-                                  <div key={`${script.name}-${index}`}>
-                                    <span>{script.name}</span>
-                                    <em>{isEntry ? 'Entry' : 'Dependency'}</em>
-                                    {!isEntry && <button type="button" onClick={() => setEntryScript(type, index)}>Set entry</button>}
-                                    <button type="button" onClick={() => removeScript(type, index)}><Trash2 size={13} /></button>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                    <em>Not supported yet</em>
+                  </div>
+                  <p>Pre- and post-operation scripts are not available in this version.</p>
                 </section>
               </main>
             </div>

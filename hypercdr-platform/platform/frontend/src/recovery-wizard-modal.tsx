@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertCircle,
@@ -78,6 +78,7 @@ type Props = {
   setConfig: React.Dispatch<React.SetStateAction<RecoveryWizardConfig | null>>;
   onClose: () => void;
   onSubmit: () => void;
+  submitting?: boolean;
 };
 
 function sourceMeta(type: RecoveryWizardConfig['sourceType']) {
@@ -163,6 +164,7 @@ export function RecoveryWizardModal(props: Props) {
     setConfig,
     onClose,
     onSubmit,
+    submitting = false,
   } = props;
 
   const currentClusterOption = clusterOptions.find(item => item.name === currentClusterName) || clusterOptions.find(item => item.isCurrent);
@@ -202,6 +204,15 @@ export function RecoveryWizardModal(props: Props) {
       alternateProfileId: sourceType === 'snapshot' ? '' : config.alternateProfileId,
     });
   };
+
+  useEffect(() => {
+    if (mode !== 'drill' || config.sourceType !== 'snapshot') return;
+    const nextPoint = points.find(point => pointSourceType(point) === 'export');
+    updateConfig({
+      sourceType: 'export',
+      pointId: nextPoint?.id || '',
+    });
+  }, [config.sourceType, mode, points]);
 
   const chooseTargetCluster = (targetCluster: string) => {
     const targetMode = inferTargetMode(targetCluster, config.namespaceMode, currentTargetClusterName);
@@ -277,13 +288,14 @@ export function RecoveryWizardModal(props: Props) {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="hbdr-protect-backdrop"
-            onClick={onClose}
+            onClick={() => { if (!submitting) onClose(); }}
           />
           <motion.div
-            initial={{ opacity: 0, y: 18, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 18, scale: 0.98 }}
-            className="hbdr-protect-dialog hbdr-protect-dialog-v2 hbdr-recovery-dialog"
+            initial={{ opacity: 0, x: 32 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 32 }}
+            transition={{ duration: 0.18, ease: 'easeOut' }}
+            className="hbdr-filter-drawer hbdr-protect-dialog hbdr-protect-dialog-v2 hbdr-protect-drawer hbdr-recovery-dialog"
           >
             <div className="hbdr-protect-header">
               <div className="hbdr-protect-title-wrap">
@@ -294,7 +306,7 @@ export function RecoveryWizardModal(props: Props) {
                 </div>
               </div>
               <div className="hbdr-protect-header-actions">
-                <button type="button" onClick={onClose} aria-label="Close recovery wizard"><X size={18} /></button>
+                <button type="button" onClick={onClose} disabled={submitting} aria-label="Close recovery wizard"><X size={18} /></button>
               </div>
             </div>
 
@@ -309,16 +321,20 @@ export function RecoveryWizardModal(props: Props) {
                     <label>
                       <span>Snapshot type</span>
                       <div className="hbdr-recovery-source-tabs">
-                        {(['snapshot', 'export'] as const).map(sourceType => {
+                        {(['export', 'snapshot'] as const).map(sourceType => {
                           const meta = sourceMeta(sourceType);
+                          const unsupported = mode === 'drill' && sourceType === 'snapshot';
                           return (
                             <button
                               key={sourceType}
                               type="button"
                               className={config.sourceType === sourceType ? 'is-active' : ''}
+                              disabled={unsupported}
+                              aria-label={unsupported ? `${meta.title}, not supported yet` : meta.title}
                               onClick={() => chooseSourceType(sourceType)}
                             >
-                              {meta.title}
+                              <span>{meta.title}</span>
+                              {unsupported && <em>Not supported yet</em>}
                             </button>
                           );
                         })}
@@ -336,7 +352,7 @@ export function RecoveryWizardModal(props: Props) {
                         {sourcePoints.length === 0 && <option value="">No {source.title} available</option>}
                         {sourcePoints.map(point => (
                           <option key={point.id} value={point.id}>
-                            {point.time} / {point.type}
+                            {point.time}
                           </option>
                         ))}
                       </select>
@@ -360,7 +376,7 @@ export function RecoveryWizardModal(props: Props) {
                         >
                           {clusterOptions.map(cluster => (
                             <option key={cluster.id} value={cluster.name}>
-                              {cluster.name}{cluster.name === currentTargetClusterName ? ' / Current' : ''}{cluster.name === configuredTargetCluster ? ' / DR default' : ''}
+                              {cluster.name}{cluster.name === currentTargetClusterName ? ' / Current' : ''}{cluster.name === configuredTargetCluster ? ' / Configured target' : ''}
                             </option>
                           ))}
                         </select>
@@ -421,17 +437,17 @@ export function RecoveryWizardModal(props: Props) {
             </div>
 
             <div className="hbdr-protect-footer">
-              <button type="button" onClick={onClose}>Cancel</button>
+              <button type="button" onClick={onClose} disabled={submitting}>Cancel</button>
               <button
                 type="button"
                 className="hbdr-protect-primary"
-                disabled={submitDisabled}
+                disabled={submitDisabled || submitting}
                 onClick={() => {
-                  if (submitDisabled) return;
+                  if (submitDisabled || submitting) return;
                   onSubmit();
                 }}
               >
-                <Play size={15} />{submitLabel}
+                <Play size={15} />{submitting ? 'Submitting…' : submitLabel}
               </button>
             </div>
           </motion.div>

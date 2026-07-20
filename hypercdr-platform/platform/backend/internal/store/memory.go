@@ -927,6 +927,7 @@ func (s *MemoryStore) CleanupProtectionPlanRecords(id string) (ProtectionPlan, b
 
 func (s *MemoryStore) CreateRestorePoint(input RestorePointInput) (RestorePoint, error) {
 	now := time.Now().UTC()
+	displayName := restorePointDisplayName(input.DisplayName, input.TaskCreatedAt, now)
 	pointType := input.PointType
 	if pointType == "" {
 		pointType = "backup"
@@ -942,6 +943,7 @@ func (s *MemoryStore) CreateRestorePoint(input RestorePointInput) (RestorePoint,
 		SourceClusterID:   input.SourceClusterID,
 		AppID:             input.AppID,
 		StorageRepoID:     input.StorageRepoID,
+		DisplayName:       displayName,
 		VeleroBackupName:  input.VeleroBackupName,
 		PointType:         pointType,
 		Status:            status,
@@ -964,6 +966,9 @@ func (s *MemoryStore) CreateRestorePoint(input RestorePointInput) (RestorePoint,
 	defer s.mu.Unlock()
 	for id, existing := range s.restorePoints {
 		if existing.SourceClusterID == point.SourceClusterID && existing.VeleroBackupName == point.VeleroBackupName {
+			if existing.DisplayName == "" {
+				existing.DisplayName = point.DisplayName
+			}
 			if existing.SizeBytes == 0 && point.SizeBytes > 0 {
 				existing.SizeBytes = point.SizeBytes
 			}

@@ -282,7 +282,35 @@ func (r *Router) consumeCaptcha(id, code string) bool {
 func validUserPassword(password string) bool { return len(password) >= 8 && len(password) <= 128 }
 
 func (r *Router) authConfig(w http.ResponseWriter, req *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"googleEnabled": strings.TrimSpace(r.cfg.GoogleClientID) != "" && strings.TrimSpace(r.cfg.GoogleClientSecret) != ""})
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"googleEnabled": strings.TrimSpace(r.cfg.GoogleClientID) != "" && strings.TrimSpace(r.cfg.GoogleClientSecret) != "",
+		"timeZone":      serverTimeZone(),
+	})
+}
+
+func serverTimeZone() string {
+	if value := strings.TrimSpace(os.Getenv("TZ")); value != "" {
+		if _, err := time.LoadLocation(value); err == nil {
+			return value
+		}
+	}
+	if target, err := filepath.EvalSymlinks("/etc/localtime"); err == nil {
+		if index := strings.LastIndex(target, "/zoneinfo/"); index >= 0 {
+			value := target[index+len("/zoneinfo/"):]
+			if _, err := time.LoadLocation(value); err == nil {
+				return value
+			}
+		}
+	}
+	if raw, err := os.ReadFile("/etc/timezone"); err == nil {
+		if value := strings.TrimSpace(string(raw)); value != "" {
+			if _, err := time.LoadLocation(value); err == nil {
+				return value
+			}
+		}
+	}
+	return "UTC"
 }
 
 func (r *Router) registerUser(w http.ResponseWriter, req *http.Request) {
@@ -1414,6 +1442,18 @@ func (r *Router) createStorageRepository(w http.ResponseWriter, req *http.Reques
 		r.logger.Error("failed to create storage repository", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "create_storage_failed"})
 		return
+	}
+	validationStatus := "connected"
+	if _, testErr := probeStorageRepository(item, 5*time.Second); testErr != nil {
+		validationStatus = "warning"
+		r.logger.Warn("new storage repository connection test failed", "repository_id", item.ID, "error", testErr)
+	}
+	validatedAt := time.Now().UTC()
+	updated, ok, updateErr := r.store.SetStorageRepositoryStatus(item.ID, validationStatus, validatedAt)
+	if updateErr != nil {
+		r.logger.Error("failed to persist new storage repository status", "repository_id", item.ID, "error", updateErr)
+	} else if ok {
+		item = updated
 	}
 	writeJSON(w, http.StatusCreated, item)
 }
@@ -5919,6 +5959,7 @@ func (r *Router) ingestVeleroBackupsFromInventory(clusterID string, backups []ma
 			SourceClusterID:   clusterID,
 			AppID:             plan.AppID,
 			StorageRepoID:     plan.StorageRepoID,
+			TaskCreatedAt:     task.CreatedAt,
 			VeleroBackupName:  name,
 			PointType:         "backup",
 			Status:            "available",
@@ -6590,6 +6631,7 @@ func (r *Router) createRestorePointFromVeleroEvent(clusterID string, plan store.
 		SourceClusterID:   clusterID,
 		AppID:             plan.AppID,
 		StorageRepoID:     plan.StorageRepoID,
+		TaskCreatedAt:     task.CreatedAt,
 		VeleroBackupName:  event.BackupName,
 		PointType:         "backup",
 		Status:            "available",
@@ -6656,6 +6698,7 @@ func (r *Router) createRestorePointFromBackup(task store.Task, veleroPayload map
 		SourceClusterID:   task.ClusterID,
 		AppID:             task.AppID,
 		StorageRepoID:     storageRepoID,
+		TaskCreatedAt:     task.CreatedAt,
 		VeleroBackupName:  backupName,
 		PointType:         "backup",
 		Status:            "available",

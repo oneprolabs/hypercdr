@@ -1,0 +1,264 @@
+- generic [ref=f1e3]:
+  - complementary [ref=f1e4]:
+    - generic [ref=f1e5]:
+      - heading "HyperCDR" [level=1] [ref=f1e11]
+      - navigation [ref=f1e12]:
+        - button "Dashboard" [ref=f1e13]
+        - button "DR" [active] [ref=f1e16]
+        - button "Configuration" [ref=f1e19]
+        - button "Operations" [ref=f1e22]
+        - button "Monitor & Alerts" [ref=f1e25]
+        - button "Settings" [ref=f1e28]
+    - generic [ref=f1e31]:
+      - 'button "Current timezone: Platform Time Zone: GMT+08:00 (Asia/Shanghai)" [ref=f1e32]': "Platform Time Zone: GMT+08:00 (Asia/Shanghai) Timezone · Platform Time Zone: GMT+08:00 (Asia/Shanghai)"
+      - 'button "Notifications: 0" [ref=f1e33]': Notifications
+      - generic [ref=f1e36]:
+        - 'button "Language: English" [ref=f1e37]'
+        - text: Switch language
+      - button "Open account menu" [ref=f1e43]:
+        - generic [ref=f1e48]: admin
+  - main [ref=f1e51]:
+    - complementary [ref=f1e515]:
+      - generic [ref=f1e516]:
+        - generic [ref=f1e517]: DR
+        - button "Collapse secondary menu" [ref=f1e518]
+      - generic [ref=f1e521]:
+        - button [ref=f1e522]:
+          - strong [ref=f1e528]: Application DR
+        - button [ref=f1e529]:
+          - strong [ref=f1e534]: Restore Points
+        - button [ref=f1e535]:
+          - strong [ref=f1e541]: Backup & Recovery Tasks
+    - generic [ref=f1e542]:
+      - generic [ref=f1e543]:
+        - generic [ref=f1e544]:
+          - heading "Application DR" [level=3] [ref=f1e545]
+          - paragraph [ref=f1e546]: Select applications, configure policies, and start DR.
+        - button "DR Workspace 136 Ready · v1.29.15 · 14 namespaces Default" [ref=f1e549]:
+          - generic [ref=f1e554]:
+            - paragraph [ref=f1e555]: DR Workspace
+            - heading "136" [level=4] [ref=f1e556]
+            - paragraph [ref=f1e557]: Ready · v1.29.15 · 14 namespaces
+          - generic [ref=f1e558]: Default
+      - generic [ref=f1e562]:
+        - button "1. Select Application Add namespaces to the platform for protection. List - Unconfigured application resources" [ref=f1e563]:
+          - generic [ref=f1e569]:
+            - heading "1. Select Application" [level=4] [ref=f1e570]
+            - paragraph [ref=f1e571]: Add namespaces to the platform for protection.
+            - generic [ref=f1e572]: List - Unconfigured application resources
+        - button "2. Setup DR Configure DR strategy for the application. List - Application resources to be configured" [ref=f1e579]:
+          - generic [ref=f1e584]:
+            - heading "2. Setup DR" [level=4] [ref=f1e585]
+            - paragraph [ref=f1e586]: Configure DR strategy for the application.
+            - generic [ref=f1e587]: List - Application resources to be configured
+        - button "3. Start DR Operate the configured applications. List - Application resources have been configured" [ref=f1e592]:
+          - generic [ref=f1e596]:
+            - heading "3. Start DR" [level=4] [ref=f1e597]
+            - paragraph [ref=f1e598]: Operate the configured applications.
+            - generic [ref=f1e599]: List - Application resources have been configured
+      - generic [ref=f1e601]:
+        - generic [ref=f1e603]:
+          - generic [ref=f1e604]:
+            - button "Next" [disabled] [ref=f1e605]
+            - button "More" [ref=f1e609]
+          - generic [ref=f1e612]:
+            - combobox "Query Field" [ref=f1e613]:
+              - option "Namespace" [selected]
+              - option "DR Support"
+              - option "Resource"
+              - option "Tags"
+            - textbox [ref=f1e615]:
+              - /placeholder: Enter search text
+            - button "Refresh" [ref=f1e616]
+            - button "Tags" [ref=f1e623]
+            - button "Filter" [ref=f1e628]
+            - button "Column Settings" [ref=f1e632]
+        - generic [ref=f1e636]:
+          - generic [ref=f1e638]:
+            - generic [ref=f1e640]:
+              - checkbox [ref=f1e643]
+              - button "Namespace" [ref=f1e645] [cursor=pointer]:
+                - emphasis [ref=f1e647]: ↕
+              - button "DR Support" [ref=f1e650] [cursor=pointer]:
+                - emphasis [ref=f1e652]: ↕
+              - button "Resource" [ref=f1e655] [cursor=pointer]:
+                - emphasis [ref=f1e657]: ↕
+              - button "Tags" [ref=f1e660] [cursor=pointer]:
+                - emphasis [ref=f1e662]: ↕
+            - generic [ref=f1e664]:
+              - generic [ref=f1e665] [cursor=pointer]:
+                - checkbox [ref=f1e667]
+                - generic "default" [ref=f1e668]:
+                  - paragraph [ref=f1e676]: default
+                - generic "Namespace storage is eligible for DR protection." [ref=f1e679]: Supported
+                - generic "8 namespaced resources" [ref=f1e684]:
+                  - generic [ref=f1e685]:
+                    - 'button "Workloads DaemonSet: 1" [ref=f1e686]':
+                      - strong [ref=f1e697]: "1"
+                    - 'button "Network Service: 1" [ref=f1e698]':
+                      - strong [ref=f1e704]: "1"
+                    - button "Storage 2 PVCs · 1.00 GB total test-csi-hostpath · Pending · csi-hostpath test-dynamic-nfs-pvc · Bound · nfs-csi · 1Gi" [ref=f1e705]:
+                      - strong [ref=f1e708]: "2"
+                      - emphasis [ref=f1e709]: 1.00 GB
+                    - 'button "Config ConfigMap: 1" [ref=f1e710]':
+                      - strong [ref=f1e723]: "1"
+                    - 'button "Access Role: 1 RoleBinding: 1 ServiceAccount: 1" [ref=f1e724]':
+                      - strong [ref=f1e728]: "3"
+                - generic [ref=f1e729]:
+                  - generic "No tags"
+              - generic [ref=f1e730] [cursor=pointer]:
+                - checkbox [ref=f1e732]
+                - generic "demo-mysql" [ref=f1e733]:
+                  - paragraph [ref=f1e741]: demo-mysql
+                - 'generic "demo-mysql Storage type is not supported for DR. Supported: stateless namespaces, or PVCs backed by portable CSI storage such as Longhorn. Unsupported: local-path, hostPath, and local PV storage. Detected in this namespace: - demo-mysql-data: local-path / HostPath, provisioner rancher.io/local-path Impact: this namespace cannot be moved to Setup DR until its PVCs use supported storage." [ref=f1e744]': Unsupported
+                - generic "9 namespaced resources" [ref=f1e748]:
+                  - generic [ref=f1e749]:
+                    - 'button "Workloads Deployment: 2" [ref=f1e750]':
+                      - strong [ref=f1e761]: "2"
+                    - 'button "Network Service: 2" [ref=f1e762]':
+                      - strong [ref=f1e768]: "2"
+                    - button "Storage 1 PVC · 1.00 GB total demo-mysql-data · Bound · local-path · 1Gi" [ref=f1e769]:
+                      - strong [ref=f1e772]: "1"
+                      - emphasis [ref=f1e773]: 1.00 GB
+                    - 'button "Config ConfigMap: 2 Secret: 1" [ref=f1e774]':
+                      - strong [ref=f1e787]: "3"
+                    - 'button "Access ServiceAccount: 1" [ref=f1e788]':
+                      - strong [ref=f1e792]: "1"
+                - generic [ref=f1e793]:
+                  - generic "No tags"
+              - generic [ref=f1e794] [cursor=pointer]:
+                - checkbox [ref=f1e796]
+                - generic "dev-test" [ref=f1e797]:
+                  - paragraph [ref=f1e805]: dev-test
+                - generic "Namespace storage is eligible for DR protection." [ref=f1e808]: Supported
+                - generic "2 namespaced resources" [ref=f1e813]:
+                  - generic [ref=f1e814]:
+                    - 'button "Config ConfigMap: 1" [ref=f1e815]':
+                      - strong [ref=f1e828]: "1"
+                    - 'button "Access ServiceAccount: 1" [ref=f1e829]':
+                      - strong [ref=f1e833]: "1"
+                - generic [ref=f1e834]:
+                  - generic "No tags"
+              - generic [ref=f1e835] [cursor=pointer]:
+                - checkbox [ref=f1e837]
+                - generic "hypercdr-agent" [ref=f1e838]:
+                  - paragraph [ref=f1e846]: hypercdr-agent
+                - generic "Namespace storage is eligible for DR protection." [ref=f1e849]: Supported
+                - generic "13 namespaced resources" [ref=f1e854]:
+                  - generic [ref=f1e855]:
+                    - 'button "Workloads DaemonSet: 1 Deployment: 2" [ref=f1e856]':
+                      - strong [ref=f1e867]: "3"
+                    - button "Storage 1 PVC · 1.00 GB total hypercdr-agent-state · Bound · longhorn · 1Gi" [ref=f1e868]:
+                      - strong [ref=f1e871]: "1"
+                      - emphasis [ref=f1e872]: 1.00 GB
+                    - 'button "Config ConfigMap: 2 Secret: 4" [ref=f1e873]':
+                      - strong [ref=f1e886]: "6"
+                    - 'button "Access ServiceAccount: 3" [ref=f1e887]':
+                      - strong [ref=f1e891]: "3"
+                - generic [ref=f1e892]:
+                  - generic "No tags"
+              - generic [ref=f1e893] [cursor=pointer]:
+                - checkbox [ref=f1e895]
+                - generic "kasten-io" [ref=f1e896]:
+                  - paragraph [ref=f1e904]: kasten-io
+                - 'generic "kasten-io Storage type is not supported for DR. Supported: stateless namespaces, or PVCs backed by portable CSI storage such as Longhorn. Unsupported: local-path, hostPath, and local PV storage. Detected in this namespace: - catalog-pv-claim: local-path / HostPath, provisioner rancher.io/local-path - jobs-pv-claim: local-path / HostPath, provisioner rancher.io/local-path - logging-pv-claim: local-path / HostPath, provisioner rancher.io/local-path - metering-pv-claim: local-path / HostPath, provisioner rancher.io/local-path Impact: this namespace cannot be moved to Setup DR until its PVCs use supported storage." [ref=f1e907]': Unsupported
+                - generic "92 namespaced resources" [ref=f1e911]:
+                  - generic [ref=f1e912]:
+                    - 'button "Workloads Deployment: 14" [ref=f1e913]':
+                      - strong [ref=f1e924]: "14"
+                    - 'button "Network NetworkPolicy: 11 Service: 14" [ref=f1e925]':
+                      - strong [ref=f1e931]: "25"
+                    - button "Storage 4 PVCs · 62.0 GB total catalog-pv-claim · Bound · local-path · 20Gi jobs-pv-claim · Bound · local-path · 20Gi logging-pv-claim · Bound · local-path · 20Gi metering-pv-claim · Bound · local-path · 2Gi" [ref=f1e932]:
+                      - strong [ref=f1e935]: "4"
+                      - emphasis [ref=f1e936]: 62.0 GB
+                    - 'button "Config ConfigMap: 10 Secret: 16" [ref=f1e937]':
+                      - strong [ref=f1e950]: "26"
+                    - 'button "Access Role: 3 RoleBinding: 3 ServiceAccount: 17" [ref=f1e951]':
+                      - strong [ref=f1e955]: "23"
+                - generic [ref=f1e956]:
+                  - generic "No tags"
+              - generic [ref=f1e957] [cursor=pointer]:
+                - checkbox [ref=f1e959]
+                - generic "kasten-io-mc" [ref=f1e960]:
+                  - paragraph [ref=f1e968]: kasten-io-mc
+                - generic "Namespace storage is eligible for DR protection." [ref=f1e971]: Supported
+                - generic "4 namespaced resources" [ref=f1e976]:
+                  - generic [ref=f1e977]:
+                    - 'button "Config ConfigMap: 1 Secret: 1" [ref=f1e978]':
+                      - strong [ref=f1e991]: "2"
+                    - 'button "Access RoleBinding: 1 ServiceAccount: 1" [ref=f1e992]':
+                      - strong [ref=f1e996]: "2"
+                - generic [ref=f1e997]:
+                  - generic "No tags"
+              - generic [ref=f1e998] [cursor=pointer]:
+                - checkbox [ref=f1e1000]
+                - generic "kube-flannel" [ref=f1e1001]:
+                  - paragraph [ref=f1e1009]: kube-flannel
+                - generic "Namespace storage is eligible for DR protection." [ref=f1e1012]: Supported
+                - generic "5 namespaced resources" [ref=f1e1017]:
+                  - generic [ref=f1e1018]:
+                    - 'button "Workloads DaemonSet: 1" [ref=f1e1019]':
+                      - strong [ref=f1e1030]: "1"
+                    - 'button "Config ConfigMap: 2" [ref=f1e1031]':
+                      - strong [ref=f1e1044]: "2"
+                    - 'button "Access ServiceAccount: 2" [ref=f1e1045]':
+                      - strong [ref=f1e1049]: "2"
+                - generic [ref=f1e1050]:
+                  - generic "No tags"
+              - generic [ref=f1e1051] [cursor=pointer]:
+                - checkbox [ref=f1e1053]
+                - generic "kube-node-lease" [ref=f1e1054]:
+                  - paragraph [ref=f1e1062]: kube-node-lease
+                - generic "Namespace storage is eligible for DR protection." [ref=f1e1065]: Supported
+                - generic "2 namespaced resources" [ref=f1e1070]:
+                  - generic [ref=f1e1071]:
+                    - 'button "Config ConfigMap: 1" [ref=f1e1072]':
+                      - strong [ref=f1e1085]: "1"
+                    - 'button "Access ServiceAccount: 1" [ref=f1e1086]':
+                      - strong [ref=f1e1090]: "1"
+                - generic [ref=f1e1091]:
+                  - generic "No tags"
+              - generic [ref=f1e1092] [cursor=pointer]:
+                - checkbox [ref=f1e1094]
+                - generic "kube-public" [ref=f1e1095]:
+                  - paragraph [ref=f1e1103]: kube-public
+                - generic "Namespace storage is eligible for DR protection." [ref=f1e1106]: Supported
+                - generic "7 namespaced resources" [ref=f1e1111]:
+                  - generic [ref=f1e1112]:
+                    - 'button "Config ConfigMap: 2" [ref=f1e1113]':
+                      - strong [ref=f1e1126]: "2"
+                    - 'button "Access Role: 2 RoleBinding: 2 ServiceAccount: 1" [ref=f1e1127]':
+                      - strong [ref=f1e1131]: "5"
+                - generic [ref=f1e1132]:
+                  - generic "No tags"
+              - generic [ref=f1e1133] [cursor=pointer]:
+                - checkbox [ref=f1e1135]
+                - generic "kube-system" [ref=f1e1136]:
+                  - paragraph [ref=f1e1144]: kube-system
+                - generic "Namespace storage is eligible for DR protection." [ref=f1e1147]: Supported
+                - generic "68 namespaced resources" [ref=f1e1152]:
+                  - generic [ref=f1e1153]:
+                    - 'button "Workloads DaemonSet: 2 Deployment: 2" [ref=f1e1154]':
+                      - strong [ref=f1e1165]: "4"
+                    - 'button "Network Service: 1" [ref=f1e1166]':
+                      - strong [ref=f1e1172]: "1"
+                    - 'button "Config ConfigMap: 7" [ref=f1e1173]':
+                      - strong [ref=f1e1186]: "7"
+                    - 'button "Access Role: 9 RoleBinding: 9 ServiceAccount: 38" [ref=f1e1187]':
+                      - strong [ref=f1e1191]: "56"
+                - generic [ref=f1e1192]:
+                  - generic "No tags"
+          - generic [ref=f1e1193]:
+            - generic [ref=f1e1194]:
+              - generic [ref=f1e1195]: 1-10 of 12
+              - generic [ref=f1e1196]: 0 selected
+            - generic [ref=f1e1197]:
+              - generic [ref=f1e1198]:
+                - text: Rows
+                - combobox "Rows" [ref=f1e1199]:
+                  - option "10" [selected]
+                  - option "20"
+                  - option "50"
+              - button "Prev" [disabled] [ref=f1e1200]
+              - generic [ref=f1e1201]: 1 / 2
+              - button "Next" [ref=f1e1202]

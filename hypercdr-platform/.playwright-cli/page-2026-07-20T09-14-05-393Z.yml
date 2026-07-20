@@ -1,0 +1,33 @@
+- generic [ref=e5]:
+  - generic "HyperCDR" [ref=e7]
+  - generic [ref=e16]:
+    - generic [ref=e17]: HyperCDR
+    - generic [ref=e18]: Container Disaster Recovery Platform
+    - generic [ref=e19]: "RECOVER FASTER: KEEP APPLICATIONS AVAILABLE"
+  - generic [ref=e20]:
+    - 'heading "Welcome to HyperCDR Language: English" [level=2] [ref=e21]':
+      - generic [ref=e22]: Welcome to HyperCDR
+      - 'button "Language: English" [ref=e23]'
+    - generic [ref=e28]:
+      - textbox [ref=e33]:
+        - /placeholder: Email Address
+        - text: admin
+      - generic [ref=e34]:
+        - textbox "Password" [ref=e38]
+        - button "Show password" [ref=e39] [cursor=pointer]
+    - generic "Verification code" [ref=e43]:
+      - textbox [ref=e48]:
+        - /placeholder: Verification Code
+      - button "Refresh verification code" [ref=e49] [cursor=pointer]:
+        - img "Verification code" [ref=e50]
+    - button "Sign In" [ref=e51]
+    - button "Forgot Password?" [ref=e53]
+    - generic [ref=e54]: or
+    - button "G Google sign-in unavailable" [disabled] [ref=e56]:
+      - generic [ref=e57]: G
+      - text: Google sign-in unavailable
+    - paragraph [ref=e58]: Configure Google OAuth to enable this option
+    - generic [ref=e59]:
+      - text: Do not have an account?
+      - button "Sign Up" [ref=e60]
+    - paragraph [ref=e61]: By continuing, you agree to our Terms and Privacy Policy.
