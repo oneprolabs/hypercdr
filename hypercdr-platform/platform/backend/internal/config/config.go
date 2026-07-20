@@ -48,7 +48,7 @@ func Load() Config {
 		ImageRegistry:            imageRegistry,
 		AgentNamespace:           getEnv("HCDR_AGENT_NAMESPACE", "hypercdr-agent"),
 		VeleroVersion:            getEnv("HCDR_VELERO_VERSION", "v1.17.1"),
-		VeleroImage:              getEnv("HCDR_VELERO_IMAGE", defaultImage(imageRegistry, "velero:v1.17.1-helperfix")),
+		VeleroImage:              getEnv("HCDR_VELERO_IMAGE", defaultImage(imageRegistry, "velero:v1.17.1-hcdr.1-20260716")),
 		VeleroAWSPlugin:          getEnv("HCDR_VELERO_AWS_PLUGIN_IMAGE", defaultImage(imageRegistry, "velero-plugin-for-aws:v1.13.0")),
 		RegistryCAPath:           getEnv("HCDR_REGISTRY_CA_PATH", "/data/harbor/cert/hypercdr-ca.crt"),
 		FrontendDir:              os.Getenv("HCDR_FRONTEND_DIR"),

@@ -242,11 +242,11 @@ func (s *PostgresStore) RegisterCluster(input RegisterClusterInput) (Cluster, st
 		clusterName = "registered-cluster"
 	}
 
-	var defaultCount int
-	if err := tx.QueryRow(`select count(*) from clusters where tenant_id = $1 and is_default = true`, DefaultTenantID).Scan(&defaultCount); err != nil {
+	var clusterCount int
+	if err := tx.QueryRow(`select count(*) from clusters where tenant_id = $1`, DefaultTenantID).Scan(&clusterCount); err != nil {
 		return Cluster{}, "", err
 	}
-	isFirstCluster := defaultCount == 0
+	isFirstCluster := clusterCount == 0
 
 	cluster := Cluster{
 		ID:               newID(),
@@ -482,12 +482,11 @@ func (s *PostgresStore) DeleteCluster(clusterID string) (bool, error) {
 	}
 	defer tx.Rollback()
 
-	var exists bool
-	if err := tx.QueryRow(`select exists(select 1 from clusters where id = $1)`, clusterID).Scan(&exists); err != nil {
-		return false, err
-	}
-	if !exists {
+	var exists, wasDefault bool
+	if err := tx.QueryRow(`select true, is_default from clusters where id = $1`, clusterID).Scan(&exists, &wasDefault); errors.Is(err, sql.ErrNoRows) {
 		return false, nil
+	} else if err != nil {
+		return false, err
 	}
 	if _, err := tx.Exec(`
 		update tasks
@@ -566,6 +565,20 @@ func (s *PostgresStore) DeleteCluster(clusterID string) (bool, error) {
 	}
 	if affected == 0 {
 		return false, nil
+	}
+	if wasDefault {
+		if _, err := tx.Exec(`
+			update clusters
+			set is_default = true, updated_at = now()
+			where id = (
+				select id from clusters
+				where tenant_id = $1
+				order by registered_at asc, id asc
+				limit 1
+			)
+		`, DefaultTenantID); err != nil {
+			return false, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return false, err
@@ -1191,12 +1204,20 @@ func (s *PostgresStore) ListPolicies() ([]Policy, error) {
 func (s *PostgresStore) CreateProtectionPlan(input ProtectionPlanInput) (ProtectionPlan, error) {
 	now := time.Now().UTC()
 	if input.ScopeType == "" {
-		input.ScopeType = "namespace"
+		input.ScopeType = "all"
 	}
 	if input.Status == "" {
 		input.Status = "active"
 	}
-	excludeRules, err := json.Marshal(input.ExcludeRules)
+	includedResources, err := json.Marshal(input.IncludedResources)
+	if err != nil {
+		return ProtectionPlan{}, err
+	}
+	labelSelector, err := json.Marshal(input.LabelSelector)
+	if err != nil {
+		return ProtectionPlan{}, err
+	}
+	excludedResources, err := json.Marshal(input.ExcludedResources)
 	if err != nil {
 		return ProtectionPlan{}, err
 	}
@@ -1224,12 +1245,13 @@ func (s *PostgresStore) CreateProtectionPlan(input ProtectionPlanInput) (Protect
 		AppID:                primary,
 		AppIDs:               appIDs,
 		ScopeType:            input.ScopeType,
+		IncludedResources:    input.IncludedResources,
 		LabelSelector:        input.LabelSelector,
 		IncludeClusterScoped: input.IncludeClusterScoped,
 		StorageRepoID:        input.StorageRepoID,
 		PolicyID:             input.PolicyID,
 		TargetClusterID:      input.TargetClusterID,
-		ExcludeRules:         input.ExcludeRules,
+		ExcludedResources:    input.ExcludedResources,
 		PreHooks:             input.PreHooks,
 		PostHooks:            input.PostHooks,
 		Status:               input.Status,
@@ -1243,15 +1265,15 @@ func (s *PostgresStore) CreateProtectionPlan(input ProtectionPlanInput) (Protect
 	defer tx.Rollback()
 	_, err = tx.Exec(`
 		insert into protection_plans (
-			id, tenant_id, source_cluster_id, app_id, scope_type, label_selector,
+			id, tenant_id, source_cluster_id, app_id, scope_type, included_resources, label_selector,
 			include_cluster_scoped, storage_repo_id, policy_id, target_cluster_id,
-			exclude_rules, pre_hooks, post_hooks, status, created_at, updated_at
+			excluded_resources, pre_hooks, post_hooks, status, created_at, updated_at
 		)
-		values ($1, $2, $3, $4, $5, $6, $7, nullif($8, '')::uuid, nullif($9, '')::uuid,
-			nullif($10, '')::uuid, $11, $12, $13, $14, $15, $15)
-	`, plan.ID, plan.TenantID, plan.SourceClusterID, plan.AppID, plan.ScopeType, plan.LabelSelector,
+		values ($1, $2, $3, $4, $5, $6, $7, $8, nullif($9, '')::uuid, nullif($10, '')::uuid,
+			nullif($11, '')::uuid, $12, $13, $14, $15, $16, $16)
+	`, plan.ID, plan.TenantID, plan.SourceClusterID, plan.AppID, plan.ScopeType, includedResources, labelSelector,
 		plan.IncludeClusterScoped, plan.StorageRepoID, plan.PolicyID, plan.TargetClusterID,
-		excludeRules, preHooks, postHooks, plan.Status, now)
+		excludedResources, preHooks, postHooks, plan.Status, now)
 	if err != nil {
 		return ProtectionPlan{}, err
 	}
@@ -1413,9 +1435,9 @@ func (s *PostgresStore) DisableProtectionPlanSchedule(planID string) error {
 
 func (s *PostgresStore) ListProtectionPlans(clusterID string) ([]ProtectionPlan, error) {
 	query := `
-		select pp.id, pp.tenant_id, pp.source_cluster_id, pp.app_id, pp.scope_type, coalesce(pp.label_selector, ''),
+		select pp.id, pp.tenant_id, pp.source_cluster_id, pp.app_id, pp.scope_type, pp.included_resources, pp.label_selector,
 		       pp.include_cluster_scoped, coalesce(pp.storage_repo_id::text, ''), coalesce(pp.policy_id::text, ''),
-		       coalesce(pp.target_cluster_id::text, ''), pp.exclude_rules, pp.pre_hooks, pp.post_hooks,
+		       coalesce(pp.target_cluster_id::text, ''), pp.excluded_resources, pp.pre_hooks, pp.post_hooks,
 		       pp.plan_storage_size, coalesce(pps.next_fire_at, '0001-01-01'::timestamptz), coalesce(pps.enabled, false),
 		       pp.status, pp.created_at, pp.updated_at
 		from protection_plans pp
@@ -1438,15 +1460,17 @@ func (s *PostgresStore) ListProtectionPlans(clusterID string) ([]ProtectionPlan,
 	planMap := map[string]*ProtectionPlan{}
 	for rows.Next() {
 		var item ProtectionPlan
-		var excludeRules, preHooks, postHooks, planStorageSize []byte
+		var includedResources, labelSelector, excludedResources, preHooks, postHooks, planStorageSize []byte
 		if err := rows.Scan(&item.ID, &item.TenantID, &item.SourceClusterID, &item.AppID, &item.ScopeType,
-			&item.LabelSelector, &item.IncludeClusterScoped, &item.StorageRepoID, &item.PolicyID,
-			&item.TargetClusterID, &excludeRules, &preHooks, &postHooks, &planStorageSize,
+			&includedResources, &labelSelector, &item.IncludeClusterScoped, &item.StorageRepoID, &item.PolicyID,
+			&item.TargetClusterID, &excludedResources, &preHooks, &postHooks, &planStorageSize,
 			&item.NextFireAt, &item.ScheduleEnabled, &item.Status,
 			&item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal(excludeRules, &item.ExcludeRules)
+		_ = json.Unmarshal(includedResources, &item.IncludedResources)
+		_ = json.Unmarshal(labelSelector, &item.LabelSelector)
+		_ = json.Unmarshal(excludedResources, &item.ExcludedResources)
 		_ = json.Unmarshal(preHooks, &item.PreHooks)
 		_ = json.Unmarshal(postHooks, &item.PostHooks)
 		_ = json.Unmarshal(planStorageSize, &item.PlanStorageSize)
@@ -1502,18 +1526,18 @@ func (s *PostgresStore) DeleteProtectionPlan(id string) (ProtectionPlan, bool, e
 	defer tx.Rollback()
 
 	var item ProtectionPlan
-	var excludeRules, preHooks, postHooks, planStorageSize []byte
+	var includedResources, labelSelector, excludedResources, preHooks, postHooks, planStorageSize []byte
 	err = tx.QueryRow(`
-		select id, tenant_id, source_cluster_id, app_id, scope_type, coalesce(label_selector, ''),
+		select id, tenant_id, source_cluster_id, app_id, scope_type, included_resources, label_selector,
 		       include_cluster_scoped, coalesce(storage_repo_id::text, ''), coalesce(policy_id::text, ''),
-		       coalesce(target_cluster_id::text, ''), exclude_rules, pre_hooks, post_hooks,
+		       coalesce(target_cluster_id::text, ''), excluded_resources, pre_hooks, post_hooks,
 		       plan_storage_size, status, created_at, updated_at
 		from protection_plans
 		where id = $1
 		for update
 	`, id).Scan(&item.ID, &item.TenantID, &item.SourceClusterID, &item.AppID, &item.ScopeType,
-		&item.LabelSelector, &item.IncludeClusterScoped, &item.StorageRepoID, &item.PolicyID,
-		&item.TargetClusterID, &excludeRules, &preHooks, &postHooks, &planStorageSize, &item.Status,
+		&includedResources, &labelSelector, &item.IncludeClusterScoped, &item.StorageRepoID, &item.PolicyID,
+		&item.TargetClusterID, &excludedResources, &preHooks, &postHooks, &planStorageSize, &item.Status,
 		&item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1521,7 +1545,9 @@ func (s *PostgresStore) DeleteProtectionPlan(id string) (ProtectionPlan, bool, e
 		}
 		return ProtectionPlan{}, false, err
 	}
-	_ = json.Unmarshal(excludeRules, &item.ExcludeRules)
+	_ = json.Unmarshal(includedResources, &item.IncludedResources)
+	_ = json.Unmarshal(labelSelector, &item.LabelSelector)
+	_ = json.Unmarshal(excludedResources, &item.ExcludedResources)
 	_ = json.Unmarshal(preHooks, &item.PreHooks)
 	_ = json.Unmarshal(postHooks, &item.PostHooks)
 	_ = json.Unmarshal(planStorageSize, &item.PlanStorageSize)
@@ -1593,18 +1619,18 @@ func (s *PostgresStore) CleanupProtectionPlanRecords(id string) (ProtectionPlan,
 	defer tx.Rollback()
 
 	var item ProtectionPlan
-	var excludeRules, preHooks, postHooks, planStorageSize []byte
+	var includedResources, labelSelector, excludedResources, preHooks, postHooks, planStorageSize []byte
 	err = tx.QueryRow(`
-		select id, tenant_id, source_cluster_id, app_id, scope_type, coalesce(label_selector, ''),
+		select id, tenant_id, source_cluster_id, app_id, scope_type, included_resources, label_selector,
 		       include_cluster_scoped, coalesce(storage_repo_id::text, ''), coalesce(policy_id::text, ''),
-		       coalesce(target_cluster_id::text, ''), exclude_rules, pre_hooks, post_hooks,
+		       coalesce(target_cluster_id::text, ''), excluded_resources, pre_hooks, post_hooks,
 		       plan_storage_size, status, created_at, updated_at
 		from protection_plans
 		where id = $1
 		for update
 	`, id).Scan(&item.ID, &item.TenantID, &item.SourceClusterID, &item.AppID, &item.ScopeType,
-		&item.LabelSelector, &item.IncludeClusterScoped, &item.StorageRepoID, &item.PolicyID,
-		&item.TargetClusterID, &excludeRules, &preHooks, &postHooks, &planStorageSize, &item.Status,
+		&includedResources, &labelSelector, &item.IncludeClusterScoped, &item.StorageRepoID, &item.PolicyID,
+		&item.TargetClusterID, &excludedResources, &preHooks, &postHooks, &planStorageSize, &item.Status,
 		&item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1612,7 +1638,9 @@ func (s *PostgresStore) CleanupProtectionPlanRecords(id string) (ProtectionPlan,
 		}
 		return ProtectionPlan{}, false, err
 	}
-	_ = json.Unmarshal(excludeRules, &item.ExcludeRules)
+	_ = json.Unmarshal(includedResources, &item.IncludedResources)
+	_ = json.Unmarshal(labelSelector, &item.LabelSelector)
+	_ = json.Unmarshal(excludedResources, &item.ExcludedResources)
 	_ = json.Unmarshal(preHooks, &item.PreHooks)
 	_ = json.Unmarshal(postHooks, &item.PostHooks)
 	_ = json.Unmarshal(planStorageSize, &item.PlanStorageSize)
@@ -2113,9 +2141,9 @@ func (s *PostgresStore) getTask(taskID string) (Task, bool, error) {
 
 func (s *PostgresStore) GetProtectionPlan(id string) (ProtectionPlan, bool, error) {
 	row := s.db.QueryRow(`
-		select pp.id, pp.tenant_id, pp.source_cluster_id, pp.app_id, pp.scope_type, coalesce(pp.label_selector, ''),
+		select pp.id, pp.tenant_id, pp.source_cluster_id, pp.app_id, pp.scope_type, pp.included_resources, pp.label_selector,
 		       pp.include_cluster_scoped, coalesce(pp.storage_repo_id::text, ''), coalesce(pp.policy_id::text, ''),
-		       coalesce(pp.target_cluster_id::text, ''), pp.exclude_rules, pp.pre_hooks, pp.post_hooks,
+		       coalesce(pp.target_cluster_id::text, ''), pp.excluded_resources, pp.pre_hooks, pp.post_hooks,
 		       pp.plan_storage_size, coalesce(pps.next_fire_at, '0001-01-01'::timestamptz), coalesce(pps.enabled, false),
 		       pp.status, pp.created_at, pp.updated_at
 		from protection_plans pp
@@ -2123,10 +2151,10 @@ func (s *PostgresStore) GetProtectionPlan(id string) (ProtectionPlan, bool, erro
 		where pp.id = $1
 	`, id)
 	var item ProtectionPlan
-	var excludeRules, preHooks, postHooks, planStorageSize []byte
+	var includedResources, labelSelector, excludedResources, preHooks, postHooks, planStorageSize []byte
 	if err := row.Scan(&item.ID, &item.TenantID, &item.SourceClusterID, &item.AppID, &item.ScopeType,
-		&item.LabelSelector, &item.IncludeClusterScoped, &item.StorageRepoID, &item.PolicyID,
-		&item.TargetClusterID, &excludeRules, &preHooks, &postHooks, &planStorageSize,
+		&includedResources, &labelSelector, &item.IncludeClusterScoped, &item.StorageRepoID, &item.PolicyID,
+		&item.TargetClusterID, &excludedResources, &preHooks, &postHooks, &planStorageSize,
 		&item.NextFireAt, &item.ScheduleEnabled, &item.Status,
 		&item.CreatedAt, &item.UpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -2134,7 +2162,9 @@ func (s *PostgresStore) GetProtectionPlan(id string) (ProtectionPlan, bool, erro
 		}
 		return ProtectionPlan{}, false, err
 	}
-	_ = json.Unmarshal(excludeRules, &item.ExcludeRules)
+	_ = json.Unmarshal(includedResources, &item.IncludedResources)
+	_ = json.Unmarshal(labelSelector, &item.LabelSelector)
+	_ = json.Unmarshal(excludedResources, &item.ExcludedResources)
 	_ = json.Unmarshal(preHooks, &item.PreHooks)
 	_ = json.Unmarshal(postHooks, &item.PostHooks)
 	_ = json.Unmarshal(planStorageSize, &item.PlanStorageSize)

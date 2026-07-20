@@ -45,3 +45,23 @@ func TestPodTerminalReadinessFailureAllowsOrdinaryStartup(t *testing.T) {
 		t.Fatalf("ordinary startup must remain retryable, got %q %q", code, message)
 	}
 }
+
+func TestPodTerminalReadinessFailureReportsCrashLoop(t *testing.T) {
+	object := map[string]any{
+		"metadata": map[string]any{"name": "demo-mysql"},
+		"status": map[string]any{"containerStatuses": []any{map[string]any{
+			"name": "mysql", "restartCount": int64(4),
+			"state":     map[string]any{"waiting": map[string]any{"reason": "CrashLoopBackOff"}},
+			"lastState": map[string]any{"terminated": map[string]any{"exitCode": int64(1), "reason": "Error"}},
+		}}},
+	}
+	code, message := podTerminalReadinessFailure(object)
+	if code != "RESTORE_WORKLOAD_CRASH_LOOP" {
+		t.Fatalf("unexpected code %q", code)
+	}
+	for _, expected := range []string{"demo-mysql", "mysql", "4 restarts", "exit code 1"} {
+		if !strings.Contains(message, expected) {
+			t.Fatalf("expected message to contain %q, got %q", expected, message)
+		}
+	}
+}

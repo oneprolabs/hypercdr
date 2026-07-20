@@ -278,10 +278,26 @@ func (s *MemoryStore) DeleteCluster(clusterID string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, ok := s.clusters[clusterID]; !ok {
+	removed, ok := s.clusters[clusterID]
+	if !ok {
 		return false, nil
 	}
 	delete(s.clusters, clusterID)
+	if removed.IsDefault {
+		var nextID string
+		var nextRegisteredAt time.Time
+		for id, cluster := range s.clusters {
+			if nextID == "" || cluster.RegisteredAt.Before(nextRegisteredAt) || (cluster.RegisteredAt.Equal(nextRegisteredAt) && id < nextID) {
+				nextID = id
+				nextRegisteredAt = cluster.RegisteredAt
+			}
+		}
+		if nextID != "" {
+			next := s.clusters[nextID]
+			next.IsDefault = true
+			s.clusters[nextID] = next
+		}
+	}
 	delete(s.credentials, clusterID)
 	for tokenKey, token := range s.tokens {
 		if token.ClusterID == clusterID {
@@ -653,7 +669,7 @@ func (s *MemoryStore) ListPolicies() ([]Policy, error) {
 func (s *MemoryStore) CreateProtectionPlan(input ProtectionPlanInput) (ProtectionPlan, error) {
 	now := time.Now().UTC()
 	if input.ScopeType == "" {
-		input.ScopeType = "namespace"
+		input.ScopeType = "all"
 	}
 	if input.Status == "" {
 		input.Status = "active"
@@ -673,12 +689,13 @@ func (s *MemoryStore) CreateProtectionPlan(input ProtectionPlanInput) (Protectio
 		AppID:                primary,
 		AppIDs:               appIDs,
 		ScopeType:            input.ScopeType,
+		IncludedResources:    input.IncludedResources,
 		LabelSelector:        input.LabelSelector,
 		IncludeClusterScoped: input.IncludeClusterScoped,
 		StorageRepoID:        input.StorageRepoID,
 		PolicyID:             input.PolicyID,
 		TargetClusterID:      input.TargetClusterID,
-		ExcludeRules:         input.ExcludeRules,
+		ExcludedResources:    input.ExcludedResources,
 		PreHooks:             input.PreHooks,
 		PostHooks:            input.PostHooks,
 		Status:               input.Status,

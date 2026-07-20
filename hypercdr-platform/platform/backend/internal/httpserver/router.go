@@ -90,16 +90,18 @@ func NewRouter(cfg config.Config, logger *slog.Logger, repo store.Store) http.Ha
 }
 
 type backupTaskRequest struct {
-	ClusterID        string           `json:"clusterId"`
-	AppID            string           `json:"appId"`
-	ProtectionPlanID string           `json:"protectionPlanId"`
-	SourceNamespace  string           `json:"sourceNamespace"`
-	SourceNamespaces []string         `json:"sourceNamespaces"`
-	Scope            string           `json:"scope"`
-	LabelSelector    string           `json:"labelSelector"`
-	StorageRepo      string           `json:"storageRepo"`
-	ExcludeRules     []map[string]any `json:"excludeRules"`
-	Trigger          string           `json:"trigger"`
+	ClusterID               string              `json:"clusterId"`
+	AppID                   string              `json:"appId"`
+	ProtectionPlanID        string              `json:"protectionPlanId"`
+	SourceNamespace         string              `json:"sourceNamespace"`
+	SourceNamespaces        []string            `json:"sourceNamespaces"`
+	Scope                   string              `json:"scope"`
+	IncludedResources       []string            `json:"includedResources"`
+	LabelSelector           store.LabelSelector `json:"labelSelector"`
+	StorageRepo             string              `json:"storageRepo"`
+	ExcludedResources       []string            `json:"excludedResources"`
+	IncludeClusterResources bool                `json:"includeClusterResources"`
+	Trigger                 string              `json:"trigger"`
 }
 
 func (r *Router) routes() {
@@ -2196,10 +2198,6 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 		if len(sourceNamespaces) == 0 && sourceNamespace != "" {
 			sourceNamespaces = []string{sourceNamespace}
 		}
-		excludeRules := append(
-			defaultExcludedResourcesForNamespaces(sourceNamespaces),
-			excludeRulesPayload(task.Payload)...,
-		)
 		payload.Backup = &protocol.BackupCommand{
 			PlanID:                  task.ProtectionPlanID,
 			Trigger:                 firstNonEmptyString(stringPayload(task.Payload, "trigger"), "manual"),
@@ -2208,10 +2206,11 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 			SourceNamespaces:        sourceNamespaces,
 			VeleroBackupName:        stringPayload(task.Payload, "veleroBackupName"),
 			Scope:                   stringPayload(task.Payload, "scope"),
-			LabelSelector:           stringPayload(task.Payload, "labelSelector"),
+			IncludedResources:       stringSlicePayload(task.Payload, "includedResources"),
+			LabelSelector:           protocolLabelSelector(labelSelectorPayload(task.Payload)),
 			StorageRepo:             stringPayload(task.Payload, "storageRepo"),
-			IncludeClusterResources: true,
-			ExcludeResources:        excludeRules,
+			IncludeClusterResources: boolPayload(task.Payload, "includeClusterResources"),
+			ExcludedResources:       stringSlicePayload(task.Payload, "excludedResources"),
 			Hooks:                   protocol.HookSet{},
 		}
 	case "backup-cancel":
@@ -2226,13 +2225,6 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 			VeleroBackupName: stringPayload(task.Payload, "veleroBackupName"),
 			Reason:           firstNonEmptyString(stringPayload(task.Payload, "reason"), "user_requested"),
 		}
-	case "schedule-sync":
-		command, err := r.scheduleSyncCommandFromPayload(task.Payload)
-		if err != nil {
-			return protocol.Message[protocol.TaskDispatchPayload]{}, err
-		}
-		payload.Deadline = time.Now().UTC().Add(10 * time.Minute)
-		payload.ScheduleSync = command
 	case "retention-cleanup":
 		command := retentionCleanupCommandFromPayload(task.Payload)
 		if len(command.RestorePoints) == 0 {
@@ -2348,6 +2340,32 @@ func stringSlicePayload(payload map[string]any, key string) []string {
 	return values
 }
 
+func labelSelectorPayload(payload map[string]any) store.LabelSelector {
+	raw, ok := payload["labelSelector"]
+	if !ok || raw == nil {
+		return store.LabelSelector{}
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return store.LabelSelector{}
+	}
+	var selector store.LabelSelector
+	if err := json.Unmarshal(data, &selector); err != nil {
+		return store.LabelSelector{}
+	}
+	return selector
+}
+
+func protocolLabelSelector(selector store.LabelSelector) protocol.LabelSelector {
+	expressions := make([]protocol.LabelSelectorExpression, 0, len(selector.MatchExpressions))
+	for _, expression := range selector.MatchExpressions {
+		expressions = append(expressions, protocol.LabelSelectorExpression{
+			Key: expression.Key, Operator: expression.Operator, Values: expression.Values,
+		})
+	}
+	return protocol.LabelSelector{MatchLabels: selector.MatchLabels, MatchExpressions: expressions}
+}
+
 func stringMapPayload(payload map[string]any, key string) map[string]string {
 	raw, ok := payload[key].(map[string]any)
 	if !ok {
@@ -2460,7 +2478,7 @@ func (r *Router) scheduleSyncCommandFromPayload(payload map[string]any) (*protoc
 		SourceNamespace:         sourceNamespace,
 		SourceNamespaces:        sourceNamespaces,
 		Scope:                   stringPayload(payload, "scope"),
-		LabelSelector:           stringPayload(payload, "labelSelector"),
+		LabelSelector:           "",
 		StorageRepo:             repoName,
 		IncludeClusterResources: boolPayload(payload, "includeClusterResources"),
 		ExcludeResources:        excludeRules,
@@ -2711,6 +2729,13 @@ func (r *Router) createProtectionPlan(w http.ResponseWriter, req *http.Request) 
 	}
 	if input.StorageRepoID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "storage_repository_required"})
+		return
+	}
+	if input.ScopeType == "" {
+		input.ScopeType = "all"
+	}
+	if input.ScopeType != "all" && input.ScopeType != "filtered" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_scope_type", "allowed": []string{"all", "filtered"}})
 		return
 	}
 	if input.AppID == "" && len(input.AppIDs) > 0 {
@@ -2977,12 +3002,13 @@ func protectionPlanActivationResponse(item store.ProtectionPlan, activationTask 
 		"appId":                item.AppID,
 		"appIds":               nonNilSlice(item.AppIDs),
 		"scopeType":            item.ScopeType,
+		"includedResources":    nonNilSlice(item.IncludedResources),
 		"labelSelector":        item.LabelSelector,
 		"includeClusterScoped": item.IncludeClusterScoped,
 		"storageRepoId":        item.StorageRepoID,
 		"policyId":             item.PolicyID,
 		"targetClusterId":      item.TargetClusterID,
-		"excludeRules":         nonNilSlice(item.ExcludeRules),
+		"excludedResources":    nonNilSlice(item.ExcludedResources),
 		"preHooks":             nonNilSlice(item.PreHooks),
 		"postHooks":            nonNilSlice(item.PostHooks),
 		"status":               item.Status,
@@ -3086,6 +3112,7 @@ func (r *Router) dispatchScheduleSyncTask(plan store.ProtectionPlan) (store.Task
 		"cron":                    cron,
 		"sourceNamespaces":        sourceNamespaces,
 		"scope":                   plan.ScopeType,
+		"includedResources":       plan.IncludedResources,
 		"labelSelector":           plan.LabelSelector,
 		"storageRepoId":           repo.ID,
 		"storageRepo":             storageName,
@@ -3093,7 +3120,7 @@ func (r *Router) dispatchScheduleSyncTask(plan store.ProtectionPlan) (store.Task
 		"sourceClusterId":         plan.SourceClusterID,
 		"objectPrefix":            storageDomainPrefix(plan.SourceClusterID),
 		"includeClusterResources": plan.IncludeClusterScoped,
-		"excludeRules":            plan.ExcludeRules,
+		"excludedResources":       plan.ExcludedResources,
 		"retentionCount":          policy.RetentionCount,
 	}
 	task, err := r.store.CreateTask(store.TaskInput{
@@ -3547,7 +3574,7 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if body.Scope == "" {
-		body.Scope = "namespace"
+		body.Scope = "all"
 	}
 	if body.StorageRepo == "" {
 		body.StorageRepo = "default"
@@ -3558,13 +3585,15 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 
 	// When a protection plan is provided, expand to one task per app on the plan.
 	type planApp struct {
-		appID         string
-		ns            string
-		storage       string
-		storageRepoID string
-		scope         string
-		labelSelector string
-		excludeRules  []map[string]any
+		appID                   string
+		ns                      string
+		storage                 string
+		storageRepoID           string
+		scope                   string
+		includedResources       []string
+		labelSelector           store.LabelSelector
+		excludedResources       []string
+		includeClusterResources bool
 	}
 	targets := []planApp{}
 	seen := map[string]struct{}{}
@@ -3620,8 +3649,10 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 			body.SourceNamespaces = sourceNamespaces
 			body.StorageRepo = storageName
 			body.Scope = plan.ScopeType
+			body.IncludedResources = plan.IncludedResources
 			body.LabelSelector = plan.LabelSelector
-			body.ExcludeRules = plan.ExcludeRules
+			body.ExcludedResources = plan.ExcludedResources
+			body.IncludeClusterResources = plan.IncludeClusterScoped
 			if existing, ok, err := r.findActiveBackupTask(body.ClusterID, body.ProtectionPlanID, "", ""); err != nil {
 				r.logger.Error("failed to check active plan backup task", "cluster_id", body.ClusterID, "protection_plan_id", body.ProtectionPlanID, "error", err)
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "check_active_backup_failed"})
@@ -3653,13 +3684,15 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 			}
 			seen[appID] = struct{}{}
 			targets = append(targets, planApp{
-				appID:         appID,
-				ns:            app.Namespace,
-				storage:       storageName,
-				storageRepoID: plan.StorageRepoID,
-				scope:         plan.ScopeType,
-				labelSelector: plan.LabelSelector,
-				excludeRules:  plan.ExcludeRules,
+				appID:                   appID,
+				ns:                      app.Namespace,
+				storage:                 storageName,
+				storageRepoID:           plan.StorageRepoID,
+				scope:                   plan.ScopeType,
+				includedResources:       plan.IncludedResources,
+				labelSelector:           plan.LabelSelector,
+				excludedResources:       plan.ExcludedResources,
+				includeClusterResources: plan.IncludeClusterScoped,
 			})
 		}
 	} else {
@@ -3703,13 +3736,15 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 			}
 			seen[app.ID] = struct{}{}
 			targets = append(targets, planApp{
-				appID:         app.ID,
-				ns:            app.Namespace,
-				storage:       storageName,
-				storageRepoID: plan.StorageRepoID,
-				scope:         plan.ScopeType,
-				labelSelector: plan.LabelSelector,
-				excludeRules:  plan.ExcludeRules,
+				appID:                   app.ID,
+				ns:                      app.Namespace,
+				storage:                 storageName,
+				storageRepoID:           plan.StorageRepoID,
+				scope:                   plan.ScopeType,
+				includedResources:       plan.IncludedResources,
+				labelSelector:           plan.LabelSelector,
+				excludedResources:       plan.ExcludedResources,
+				includeClusterResources: plan.IncludeClusterScoped,
 			})
 		}
 	}
@@ -3724,8 +3759,10 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 		body.SourceNamespace = tgt.ns
 		body.StorageRepo = tgt.storage
 		body.Scope = tgt.scope
+		body.IncludedResources = tgt.includedResources
 		body.LabelSelector = tgt.labelSelector
-		body.ExcludeRules = tgt.excludeRules
+		body.ExcludedResources = tgt.excludedResources
+		body.IncludeClusterResources = tgt.includeClusterResources
 		if existing, ok, err := r.findActiveBackupTask(body.ClusterID, body.ProtectionPlanID, tgt.appID, tgt.ns); err != nil {
 			r.logger.Error("failed to check active backup tasks", "cluster_id", body.ClusterID, "protection_plan_id", body.ProtectionPlanID, "namespace", tgt.ns, "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "check_active_backup_failed"})
@@ -3891,15 +3928,17 @@ func (r *Router) createPendingBackupTask(body backupTaskRequest, appID string) (
 		Status:           "queued",
 		CommandID:        commandID,
 		Payload: map[string]any{
-			"sourceNamespace":  body.SourceNamespace,
-			"sourceNamespaces": body.SourceNamespaces,
-			"scope":            body.Scope,
-			"labelSelector":    body.LabelSelector,
-			"storageRepo":      body.StorageRepo,
-			"excludeRules":     body.ExcludeRules,
-			"veleroBackupName": veleroBackupName,
-			"trigger":          body.Trigger,
-			"scheduled":        body.Trigger == "scheduled",
+			"sourceNamespace":         body.SourceNamespace,
+			"sourceNamespaces":        body.SourceNamespaces,
+			"scope":                   body.Scope,
+			"includedResources":       body.IncludedResources,
+			"labelSelector":           body.LabelSelector,
+			"storageRepo":             body.StorageRepo,
+			"excludedResources":       body.ExcludedResources,
+			"includeClusterResources": body.IncludeClusterResources,
+			"veleroBackupName":        veleroBackupName,
+			"trigger":                 body.Trigger,
+			"scheduled":               body.Trigger == "scheduled",
 		},
 	})
 	if err != nil {
@@ -4061,6 +4100,14 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 		}
 		if !ok {
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "restore_point_not_found"})
+			return
+		}
+		if !strings.EqualFold(strings.TrimSpace(point.Status), "available") {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":   "restore_point_not_available",
+				"message": "The selected restore point is no longer available. Refresh restore points and select an available recovery point.",
+				"status":  point.Status,
+			})
 			return
 		}
 		protectionPlanID = point.ProtectionPlanID
@@ -7925,6 +7972,101 @@ print_diagnostics() {
   kubectl -n "$NAMESPACE" get events --sort-by=.lastTimestamp | tail -n 30 >&2 || true
 }
 
+wait_timeout_seconds() {
+  if [[ "$WAIT_TIMEOUT" =~ ^([0-9]+)s$ ]]; then
+    echo "${BASH_REMATCH[1]}"
+  elif [[ "$WAIT_TIMEOUT" =~ ^([0-9]+)m$ ]]; then
+    echo $(( BASH_REMATCH[1] * 60 ))
+  else
+    echo 180
+  fi
+}
+
+print_retry_guidance() {
+  log_section "How to resolve and retry"
+  log_error "1. Correct the reported Kubernetes, storage, registry, or network problem."
+  log_error "2. Verify the control plane: kubectl get --raw='/readyz?verbose'"
+  log_error "3. Verify install resources: kubectl -n ${NAMESPACE} get pods,pvc"
+  log_error "4. If this cluster is already Online in HyperCDR, do not register it again."
+  log_error "5. Otherwise rerun this installer with --wait-timeout 600s."
+  log_error "6. If the token is expired or already used, generate a new registration command in HyperCDR before retrying."
+  log_error "The installer uses idempotent Kubernetes apply operations, so a partial installation can be retried after the underlying problem is fixed."
+}
+
+diagnose_rollout_failure() {
+  local workload_kind="$1"
+  local workload_name="$2"
+  local selector="$3"
+  local diagnostic_text=""
+
+  diagnostic_text="$(
+    kubectl -n "$NAMESPACE" describe "${workload_kind}/${workload_name}" 2>&1 || true
+    kubectl -n "$NAMESPACE" describe pods -l "$selector" 2>&1 || true
+    kubectl -n "$NAMESPACE" get events --sort-by=.lastTimestamp 2>&1 | tail -n 40 || true
+  )"
+
+  log_section "Installation failed"
+  if ! kubectl --request-timeout=5s get --raw='/readyz' >/dev/null 2>&1 || echo "$diagnostic_text" | grep -Eqi 'connection refused|Unable to connect to the server|etcdserver: request timed out'; then
+    log_error "Reason: the Kubernetes API server or etcd is unavailable or timing out."
+    log_error "Impact: nodes cannot read PVC or VolumeAttachment objects, so workloads cannot become Ready."
+  elif echo "$diagnostic_text" | grep -Eqi 'ErrImagePull|ImagePullBackOff|Failed to pull image|pull access denied|x509: certificate|unauthorized: authentication required'; then
+    log_error "Reason: a required container image could not be pulled."
+    log_error "Check registry reachability, credentials, CA trust, and whether the requested image tag exists."
+  elif echo "$diagnostic_text" | grep -Eqi 'FailedMount|FailedAttachVolume|WaitForAttach|Unable to attach or mount volumes'; then
+    log_error "Reason: a persistent volume could not be attached or mounted."
+    log_error "Check the PVC, StorageClass, CSI controller, VolumeAttachment, and node storage health."
+  elif echo "$diagnostic_text" | grep -Eqi 'unbound immediate PersistentVolumeClaims|ProvisioningFailed|no storage class is set|storageclass.*not found'; then
+    log_error "Reason: the installer PVC could not be provisioned."
+    log_error "Check that a default or selected StorageClass exists and its CSI provisioner is healthy."
+  elif echo "$diagnostic_text" | grep -Eqi 'CrashLoopBackOff|Back-off restarting failed container'; then
+    log_error "Reason: the workload container is repeatedly crashing."
+    log_error "Inspect its logs: kubectl -n ${NAMESPACE} logs -l ${selector} --all-containers --tail=100"
+  elif echo "$diagnostic_text" | grep -Eqi 'forbidden:|cannot (get|list|watch|create|update|patch|delete) resource'; then
+    log_error "Reason: Kubernetes RBAC denied an operation required by the installer."
+    log_error "Check the HyperCDR ServiceAccount, ClusterRole, and ClusterRoleBinding."
+  else
+    log_error "Reason: ${workload_kind}/${workload_name} did not become Ready within ${WAIT_TIMEOUT}."
+    log_error "Review the diagnostics below for scheduling, probe, runtime, or node errors."
+  fi
+  print_diagnostics
+  print_retry_guidance
+}
+
+wait_for_rollout() {
+  local workload_kind="$1"
+  local workload_name="$2"
+  local selector="$3"
+  local display_name="$4"
+  local timeout_seconds deadline next_update status_output pod_status pvc_status
+  timeout_seconds="$(wait_timeout_seconds)"
+  if ! [[ "$timeout_seconds" =~ ^[0-9]+$ ]]; then
+    timeout_seconds=180
+  fi
+  deadline=$((SECONDS + timeout_seconds))
+  next_update=$SECONDS
+  log_info "Waiting up to ${timeout_seconds}s for ${display_name} to become ready"
+  while [[ $SECONDS -lt $deadline ]]; do
+    if status_output="$(kubectl -n "$NAMESPACE" rollout status "${workload_kind}/${workload_name}" --timeout=2s 2>&1)"; then
+      log_ok "${display_name} is ready"
+      return 0
+    fi
+    if [[ $SECONDS -ge $next_update ]]; then
+      if ! kubectl --request-timeout=5s get --raw='/readyz' >/dev/null 2>&1; then
+        log_warn "${display_name}: Kubernetes API server is currently unavailable; waiting for recovery"
+      else
+        pod_status="$(kubectl -n "$NAMESPACE" get pods -l "$selector" --no-headers 2>/dev/null | awk '{print $1 "=" $2 "/" $3}' | paste -sd ', ' - || true)"
+        pvc_status="$(kubectl -n "$NAMESPACE" get pvc --no-headers 2>/dev/null | awk '{print $1 "=" $2}' | paste -sd ', ' - || true)"
+        log_info "${display_name}: ${pod_status:-no matching pod}; PVC: ${pvc_status:-none}"
+      fi
+      next_update=$((SECONDS + 15))
+    fi
+    sleep 3
+  done
+  log_error "${display_name} did not become ready within ${WAIT_TIMEOUT}"
+  diagnose_rollout_failure "$workload_kind" "$workload_name" "$selector"
+  return 1
+}
+
 wait_agent_registration() {
   local timeout_seconds="${WAIT_TIMEOUT%s}"
   if ! [[ "$timeout_seconds" =~ ^[0-9]+$ ]]; then
@@ -8386,7 +8528,7 @@ rules:
     verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["namespaces"]
-    verbs: ["delete"]
+    verbs: ["create", "delete"]
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get", "list", "watch", "create", "patch", "update"]
@@ -8512,8 +8654,7 @@ if [[ "$WAIT_READY" == "true" ]]; then
   log_section "Readiness"
   log_info "Waiting for HyperCDR workloads to become ready in namespace ${NAMESPACE}"
   if [[ "$INSTALL_VELERO" == "true" ]]; then
-    kubectl -n "$NAMESPACE" rollout status deployment/velero --timeout="$WAIT_TIMEOUT" || { log_error "Velero deployment did not become ready within ${WAIT_TIMEOUT}"; print_diagnostics; exit 1; }
-    log_ok "Velero deployment is ready"
+    wait_for_rollout deployment velero app.kubernetes.io/name=velero "Velero deployment" || exit 1
     aws_plugin_exit_code="$(kubectl -n "$NAMESPACE" get pod -l app.kubernetes.io/name=velero -o jsonpath='{.items[0].status.initContainerStatuses[?(@.name=="velero-plugin-for-aws")].state.terminated.exitCode}' 2>/dev/null || true)"
     if [[ "$aws_plugin_exit_code" != "0" ]]; then
       log_error "Velero AWS ObjectStore plugin was not installed successfully"
@@ -8521,11 +8662,9 @@ if [[ "$WAIT_READY" == "true" ]]; then
   return 1
     fi
     log_ok "Velero AWS ObjectStore plugin is installed"
-    kubectl -n "$NAMESPACE" rollout status daemonset/node-agent --timeout="$WAIT_TIMEOUT" || { log_error "Velero node-agent daemonset did not become ready within ${WAIT_TIMEOUT}"; print_diagnostics; exit 1; }
-    log_ok "Velero node-agent daemonset is ready"
+    wait_for_rollout daemonset node-agent app.kubernetes.io/name=velero-node-agent "Velero node-agent daemonset" || exit 1
   fi
-  kubectl -n "$NAMESPACE" rollout status deployment/hypercdr-comm-agent --timeout="$WAIT_TIMEOUT" || { log_error "comm-agent deployment did not become ready within ${WAIT_TIMEOUT}"; print_diagnostics; exit 1; }
-  log_ok "comm-agent deployment is ready"
+  wait_for_rollout deployment hypercdr-comm-agent app.kubernetes.io/name=hypercdr-comm-agent "comm-agent deployment" || exit 1
   if ! wait_agent_registration; then
     rollback_failed_registration
     exit 1

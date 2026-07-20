@@ -18,7 +18,7 @@ HCDR_BUILD_ROOT=/data/hypercdr/.build/platform
 HCDR_CACHE_ROOT=/data/hypercdr/.cache
 
 # Optional runtime images exposed by /install.sh. Defaults derive from HCDR_IMAGE_REGISTRY.
-# HCDR_VELERO_IMAGE=192.168.8.149:5001/hypercdr/velero:v1.17.1-helperfix
+# HCDR_VELERO_IMAGE=192.168.8.149:5001/hypercdr/velero:v1.17.1-hcdr.1-20260716
 # HCDR_VELERO_AWS_PLUGIN_IMAGE=192.168.8.149:5001/hypercdr/velero-plugin-for-aws:v1.13.0
 
 # Optional behavior defaults. CLI flags override these.

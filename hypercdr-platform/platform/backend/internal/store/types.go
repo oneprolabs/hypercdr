@@ -346,12 +346,13 @@ type ProtectionPlan struct {
 	AppID                string           `json:"appId"`
 	AppIDs               []string         `json:"appIds"`
 	ScopeType            string           `json:"scopeType"`
-	LabelSelector        string           `json:"labelSelector,omitempty"`
+	IncludedResources    []string         `json:"includedResources,omitempty"`
+	LabelSelector        LabelSelector    `json:"labelSelector,omitempty"`
 	IncludeClusterScoped bool             `json:"includeClusterScoped"`
 	StorageRepoID        string           `json:"storageRepoId,omitempty"`
 	PolicyID             string           `json:"policyId,omitempty"`
 	TargetClusterID      string           `json:"targetClusterId,omitempty"`
-	ExcludeRules         []map[string]any `json:"excludeRules,omitempty"`
+	ExcludedResources    []string         `json:"excludedResources,omitempty"`
 	PreHooks             []map[string]any `json:"preHooks,omitempty"`
 	PostHooks            []map[string]any `json:"postHooks,omitempty"`
 	PlanStorageSize      map[string]any   `json:"planStorageSize,omitempty"`
@@ -367,15 +368,27 @@ type ProtectionPlanInput struct {
 	AppID                string           `json:"appId"`
 	AppIDs               []string         `json:"appIds"`
 	ScopeType            string           `json:"scopeType"`
-	LabelSelector        string           `json:"labelSelector"`
+	IncludedResources    []string         `json:"includedResources"`
+	LabelSelector        LabelSelector    `json:"labelSelector"`
 	IncludeClusterScoped bool             `json:"includeClusterScoped"`
 	StorageRepoID        string           `json:"storageRepoId"`
 	PolicyID             string           `json:"policyId"`
 	TargetClusterID      string           `json:"targetClusterId"`
-	ExcludeRules         []map[string]any `json:"excludeRules"`
+	ExcludedResources    []string         `json:"excludedResources"`
 	PreHooks             []map[string]any `json:"preHooks"`
 	PostHooks            []map[string]any `json:"postHooks"`
 	Status               string           `json:"status"`
+}
+
+type LabelSelector struct {
+	MatchLabels      map[string]string         `json:"matchLabels,omitempty"`
+	MatchExpressions []LabelSelectorExpression `json:"matchExpressions,omitempty"`
+}
+
+type LabelSelectorExpression struct {
+	Key      string   `json:"key"`
+	Operator string   `json:"operator"`
+	Values   []string `json:"values,omitempty"`
 }
 
 type ProtectionPlanSchedule struct {

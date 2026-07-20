@@ -9,16 +9,11 @@ import (
 
 func TestBuildBackupManifestPopulatesExcludedResourcesFromCommand(t *testing.T) {
 	cmd := protocol.BackupCommand{
-		SourceNamespace: "kasten-io",
-		StorageRepo:     "my-minio",
-		ExcludeResources: []protocol.ExcludeRule{
-			{Group: "actions.kio.kasten.io", Resource: "runactions"},
-			{Group: "config.kio.kasten.io", Resource: "policies"},
-			{Group: "core", Resource: "configmaps"},
-			{Group: "", Resource: "secrets"},
-			{Group: "config.kio.kasten.io", Resource: "policies"}, // dup
-			{Group: "config.kio.kasten.io", Resource: ""},         // empty resource skipped
-		},
+		SourceNamespace:   "kasten-io",
+		StorageRepo:       "my-minio",
+		IncludedResources: []string{"deployments.apps", "services"},
+		LabelSelector:     protocol.LabelSelector{MatchLabels: map[string]string{"app": "demo"}},
+		ExcludedResources: []string{"configmaps", "secrets"},
 	}
 	manifest, err := BuildBackupManifest(BackupBuildInput{
 		TaskID:         "task-1",
@@ -35,14 +30,15 @@ func TestBuildBackupManifestPopulatesExcludedResourcesFromCommand(t *testing.T) 
 	if manifest.Spec.DefaultVolumesToFsBackup == nil || !*manifest.Spec.DefaultVolumesToFsBackup {
 		t.Errorf("DefaultVolumesToFsBackup should be true for kasten-io style workloads")
 	}
-	wantExcluded := []string{
-		"actions.kio.kasten.io/runactions",
-		"config.kio.kasten.io/policies",
-		"configmaps",
-		"secrets",
-	}
+	wantExcluded := []string{"configmaps", "secrets"}
 	if len(manifest.Spec.ExcludedResources) != len(wantExcluded) {
 		t.Fatalf("ExcludedResources = %v, want %v", manifest.Spec.ExcludedResources, wantExcluded)
+	}
+	if len(manifest.Spec.IncludedResources) != 2 || manifest.Spec.IncludedResources[0] != "deployments.apps" {
+		t.Fatalf("IncludedResources = %v", manifest.Spec.IncludedResources)
+	}
+	if manifest.Spec.LabelSelector == nil || manifest.Spec.LabelSelector.MatchLabels["app"] != "demo" {
+		t.Fatalf("LabelSelector = %#v", manifest.Spec.LabelSelector)
 	}
 	for i, want := range wantExcluded {
 		if manifest.Spec.ExcludedResources[i] != want {

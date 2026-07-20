@@ -8,6 +8,23 @@ import (
 	"hypercdr-platform/agent/comm-agent/pkg/protocol"
 )
 
+// parseLegacyScheduleLabelSelector is retained only while the obsolete
+// schedule-sync path is being removed. Platform-managed backups use the
+// structured selector on BackupCommand.
+func parseLegacyScheduleLabelSelector(selector string) *protocol.LabelSelector {
+	labels := map[string]string{}
+	for _, part := range strings.Split(selector, ",") {
+		key, value, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if ok && strings.TrimSpace(key) != "" && strings.TrimSpace(value) != "" {
+			labels[strings.TrimSpace(key)] = strings.TrimSpace(value)
+		}
+	}
+	if len(labels) == 0 {
+		return nil
+	}
+	return &protocol.LabelSelector{MatchLabels: labels}
+}
+
 type ScheduleManifest struct {
 	APIVersion string               `json:"apiVersion"`
 	Kind       string               `json:"kind"`
@@ -85,7 +102,7 @@ func BuildScheduleManifest(input ScheduleBuildInput) (ScheduleManifest, error) {
 		ExcludedResources:        convertExcludeRules(input.Command.ExcludeResources),
 	}
 	if input.Command.LabelSelector != "" {
-		template.LabelSelector = parseSimpleLabelSelector(input.Command.LabelSelector)
+		template.LabelSelector = parseLegacyScheduleLabelSelector(input.Command.LabelSelector)
 	}
 	return ScheduleManifest{
 		APIVersion: "velero.io/v1",

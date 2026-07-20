@@ -447,8 +447,6 @@ func (c *Client) executeTask(task protocol.TaskDispatchPayload) {
 		c.executeRestoreTask(task)
 	case "storage-sync":
 		c.executeStorageSyncTask(task)
-	case "schedule-sync":
-		c.executeScheduleSyncTask(task)
 	case "retention-cleanup":
 		c.executeRetentionCleanupTask(task)
 	case "protection-cleanup":
@@ -998,51 +996,6 @@ func (c *Client) executeStorageSyncTask(task protocol.TaskDispatchPayload) {
 	}
 }
 
-func (c *Client) executeScheduleSyncTask(task protocol.TaskDispatchPayload) {
-	if task.ScheduleSync == nil {
-		_ = c.sendTaskFailed(task, "SCHEDULE_SYNC_COMMAND_INVALID", "schedule sync command is required")
-		return
-	}
-	if err := c.waitForBackupStorageLocation(context.Background(), task.ScheduleSync.StorageRepo, 2*time.Minute); err != nil {
-		_ = c.sendTaskFailedWithDetails(task, "BSL_NOT_READY", err.Error(), map[string]any{
-			"storageRepo": task.ScheduleSync.StorageRepo,
-		})
-		return
-	}
-	if c.applier == nil {
-		_ = c.sendTaskFailed(task, "SCHEDULE_APPLIER_UNAVAILABLE", "kubernetes manifest applier is not configured")
-		return
-	}
-	manifest, err := velero.BuildScheduleManifest(velero.ScheduleBuildInput{
-		TaskID:          task.TaskID,
-		CommandID:       task.CommandID,
-		SourceClusterID: c.cfg.ClusterID,
-		AgentNamespace:  c.cfg.Namespace,
-		Command:         *task.ScheduleSync,
-	})
-	if err != nil {
-		_ = c.sendTaskFailed(task, "SCHEDULE_MANIFEST_INVALID", err.Error())
-		return
-	}
-	c.markScheduleContext(task)
-	if err := c.sendTaskAccepted(task); err != nil {
-		c.logger.Error("failed to send task accepted", "task_id", task.TaskID, "error", err)
-		return
-	}
-	raw, err := kube.ManifestFromStruct(manifest)
-	if err != nil {
-		_ = c.sendTaskFailed(task, "SCHEDULE_MANIFEST_INVALID", err.Error())
-		return
-	}
-	if _, err := c.applier.ApplyManifest(context.Background(), raw); err != nil {
-		_ = c.sendTaskFailed(task, "SCHEDULE_APPLY_FAILED", err.Error())
-		return
-	}
-	if err := c.sendTaskCompleted(task, scheduleVeleroPayload(manifest, true), "velero schedule configured"); err != nil {
-		c.logger.Error("failed to send schedule sync completed", "task_id", task.TaskID, "error", err)
-	}
-}
-
 func (c *Client) executeRetentionCleanupTask(task protocol.TaskDispatchPayload) {
 	if task.RetentionCleanup == nil {
 		_ = c.sendTaskFailed(task, "RETENTION_CLEANUP_COMMAND_INVALID", "retention cleanup command is required")
@@ -1524,7 +1477,7 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, b
 	}
 	startPayload := cloneVeleroPayload(basePayload)
 	startPayload["readinessStage"] = "started"
-	if err := c.sendTaskProgress(task, startPayload, 100, "Resource and volume data restoration completed; restored application readiness validation started."); err != nil {
+	if err := c.sendTaskProgress(task, startPayload, 95, "Resource and volume data restoration completed; restored application readiness validation started."); err != nil {
 		c.logger.Error("failed to send restore readiness start event", "task_id", task.TaskID, "error", err)
 		return
 	}
@@ -1539,7 +1492,7 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, b
 			}
 			if readiness.Ready {
 				payload["readinessStage"] = "succeeded"
-				if err := c.sendTaskProgress(task, payload, 100, "Restored application readiness validation completed successfully."); err != nil {
+				if err := c.sendTaskProgress(task, payload, 99, "Restored application readiness validation completed successfully."); err != nil {
 					c.logger.Error("failed to send restore readiness success event", "task_id", task.TaskID, "error", err)
 					return
 				}
@@ -1552,7 +1505,7 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, b
 				_ = c.sendTaskFailedWithDetails(task, "RESTORE_READINESS_TIMEOUT", "timed out waiting for restored application readiness", map[string]any{"velero": payload})
 				return
 			}
-			if err := c.sendTaskProgress(task, payload, 100, restoreReadinessProgressMessage(readiness)); err != nil {
+			if err := c.sendTaskProgress(task, payload, 95, restoreReadinessProgressMessage(readiness)); err != nil {
 				c.logger.Error("failed to send restore readiness progress", "task_id", task.TaskID, "error", err)
 				return
 			}
@@ -2343,21 +2296,6 @@ func (c *Client) markBackupContext(task protocol.TaskDispatchPayload) {
 	_ = c.ledger.remember(task.TaskID, task.CommandID, backupTaskPlanID(task))
 }
 
-func (c *Client) markScheduleContext(task protocol.TaskDispatchPayload) {
-	c.backupContextMu.Lock()
-	defer c.backupContextMu.Unlock()
-	if task.TaskID != "" {
-		c.backupTaskIDs[task.TaskID] = struct{}{}
-	}
-	if task.CommandID != "" {
-		c.backupCommandIDs[task.CommandID] = struct{}{}
-	}
-	if task.ScheduleSync != nil && strings.TrimSpace(task.ScheduleSync.PlanID) != "" {
-		c.backupPlanIDs[strings.TrimSpace(task.ScheduleSync.PlanID)] = struct{}{}
-	}
-	_ = c.ledger.remember(task.TaskID, task.CommandID, backupTaskPlanID(task))
-}
-
 func (c *Client) shouldReportVeleroBackup(backup kube.VeleroBackupSummary) bool {
 	labels := backup.Labels
 	if !c.labelsBelongToSourceCluster(labels) {
@@ -2404,9 +2342,6 @@ func (c *Client) labelsBelongToSourceCluster(labels map[string]string) bool {
 func backupTaskPlanID(task protocol.TaskDispatchPayload) string {
 	if task.Backup != nil {
 		return strings.TrimSpace(task.Backup.PlanID)
-	}
-	if task.ScheduleSync != nil {
-		return strings.TrimSpace(task.ScheduleSync.PlanID)
 	}
 	return ""
 }
@@ -2780,14 +2715,6 @@ func restoreVeleroPayload(manifest velero.RestoreManifest, includeManifest bool)
 }
 
 func storageVeleroPayload(manifest velero.BackupStorageLocationManifest, includeManifest bool) map[string]any {
-	payload := manifestPayload(manifest.Kind, manifest.Metadata.Name, manifest.Metadata.Namespace)
-	if includeManifest {
-		payload["manifest"] = manifest
-	}
-	return payload
-}
-
-func scheduleVeleroPayload(manifest velero.ScheduleManifest, includeManifest bool) map[string]any {
 	payload := manifestPayload(manifest.Kind, manifest.Metadata.Name, manifest.Metadata.Namespace)
 	if includeManifest {
 		payload["manifest"] = manifest

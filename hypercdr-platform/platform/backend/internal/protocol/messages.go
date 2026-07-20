@@ -324,11 +324,23 @@ type BackupCommand struct {
 	SourceNamespaces        []string      `json:"sourceNamespaces,omitempty"`
 	VeleroBackupName        string        `json:"veleroBackupName,omitempty"`
 	Scope                   string        `json:"scope"`
-	LabelSelector           string        `json:"labelSelector,omitempty"`
+	IncludedResources       []string      `json:"includedResources,omitempty"`
+	LabelSelector           LabelSelector `json:"labelSelector,omitempty"`
 	StorageRepo             string        `json:"storageRepo"`
 	IncludeClusterResources bool          `json:"includeClusterResources"`
-	ExcludeResources        []ExcludeRule `json:"excludeResources"`
+	ExcludedResources       []string      `json:"excludedResources,omitempty"`
 	Hooks                   HookSet       `json:"hooks"`
+}
+
+type LabelSelector struct {
+	MatchLabels      map[string]string         `json:"matchLabels,omitempty"`
+	MatchExpressions []LabelSelectorExpression `json:"matchExpressions,omitempty"`
+}
+
+type LabelSelectorExpression struct {
+	Key      string   `json:"key"`
+	Operator string   `json:"operator"`
+	Values   []string `json:"values,omitempty"`
 }
 
 type BackupCancelCommand struct {

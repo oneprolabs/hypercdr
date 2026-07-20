@@ -66,10 +66,14 @@ ENV CGO_ENABLED=0 \
     GOARM=${TARGETVARIANT}
 
 COPY . /go/src/github.com/vmware-tanzu/velero
+COPY --from=restic-source / /restic
 
 RUN mkdir -p /output/usr/bin && \
     export GOARM=$(echo "${GOARM}" | cut -c2-) && \
-    /go/src/github.com/vmware-tanzu/velero/hack/build-restic.sh && \
+    cd /restic && \
+    git apply /go/src/github.com/vmware-tanzu/velero/hack/fix_restic_cve.txt && \
+    go run build.go --goos "${GOOS}" --goarch "${GOARCH}" --goarm "${GOARM}" -o /output/usr/bin/restic && \
+    chmod +x /output/usr/bin/restic && \
     go clean -modcache -cache
 
 # Velero image packing section
@@ -82,4 +86,3 @@ COPY --from=velero-builder /output /
 COPY --from=restic-builder /output /
 
 USER cnb:cnb
-

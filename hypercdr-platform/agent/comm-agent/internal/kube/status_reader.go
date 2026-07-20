@@ -490,6 +490,22 @@ func podTerminalReadinessFailure(object map[string]any) (string, string) {
 					message += ": " + detail
 				}
 				return "RESTORE_WORKLOAD_IMAGE_PULL_FAILED", message
+			case "CrashLoopBackOff":
+				if intField(status, "restartCount") < 3 {
+					continue
+				}
+				containerName := stringField(status, "name")
+				terminated, _, _ := unstructured.NestedMap(status, "lastState", "terminated")
+				exitCode := intField(terminated, "exitCode")
+				detail := firstStringField(terminated, "message", "reason")
+				message := fmt.Sprintf("restored pod %s container %s is crash looping after %d restarts", podName, containerName, intField(status, "restartCount"))
+				if exitCode != 0 {
+					message += fmt.Sprintf(" (last exit code %d)", exitCode)
+				}
+				if detail != "" {
+					message += ": " + detail
+				}
+				return "RESTORE_WORKLOAD_CRASH_LOOP", message
 			}
 		}
 	}

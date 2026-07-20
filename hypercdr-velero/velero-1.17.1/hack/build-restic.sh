@@ -23,6 +23,7 @@ set -o pipefail
 output_dir=${OUTPUT_DIR:-/output/usr/bin}
 restic_bin=${output_dir}/restic
 build_path=$(dirname "$PWD")
+restic_git_url=${RESTIC_GIT_URL:-https://github.com/restic/restic.git}
 
 if [[ -z "${BIN}" ]]; then
     echo "BIN must be set"
@@ -47,8 +48,17 @@ if [[ -z "${RESTIC_VERSION}" ]]; then
     exit 1
 fi
 
-mkdir ${build_path}/restic
-git clone -b v${RESTIC_VERSION} https://github.com/restic/restic.git ${build_path}/restic
+for attempt in 1 2 3; do
+    rm -rf "${build_path}/restic"
+    if git clone --depth 1 -b "v${RESTIC_VERSION}" "${restic_git_url}" "${build_path}/restic"; then
+        break
+    fi
+    if [[ "${attempt}" == "3" ]]; then
+        echo "Failed to clone restic after ${attempt} attempts" >&2
+        exit 1
+    fi
+    sleep $((attempt * 2))
+done
 pushd ${build_path}/restic
 git apply /go/src/github.com/vmware-tanzu/velero/hack/fix_restic_cve.txt
 go run build.go --goos "${GOOS}" --goarch "${GOARCH}" --goarm "${GOARM}" -o ${restic_bin}

@@ -1,5 +1,5 @@
 # source-image target-repository target-tag
 hypercdr/platform-api:dev platform-api dev
 hypercdr/comm-agent:dev comm-agent dev
-hypercdr/velero:v1.17.1-helperfix velero v1.17.1-helperfix
+192.168.8.149:5001/hypercdr/velero:v1.17.1-hcdr.1-20260716 velero v1.17.1-hcdr.1-20260716
 hypercdr/postgres:16 postgres 16

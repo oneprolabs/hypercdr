@@ -28,9 +28,10 @@ type ManifestMetadata struct {
 type BackupManifestSpec struct {
 	Metadata                 *BackupTemplateMetadata `json:"metadata,omitempty"`
 	IncludedNamespaces       []string                `json:"includedNamespaces"`
+	IncludedResources        []string                `json:"includedResources,omitempty"`
 	ExcludedNamespaces       []string                `json:"excludedNamespaces,omitempty"`
 	ExcludedResources        []string                `json:"excludedResources,omitempty"`
-	LabelSelector            map[string]string       `json:"labelSelector,omitempty"`
+	LabelSelector            *protocol.LabelSelector `json:"labelSelector,omitempty"`
 	StorageLocation          string                  `json:"storageLocation,omitempty"`
 	IncludeClusterResources  bool                    `json:"includeClusterResources"`
 	SnapshotVolumes          *bool                   `json:"snapshotVolumes,omitempty"`
@@ -86,15 +87,17 @@ func BuildBackupManifest(input BackupBuildInput) (BackupManifest, error) {
 		},
 		Spec: BackupManifestSpec{
 			IncludedNamespaces:       sourceNamespaces,
+			IncludedResources:        input.Command.IncludedResources,
 			StorageLocation:          input.Command.StorageRepo,
 			IncludeClusterResources:  input.Command.IncludeClusterResources,
 			SnapshotVolumes:          boolPtr(false),
 			DefaultVolumesToFsBackup: boolPtr(true),
-			ExcludedResources:        convertExcludeRules(input.Command.ExcludeResources),
+			ExcludedResources:        input.Command.ExcludedResources,
 		},
 	}
-	if input.Command.LabelSelector != "" {
-		manifest.Spec.LabelSelector = parseSimpleLabelSelector(input.Command.LabelSelector)
+	if len(input.Command.LabelSelector.MatchLabels) > 0 || len(input.Command.LabelSelector.MatchExpressions) > 0 {
+		selector := input.Command.LabelSelector
+		manifest.Spec.LabelSelector = &selector
 	}
 	if input.Command.PlanID != "" {
 		manifest.Metadata.Labels["hypercdr.io/plan-id"] = input.Command.PlanID
@@ -180,25 +183,4 @@ func sanitizeName(value string) string {
 		return "backup"
 	}
 	return value
-}
-
-func parseSimpleLabelSelector(selector string) map[string]string {
-	labels := map[string]string{}
-	parts := strings.Split(selector, ",")
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" || strings.Contains(part, "!=") {
-			continue
-		}
-		key, value, ok := strings.Cut(part, "=")
-		if !ok {
-			continue
-		}
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		if key != "" && value != "" {
-			labels[key] = value
-		}
-	}
-	return labels
 }

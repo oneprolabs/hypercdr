@@ -23,7 +23,7 @@ func TestKubernetesBackupExecutorAppliesVeleroBackup(t *testing.T) {
 		Deadline:  time.Now().Add(time.Minute),
 		Backup: &protocol.BackupCommand{
 			SourceNamespace: "default",
-			LabelSelector:   "app=demo",
+			LabelSelector:   protocol.LabelSelector{MatchLabels: map[string]string{"app": "demo"}},
 			StorageRepo:     "default",
 		},
 	}

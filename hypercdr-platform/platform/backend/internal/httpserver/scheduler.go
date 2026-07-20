@@ -133,16 +133,17 @@ func (r *Router) createScheduledBackupTask(plan store.ProtectionPlan, policy sto
 	}
 	storageName := storageDomainBSLName(repo, plan.SourceClusterID)
 	request := backupTaskRequest{
-		ClusterID:        plan.SourceClusterID,
-		AppID:            firstStringFromStrings(appIDs),
-		ProtectionPlanID: plan.ID,
-		SourceNamespace:  firstStringFromStrings(sourceNamespaces),
-		SourceNamespaces: sourceNamespaces,
-		Scope:            plan.ScopeType,
-		LabelSelector:    plan.LabelSelector,
-		StorageRepo:      storageName,
-		ExcludeRules:     plan.ExcludeRules,
-		Trigger:          "scheduled",
+		ClusterID:         plan.SourceClusterID,
+		AppID:             firstStringFromStrings(appIDs),
+		ProtectionPlanID:  plan.ID,
+		SourceNamespace:   firstStringFromStrings(sourceNamespaces),
+		SourceNamespaces:  sourceNamespaces,
+		Scope:             plan.ScopeType,
+		IncludedResources: plan.IncludedResources,
+		LabelSelector:     plan.LabelSelector,
+		StorageRepo:       storageName,
+		ExcludedResources: plan.ExcludedResources,
+		Trigger:           "scheduled",
 	}
 	task, err := r.createPendingBackupTask(request, request.AppID)
 	if err != nil {

@@ -170,7 +170,7 @@ func TestSchedulerCreatesSingleBackupTaskPerPlan(t *testing.T) {
 	}
 	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{
 		SourceClusterID: clusterID, AppID: app.ID, AppIDs: []string{app.ID}, StorageRepoID: storage.ID,
-		PolicyID: policy.ID, ScopeType: "namespace", Status: "active",
+		PolicyID: policy.ID, ScopeType: "all", Status: "active",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -351,7 +351,7 @@ func TestCreateBackupTaskRequiresProtectionPlan(t *testing.T) {
 		"sourceNamespace": "demo-mysql-csi",
 		"scope":           "namespace",
 		"storageRepo":     "default",
-		"labelSelector":   "",
+		"labelSelector":   map[string]any{},
 	})
 	defer resp.Body.Close()
 
@@ -377,7 +377,7 @@ func TestCreateBackupTaskResolvesProtectionPlanForApp(t *testing.T) {
 	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{
 		SourceClusterID: clusterID,
 		AppIDs:          []string{appID},
-		ScopeType:       "namespace",
+		ScopeType:       "all",
 		Status:          "active",
 	})
 	if err != nil {
@@ -390,7 +390,7 @@ func TestCreateBackupTaskResolvesProtectionPlanForApp(t *testing.T) {
 		"sourceNamespace": "demo-mysql-csi",
 		"scope":           "namespace",
 		"storageRepo":     "default",
-		"labelSelector":   "",
+		"labelSelector":   map[string]any{},
 	})
 	defer resp.Body.Close()
 
@@ -677,6 +677,12 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 		"value: \"true\"",
 		"download_url \"$VELERO_CRDS_URL\" \"$crds_file\"",
 		"kubectl_retry kubectl apply -f \"$crds_file\"",
+		"wait_for_rollout deployment hypercdr-comm-agent",
+		"Kubernetes API server is currently unavailable; waiting for recovery",
+		"Reason: a persistent volume could not be attached or mounted.",
+		"Reason: a required container image could not be pulled.",
+		"If this cluster is already Online in HyperCDR, do not register it again.",
+		"generate a new registration command in HyperCDR before retrying",
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("expected install script to contain %q", expected)

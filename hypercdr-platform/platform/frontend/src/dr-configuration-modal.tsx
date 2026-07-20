@@ -94,6 +94,13 @@ type ProtectConfig = {
   labels: string;
   labelConditions: LabelCondition[];
   includeRules: ExcludeRule[];
+  includedResources: string[];
+  includeAllResources: boolean;
+  labelSelector: {
+    matchLabels: Record<string, string>;
+    matchExpressions: Array<{ key: string; operator: string; values: string[] }>;
+  };
+  excludedResources: string[];
   storageType: string;
   storageId: string;
   policy: string;
@@ -152,37 +159,37 @@ const SCOPE_OPTIONS = [
 ];
 
 const RESOURCE_OPTIONS = [
-  'deployments',
-  'statefulsets',
-  'daemonsets',
-  'replicasets',
-  'jobs',
-  'cronjobs',
+  'deployments.apps',
+  'statefulsets.apps',
+  'daemonsets.apps',
+  'replicasets.apps',
+  'jobs.batch',
+  'cronjobs.batch',
   'services',
-  'ingresses',
-  'networkpolicies',
+  'ingresses.networking.k8s.io',
+  'networkpolicies.networking.k8s.io',
   'configmaps',
   'secrets',
   'serviceaccounts',
-  'roles',
-  'rolebindings',
+  'roles.rbac.authorization.k8s.io',
+  'rolebindings.rbac.authorization.k8s.io',
   'persistentvolumeclaims',
 ];
 const RESOURCE_KIND_ALIASES: Record<string, string> = {
-  deployments: 'deployment',
-  statefulsets: 'statefulset',
-  daemonsets: 'daemonset',
-  replicasets: 'replicaset',
-  jobs: 'job',
-  cronjobs: 'cronjob',
+  'deployments.apps': 'deployment',
+  'statefulsets.apps': 'statefulset',
+  'daemonsets.apps': 'daemonset',
+  'replicasets.apps': 'replicaset',
+  'jobs.batch': 'job',
+  'cronjobs.batch': 'cronjob',
   services: 'service',
-  ingresses: 'ingress',
-  networkpolicies: 'networkpolicy',
+  'ingresses.networking.k8s.io': 'ingress',
+  'networkpolicies.networking.k8s.io': 'networkpolicy',
   configmaps: 'configmap',
   secrets: 'secret',
   serviceaccounts: 'serviceaccount',
-  roles: 'role',
-  rolebindings: 'rolebinding',
+  'roles.rbac.authorization.k8s.io': 'role',
+  'rolebindings.rbac.authorization.k8s.io': 'rolebinding',
   persistentvolumeclaims: 'persistentvolumeclaim',
 };
 const LABEL_OPERATORS: LabelOperator[] = ['Equals', 'Not Equals'];
@@ -323,6 +330,7 @@ export function DrConfigurationModal(props: Props) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [includeFilterOpen, setIncludeFilterOpen] = useState(false);
   const [editingIncludeIndex, setEditingIncludeIndex] = useState<number | null>(null);
+  const [includeFilterType, setIncludeFilterType] = useState<'resource' | 'label'>('resource');
   const [newIncludeRule, setNewIncludeRule] = useState<ExcludeRule>({ group: '', resource: '', name: '', version: '', labels: '' });
   const headerSummary = targetCount === 1
     ? `Namespace: ${targetNames[0] || targetSummary}`
@@ -344,7 +352,8 @@ export function DrConfigurationModal(props: Props) {
     setProtectConfig(prev => ({ ...prev, scope: 'all' }));
   }, [multiNamespaceFilterDisabled, protectConfig.scope, setProtectConfig]);
 
-  const canSave = Boolean(protectConfig.storageId && (protectConfig.targetCluster || targetClusterOptions.length === 0));
+  const resourceSelectionValid = protectConfig.scope !== 'filter' || protectConfig.includeAllResources || protectConfig.includedResources.length > 0;
+  const canSave = Boolean(resourceSelectionValid && protectConfig.storageId && (protectConfig.targetCluster || targetClusterOptions.length === 0));
   void filteredPolicyOptions;
   void paginatedPolicyOptions;
   void wizardPolicySearchQuery;
@@ -366,6 +375,38 @@ export function DrConfigurationModal(props: Props) {
   const includeRuleResources = splitRuleValues(newIncludeRule.resource);
   const excludeRuleResources = splitRuleValues(newExcludeRule.resource);
   const includeRuleLabels = splitRuleValues(newIncludeRule.labels);
+  const selectedLabels = Object.entries(protectConfig.labelSelector.matchLabels || {}).map(([key, value]) => `${key}=${value}`);
+  const toggleIncludedResource = (resource: string) => setProtectConfig(prev => {
+    if (prev.includeAllResources) {
+      return {
+        ...prev,
+        includeAllResources: false,
+        includedResources: RESOURCE_OPTIONS.filter(item => item !== resource),
+      };
+    }
+    return {
+      ...prev,
+      includedResources: prev.includedResources.includes(resource)
+        ? prev.includedResources.filter(item => item !== resource)
+        : [...prev.includedResources, resource],
+    };
+  });
+  const toggleExcludedResource = (resource: string) => setProtectConfig(prev => ({
+    ...prev,
+    excludedResources: prev.excludedResources.includes(resource)
+      ? prev.excludedResources.filter(item => item !== resource)
+      : [...prev.excludedResources, resource],
+  }));
+  const toggleMatchLabel = (label: string) => {
+    const [key, value] = label.split('=', 2);
+    if (!key || !value) return;
+    setProtectConfig(prev => {
+      const matchLabels = { ...(prev.labelSelector.matchLabels || {}) };
+      if (matchLabels[key] === value) delete matchLabels[key];
+      else matchLabels[key] = value;
+      return { ...prev, labelSelector: { ...prev.labelSelector, matchLabels } };
+    });
+  };
   const renderRulePreview = (rule: ExcludeRule, labels: string[], mode: 'include' | 'exclude') => {
     const resources = splitRuleValues(rule.resource);
     const criteria = [
@@ -510,12 +551,14 @@ export function DrConfigurationModal(props: Props) {
 
   const openIncludeFilter = () => {
     setEditingIncludeIndex(null);
+    setIncludeFilterType('resource');
     setNewIncludeRule({ group: '', resource: '', name: '', version: '', labels: '' });
     setIncludeFilterOpen(true);
   };
 
   const editIncludeFilter = (rule: ExcludeRule, index: number) => {
     setNewIncludeRule(rule);
+    setIncludeFilterType(rule.labels && !rule.resource ? 'label' : 'resource');
     setEditingIncludeIndex(index);
     setIncludeFilterOpen(true);
   };
@@ -523,10 +566,10 @@ export function DrConfigurationModal(props: Props) {
   const saveIncludeRule = () => {
     const normalizedRule = {
       group: '',
-      resource: newIncludeRule.resource,
+      resource: includeFilterType === 'resource' ? newIncludeRule.resource : '',
       name: '',
       version: '',
-      labels: newIncludeRule.labels,
+      labels: includeFilterType === 'label' ? newIncludeRule.labels : '',
     };
     if (!hasRuleContent(normalizedRule)) {
       closeIncludeFilter();
@@ -653,84 +696,57 @@ export function DrConfigurationModal(props: Props) {
                     <div className="hbdr-config-inline-panel">
                       <div className="hbdr-config-filter-head">
                         <div>
-                          <strong>Resource filters</strong>
+                          <strong>Velero Backup filters</strong>
+                          <span>These values are written directly to the Backup spec.</span>
                         </div>
-                        <em>{(protectConfig.includeRules || []).filter(hasRuleContent).length} include · {protectConfig.excludeRules.filter(hasRuleContent).length} exclude</em>
+                        <em>{protectConfig.includeAllResources ? 'All' : protectConfig.includedResources.length} included · {protectConfig.excludedResources.length} excluded</em>
                       </div>
-                      <div className="hbdr-config-filter-block">
+                      <div className="hbdr-config-filter-block hbdr-velero-filter-block">
                         <div className="hbdr-config-filter-title">
-                          <strong>Include filters</strong>
-                          <button type="button" onClick={openIncludeFilter}><PlusCircle size={14} />Add include</button>
+                          <div><strong>Included resources</strong><span>spec.includedResources · Empty means all resource types</span></div>
                         </div>
-                        <div className="hbdr-config-filter-list">
-                          {(protectConfig.includeRules || []).filter(hasRuleContent).length === 0 ? <span>All resources are included before excludes.</span> : (protectConfig.includeRules || []).filter(hasRuleContent).map((rule, index) => (
-                            <div key={`${summarizeRule(rule)}-${index}`} className="hbdr-config-filter-row">
-                              <dl>
-                                {rule.resource && <div><dt>Resources</dt><dd>{splitRuleValues(rule.resource).join(', ')}</dd></div>}
-                                {rule.labels && <div><dt>Labels</dt><dd>{rule.labels}</dd></div>}
-                              </dl>
-                              <div className="hbdr-config-filter-actions">
-                                <button type="button" aria-label="Edit include filter" onClick={() => editIncludeFilter(rule, index)}><Pencil size={13} /></button>
-                                <button
-                                  type="button"
-                                  aria-label="Remove include filter"
-                                  onClick={() => setProtectConfig(prev => ({ ...prev, includeRules: (prev.includeRules || []).filter((_, itemIndex) => itemIndex !== index) }))}
-                                >
-                                  <Trash2 size={13} />
-                                </button>
-                              </div>
-                            </div>
-                          ))}
+                        <div className="hbdr-velero-resource-grid">
+                          <button type="button" className={`hbdr-velero-all-resources ${protectConfig.includeAllResources ? 'is-selected' : ''}`} onClick={() => setProtectConfig(prev => ({ ...prev, includeAllResources: !prev.includeAllResources, includedResources: [] }))}>
+                            <span>All resource types</span><i>{protectConfig.includeAllResources && <Check size={11} />}</i>
+                          </button>
+                          {RESOURCE_OPTIONS.map(resource => {
+                            const selected = protectConfig.includeAllResources || protectConfig.includedResources.includes(resource);
+                            return <button type="button" key={`include-${resource}`} className={selected ? 'is-selected' : ''} onClick={() => toggleIncludedResource(resource)}><span>{resource}</span><i>{selected && <Check size={11} />}</i></button>;
+                          })}
                         </div>
+                        {!protectConfig.includeAllResources && protectConfig.includedResources.length === 0 && <p className="hbdr-velero-filter-validation">Select at least one resource type or choose All resource types.</p>}
                       </div>
-                      <div className="hbdr-config-filter-block">
+                      <div className="hbdr-config-filter-block hbdr-velero-filter-block">
                         <div className="hbdr-config-filter-title">
-                          <strong>Exclude filters</strong>
-                          <button type="button" onClick={() => setShowAddRuleForm(true)}><PlusCircle size={14} />Add exclude</button>
+                          <div><strong>Label selector</strong><span>spec.labelSelector · Conditions are combined with AND</span></div>
+                          {selectedLabels.length > 0 && <button type="button" onClick={() => setProtectConfig(prev => ({ ...prev, labelSelector: { matchLabels: {}, matchExpressions: [] } }))}>Clear</button>}
                         </div>
-                        <div className="hbdr-config-filter-list">
-                          {protectConfig.excludeRules.filter(hasRuleContent).length === 0 ? <span>No exclude filters</span> : protectConfig.excludeRules.filter(hasRuleContent).map((rule, index) => (
-                            <div key={`${summarizeRule(rule)}-${index}`} className="hbdr-config-filter-row">
-                              <dl>
-                                {rule.resource && <div><dt>Resources</dt><dd>{splitRuleValues(rule.resource).join(', ')}</dd></div>}
-                              </dl>
-                              <div className="hbdr-config-filter-actions">
-                                <button type="button" aria-label="Edit exclude filter" onClick={() => editExcludeRule(rule, index)}><Pencil size={13} /></button>
-                                <button type="button" aria-label="Remove exclude filter" onClick={() => setProtectConfig(prev => ({ ...prev, excludeRules: prev.excludeRules.filter((_, itemIndex) => itemIndex !== index) }))}><Trash2 size={13} /></button>
-                              </div>
-                            </div>
-                          ))}
+                        <div className="hbdr-velero-resource-grid">
+                          {knownLabelOptions.map(label => <button type="button" key={`label-${label}`} className={selectedLabels.includes(label) ? 'is-selected' : ''} onClick={() => toggleMatchLabel(label)}><span>{label}</span><i>{selectedLabels.includes(label) && <Check size={11} />}</i></button>)}
+                          {knownLabelOptions.length === 0 && <p>No labels discovered in the selected namespace.</p>}
                         </div>
                       </div>
-                      {hasResourceFilters && (
-                        <div className="hbdr-config-label-preview">
-                          <div className="hbdr-config-label-preview-head">
-                            <strong>Matched resources</strong>
-                            <span>{matchedResources.length > 0 ? `${matchedResources.length} resources` : 'No resource match'}</span>
-                          </div>
-                          {matchedResources.length > 0 ? (
-                            <div className="hbdr-config-label-preview-grid">
-                              {matchedGroups.slice(0, 6).map(group => (
-                                <div key={group.kind}>
-                                  <strong>{group.kind}</strong>
-                                  <span>{group.items.slice(0, 4).map(item => item.name).join(', ')}</span>
-                                  {group.items.length > 4 && <em>+{group.items.length - 4} more</em>}
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <p>No namespaced resources currently match this selector. Saving it may create backups with no application resources.</p>
-                          )}
-                          {selectedLabelOptions.some(option => option.namespaceNames.length > 0) && (
-                            <p>
-                              Namespace labels matched: {selectedLabelOptions
-                                .flatMap(option => option.namespaceNames)
-                                .filter((name, index, names) => names.indexOf(name) === index)
-                                .join(', ')}
-                            </p>
-                          )}
+                      <div className="hbdr-config-filter-block hbdr-velero-filter-block">
+                        <div className="hbdr-config-filter-title">
+                          <div><strong>Excluded resources</strong><span>spec.excludedResources · Applied after include and label filters</span></div>
+                          {protectConfig.excludedResources.length > 0 && <button type="button" onClick={() => setProtectConfig(prev => ({ ...prev, excludedResources: [] }))}>Clear</button>}
                         </div>
-                      )}
+                        <div className="hbdr-velero-resource-grid">
+                          {RESOURCE_OPTIONS.map(resource => {
+                            const conflict = protectConfig.includedResources.includes(resource);
+                            const selected = protectConfig.excludedResources.includes(resource);
+                            return <button type="button" key={`exclude-${resource}`} disabled={conflict} title={conflict ? 'Remove this resource from Included resources before excluding it.' : undefined} className={selected ? 'is-selected is-excluded' : conflict ? 'is-conflict' : ''} onClick={() => toggleExcludedResource(resource)}><span>{resource}</span><i>{selected && <X size={11} />}</i></button>;
+                          })}
+                        </div>
+                      </div>
+                      <div className="hbdr-velero-spec-preview">
+                        <strong>Backup spec preview</strong>
+                        <pre>{JSON.stringify({
+                          includedResources: protectConfig.includedResources,
+                          labelSelector: protectConfig.labelSelector,
+                          excludedResources: protectConfig.excludedResources,
+                        }, null, 2)}</pre>
+                      </div>
                     </div>
                   )}
                 </section>
@@ -819,7 +835,7 @@ export function DrConfigurationModal(props: Props) {
 
             <footer className="hbdr-filter-drawer-actions hbdr-config-footer">
               <div className="hbdr-config-footer-status">
-                <span className={canSave ? 'is-ready' : ''}>{canSave ? 'Ready' : 'Repository and target cluster required'}</span>
+                <span className={canSave ? 'is-ready' : ''}>{canSave ? 'Ready' : !resourceSelectionValid ? 'Select at least one included resource' : 'Repository and target cluster required'}</span>
               </div>
               <button type="button" onClick={onClose}>Cancel</button>
               <button type="button" className="hbdr-config-save" disabled={!canSave} onClick={onFinish}>
@@ -837,43 +853,59 @@ export function DrConfigurationModal(props: Props) {
                 <header>
                   <div>
                     <h4>{editingIncludeIndex === null ? 'Add Include Filter' : 'Edit Include Filter'}</h4>
+                    <p>Choose one filter type, then select the values to include.</p>
                   </div>
                   <button type="button" onClick={closeIncludeFilter} aria-label="Close"><X size={16} /></button>
                 </header>
                 <div className="hbdr-config-filter-dialog-body">
-                  <div className="hbdr-config-rule-form">
-                    {renderMultiSelect(
-                      'include-resources',
-                      'Resource types',
-                      'Select resource types',
-                      RESOURCE_OPTIONS,
-                      includeRuleResources,
-                      value => setNewIncludeRule(prev => ({
-                        ...prev,
-                        resource: includeRuleResources.includes(value)
-                          ? removeRuleValue(prev.resource, value)
-                          : addRuleValue(prev.resource, value),
-                      })),
-                    )}
-                    {renderMultiSelect(
-                      'include-labels',
-                      'Labels',
-                      'Select labels',
-                      knownLabelOptions,
-                      includeRuleLabels,
-                      value => setNewIncludeRule(prev => ({
-                        ...prev,
-                        labels: includeRuleLabels.includes(value)
-                          ? removeRuleValue(prev.labels, value)
-                          : addRuleValue(prev.labels, value),
-                      })),
-                    )}
+                  <div className="hbdr-include-filter-types">
+                    <button type="button" className={includeFilterType === 'resource' ? 'is-active' : ''} onClick={() => {
+                      setIncludeFilterType('resource');
+                      setNewIncludeRule(prev => ({ ...prev, labels: '' }));
+                    }}>
+                      <Grid3X3 size={17} />
+                      <span><strong>Resource type</strong><em>Include selected Kubernetes resource kinds</em></span>
+                      <i>{includeFilterType === 'resource' && <Check size={12} />}</i>
+                    </button>
+                    <button type="button" className={includeFilterType === 'label' ? 'is-active' : ''} onClick={() => {
+                      setIncludeFilterType('label');
+                      setNewIncludeRule(prev => ({ ...prev, resource: '' }));
+                    }}>
+                      <Filter size={17} />
+                      <span><strong>Label</strong><em>Include resources matching selected labels</em></span>
+                      <i>{includeFilterType === 'label' && <Check size={12} />}</i>
+                    </button>
                   </div>
-                  {renderRulePreview(newIncludeRule, includeRuleLabels, 'include')}
+                  <div className="hbdr-include-filter-picker">
+                    <div className="hbdr-include-filter-picker-head">
+                      <strong>{includeFilterType === 'resource' ? 'Select resource types' : 'Select labels'}</strong>
+                      <span>{includeFilterType === 'resource' ? includeRuleResources.length : includeRuleLabels.length} selected</span>
+                    </div>
+                    <div className="hbdr-include-filter-options">
+                      {(includeFilterType === 'resource' ? RESOURCE_OPTIONS : knownLabelOptions).map(value => {
+                        const selected = includeFilterType === 'resource' ? includeRuleResources.includes(value) : includeRuleLabels.includes(value);
+                        return (
+                          <button
+                            type="button"
+                            key={value}
+                            className={selected ? 'is-selected' : ''}
+                            onClick={() => setNewIncludeRule(prev => includeFilterType === 'resource'
+                              ? { ...prev, resource: selected ? removeRuleValue(prev.resource, value) : addRuleValue(prev.resource, value) }
+                              : { ...prev, labels: selected ? removeRuleValue(prev.labels, value) : addRuleValue(prev.labels, value) })}
+                          >
+                            <span>{value}</span>
+                            <i>{selected && <Check size={11} />}</i>
+                          </button>
+                        );
+                      })}
+                      {includeFilterType === 'label' && knownLabelOptions.length === 0 && <p>No labels were discovered in the selected namespace.</p>}
+                    </div>
+                  </div>
+                  {renderRulePreview(newIncludeRule, includeFilterType === 'label' ? includeRuleLabels : [], 'include')}
                 </div>
                 <footer>
                   <button type="button" onClick={closeIncludeFilter}>Cancel</button>
-                  <button type="button" className="hbdr-config-filter-primary" disabled={!hasRuleContent(newIncludeRule)} onClick={saveIncludeRule}>{editingIncludeIndex === null ? 'Add Filter' : 'Save Filter'}</button>
+                  <button type="button" className="hbdr-config-filter-primary" disabled={includeFilterType === 'resource' ? includeRuleResources.length === 0 : includeRuleLabels.length === 0} onClick={saveIncludeRule}>{editingIncludeIndex === null ? 'Add Include' : 'Save Changes'}</button>
                 </footer>
               </div>
             </div>

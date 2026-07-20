@@ -526,10 +526,13 @@ type ApiProtectionPlan = {
   appId: string;
   appIds?: string[];
   sourceClusterId?: string;
+  scopeType?: string;
   policyId?: string;
   storageRepoId?: string;
   targetClusterId?: string;
-  labelSelector?: string;
+  includedResources?: string[];
+  labelSelector?: { matchLabels?: Record<string, string>; matchExpressions?: Array<{ key: string; operator: string; values?: string[] }> };
+  excludedResources?: string[];
   status?: string;
   warning?: string;
   activationTask?: ApiTask;
@@ -626,6 +629,7 @@ type ClusterTaskLog = {
 type ApiRestorePoint = {
   id: string;
   sourceClusterId: string;
+  scopeType?: string;
   protectionPlanId?: string;
   appId?: string;
   storageRepoId?: string;
@@ -1128,6 +1132,13 @@ const ERROR_MESSAGE_CATALOG: ErrorMessageDefinition[] = [
     description: 'Volume data restoration cannot start because a required persistent volume claim is missing.',
     detail: 'Retry the drill with Replace conflict handling after the previous target namespace is fully removed. Verify that the target StorageClass and provisioner are healthy and that the restored PVC is created before the workload Pod starts.',
   },
+  {
+    code: '140007',
+    aliases: ['RESTORE_WORKLOAD_CRASH_LOOP'],
+    title: 'Restored workload is crash looping',
+    description: 'A restored container repeatedly exited and the application could not become ready.',
+    detail: 'Review the restored Pod logs, last container exit reason, restored volume permissions, secrets, configuration, and application startup requirements.',
+  },
 ];
 
 const ERROR_MESSAGE_BY_CODE = new Map(ERROR_MESSAGE_CATALOG.map(item => [item.code, item]));
@@ -1143,6 +1154,8 @@ function taskFailureSummary(task: ApiTask, events?: ApiTaskEvent[]): { code: str
   const firstDetail = details[0] || task.errorMessage || task.errorCode || 'Task failed';
   const code = resolveErrorCode(task.errorCode, firstDetail);
   const definition = errorMessageDefinition(code);
+  const taskLabel = taskDetailLabel(task.type);
+  const unmatched = code === '100000';
   const originalCode = String(task.errorCode || '').trim();
   const fullText = [
     originalCode && !/^\d{6}$/.test(originalCode) ? `Original error code: ${originalCode}` : '',
@@ -1151,8 +1164,10 @@ function taskFailureSummary(task: ApiTask, events?: ApiTaskEvent[]): { code: str
   ].filter(Boolean).join('\n');
   return {
     code,
-    title: definition.title,
-    description: definition.description,
+    title: unmatched ? `${taskLabel} failed` : definition.title,
+    description: unmatched
+      ? `The ${taskLabel.toLowerCase()} task failed. Open details to review the reported cause.`
+      : definition.description,
     fullText,
   };
 }
@@ -2472,10 +2487,9 @@ function formatPolicyRetention(policy: Pick<PolicyItem, 'composition' | 'retenti
 
 function formatScopeLabel(scope: string | undefined) {
   const value = (scope || '').toLowerCase();
-  if (value === 'namespace' || value === 'all') return 'All resources';
-  if (value === 'label-selector' || value === 'labels' || value === 'filter' || value === 'filtered') return 'Filter resources';
-  if (value === 'stateless only' || value === 'stateless') return 'Filter resources';
-  return scope || 'All resources';
+  if (value === 'all') return 'All';
+  if (value === 'filtered') return 'Filtered';
+  return scope || 'Not configured';
 }
 
 function clusterStatusMeta(status: ClusterStatus) {
@@ -2834,13 +2848,7 @@ export default function App() {
   const [restorePointNamespaceFilter, setRestorePointNamespaceFilter] = useState<string[]>([]);
   const [secondaryCollapsed, setSecondaryCollapsed] = useState(false);
   const [selectedCluster, setSelectedCluster] = useState<Cluster | null>(null);
-  const [defaultClusterId, setDefaultClusterId] = useState<string | null>(() => {
-    try {
-      return localStorage.getItem(DEFAULT_CLUSTER_KEY) || null;
-    } catch {
-      return null;
-    }
-  });
+  const [defaultClusterId, setDefaultClusterId] = useState<string | null>(null);
   const [clusterPickerOpen, setClusterPickerOpen] = useState(false);
   const [clusterMenuId, setClusterMenuId] = useState<string | null>(null);
   const prefetchedAgentTokenRef = useRef<ApiAgentToken | null>(null);
@@ -2978,7 +2986,7 @@ export default function App() {
       writeStoredView('clusters');
       setView('clusters');
     } else {
-      const target = liveList.find(cluster => cluster.id === defaultClusterId || cluster.isDefault) || liveList[0] || clusters[0] || null;
+      const target = liveList.find(cluster => cluster.isDefault) || liveList[0] || clusters[0] || null;
       setSelectedCluster(target);
       try {
         if (target?.id) localStorage.setItem(SELECTED_CLUSTER_KEY, target.id);
@@ -2988,7 +2996,7 @@ export default function App() {
       writeStoredView('dashboard');
       setView('dashboard');
     }
-  }, [clusters, defaultClusterId, liveClusters]);
+  }, [clusters, liveClusters]);
 
   useEffect(() => {
     if (!authSession) return;
@@ -3260,30 +3268,20 @@ export default function App() {
             return nextClusters.find(cluster => cluster.id === prev.id) || nextClusters[0] || null;
           }
           let storedSelectedId = '';
-          let storedDefaultId = '';
           try {
             storedSelectedId = localStorage.getItem(SELECTED_CLUSTER_KEY) || '';
-            storedDefaultId = localStorage.getItem(DEFAULT_CLUSTER_KEY) || '';
           } catch {
             // localStorage may be unavailable in private contexts.
           }
           const apiDefault = nextClusters.find(cluster => cluster.isDefault);
           return nextClusters.find(cluster => cluster.id === storedSelectedId)
-            || nextClusters.find(cluster => cluster.id === storedDefaultId)
             || apiDefault
             || nextClusters[0]
             || null;
         });
-        setDefaultClusterId(prev => {
+        setDefaultClusterId(() => {
           const apiDefault = nextClusters.find(cluster => cluster.isDefault);
-          const nextDefaultId = apiDefault?.id || (nextClusters.some(cluster => cluster.id === prev) ? prev : nextClusters[0]?.id || null);
-          try {
-            if (nextDefaultId) localStorage.setItem(DEFAULT_CLUSTER_KEY, nextDefaultId);
-            else localStorage.removeItem(DEFAULT_CLUSTER_KEY);
-          } catch {
-            // localStorage may be unavailable in private contexts.
-          }
-          return nextDefaultId;
+          return apiDefault?.id || null;
         });
       }
       return nextClusters;
@@ -3319,8 +3317,8 @@ export default function App() {
   const activeModule = moduleForView(view);
   const language = locales[locale];
   const defaultCluster = useMemo(
-    () => clusters.find(cluster => cluster.isDefault) || clusters.find(cluster => cluster.id === defaultClusterId) || null,
-    [clusters, defaultClusterId],
+    () => clusters.find(cluster => cluster.isDefault) || null,
+    [clusters],
   );
   const defaultWorkspaceCluster = defaultCluster || clusters[0] || null;
   const workspaceCluster = selectedCluster || defaultWorkspaceCluster;
@@ -3330,7 +3328,7 @@ export default function App() {
   const activeRestorePointCount = dashboardCluster ? restorePointCount : 0;
   const drClusters = liveClusters ?? clusters;
   const drSelectedCluster = selectedCluster ? drClusters.find(cluster => cluster.id === selectedCluster.id) || null : null;
-  const drDefaultCluster = drClusters.find(cluster => cluster.isDefault) || drClusters.find(cluster => cluster.id === defaultClusterId) || drClusters[0] || null;
+  const drDefaultCluster = drClusters.find(cluster => cluster.isDefault) || null;
   const drWorkspaceCluster = liveClusters
     ? (drSelectedCluster || drDefaultCluster)
     : workspaceCluster;
@@ -3416,17 +3414,13 @@ export default function App() {
   const setDefaultCluster = async (cluster: Cluster, event?: React.MouseEvent) => {
     event?.stopPropagation();
     try {
-      await apiPost<ApiCluster>(`/api/v1/clusters/${cluster.id}/default`, {});
-    } catch {
-      setToast('Failed to persist default cluster, using local selection for now');
-    }
-    setDefaultClusterId(cluster.id);
-    setSelectedCluster(cluster);
-    try {
-      localStorage.setItem(DEFAULT_CLUSTER_KEY, cluster.id);
+      const updated = await apiPost<ApiCluster>(`/api/v1/clusters/${cluster.id}/default`, {});
+      setDefaultClusterId(updated.isDefault ? updated.id : null);
+      setSelectedCluster(prev => prev?.id === updated.id ? { ...prev, isDefault: updated.isDefault } : cluster);
+      await refreshPlatformData();
       localStorage.setItem(SELECTED_CLUSTER_KEY, cluster.id);
     } catch {
-      // localStorage can be blocked in embedded browsers.
+      setToast('Failed to persist default cluster');
     }
   };
 
@@ -3435,16 +3429,13 @@ export default function App() {
     if (defaultClusterId) {
       try {
         await apiPatch<ApiCluster>(`/api/v1/clusters/${defaultClusterId}`, { isDefault: false });
+        await refreshPlatformData();
       } catch {
         setToast('Failed to clear default cluster from platform API');
+        return;
       }
     }
     setDefaultClusterId(null);
-    try {
-      localStorage.removeItem(DEFAULT_CLUSTER_KEY);
-    } catch {
-      // localStorage can be blocked in embedded browsers.
-    }
   };
 
   const unregisterCluster = async (cluster: Cluster, event?: React.MouseEvent): Promise<ApiTask | null> => {
@@ -4601,6 +4592,7 @@ function ApplicationDrPage(props: {
   const [selectedSelectApps, setSelectedSelectApps] = useState<string[]>([]);
   const [selectedConfigApps, setSelectedConfigApps] = useState<string[]>([]);
   const [selectedRunApps, setSelectedRunApps] = useState<string[]>([]);
+  const [submittingRecoveryTasks, setSubmittingRecoveryTasks] = useState<Record<string, ApiTask>>({});
   const [configAppNames, setConfigAppNames] = useState<string[]>([]);
   const [protectedAppNames, setProtectedAppNames] = useState<string[]>(() => apps.filter(app => app.stage === 'run').map(app => app.name));
   const [appUiOverrides, setAppUiOverrides] = useState<Record<string, Partial<AppItem>>>({});
@@ -4612,6 +4604,10 @@ function ApplicationDrPage(props: {
     labels: '',
     labelConditions: [] as Array<{ key: string; operator: 'Equals' | 'Not Equals'; value: string }>,
     includeRules: [] as Array<{ group: string; resource: string; name: string; version: string; labels: string }>,
+    includedResources: [] as string[],
+    includeAllResources: true,
+    labelSelector: { matchLabels: {} as Record<string, string>, matchExpressions: [] as Array<{ key: string; operator: string; values: string[] }> },
+    excludedResources: [] as string[],
     storageType: 'local',
     storageId: storage[0]?.id || '',
     policy: 'manual',
@@ -4924,10 +4920,12 @@ function ApplicationDrPage(props: {
     }
     return unitMembers(app).map(member => tasks[member.name]).find(Boolean);
   };
+  const recoveryTaskForUnit = (app: AppItem) =>
+    taskForUnit(submittingRecoveryTasks, app) || taskForUnit(liveRecoveryTasks, app);
   const normalizedQuery = query.trim().toLowerCase();
   const queryValueForApp = (app: AppItem, field: string) => {
     const profile = profileOf(app);
-    const recoveryTask = taskForUnit(liveRecoveryTasks, app);
+    const recoveryTask = recoveryTaskForUnit(app);
     if (field === 'namespace') return unitNamespaces(app).join(' ');
     if (field === 'policy') return app.policy || '';
     if (field === 'storage' || field === 'repository') return app.storage || '';
@@ -4952,7 +4950,7 @@ function ApplicationDrPage(props: {
   const appMatchesFilter = (app: AppItem, filter: string) => {
     const profile = profileOf(app);
     const task = taskForUnit(syncTasks, app);
-    const recoveryTask = taskForUnit(liveRecoveryTasks, app);
+    const recoveryTask = recoveryTaskForUnit(app);
     if (filter === 'active') return unitMembers(app).some(member => member.status === 'Active' || member.status === 'Running');
     if (filter === 'protected') return stageOf(app) === 'run';
     if (filter === 'pending') return stageOf(app) === 'config';
@@ -4997,7 +4995,10 @@ function ApplicationDrPage(props: {
     capacity: app.storage ? '10.0 GB' : '0 GB',
     age: app.lastBackup || '1 days ago',
     score: app.isProtected ? 90 : 70,
-    scope: app.isProtected ? 'Namespace' : 'Pending Selection',
+    scope: app.isProtected
+      ? (protectionPlanForApp(app)?.scopeType || 'all')
+      : 'Pending Selection',
+    scopeTag: undefined as string | undefined,
     taskStatus: app.isProtected ? 'normal' as const : 'warning' as const,
   };
   const resourceSummaryTotal = (app: AppItem) => normalizeResourceCategories(app).reduce((sum, category) => sum + category.total, 0);
@@ -5153,7 +5154,7 @@ function ApplicationDrPage(props: {
   const appSortValue = (app: AppItem, column: string): string | number => {
     const profile = profileOf(app);
     const task = taskForUnit(syncTasks, app);
-    const recoveryTask = taskForUnit(liveRecoveryTasks, app);
+    const recoveryTask = recoveryTaskForUnit(app);
     if (column === 'name') return app.name;
     if (column === 'namespace') return unitNamespaces(app).join(' ');
     if (column === 'status') return app.status || '';
@@ -5889,7 +5890,7 @@ function ApplicationDrPage(props: {
     if (realPoints.length > 0) return realPoints;
     return [];
   };
-  const selectedRunActiveRecoveryTask = selectedRunRows.length === 1 ? taskForUnit(liveRecoveryTasks, selectedRunRows[0]) : undefined;
+  const selectedRunActiveRecoveryTask = selectedRunRows.length === 1 ? recoveryTaskForUnit(selectedRunRows[0]) : undefined;
   const hasSelectedRunActiveRecoveryTask = isActiveTaskStatus(selectedRunActiveRecoveryTask?.status);
   const canRestoreAction = selectedRunRows.length === 1 && isProtectionPlanReady(protectionPlanForApp(selectedRunRows[0])?.status) && restorePointsForApp(selectedRunRows[0]).length > 0 && !hasSelectedRunActiveRecoveryTask;
   const buildRecoveryDraft = (mode: 'drill' | 'takeover', app: AppItem, pointId: string): RecoveryWizardConfig => {
@@ -5929,7 +5930,7 @@ function ApplicationDrPage(props: {
       toast('Select one namespace first');
       return;
     }
-    const activeTask = taskForUnit(liveRecoveryTasks, selectedRunRows[0]);
+    const activeTask = recoveryTaskForUnit(selectedRunRows[0]);
     if (isActiveTaskStatus(activeTask?.status)) {
       const label = activeTask?.type === 'drill' ? 'drill' : activeTask?.type === 'takeover' ? 'takeover' : 'recovery';
       toast(`A ${label} task is already running for this namespace`);
@@ -5969,11 +5970,22 @@ function ApplicationDrPage(props: {
     }
     const action = restoreAction;
     const submittedMessage = `${action.mode === 'drill' ? 'Drill' : 'Takeover'} job submitted: ${action.config.targetCluster} / ${targetNamespace} / ${point?.time || 'selected recovery point'}`;
+    const optimisticTask: ApiTask = {
+      id: `submitting-${action.mode}-${Date.now()}`,
+      clusterId: targetCluster.id,
+      protectionPlanId: livePoint.protectionPlanId || action.app.protectionPlanId,
+      restorePointId: livePoint.id,
+      type: action.mode,
+      status: 'queued',
+      progress: 0,
+      payload: { targetNamespace, sourceNamespace: sourceNamespaces[0] || action.app.namespace },
+      createdAt: new Date().toISOString(),
+    };
+    setSubmittingRecoveryTasks(prev => ({ ...prev, [action.app.name]: optimisticTask }));
     setRestoreAction(null);
     toast(submittedMessage);
-    void (async () => {
-      try {
-        const createdTask = await apiPost<ApiTask>(`/api/v1/tasks/${action.mode}`, {
+    try {
+      const createdTask = await apiPost<ApiTask>(`/api/v1/tasks/${action.mode}`, {
           clusterId: targetCluster.id,
           protectionPlanId: livePoint.protectionPlanId || action.app.protectionPlanId,
           restorePointId: livePoint.id,
@@ -5992,17 +6004,22 @@ function ApplicationDrPage(props: {
           transformPreset: action.config.transformPreset,
           storageProfileMode: action.config.storageProfileMode,
           alternateProfileId: action.config.alternateProfileId,
-        });
-        setLiveRecoveryTasks(prev => ({ ...prev, [action.app.name]: createdTask }));
-        setDrTaskEvents(prev => ({
-          ...prev,
-          [createdTask.id]: prev[createdTask.id] || [],
-        }));
-        await refreshPlatformData();
-      } catch (error) {
-        toast('Failed to submit recovery task: ' + (error instanceof Error ? error.message : 'unknown error'));
-      }
-    })();
+      });
+      setLiveRecoveryTasks(prev => ({ ...prev, [action.app.name]: createdTask }));
+      setSubmittingRecoveryTasks(prev => Object.fromEntries(
+        Object.entries(prev).filter(([key, task]) => key !== action.app.name || task.id !== optimisticTask.id),
+      ));
+      setDrTaskEvents(prev => ({
+        ...prev,
+        [createdTask.id]: prev[createdTask.id] || [],
+      }));
+      void refreshPlatformData();
+    } catch (error) {
+      setSubmittingRecoveryTasks(prev => prev[action.app.name]?.id === optimisticTask.id
+        ? Object.fromEntries(Object.entries(prev).filter(([key]) => key !== action.app.name))
+        : prev);
+      toast('Failed to submit recovery task: ' + (error instanceof Error ? error.message : 'unknown error'));
+    }
   };
   const renderSyncTaskStatus = (app: AppItem) => {
     const task = taskForUnit(syncTasks, app);
@@ -6137,7 +6154,7 @@ function ApplicationDrPage(props: {
     );
   };
   const renderRecoveryTaskStatus = (app: AppItem) => {
-    const task = taskForUnit(liveRecoveryTasks, app);
+    const task = recoveryTaskForUnit(app);
     if (!task) return <span className="hbdr-dr-task-neutral">No recovery task</span>;
 
     const actionText = recoveryActionText(task.type);
@@ -6329,9 +6346,7 @@ function ApplicationDrPage(props: {
           protectionPlanId: app.protectionPlanId || '',
           sourceNamespace: app.isMergedPlan ? '' : app.namespace,
           sourceNamespaces: app.isMergedPlan ? unitNamespaces(app) : undefined,
-          scope: 'namespace',
-          labelSelector: '',
-          storageRepo: app.storage || storage[0]?.name || 'default',
+          trigger: 'manual',
         });
       }));
       syncWarning = responses.map(response => 'warning' in response ? response.warning : '').find(Boolean) || '';
@@ -6529,15 +6544,7 @@ function ApplicationDrPage(props: {
     }
     const targetCluster = clusters.find(cluster => cluster.name === protectConfig.targetCluster);
     const policyId = policies.some(policy => policy.id === protectConfig.policy) ? protectConfig.policy : '';
-    const includeLabelSelector = protectConfig.includeRules
-      .flatMap(rule => rule.labels.split(','))
-      .map(value => value.trim())
-      .filter(Boolean)
-      .join(',');
-    const labelSelector = protectConfig.scope === 'filter'
-      ? includeLabelSelector || labelConditionsToSelector(protectConfig.labelConditions) || protectConfig.labels
-      : '';
-    const scopeType = protectConfig.scope === 'filter' ? 'label-selector' : 'namespace';
+    const scopeType = protectConfig.scope === 'filter' ? 'filtered' : 'all';
     const targetAppMeta = targetApps
       .map(name => apps.find(item => item.name === name))
       .filter((app): app is AppItem => Boolean(app?.apiId))
@@ -6557,12 +6564,13 @@ function ApplicationDrPage(props: {
           sourceClusterId: currentClusterId,
           appIds: group.map(meta => meta.apiId),
           scopeType,
-          labelSelector,
+          includedResources: protectConfig.scope === 'filter' && !protectConfig.includeAllResources ? protectConfig.includedResources : [],
+          labelSelector: protectConfig.scope === 'filter' ? protectConfig.labelSelector : { matchLabels: {}, matchExpressions: [] },
+          excludedResources: protectConfig.scope === 'filter' ? protectConfig.excludedResources : [],
           includeClusterScoped: false,
           storageRepoId: protectConfig.storageId,
           policyId,
           targetClusterId: targetCluster?.id || currentClusterId,
-          excludeRules: protectConfig.excludeRules,
           preHooks: protectConfig.preScripts.map(scriptPayload),
           postHooks: protectConfig.postScripts.map(scriptPayload),
         });
@@ -10282,6 +10290,7 @@ function RealRestorePointPage({
   const [storageRepos, setStorageRepos] = useState<ApiStorageRepo[]>(initialStorageRepos);
   const [plans, setPlans] = useState<ApiProtectionPlan[]>(initialPlans);
   const [tasks, setTasks] = useState<ApiTask[]>(initialTasks);
+  const [submittingRecoveryTasks, setSubmittingRecoveryTasks] = useState<Record<string, ApiTask>>({});
   const [loading, setLoading] = useState(initialPoints.length === 0);
   const [selectedRestorePoints, setSelectedRestorePoints] = useState<string[]>([]);
   const [activeRestorePointId, setActiveRestorePointId] = useState('');
@@ -10303,6 +10312,8 @@ function RealRestorePointPage({
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const [visibleColumns, setVisibleColumns] = useState<string[]>(['time', 'storage', 'size', 'storageSize', 'media', 'backupMode', 'task']);
   const [restoreBulkMenuOpen, setRestoreBulkMenuOpen] = useState(false);
+  const visibleRecoveryTask = (restorePointId: string) =>
+    submittingRecoveryTasks[restorePointId] || latestTaskForRestorePoint(tasks, restorePointId);
 
   const load = async () => {
     const [pointRes, clusterRes, storageRes, planRes, taskRes] = await Promise.all([
@@ -10499,10 +10510,10 @@ function RealRestorePointPage({
       storageSize: row.storageSize,
       media: row.media,
       backupMode: row.backupMode,
-      task: latestTaskForRestorePoint(tasks, row.id)?.status || 'No recovery task',
+      task: visibleRecoveryTask(row.id)?.status || 'No recovery task',
     };
     const matchesQuery = !q || (searchableValues[queryField] || Object.values(searchableValues).join(' ')).toLowerCase().includes(q);
-    const latestTask = latestTaskForRestorePoint(tasks, row.id);
+    const latestTask = visibleRecoveryTask(row.id);
     const matchesFilters = activeFilters.every(filter => {
       if (parseColumnFilterToken(filter)) return matchesColumnFilterToken(filter, field => searchableValues[field] || '');
       if (filter === 'remote') return row.media === 'Remote Snapshot';
@@ -10521,10 +10532,9 @@ function RealRestorePointPage({
       || rows.find(row => selectedRestorePoints.includes(row.id))
       || null
     : rows.find(row => selectedRestorePoints.includes(row.id)) || null;
-  const activeRecoveryTaskForSelectedRow = selectedRow
-    ? tasks.find(task => ['restore', 'drill', 'takeover'].includes(task.type)
-      && isActiveTaskStatus(task.status)
-      && taskMatchesRestorePoint(task, selectedRow.id))
+  const selectedRowRecoveryTask = selectedRow ? visibleRecoveryTask(selectedRow.id) : undefined;
+  const activeRecoveryTaskForSelectedRow = isActiveTaskStatus(selectedRowRecoveryTask?.status)
+    ? selectedRowRecoveryTask
     : undefined;
   const activeRecoveryTaskIds = tasks
     .filter(task => ['restore', 'drill', 'takeover'].includes(task.type) && isActiveTaskStatus(task.status))
@@ -10714,7 +10724,7 @@ function RealRestorePointPage({
     }
   };
   const renderRestorePageTask = (row: Row) => {
-    const task = latestTaskForRestorePoint(tasks, row.id);
+    const task = visibleRecoveryTask(row.id);
     if (!task) return <span className="hbdr-dr-task-neutral">No recovery task</span>;
     const label = task.type === 'drill' ? 'Drill' : task.type === 'takeover' ? 'Takeover' : 'Restore';
     if (task.status === 'succeeded') {
@@ -10810,7 +10820,7 @@ function RealRestorePointPage({
     ...(visibleColumns.includes('storageSize') ? [{ id: 'storageSize', header: 'Storage Size', accessorFn: (row: Row) => row.storageSizeBytes, size: 150, minSize: 130, maxSize: 240, cell: (info: any) => <span className="text-xs font-semibold text-slate-500">{info.row.original.storageSize}</span>, meta: { title: (row: Row) => row.storageSizeTitle } }] : []),
     ...(visibleColumns.includes('media') ? [{ id: 'media', header: 'Type', accessorFn: (row: Row) => row.media, size: 145, minSize: 120, maxSize: 220, cell: (info: any) => <span className="text-xs font-semibold text-slate-500">{info.row.original.media}</span>, meta: { title: (row: Row) => row.media } }] : []),
     ...(visibleColumns.includes('backupMode') ? [{ id: 'backupMode', header: 'Backup Mode', accessorFn: (row: Row) => row.backupMode, size: 140, minSize: 120, maxSize: 190, cell: (info: any) => <span className="text-xs font-semibold text-slate-500">{info.row.original.backupMode}</span>, meta: { title: (row: Row) => row.backupMode } }] : []),
-    ...(visibleColumns.includes('task') ? [{ id: 'task', header: 'Recovery Task', accessorFn: (row: Row) => latestTaskForRestorePoint(tasks, row.id)?.status || 'No recovery task', size: 210, minSize: 170, maxSize: 360, cell: (info: any) => renderRestorePageTask(info.row.original) }] : []),
+    ...(visibleColumns.includes('task') ? [{ id: 'task', header: 'Recovery Task', accessorFn: (row: Row) => visibleRecoveryTask(row.id)?.status || 'No recovery task', size: 210, minSize: 170, maxSize: 360, cell: (info: any) => renderRestorePageTask(info.row.original) }] : []),
   ], [allVisibleSelected, selectedRestorePoints, visibleColumns, tasks]);
 
   return (
@@ -10944,8 +10954,8 @@ function RealRestorePointPage({
                 { value: 'local', label: 'Local Snapshot', count: availableRows.filter(row => row.media === 'Local Snapshot').length },
                 { value: 'manual', label: 'Manual', count: availableRows.filter(row => row.backupMode === 'Manual').length },
                 { value: 'automatic', label: 'Automatic', count: availableRows.filter(row => row.backupMode === 'Automatic').length },
-                { value: 'running', label: 'Recovery Running', count: availableRows.filter(row => isActiveTaskStatus(latestTaskForRestorePoint(tasks, row.id)?.status)).length },
-                { value: 'failed', label: 'Recovery Failed', count: availableRows.filter(row => isFailedStatus(latestTaskForRestorePoint(tasks, row.id)?.status)).length },
+                { value: 'running', label: 'Recovery Running', count: availableRows.filter(row => isActiveTaskStatus(visibleRecoveryTask(row.id)?.status)).length },
+                { value: 'failed', label: 'Recovery Failed', count: availableRows.filter(row => isFailedStatus(visibleRecoveryTask(row.id)?.status)).length },
               ]}
               activeFilters={activeFilters}
               setActiveFilters={setActiveFilters}
@@ -11138,11 +11148,22 @@ function RealRestorePointPage({
             const action = restoreAction;
             const targetNamespace = action.config.namespaceMode === 'original' ? action.row.namespace : action.config.targetNamespace;
             const targetCluster = clusters.find(cluster => cluster.name === action.config.targetCluster);
+            const optimisticTask: ApiTask = {
+              id: `submitting-${action.mode}-${Date.now()}`,
+              clusterId: targetCluster?.id || action.row.targetClusterId,
+              protectionPlanId: action.row.protectionPlanId,
+              restorePointId: action.row.id,
+              type: action.mode,
+              status: 'queued',
+              progress: 0,
+              payload: { targetNamespace, sourceNamespace: action.row.namespace },
+              createdAt: new Date().toISOString(),
+            };
+            setSubmittingRecoveryTasks(prev => ({ ...prev, [action.row.id]: optimisticTask }));
             setRestoreAction(null);
             toast(action.mode === 'drill' ? 'DR drill job submitted' : 'DR takeover job submitted');
-            void (async () => {
-              try {
-                await apiPost<ApiTask>(`/api/v1/tasks/${action.mode}`, {
+            try {
+              const createdTask = await apiPost<ApiTask>(`/api/v1/tasks/${action.mode}`, {
                 clusterId: targetCluster?.id || action.row.targetClusterId,
                 protectionPlanId: action.row.protectionPlanId,
                 restorePointId: action.row.id,
@@ -11161,11 +11182,17 @@ function RealRestorePointPage({
                 storageProfileMode: action.config.storageProfileMode,
                 alternateProfileId: action.config.alternateProfileId,
               });
-              await load();
-              } catch (error) {
-                toast('Failed to submit recovery task: ' + (error instanceof Error ? error.message : 'unknown error'));
-              }
-            })();
+              setTasks(prev => [createdTask, ...prev.filter(task => task.id !== createdTask.id)]);
+              setSubmittingRecoveryTasks(prev => prev[action.row.id]?.id === optimisticTask.id
+                ? Object.fromEntries(Object.entries(prev).filter(([key]) => key !== action.row.id))
+                : prev);
+              void load();
+            } catch (error) {
+              setSubmittingRecoveryTasks(prev => prev[action.row.id]?.id === optimisticTask.id
+                ? Object.fromEntries(Object.entries(prev).filter(([key]) => key !== action.row.id))
+                : prev);
+              toast('Failed to submit recovery task: ' + (error instanceof Error ? error.message : 'unknown error'));
+            }
           }}
         />
       )}
@@ -12082,7 +12109,7 @@ function RealOperationsPage() {
                   {taskFailureDetails(selectedTask, taskEvents).map((detail, index) => (
                     <p key={`${index}-${detail}`} className="mt-1 whitespace-pre-wrap break-words">{detail}</p>
                   ))}
-                  {taskFailureDetails(selectedTask, taskEvents).length === 0 && <p className="mt-1">Task failed.</p>}
+                  {taskFailureDetails(selectedTask, taskEvents).length === 0 && <p className="mt-1">{taskDetailLabel(selectedTask.type)} failed.</p>}
                 </div>
               )}
               <div className="max-h-72 overflow-y-auto rounded-xl border border-slate-100">

@@ -31,7 +31,7 @@ Docker options:
   --data-dir PATH              Persistent data directory, default: /data/hypercdr/deploy
   --registry REGISTRY          Harbor project prefix, required. Example: 192.168.8.149:5001/hypercdr
   --image-tag TAG              Platform/agent image tag, default v20260714.5.
-  --velero-image IMAGE         Velero image, default <registry>/velero:v1.17.1-helperfix.
+  --velero-image IMAGE         Velero image, default <registry>/velero:v1.17.1-hcdr.1-20260716.
   --velero-aws-plugin-image IMAGE
                               Velero AWS plugin image, default <registry>/velero-plugin-for-aws:v1.13.0.
   --http-port PORT             Frontend host port. Defaults to the port in --public-base-url, or 3002.
@@ -177,7 +177,7 @@ run_k8s() {
     http_port="3002"
   fi
   if [[ -z "${velero_image}" ]]; then
-    velero_image="${registry}/velero:v1.17.1-helperfix"
+    velero_image="${registry}/velero:v1.17.1-hcdr.1-20260716"
   fi
   if [[ -z "${velero_aws_plugin_image}" ]]; then
     velero_aws_plugin_image="${registry}/velero-plugin-for-aws:v1.13.0"
@@ -329,7 +329,7 @@ run_docker() {
     http_port="3002"
   fi
   if [[ -z "${velero_image}" ]]; then
-    velero_image="${registry}/velero:v1.17.1-helperfix"
+    velero_image="${registry}/velero:v1.17.1-hcdr.1-20260716"
   fi
   if [[ -z "${velero_aws_plugin_image}" ]]; then
     velero_aws_plugin_image="${registry}/velero-plugin-for-aws:v1.13.0"

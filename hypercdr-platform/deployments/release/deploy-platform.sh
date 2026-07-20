@@ -49,7 +49,7 @@ require_version "${VERSION}"
 require_registry "${REGISTRY}"
 REGISTRY="${REGISTRY%/}"
 if [[ -z "${VELERO_IMAGE}" ]]; then
-  VELERO_IMAGE="${REGISTRY}/velero:v1.17.1-helperfix"
+  VELERO_IMAGE="${REGISTRY}/velero:v1.17.1-hcdr.1-20260716"
 fi
 if [[ -z "${VELERO_AWS_PLUGIN_IMAGE}" ]]; then
   VELERO_AWS_PLUGIN_IMAGE="${REGISTRY}/velero-plugin-for-aws:v1.13.0"
