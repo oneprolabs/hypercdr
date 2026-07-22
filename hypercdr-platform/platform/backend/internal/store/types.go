@@ -109,35 +109,47 @@ type AgentToken struct {
 }
 
 type Cluster struct {
-	ID                     string                `json:"id"`
-	TenantID               string                `json:"tenantId"`
-	Name                   string                `json:"name"`
-	KubeVersion            string                `json:"kubeVersion"`
-	Status                 string                `json:"status"`
-	ConnectionStatus       string                `json:"connectionStatus"`
-	NodeCount              int                   `json:"nodeCount"`
-	NamespaceCount         int                   `json:"namespaceCount"`
-	ApplicationCount       int                   `json:"applicationCount"`
-	ActiveTasks            int                   `json:"activeTasks"`
-	AgentVersion           string                `json:"agentVersion"`
-	AgentImage             string                `json:"agentImage,omitempty"`
-	AgentImageID           string                `json:"agentImageId,omitempty"`
-	AgentImageDigest       string                `json:"agentImageDigest,omitempty"`
-	LatestAgentVersion     string                `json:"latestAgentVersion,omitempty"`
-	LatestAgentImage       string                `json:"latestAgentImage,omitempty"`
-	LatestAgentImageDigest string                `json:"latestAgentImageDigest,omitempty"`
-	AgentUpgradeAvailable  bool                  `json:"agentUpgradeAvailable,omitempty"`
-	AgentUpgradeStatus     string                `json:"agentUpgradeStatus,omitempty"`
-	AgentUpgradeProgress   int                   `json:"agentUpgradeProgress,omitempty"`
-	VeleroVersion          string                `json:"veleroVersion,omitempty"`
-	VeleroStatus           string                `json:"veleroStatus"`
-	InventoryHash          string                `json:"inventoryHash,omitempty"`
-	Nodes                  []ClusterNode         `json:"nodes,omitempty"`
-	StorageClasses         []ClusterStorageClass `json:"storageClasses,omitempty"`
-	Role                   string                `json:"role"`
-	IsDefault              bool                  `json:"isDefault"`
-	RegisteredAt           time.Time             `json:"registeredAt"`
-	LastSeenAt             time.Time             `json:"lastSeenAt"`
+	ID                         string                `json:"id"`
+	TenantID                   string                `json:"tenantId"`
+	Name                       string                `json:"name"`
+	KubeVersion                string                `json:"kubeVersion"`
+	Status                     string                `json:"status"`
+	ConnectionStatus           string                `json:"connectionStatus"`
+	NodeCount                  int                   `json:"nodeCount"`
+	NamespaceCount             int                   `json:"namespaceCount"`
+	ApplicationCount           int                   `json:"applicationCount"`
+	ActiveTasks                int                   `json:"activeTasks"`
+	AgentVersion               string                `json:"agentVersion"`
+	AgentImage                 string                `json:"agentImage,omitempty"`
+	AgentImageID               string                `json:"agentImageId,omitempty"`
+	AgentImageDigest           string                `json:"agentImageDigest,omitempty"`
+	LatestAgentVersion         string                `json:"latestAgentVersion,omitempty"`
+	LatestAgentImage           string                `json:"latestAgentImage,omitempty"`
+	LatestAgentImageDigest     string                `json:"latestAgentImageDigest,omitempty"`
+	AgentUpgradeAvailable      bool                  `json:"agentUpgradeAvailable,omitempty"`
+	AgentUpgradeStatus         string                `json:"agentUpgradeStatus,omitempty"`
+	AgentUpgradeProgress       int                   `json:"agentUpgradeProgress,omitempty"`
+	VeleroVersion              string                `json:"veleroVersion,omitempty"`
+	VeleroStatus               string                `json:"veleroStatus"`
+	VeleroImage                string                `json:"veleroImage,omitempty"`
+	VeleroImageDigest          string                `json:"veleroImageDigest,omitempty"`
+	VeleroServerReady          bool                  `json:"veleroServerReady,omitempty"`
+	VeleroNodeAgentDesired     int32                 `json:"veleroNodeAgentDesired,omitempty"`
+	VeleroNodeAgentReady       int32                 `json:"veleroNodeAgentReady,omitempty"`
+	VeleroNodeAgentImageDigest string                `json:"veleroNodeAgentImageDigest,omitempty"`
+	LatestVeleroVersion        string                `json:"latestVeleroVersion,omitempty"`
+	LatestVeleroImage          string                `json:"latestVeleroImage,omitempty"`
+	LatestVeleroImageDigest    string                `json:"latestVeleroImageDigest,omitempty"`
+	VeleroUpgradeAvailable     bool                  `json:"veleroUpgradeAvailable,omitempty"`
+	VeleroUpgradeStatus        string                `json:"veleroUpgradeStatus,omitempty"`
+	VeleroUpgradeProgress      int                   `json:"veleroUpgradeProgress,omitempty"`
+	InventoryHash              string                `json:"inventoryHash,omitempty"`
+	Nodes                      []ClusterNode         `json:"nodes,omitempty"`
+	StorageClasses             []ClusterStorageClass `json:"storageClasses,omitempty"`
+	Role                       string                `json:"role"`
+	IsDefault                  bool                  `json:"isDefault"`
+	RegisteredAt               time.Time             `json:"registeredAt"`
+	LastSeenAt                 time.Time             `json:"lastSeenAt"`
 }
 
 func applyClusterConnectionFreshness(cluster *Cluster) {
@@ -214,19 +226,26 @@ type AgentCredentialInput struct {
 }
 
 type HeartbeatInput struct {
-	ClusterID        string
-	Status           string
-	KubeVersion      string
-	AgentVersion     string
-	AgentImage       string
-	AgentImageID     string
-	AgentImageDigest string
-	VeleroStatus     string
-	NodeCount        int
-	NamespaceCount   int
-	ApplicationCount int
-	ActiveTasks      int
-	InventoryHash    string
+	ClusterID                  string
+	Status                     string
+	KubeVersion                string
+	AgentVersion               string
+	AgentImage                 string
+	AgentImageID               string
+	AgentImageDigest           string
+	VeleroStatus               string
+	VeleroVersion              string
+	VeleroImage                string
+	VeleroImageDigest          string
+	VeleroServerReady          bool
+	VeleroNodeAgentDesired     int32
+	VeleroNodeAgentReady       int32
+	VeleroNodeAgentImageDigest string
+	NodeCount                  int
+	NamespaceCount             int
+	ApplicationCount           int
+	ActiveTasks                int
+	InventoryHash              string
 }
 
 type InventoryInput struct {

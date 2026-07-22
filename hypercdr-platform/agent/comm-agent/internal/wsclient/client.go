@@ -48,6 +48,7 @@ type Client struct {
 	agentRuntime   interface {
 		kube.AgentRuntimeReader
 		kube.AgentUpgrader
+		kube.VeleroRuntimeManager
 	}
 	lastInventory     inventory.Snapshot
 	backupSamples     map[string][]volumeProgressSample
@@ -99,6 +100,7 @@ func NewWithRuntimeDependencies(cfg config.Config, logger *slog.Logger, applier 
 	var agentRuntime interface {
 		kube.AgentRuntimeReader
 		kube.AgentUpgrader
+		kube.VeleroRuntimeManager
 	}
 	if runtime, err := kube.NewKubernetesAgentRuntime(cfg.KubeconfigPath); err == nil {
 		agentRuntime = runtime
@@ -453,6 +455,8 @@ func (c *Client) executeTask(task protocol.TaskDispatchPayload) {
 		c.executeProtectionCleanupTask(task)
 	case "agent-upgrade":
 		c.executeAgentUpgradeTask(task)
+	case "velero-upgrade":
+		c.executeVeleroUpgradeTask(task)
 	case "unregister":
 		c.executeUnregisterTask(task)
 	default:
@@ -531,6 +535,32 @@ func (c *Client) executeAgentUpgradeTask(task protocol.TaskDispatchPayload) {
 		"image":          command.Image,
 		"expectedDigest": command.ExpectedDigest,
 	}, "agent deployment upgrade submitted")
+}
+
+func (c *Client) executeVeleroUpgradeTask(task protocol.TaskDispatchPayload) {
+	if task.VeleroUpgrade == nil {
+		_ = c.sendTaskFailed(task, "VELERO_UPGRADE_COMMAND_INVALID", "velero upgrade command is required")
+		return
+	}
+	if err := c.sendTaskAccepted(task); err != nil {
+		return
+	}
+	if c.agentRuntime == nil {
+		_ = c.sendTaskFailed(task, "VELERO_UPGRADER_NOT_CONFIGURED", "velero upgrader is not configured")
+		return
+	}
+	command := task.VeleroUpgrade
+	_ = c.sendTaskProgress(task, map[string]any{"kind": "VeleroUpgrade", "image": command.Image}, 15, "velero upgrade accepted; updating server and node agents")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	if err := c.agentRuntime.UpgradeVelero(ctx, kube.VeleroUpgradeOptions{
+		Namespace: command.Namespace, Image: command.Image, DeploymentName: command.DeploymentName, DaemonSetName: command.DaemonSetName,
+	}); err != nil {
+		_ = c.sendTaskFailedWithDetails(task, "VELERO_UPGRADE_FAILED", "velero rollout failed", map[string]any{"error": err.Error(), "image": command.Image})
+		return
+	}
+	_ = c.sendTaskProgress(task, map[string]any{"kind": "VeleroUpgrade", "image": command.Image}, 85, "velero server and all scheduled node agents are ready; verifying image digest")
+	_ = c.sendTaskCompleted(task, map[string]any{"kind": "VeleroUpgrade", "image": command.Image, "expectedDigest": command.ExpectedDigest}, "velero rollout completed; waiting for heartbeat verification")
 }
 
 func (c *Client) executeUnregisterTask(task protocol.TaskDispatchPayload) {
@@ -2786,6 +2816,7 @@ func (c *Client) sendHeartbeat(_ bool) error {
 	agentImage := c.cfg.AgentImage
 	agentImageID := ""
 	agentImageDigest := ""
+	veleroRuntime := kube.VeleroRuntimeStatus{}
 	if c.agentRuntime != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		image, imageID, digest, err := c.agentRuntime.PodImageStatus(ctx, c.cfg.Namespace, c.cfg.PodName, "comm-agent")
@@ -2799,17 +2830,30 @@ func (c *Client) sendHeartbeat(_ bool) error {
 			agentImageID = imageID
 			agentImageDigest = digest
 		}
+		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+		veleroRuntime, err = c.agentRuntime.VeleroRuntimeStatus(ctx, c.cfg.Namespace)
+		cancel()
+		if err != nil {
+			c.logger.Warn("failed to read velero runtime status", "error", err)
+		}
 	}
 	payload := protocol.HeartbeatPayload{
-		AckRequired:      false,
-		Status:           "healthy",
-		AgentVersion:     c.cfg.AgentVersion,
-		AgentImage:       agentImage,
-		AgentImageID:     agentImageID,
-		AgentImageDigest: agentImageDigest,
-		VeleroStatus:     veleroStatus,
-		ActiveTasks:      0,
-		LastInventoryAt:  snapshot.Report.CollectedAt.Format(time.RFC3339),
+		AckRequired:                false,
+		Status:                     "healthy",
+		AgentVersion:               c.cfg.AgentVersion,
+		AgentImage:                 agentImage,
+		AgentImageID:               agentImageID,
+		AgentImageDigest:           agentImageDigest,
+		VeleroStatus:               veleroStatus,
+		VeleroVersion:              veleroRuntime.Version,
+		VeleroImage:                veleroRuntime.Image,
+		VeleroImageDigest:          veleroRuntime.ImageDigest,
+		VeleroServerReady:          veleroRuntime.ServerReady,
+		VeleroNodeAgentDesired:     veleroRuntime.NodeAgentDesired,
+		VeleroNodeAgentReady:       veleroRuntime.NodeAgentReady,
+		VeleroNodeAgentImageDigest: veleroRuntime.NodeAgentImageDigest,
+		ActiveTasks:                0,
+		LastInventoryAt:            snapshot.Report.CollectedAt.Format(time.RFC3339),
 	}
 	message := protocol.NewMessage(protocol.MessageKindEvent, protocol.MessageAgentHeartbeat, c.cfg.ClusterID, c.cfg.AgentID, payload)
 	if err := c.writeJSON(message); err != nil {

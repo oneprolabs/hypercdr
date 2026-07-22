@@ -14,11 +14,12 @@ textarea::placeholder {
 }
 
 html {
-  background: #eef4fb;
+  background: #03050a;
 }
 
 body {
   margin: 0;
+  min-height: 100vh;
   background:
     radial-gradient(circle at 12% 8%, rgba(37, 99, 235, 0.13), transparent 30rem),
     radial-gradient(circle at 84% 18%, rgba(20, 184, 166, 0.12), transparent 28rem),
@@ -26,6 +27,15 @@ body {
   color: #0f172a;
   -webkit-font-smoothing: antialiased;
   text-rendering: geometricPrecision;
+}
+
+#root {
+  min-height: 100vh;
+  background: #03050a;
+}
+
+.premium-app {
+  background-color: #eef4fb;
 }
 
 ::selection {
@@ -12436,6 +12446,143 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   }
 }
 
+/* Velero version and user-triggered upgrade. */
+.premium-app .hbdr-cluster-card-grid .cluster-agent-panel {
+  min-height: 78px !important;
+  grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr) minmax(0, 1fr) !important;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-components-cell {
+  display: grid;
+  align-content: center;
+  gap: 8px;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-component-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 78px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-component-row > span:first-child {
+  margin: 0 !important;
+  color: #6f8092 !important;
+  font-family: inherit;
+  font-size: 10px !important;
+  font-weight: 680 !important;
+  letter-spacing: 0 !important;
+  line-height: 1.2;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-component-row > p {
+  min-width: 0;
+  overflow: hidden;
+  margin: 0;
+  color: #33475b !important;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px !important;
+  font-weight: 680;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-component-update,
+.premium-app .hbdr-cluster-card-grid .cluster-component-progress {
+  margin: 0 !important;
+  color: #2f72ad !important;
+  font-family: inherit;
+  font-size: 9px !important;
+  font-weight: 760 !important;
+  letter-spacing: 0 !important;
+  line-height: 1.2;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-component-update:hover {
+  color: #205f96 !important;
+  text-decoration: underline;
+}
+
+.premium-app .hbdr-velero-upgrade-drawer {
+  width: min(560px, calc(100vw - 72px));
+}
+
+.premium-app .hbdr-velero-upgrade-body {
+  padding-top: 18px;
+}
+
+.premium-app .hbdr-velero-version-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+}
+
+.premium-app .hbdr-velero-version-box > div {
+  display: grid;
+  gap: 4px;
+}
+
+.premium-app .hbdr-velero-version-box span {
+  color: #8290a2;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.premium-app .hbdr-velero-version-box strong {
+  color: #172638;
+  font-size: 15px;
+}
+
+.premium-app .hbdr-velero-version-box small {
+  color: #718096;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+}
+
+.premium-app .hbdr-velero-version-box > svg {
+  color: #8aa0b5;
+}
+
+.premium-app .hbdr-velero-scope-box {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.premium-app .hbdr-velero-scope-box > div {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #43566a;
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.premium-app .hbdr-velero-scope-box svg {
+  color: #2f8b69;
+}
+
+.premium-app .hbdr-velero-upgrade-actions {
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+@media (max-width: 720px) {
+  .premium-app .hbdr-velero-upgrade-drawer {
+    width: 100vw;
+  }
+}
+
 /* Dashboard zones — single authoritative layout (overrides legacy dashboard patches above). */
 .premium-content .hbdr-dashboard.hbdr-dashboard-zones {
   display: grid !important;
@@ -23666,6 +23813,14 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   background: #6f98b9 !important;
 }
 
+.premium-app .hbdr-policy-drawer .hbdr-policy-timezone-note {
+  margin: -2px 0 2px;
+  color: #718096;
+  font-size: 11px;
+  font-weight: 620;
+  line-height: 1.45;
+}
+
 .premium-app .hbdr-policy-drawer-body button.border-indigo-600 {
   border-color: #b7cada !important;
   background: #f5f8fb !important;
@@ -23757,4 +23912,305 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 .premium-app .hbdr-storage-connection-check .hbdr-storage-test-button:hover:not(:disabled) {
   border-color: #9bbbd7 !important;
   background: #edf5fb !important;
+}
+
+/* Clusters page cards — refined enterprise presentation. */
+.premium-app .hbdr-cluster-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  padding: 16px;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-card-premium {
+  width: auto !important;
+  min-width: 0;
+  min-height: 304px;
+  padding: 18px !important;
+  border: 1px solid #dce5ef !important;
+  border-radius: 12px !important;
+  background:
+    radial-gradient(circle at 94% 2%, rgba(53, 122, 181, 0.08), transparent 170px),
+    #ffffff !important;
+  box-shadow: 0 8px 24px rgba(25, 45, 72, 0.07) !important;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-card-premium::before {
+  left: 18px;
+  right: 18px;
+  top: 0;
+  width: auto;
+  height: 2px !important;
+  border-radius: 0 0 999px 999px;
+  background: linear-gradient(90deg, #347bb8, #6ea8d2 70%, transparent) !important;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-card-premium::after {
+  display: none;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-card-premium:hover {
+  border-color: #abc6dc !important;
+  box-shadow: 0 14px 34px rgba(25, 55, 87, 0.11) !important;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-card-head {
+  min-height: 50px;
+  margin-bottom: 10px !important;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-card-icon {
+  width: 44px;
+  height: 44px;
+  border: 1px solid #d3e2ee;
+  border-radius: 11px !important;
+  background: #f2f7fb !important;
+  box-shadow: 0 5px 14px rgba(45, 103, 151, 0.10);
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-card-title {
+  font-size: 17px !important;
+  font-weight: 760 !important;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-agent-panel {
+  min-height: 64px !important;
+  gap: 0 !important;
+  padding: 10px 8px !important;
+  border-color: #e1e8f0 !important;
+  border-radius: 9px !important;
+  background: #f7f9fc !important;
+  box-shadow: none;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-agent-panel > div {
+  min-width: 0;
+  padding: 0 10px;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-agent-panel > div + div {
+  border-left: 1px solid #e2e8f0;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-agent-panel span:first-child {
+  margin-bottom: 5px;
+  color: #8a99aa !important;
+  letter-spacing: 0.09em;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-agent-panel p {
+  font-size: 12px !important;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-metrics-grid {
+  gap: 10px !important;
+  padding-top: 10px !important;
+  border-top-color: #e6edf4 !important;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-metric-tile {
+  min-height: 58px;
+  padding: 9px 11px !important;
+  border-color: #e0e8f0 !important;
+  border-radius: 9px !important;
+  background: #ffffff !important;
+  box-shadow: 0 3px 10px rgba(25, 45, 72, 0.04);
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-metric-tile-clickable:hover {
+  transform: translateY(-1px);
+  border-color: #b7cee1 !important;
+  background: #f8fbfe !important;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-metric-tile p:first-child {
+  color: #7b8999 !important;
+  font-size: 10px !important;
+  font-weight: 650 !important;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-metric-tile p:last-child {
+  color: #17263a !important;
+  font-size: 17px !important;
+  font-weight: 760 !important;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-entry-bar {
+  min-height: 38px;
+  margin-top: 10px !important;
+  padding: 0 12px !important;
+  border: 1px solid #dce7f0 !important;
+  border-radius: 9px !important;
+  background: #f5f9fc !important;
+  color: #4c6982 !important;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-entry-bar:hover {
+  border-color: #b7cee1 !important;
+  background: #edf5fb !important;
+  color: #25689f !important;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-entry-bar svg {
+  transition: transform 160ms ease;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-entry-bar:hover svg {
+  transform: translateX(2px);
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-card-offline {
+  border-color: #efd6d8 !important;
+  background: radial-gradient(circle at 94% 2%, rgba(190, 24, 45, 0.055), transparent 170px), #ffffff !important;
+  box-shadow: 0 8px 24px rgba(86, 35, 43, 0.06) !important;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-card-offline::before {
+  background: linear-gradient(90deg, #d75a65, #e8a0a6 70%, transparent) !important;
+}
+
+@media (max-width: 1050px) {
+  .premium-app .hbdr-cluster-card-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Native choice controls must never inherit text-field dimensions. */
+.premium-app.hbdr-workspace .premium-content input[type="checkbox"],
+.premium-app.hbdr-workspace .premium-content input[type="radio"] {
+  width: 16px !important;
+  min-width: 16px !important;
+  height: 16px !important;
+  min-height: 16px !important;
+  padding: 0 !important;
+  border-radius: 3px !important;
+  box-shadow: none !important;
+  flex: 0 0 16px;
+}
+
+.premium-app.hbdr-workspace .premium-content input[type="radio"] {
+  border-radius: 999px !important;
+}
+
+.premium-app.hbdr-workspace .premium-content input[type="checkbox"]:focus,
+.premium-app.hbdr-workspace .premium-content input[type="radio"]:focus {
+  box-shadow: 0 0 0 3px rgba(75, 141, 204, 0.14) !important;
+}
+
+/* Cluster unregister drawer. */
+.premium-app .hbdr-unregister-drawer {
+  width: min(620px, calc(100vw - 72px));
+}
+
+.premium-app .hbdr-unregister-drawer-body {
+  gap: 14px;
+  padding-top: 18px;
+}
+
+.premium-app .hbdr-unregister-drawer-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 11px;
+}
+
+.premium-app .hbdr-unregister-drawer-title-icon {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #f0cbd0;
+  border-radius: 9px;
+  background: #fff3f4;
+  color: #c83e4e;
+}
+
+.premium-app .hbdr-unregister-drawer-title-copy {
+  min-width: 0;
+}
+
+.premium-app .hbdr-filter-drawer-head .hbdr-unregister-drawer-title-copy > strong {
+  display: block;
+  line-height: 1.25;
+}
+
+.premium-app .hbdr-filter-drawer-head .hbdr-unregister-drawer-title-copy > span {
+  display: block;
+  margin-top: 3px;
+  line-height: 1.35;
+}
+
+.premium-app .hbdr-unregister-warning,
+.premium-app .hbdr-unregister-cluster,
+.premium-app .hbdr-unregister-force {
+  border-radius: 10px !important;
+  box-shadow: 0 5px 16px rgba(15, 23, 42, 0.035) !important;
+}
+
+.premium-app .hbdr-unregister-warning {
+  border-color: #f1c8cd !important;
+  background: #fff6f7 !important;
+}
+
+.premium-app .hbdr-unregister-cluster {
+  border-color: #dde6ef !important;
+  background: #ffffff !important;
+}
+
+.premium-app .hbdr-unregister-cluster > span {
+  display: block;
+  margin-bottom: 7px;
+  color: #8a98a9;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.premium-app .hbdr-unregister-force {
+  border-color: #dce5ee !important;
+  background: #ffffff !important;
+}
+
+.premium-app .hbdr-unregister-force.is-active {
+  border-color: #efc1c7 !important;
+  background: #fff7f8 !important;
+}
+
+.premium-app .hbdr-unregister-drawer-actions {
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.premium-app .hbdr-unregister-drawer-actions button:first-child {
+  border: 1px solid #d7e0e9 !important;
+  background: #ffffff !important;
+  color: #58687a !important;
+}
+
+.premium-app .hbdr-unregister-drawer-actions button:last-child:not(:disabled) {
+  border-color: #c83e4e !important;
+  background: #cf4353 !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 10px rgba(190, 42, 61, 0.18) !important;
+}
+
+.premium-app .hbdr-unregister-drawer-actions button:last-child:hover:not(:disabled) {
+  background: #bd3445 !important;
+}
+
+.premium-app .hbdr-unregister-drawer-actions button:last-child:disabled {
+  border-color: #e3e8ee !important;
+  background: #edf1f5 !important;
+  color: #a2acb8 !important;
+  box-shadow: none !important;
+}
+
+@media (max-width: 720px) {
+  .premium-app .hbdr-unregister-drawer {
+    width: 100vw;
+  }
 }

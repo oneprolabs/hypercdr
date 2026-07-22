@@ -606,15 +606,21 @@ func applyClusterMetadata(cluster *Cluster, metadataRaw []byte) {
 		return
 	}
 	var metadata struct {
-		Nodes                  []ClusterNode         `json:"nodes"`
-		StorageClasses         []ClusterStorageClass `json:"storageClasses"`
-		AgentImage             string                `json:"agentImage"`
-		AgentImageID           string                `json:"agentImageId"`
-		AgentImageDigest       string                `json:"agentImageDigest"`
-		LatestAgentVersion     string                `json:"latestAgentVersion"`
-		LatestAgentImage       string                `json:"latestAgentImage"`
-		LatestAgentImageDigest string                `json:"latestAgentImageDigest"`
-		AgentUpgradeStatus     string                `json:"agentUpgradeStatus"`
+		Nodes                      []ClusterNode         `json:"nodes"`
+		StorageClasses             []ClusterStorageClass `json:"storageClasses"`
+		AgentImage                 string                `json:"agentImage"`
+		AgentImageID               string                `json:"agentImageId"`
+		AgentImageDigest           string                `json:"agentImageDigest"`
+		LatestAgentVersion         string                `json:"latestAgentVersion"`
+		LatestAgentImage           string                `json:"latestAgentImage"`
+		LatestAgentImageDigest     string                `json:"latestAgentImageDigest"`
+		VeleroImage                string                `json:"veleroImage"`
+		VeleroImageDigest          string                `json:"veleroImageDigest"`
+		VeleroServerReady          bool                  `json:"veleroServerReady"`
+		VeleroNodeAgentDesired     int32                 `json:"veleroNodeAgentDesired"`
+		VeleroNodeAgentReady       int32                 `json:"veleroNodeAgentReady"`
+		VeleroNodeAgentImageDigest string                `json:"veleroNodeAgentImageDigest"`
+		AgentUpgradeStatus         string                `json:"agentUpgradeStatus"`
 	}
 	if err := json.Unmarshal(metadataRaw, &metadata); err != nil {
 		return
@@ -627,6 +633,12 @@ func applyClusterMetadata(cluster *Cluster, metadataRaw []byte) {
 	cluster.LatestAgentVersion = metadata.LatestAgentVersion
 	cluster.LatestAgentImage = metadata.LatestAgentImage
 	cluster.LatestAgentImageDigest = metadata.LatestAgentImageDigest
+	cluster.VeleroImage = metadata.VeleroImage
+	cluster.VeleroImageDigest = metadata.VeleroImageDigest
+	cluster.VeleroServerReady = metadata.VeleroServerReady
+	cluster.VeleroNodeAgentDesired = metadata.VeleroNodeAgentDesired
+	cluster.VeleroNodeAgentReady = metadata.VeleroNodeAgentReady
+	cluster.VeleroNodeAgentImageDigest = metadata.VeleroNodeAgentImageDigest
 	cluster.AgentUpgradeStatus = metadata.AgentUpgradeStatus
 	cluster.AgentUpgradeAvailable = metadata.AgentImageDigest != "" && metadata.LatestAgentImageDigest != "" && metadata.AgentImageDigest != metadata.LatestAgentImageDigest
 }
@@ -803,22 +815,31 @@ func (s *PostgresStore) UpdateHeartbeat(input HeartbeatInput) (Cluster, bool, er
 		    kube_version = coalesce(nullif($3, ''), kube_version),
 		    agent_version = coalesce(nullif($4, ''), agent_version),
 		    velero_status = coalesce(nullif($5, ''), velero_status),
+		    velero_version = coalesce(nullif($14, ''), velero_version),
 		    node_count = case when $6 > 0 then $6 else node_count end,
 		    namespace_count = case when $7 > 0 then $7 else namespace_count end,
 		    application_count = case when $8 > 0 then $8 else application_count end,
 		    connection_status = 'online',
 		    last_seen_at = $9,
 		    metadata = coalesce(metadata, '{}'::jsonb) || jsonb_strip_nulls(jsonb_build_object(
-		    	'inventoryHash', nullif($10, ''),
-		    	'agentImage', nullif($11, ''),
-		    	'agentImageId', nullif($12, ''),
-		    	'agentImageDigest', nullif($13, '')
+		        'inventoryHash', nullif($10, ''),
+		        'agentImage', nullif($11, ''),
+		        'agentImageId', nullif($12, ''),
+		        'agentImageDigest', nullif($13, ''),
+		        'veleroImage', nullif($15, ''),
+		        'veleroImageDigest', nullif($16, ''),
+		        'veleroServerReady', $17::boolean,
+		        'veleroNodeAgentDesired', $18::integer,
+		        'veleroNodeAgentReady', $19::integer,
+		        'veleroNodeAgentImageDigest', nullif($20, '')
 		    )),
 		    updated_at = $9
 		where id = $1
 	`, input.ClusterID, input.Status, input.KubeVersion, input.AgentVersion, input.VeleroStatus,
 		input.NodeCount, input.NamespaceCount, input.ApplicationCount, now, input.InventoryHash,
-		input.AgentImage, input.AgentImageID, input.AgentImageDigest)
+		input.AgentImage, input.AgentImageID, input.AgentImageDigest, input.VeleroVersion,
+		input.VeleroImage, input.VeleroImageDigest, input.VeleroServerReady,
+		input.VeleroNodeAgentDesired, input.VeleroNodeAgentReady, input.VeleroNodeAgentImageDigest)
 	if err != nil {
 		return Cluster{}, false, err
 	}

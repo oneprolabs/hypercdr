@@ -98,15 +98,22 @@ type RegisterRejectedPayload struct {
 }
 
 type HeartbeatPayload struct {
-	AckRequired      bool   `json:"ackRequired,omitempty"`
-	Status           string `json:"status"`
-	AgentVersion     string `json:"agentVersion"`
-	AgentImage       string `json:"agentImage,omitempty"`
-	AgentImageID     string `json:"agentImageId,omitempty"`
-	AgentImageDigest string `json:"agentImageDigest,omitempty"`
-	VeleroStatus     string `json:"veleroStatus,omitempty"`
-	ActiveTasks      int    `json:"activeTasks"`
-	LastInventoryAt  string `json:"lastInventoryAt,omitempty"`
+	AckRequired                bool   `json:"ackRequired,omitempty"`
+	Status                     string `json:"status"`
+	AgentVersion               string `json:"agentVersion"`
+	AgentImage                 string `json:"agentImage,omitempty"`
+	AgentImageID               string `json:"agentImageId,omitempty"`
+	AgentImageDigest           string `json:"agentImageDigest,omitempty"`
+	VeleroStatus               string `json:"veleroStatus,omitempty"`
+	VeleroVersion              string `json:"veleroVersion,omitempty"`
+	VeleroImage                string `json:"veleroImage,omitempty"`
+	VeleroImageDigest          string `json:"veleroImageDigest,omitempty"`
+	VeleroServerReady          bool   `json:"veleroServerReady,omitempty"`
+	VeleroNodeAgentDesired     int32  `json:"veleroNodeAgentDesired,omitempty"`
+	VeleroNodeAgentReady       int32  `json:"veleroNodeAgentReady,omitempty"`
+	VeleroNodeAgentImageDigest string `json:"veleroNodeAgentImageDigest,omitempty"`
+	ActiveTasks                int    `json:"activeTasks"`
+	LastInventoryAt            string `json:"lastInventoryAt,omitempty"`
 }
 
 type InventoryReportPayload struct {
@@ -294,6 +301,7 @@ type TaskDispatchPayload struct {
 	RetentionCleanup  *RetentionCleanupCommand  `json:"retentionCleanup,omitempty"`
 	ProtectionCleanup *ProtectionCleanupCommand `json:"protectionCleanup,omitempty"`
 	AgentUpgrade      *AgentUpgradeCommand      `json:"agentUpgrade,omitempty"`
+	VeleroUpgrade     *VeleroUpgradeCommand     `json:"veleroUpgrade,omitempty"`
 	Unregister        *UnregisterCommand        `json:"unregister,omitempty"`
 }
 
@@ -306,6 +314,16 @@ type AgentUpgradeCommand struct {
 	DeploymentName    string `json:"deploymentName,omitempty"`
 	ContainerName     string `json:"containerName,omitempty"`
 	RolloutAnnotation string `json:"rolloutAnnotation,omitempty"`
+}
+
+type VeleroUpgradeCommand struct {
+	ClusterID      string `json:"clusterId"`
+	Namespace      string `json:"namespace"`
+	Image          string `json:"image"`
+	Version        string `json:"version,omitempty"`
+	ExpectedDigest string `json:"expectedDigest,omitempty"`
+	DeploymentName string `json:"deploymentName,omitempty"`
+	DaemonSetName  string `json:"daemonSetName,omitempty"`
 }
 
 type UnregisterCommand struct {

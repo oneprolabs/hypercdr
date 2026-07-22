@@ -45,12 +45,15 @@ type Router struct {
 	oauthStates   map[string]time.Time
 	inventoryMu   sync.Mutex
 	inventory     map[string]inventoryRequestStatus
+	imageDigestMu sync.Mutex
+	imageDigests  map[string]imageDigestCacheEntry
 	schedulerOnce sync.Once
 }
 
 const (
 	agentPongWait   = 90 * time.Second
 	agentPingPeriod = 30 * time.Second
+	imageDigestTTL  = 10 * time.Minute
 )
 
 var cleanObjectStoragePrefix = deleteObjectStoragePrefix
@@ -73,16 +76,22 @@ type inventoryRequestStatus struct {
 	CompletedAt time.Time `json:"completedAt,omitempty"`
 }
 
+type imageDigestCacheEntry struct {
+	Digest    string
+	ExpiresAt time.Time
+}
+
 func NewRouter(cfg config.Config, logger *slog.Logger, repo store.Store) http.Handler {
 	router := &Router{
-		cfg:         cfg,
-		logger:      logger,
-		mux:         http.NewServeMux(),
-		store:       repo,
-		hub:         newSessionHub(),
-		captchas:    map[string]captchaChallenge{},
-		oauthStates: map[string]time.Time{},
-		inventory:   map[string]inventoryRequestStatus{},
+		cfg:          cfg,
+		logger:       logger,
+		mux:          http.NewServeMux(),
+		store:        repo,
+		hub:          newSessionHub(),
+		captchas:     map[string]captchaChallenge{},
+		oauthStates:  map[string]time.Time{},
+		inventory:    map[string]inventoryRequestStatus{},
+		imageDigests: map[string]imageDigestCacheEntry{},
 	}
 	router.routes()
 	router.startScheduler()
@@ -122,6 +131,7 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("POST /api/v1/clusters/{id}/force-cleanup", r.forceCleanupCluster)
 	r.mux.HandleFunc("POST /api/v1/clusters/{id}/unregister", r.unregisterCluster)
 	r.mux.HandleFunc("POST /api/v1/clusters/{id}/agent/upgrade", r.upgradeClusterAgent)
+	r.mux.HandleFunc("POST /api/v1/clusters/{id}/velero/upgrade", r.upgradeClusterVelero)
 	r.mux.HandleFunc("POST /api/v1/clusters/{id}/inventory/request", r.requestClusterInventory)
 	r.mux.HandleFunc("GET /api/v1/clusters/{id}/inventory/requests/{requestId}", r.getClusterInventoryRequest)
 	r.mux.HandleFunc("GET /api/v1/applications", r.listApplications)
@@ -311,6 +321,15 @@ func serverTimeZone() string {
 		}
 	}
 	return "UTC"
+}
+
+func serverLocation() *time.Location {
+	name := serverTimeZone()
+	location, err := time.LoadLocation(name)
+	if err != nil {
+		return time.UTC
+	}
+	return location
 }
 
 func (r *Router) registerUser(w http.ResponseWriter, req *http.Request) {
@@ -518,6 +537,11 @@ func (r *Router) listClusters(w http.ResponseWriter, req *http.Request) {
 	if digestErr != nil {
 		r.logger.Warn("failed to resolve latest agent image digest", "image", latestAgentImage, "error", digestErr)
 	}
+	latestVeleroImage := strings.TrimSpace(r.cfg.VeleroImage)
+	latestVeleroDigest, veleroDigestErr := r.resolveImageDigest(req.Context(), latestVeleroImage)
+	if veleroDigestErr != nil {
+		r.logger.Warn("failed to resolve latest velero image digest", "image", latestVeleroImage, "error", veleroDigestErr)
+	}
 	upgradeTasks, taskErr := r.store.ListTasks("")
 	if taskErr != nil {
 		r.logger.Warn("failed to load agent upgrade status", "error", taskErr)
@@ -532,16 +556,31 @@ func (r *Router) listClusters(w http.ResponseWriter, req *http.Request) {
 		clusters[i].LatestAgentImage = latestAgentImage
 		clusters[i].LatestAgentImageDigest = latestAgentDigest
 		clusters[i].AgentUpgradeAvailable = clusters[i].AgentImageDigest != "" && latestAgentDigest != "" && clusters[i].AgentImageDigest != latestAgentDigest
+		clusters[i].LatestVeleroVersion = r.cfg.VeleroVersion
+		clusters[i].LatestVeleroImage = latestVeleroImage
+		clusters[i].LatestVeleroImageDigest = latestVeleroDigest
+		veleroRuntimeReported := clusters[i].VeleroImageDigest != "" && clusters[i].VeleroNodeAgentImageDigest != ""
+		veleroDigestMismatch := latestVeleroDigest != "" && veleroRuntimeReported && (clusters[i].VeleroImageDigest != latestVeleroDigest || clusters[i].VeleroNodeAgentImageDigest != latestVeleroDigest)
+		veleroVersionMismatch := latestVeleroDigest == "" && clusters[i].VeleroVersion != "" && clusters[i].VeleroVersion != r.cfg.VeleroVersion
+		clusters[i].VeleroUpgradeAvailable = veleroDigestMismatch || veleroVersionMismatch
 		for _, task := range upgradeTasks {
-			if task.ClusterID != clusters[i].ID || task.Type != "agent-upgrade" || isTerminalTaskStatus(task.Status) {
+			if task.ClusterID != clusters[i].ID || isTerminalTaskStatus(task.Status) {
 				continue
 			}
-			clusters[i].AgentUpgradeStatus = "upgrading"
-			clusters[i].AgentUpgradeProgress = task.Progress
-			break
+			if task.Type == "agent-upgrade" {
+				clusters[i].AgentUpgradeStatus = "upgrading"
+				clusters[i].AgentUpgradeProgress = task.Progress
+			}
+			if task.Type == "velero-upgrade" {
+				clusters[i].VeleroUpgradeStatus = "upgrading"
+				clusters[i].VeleroUpgradeProgress = task.Progress
+			}
 		}
 		if clusters[i].AgentUpgradeAvailable && clusters[i].AgentUpgradeStatus == "" {
 			clusters[i].AgentUpgradeStatus = "available"
+		}
+		if clusters[i].VeleroUpgradeAvailable && clusters[i].VeleroUpgradeStatus == "" {
+			clusters[i].VeleroUpgradeStatus = "available"
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -590,7 +629,36 @@ func (r *Router) completeAgentUpgradeAfterHeartbeat(cluster store.Cluster) {
 	}
 }
 
+func (r *Router) completeVeleroUpgradeAfterHeartbeat(cluster store.Cluster) {
+	tasks, err := r.store.ListTasks(cluster.ID)
+	if err != nil {
+		return
+	}
+	for _, task := range tasks {
+		if task.Type != "velero-upgrade" || isTerminalTaskStatus(task.Status) {
+			continue
+		}
+		expected := strings.TrimSpace(stringPayload(task.Payload, "expectedDigest"))
+		allNodesReady := cluster.VeleroNodeAgentDesired > 0 && cluster.VeleroNodeAgentReady == cluster.VeleroNodeAgentDesired
+		if expected == "" || cluster.VeleroImageDigest != expected || cluster.VeleroNodeAgentImageDigest != expected || !cluster.VeleroServerReady || !allNodesReady {
+			continue
+		}
+		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "succeeded", Progress: 100, MarkDone: true})
+		_ = r.addTaskEventIfChanged(store.TaskEventInput{TaskID: task.ID, Level: "info", Reason: "completed", Message: "velero server and all scheduled node agents report the expected image digest"})
+	}
+}
+
 func (r *Router) resolveImageDigest(ctx context.Context, image string) (string, error) {
+	image = strings.TrimSpace(image)
+	now := time.Now()
+	r.imageDigestMu.Lock()
+	cached, ok := r.imageDigests[image]
+	if ok && cached.Digest != "" && cached.ExpiresAt.After(now) {
+		r.imageDigestMu.Unlock()
+		return cached.Digest, nil
+	}
+	r.imageDigestMu.Unlock()
+
 	registry, repository, reference, ok := splitContainerImage(image)
 	if !ok {
 		return "", fmt.Errorf("invalid image reference %q", image)
@@ -640,6 +708,9 @@ func (r *Router) resolveImageDigest(ctx context.Context, image string) (string, 
 	if digest == "" {
 		return "", errors.New("registry manifest digest is empty")
 	}
+	r.imageDigestMu.Lock()
+	r.imageDigests[image] = imageDigestCacheEntry{Digest: digest, ExpiresAt: now.Add(imageDigestTTL)}
+	r.imageDigestMu.Unlock()
 	return digest, nil
 }
 
@@ -1155,6 +1226,79 @@ func (r *Router) upgradeClusterAgent(w http.ResponseWriter, req *http.Request) {
 		Reason:  "dispatched",
 		Message: "agent upgrade task dispatched",
 	})
+	writeJSON(w, http.StatusAccepted, task)
+}
+
+func (r *Router) upgradeClusterVelero(w http.ResponseWriter, req *http.Request) {
+	clusterID := req.PathValue("id")
+	clusters, listErr := r.store.ListClusters()
+	if listErr != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_clusters_failed"})
+		return
+	}
+	var cluster store.Cluster
+	found := false
+	for _, item := range clusters {
+		if item.ID == clusterID {
+			cluster = item
+			found = true
+			break
+		}
+	}
+	if clusterID == "" || !found {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "cluster_not_found"})
+		return
+	}
+	if cluster.VeleroImageDigest == "" || cluster.VeleroNodeAgentImageDigest == "" {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "velero_runtime_unreported", "message": "Upgrade the comm-agent first so it can report the Velero server and node-agent image digests."})
+		return
+	}
+	targetImage := strings.TrimSpace(r.cfg.VeleroImage)
+	if targetImage == "" {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "velero_image_not_configured"})
+		return
+	}
+	targetDigest, err := r.resolveImageDigest(req.Context(), targetImage)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "velero_image_digest_unavailable", "message": "Could not resolve target Velero image digest from the registry"})
+		return
+	}
+	if cluster.VeleroImageDigest == targetDigest && cluster.VeleroNodeAgentImageDigest == targetDigest && cluster.VeleroServerReady && cluster.VeleroNodeAgentDesired > 0 && cluster.VeleroNodeAgentReady == cluster.VeleroNodeAgentDesired {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "velero_already_current", "message": "Velero server and all node agents already use the target image."})
+		return
+	}
+	tasks, err := r.store.ListTasks(clusterID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_tasks_failed"})
+		return
+	}
+	blockedTypes := map[string]bool{"backup": true, "restore": true, "drill": true, "takeover": true, "failback": true, "retention-cleanup": true, "protection-cleanup": true, "agent-upgrade": true, "velero-upgrade": true}
+	for _, task := range tasks {
+		if blockedTypes[task.Type] && !isTerminalTaskStatus(task.Status) {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "cluster_task_active", "message": "Wait for active backup, restore, drill, cleanup, or upgrade tasks to finish before upgrading Velero."})
+			return
+		}
+	}
+	conn, ok := r.hub.get(clusterID)
+	if !ok {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "agent_offline", "message": "Cluster agent is offline. Reconnect the agent before upgrading Velero."})
+		return
+	}
+	task, err := r.store.CreateTask(store.TaskInput{ClusterID: clusterID, Type: "velero-upgrade", Status: "queued", CommandID: store.NewPublicID(), Payload: map[string]any{
+		"clusterId": clusterID, "namespace": r.agentNamespace(), "image": targetImage, "version": r.cfg.VeleroVersion,
+		"expectedDigest": targetDigest, "deploymentName": "velero", "daemonSetName": "node-agent",
+	}})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "create_task_failed"})
+		return
+	}
+	if err := r.dispatchStoredTask(conn, task); err != nil {
+		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "queued", ErrorCode: "DISPATCH_FAILED", ErrorMessage: err.Error()})
+		writeJSON(w, http.StatusAccepted, map[string]any{"task": task, "warning": "Velero upgrade task created but dispatch failed"})
+		return
+	}
+	task, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "dispatched", Progress: 0})
+	_ = r.store.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "info", Reason: "dispatched", Message: "Velero upgrade task dispatched to cluster agent"})
 	writeJSON(w, http.StatusAccepted, task)
 }
 
@@ -2299,6 +2443,16 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 		}
 		if payload.AgentUpgrade.Image == "" {
 			return protocol.Message[protocol.TaskDispatchPayload]{}, errors.New("agent upgrade image is required")
+		}
+	case "velero-upgrade":
+		payload.Deadline = time.Now().UTC().Add(15 * time.Minute)
+		payload.VeleroUpgrade = &protocol.VeleroUpgradeCommand{
+			ClusterID: task.ClusterID, Namespace: firstNonEmptyString(stringPayload(task.Payload, "namespace"), r.agentNamespace()),
+			Image: stringPayload(task.Payload, "image"), Version: stringPayload(task.Payload, "version"), ExpectedDigest: stringPayload(task.Payload, "expectedDigest"),
+			DeploymentName: stringPayload(task.Payload, "deploymentName"), DaemonSetName: stringPayload(task.Payload, "daemonSetName"),
+		}
+		if payload.VeleroUpgrade.Image == "" {
+			return protocol.Message[protocol.TaskDispatchPayload]{}, errors.New("velero upgrade image is required")
 		}
 	case "restore", "drill", "takeover":
 		sourceNamespace := stringPayload(task.Payload, "sourceNamespace")
@@ -4656,14 +4810,21 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 				return
 			}
 			updated, ok, err := r.store.UpdateHeartbeat(store.HeartbeatInput{
-				ClusterID:        clusterID,
-				Status:           heartbeat.Payload.Status,
-				AgentVersion:     heartbeat.Payload.AgentVersion,
-				AgentImage:       heartbeat.Payload.AgentImage,
-				AgentImageID:     heartbeat.Payload.AgentImageID,
-				AgentImageDigest: heartbeat.Payload.AgentImageDigest,
-				VeleroStatus:     heartbeat.Payload.VeleroStatus,
-				ActiveTasks:      heartbeat.Payload.ActiveTasks,
+				ClusterID:                  clusterID,
+				Status:                     heartbeat.Payload.Status,
+				AgentVersion:               heartbeat.Payload.AgentVersion,
+				AgentImage:                 heartbeat.Payload.AgentImage,
+				AgentImageID:               heartbeat.Payload.AgentImageID,
+				AgentImageDigest:           heartbeat.Payload.AgentImageDigest,
+				VeleroStatus:               heartbeat.Payload.VeleroStatus,
+				VeleroVersion:              heartbeat.Payload.VeleroVersion,
+				VeleroImage:                heartbeat.Payload.VeleroImage,
+				VeleroImageDigest:          heartbeat.Payload.VeleroImageDigest,
+				VeleroServerReady:          heartbeat.Payload.VeleroServerReady,
+				VeleroNodeAgentDesired:     heartbeat.Payload.VeleroNodeAgentDesired,
+				VeleroNodeAgentReady:       heartbeat.Payload.VeleroNodeAgentReady,
+				VeleroNodeAgentImageDigest: heartbeat.Payload.VeleroNodeAgentImageDigest,
+				ActiveTasks:                heartbeat.Payload.ActiveTasks,
 			})
 			if err != nil {
 				r.logger.Error("failed to update heartbeat", "cluster_id", clusterID, "error", err)
@@ -4674,6 +4835,7 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 				return
 			}
 			r.completeAgentUpgradeAfterHeartbeat(updated)
+			r.completeVeleroUpgradeAfterHeartbeat(updated)
 			r.logger.Info("agent heartbeat",
 				"cluster_id", updated.ID,
 				"status", updated.Status,
@@ -4884,11 +5046,19 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 				}
 				continue
 			}
-			if existingTask.Type == "agent-upgrade" {
+			if existingTask.Type == "agent-upgrade" || existingTask.Type == "velero-upgrade" {
+				progress := 70
+				reason := "waiting_for_reconnect"
+				message := "agent deployment updated; waiting for the new agent to reconnect"
+				if existingTask.Type == "velero-upgrade" {
+					progress = 90
+					reason = "waiting_for_verification"
+					message = "velero rollout completed; waiting for server and node-agent digest verification"
+				}
 				_, _, err = r.store.UpdateTaskStatus(store.TaskStatusInput{
 					TaskID:      existingTask.ID,
 					Status:      "running",
-					Progress:    70,
+					Progress:    progress,
 					Payload:     taskCompletedPayloadPatch(completed.Payload),
 					MarkStarted: true,
 				})
@@ -4897,8 +5067,7 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 					return
 				}
 				_ = r.addTaskEventIfChanged(store.TaskEventInput{
-					TaskID: existingTask.ID, Level: "info", Reason: "waiting_for_reconnect",
-					Message: "agent deployment updated; waiting for the new agent to reconnect",
+					TaskID: existingTask.ID, Level: "info", Reason: reason, Message: message,
 				})
 				if completed.Payload.AckRequired {
 					_ = r.writeEventAck(conn, clusterID, completed.AgentID, completed.MessageID, completed.Type, completed.Payload.TaskID, completed.Payload.CommandID)
@@ -8594,8 +8763,11 @@ rules:
     resources: ["deployments"]
     verbs: ["get", "list", "watch", "patch", "update"]
   - apiGroups: ["apps"]
-    resources: ["statefulsets", "daemonsets", "replicasets"]
+    resources: ["statefulsets", "replicasets"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    verbs: ["get", "list", "watch", "patch", "update"]
   - apiGroups: ["batch"]
     resources: ["jobs", "cronjobs"]
     verbs: ["get", "list", "watch"]

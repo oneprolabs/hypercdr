@@ -354,7 +354,20 @@ interface Cluster {
   agentUpgradeAvailable?: boolean;
   agentUpgradeStatus?: string;
   agentUpgradeProgress?: number;
+  veleroVersion?: string;
   veleroStatus?: string;
+  veleroImage?: string;
+  veleroImageDigest?: string;
+  veleroServerReady?: boolean;
+  veleroNodeAgentDesired?: number;
+  veleroNodeAgentReady?: number;
+  veleroNodeAgentImageDigest?: string;
+  latestVeleroVersion?: string;
+  latestVeleroImage?: string;
+  latestVeleroImageDigest?: string;
+  veleroUpgradeAvailable?: boolean;
+  veleroUpgradeStatus?: string;
+  veleroUpgradeProgress?: number;
   lastSeenAt?: string;
   role?: 'source' | 'target' | 'both';
   isDefault?: boolean;
@@ -458,6 +471,18 @@ type ApiCluster = {
   agentUpgradeProgress?: number;
   veleroVersion?: string;
   veleroStatus: string;
+  veleroImage?: string;
+  veleroImageDigest?: string;
+  veleroServerReady?: boolean;
+  veleroNodeAgentDesired?: number;
+  veleroNodeAgentReady?: number;
+  veleroNodeAgentImageDigest?: string;
+  latestVeleroVersion?: string;
+  latestVeleroImage?: string;
+  latestVeleroImageDigest?: string;
+  veleroUpgradeAvailable?: boolean;
+  veleroUpgradeStatus?: string;
+  veleroUpgradeProgress?: number;
   role?: 'source' | 'target' | 'both';
   isDefault?: boolean;
   registeredAt?: string;
@@ -646,6 +671,7 @@ type ApiRestorePoint = {
 };
 
 const AUTH_SESSION_KEY = 'hypercdr.auth.session';
+const AUTH_EXPIRED_EVENT = 'hypercdr:auth-expired';
 const NAV_VIEW_KEY = 'hypercdr.nav.view';
 const SELECTED_CLUSTER_KEY = 'hypercdr.selectedClusterId';
 const DEFAULT_CLUSTER_KEY = 'hypercdr.defaultClusterId';
@@ -742,19 +768,25 @@ async function readApiError(response: Response): Promise<Error> {
   }
 }
 
+async function ensureApiResponse(response: Response, path: string): Promise<Response> {
+  if (response.ok) return response;
+  if (response.status === 401 && !path.startsWith('/api/v1/auth/')) {
+    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+  }
+  throw await readApiError(response);
+}
+
 async function apiGet<T>(path: string): Promise<T> {
-  const response = await fetch(path, { cache: 'no-store' });
-  if (!response.ok) throw await readApiError(response);
+  const response = await ensureApiResponse(await fetch(path, { cache: 'no-store' }), path);
   return response.json() as Promise<T>;
 }
 
 async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(path, {
+  const response = await ensureApiResponse(await fetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  });
-  if (!response.ok) throw await readApiError(response);
+  }), path);
   return response.json() as Promise<T>;
 }
 
@@ -765,18 +797,16 @@ function isAgentTokenUsable(token: ApiAgentToken | null) {
 }
 
 async function apiPatch<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(path, {
+  const response = await ensureApiResponse(await fetch(path, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  });
-  if (!response.ok) throw await readApiError(response);
+  }), path);
   return response.json() as Promise<T>;
 }
 
 async function apiDelete<T>(path: string): Promise<T> {
-  const response = await fetch(path, { method: 'DELETE' });
-  if (!response.ok) throw await readApiError(response);
+  const response = await ensureApiResponse(await fetch(path, { method: 'DELETE' }), path);
   return response.json() as Promise<T>;
 }
 
@@ -2217,7 +2247,20 @@ function mapCluster(cluster: ApiCluster, apps: AppItem[] = []): Cluster {
     agentUpgradeAvailable: Boolean(cluster.agentUpgradeAvailable),
     agentUpgradeStatus: cluster.agentUpgradeStatus,
     agentUpgradeProgress: cluster.agentUpgradeProgress,
+    veleroVersion: cluster.veleroVersion || 'unknown',
     veleroStatus: cluster.veleroStatus || 'unknown',
+    veleroImage: cluster.veleroImage,
+    veleroImageDigest: cluster.veleroImageDigest,
+    veleroServerReady: cluster.veleroServerReady,
+    veleroNodeAgentDesired: cluster.veleroNodeAgentDesired,
+    veleroNodeAgentReady: cluster.veleroNodeAgentReady,
+    veleroNodeAgentImageDigest: cluster.veleroNodeAgentImageDigest,
+    latestVeleroVersion: cluster.latestVeleroVersion,
+    latestVeleroImage: cluster.latestVeleroImage,
+    latestVeleroImageDigest: cluster.latestVeleroImageDigest,
+    veleroUpgradeAvailable: Boolean(cluster.veleroUpgradeAvailable),
+    veleroUpgradeStatus: cluster.veleroUpgradeStatus,
+    veleroUpgradeProgress: cluster.veleroUpgradeProgress,
     lastSeenAt: cluster.lastSeenAt,
     role: cluster.role || 'both',
     isDefault: Boolean(cluster.isDefault),
@@ -2402,10 +2445,13 @@ function buildStorageRepositoryInput(repo: StorageRepo): StorageRepositoryInput 
 
 function mapPolicy(policy: ApiPolicy): PolicyItem {
   const scheduleType = ['daily', 'weekly', 'monthly'].includes(policy.scheduleType) ? policy.scheduleType as PolicyScheduleType : 'interval';
+  const composition = ['manual', 'combined', 'schedule', 'retention'].includes(policy.composition)
+    ? policy.composition as PolicyComposition
+    : 'combined';
   return {
     id: policy.id,
     name: policy.name,
-    composition: policy.composition === 'manual' ? 'manual' : 'combined',
+    composition,
     type: scheduleType,
     intervalValue: policy.intervalValue || 1,
     intervalUnit: policy.intervalUnit === 'minute' || policy.intervalUnit === 'minutes' ? 'minutes' : 'hours',
@@ -3148,6 +3194,20 @@ export default function App() {
     setView('login');
   }, []);
 
+  useEffect(() => {
+    const expireSession = () => {
+      clearStoredAuthSession();
+      setAccountMenuOpen(false);
+      setAuthSession(null);
+      setLoginPassword('');
+      setLoginCaptchaCode('');
+      setLoginError('Your session has expired. Sign in again.');
+      setView('login');
+    };
+    window.addEventListener(AUTH_EXPIRED_EVENT, expireSession);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, expireSession);
+  }, []);
+
   const [clusterTaskLogs, setClusterTaskLogs] = useState<Record<string, ClusterTaskLog[]>>({});
   const [activeClusterTaskIds, setActiveClusterTaskIds] = useState<Set<string>>(new Set());
   const clusterTaskLogsRef = useRef(clusterTaskLogs);
@@ -3157,6 +3217,10 @@ export default function App() {
   const refreshLastResultRef = useRef<Cluster[]>([]);
 
   useEffect(() => {
+    if (!authSession || view === 'login') {
+      setActiveClusterTaskIds(new Set());
+      return;
+    }
     let cancelled = false;
     const loadTasks = async () => {
       try {
@@ -3201,9 +3265,10 @@ export default function App() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [authSession, view]);
 
   useEffect(() => {
+    if (!authSession || view === 'login') return;
     const ids = Array.from(activeClusterTaskIds);
     if (ids.length === 0) return;
     let cancelled = false;
@@ -3231,7 +3296,7 @@ export default function App() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [activeClusterTaskIds]);
+  }, [activeClusterTaskIds, authSession, view]);
 
   const refreshPlatformData = useCallback(() => {
     const now = Date.now();
@@ -3321,6 +3386,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!authSession || view === 'login') return;
     let cancelled = false;
     const realtimeViews = new Set<View>(['dashboard', 'applications', 'clusters', 'alerts']);
     const loadPlatformData = async () => {
@@ -3333,7 +3399,7 @@ export default function App() {
       }
     };
     loadPlatformData();
-    const shouldPoll = authSession && realtimeViews.has(view);
+    const shouldPoll = realtimeViews.has(view);
     const pollIntervalMs = view === 'applications' ? 3000 : 10000;
     const timer = shouldPoll ? window.setInterval(loadPlatformData, pollIntervalMs) : undefined;
     return () => {
@@ -3923,6 +3989,13 @@ export default function App() {
                     ...cluster,
                     agentUpgradeStatus: 'upgrading',
                   } : cluster;
+                  setClusters(prev => prev.map(markUpgrading));
+                  setLiveClusters(prev => prev ? prev.map(markUpgrading) : prev);
+                  setSelectedCluster(prev => prev ? markUpgrading(prev) : prev);
+                }}
+                onUpgradeVelero={async (clusterId) => {
+                  await apiPost<ApiTask>(`/api/v1/clusters/${clusterId}/velero/upgrade`, {});
+                  const markUpgrading = (cluster: Cluster) => cluster.id === clusterId ? { ...cluster, veleroUpgradeStatus: 'upgrading' } : cluster;
                   setClusters(prev => prev.map(markUpgrading));
                   setLiveClusters(prev => prev ? prev.map(markUpgrading) : prev);
                   setSelectedCluster(prev => prev ? markUpgrading(prev) : prev);
@@ -7582,6 +7655,7 @@ function ClusterPage(props: {
   unregisterCluster: (cluster: Cluster, event?: React.MouseEvent) => Promise<ApiTask | null>;
   onRenameCluster: (clusterId: string, name: string) => void;
   onUpgradeCluster: (clusterId: string) => Promise<void>;
+  onUpgradeVelero: (clusterId: string) => Promise<void>;
   onRegisterCluster: (cluster: Cluster) => void;
   onRefreshRegistration: () => Promise<Cluster[]>;
   clusterTaskLogs: Record<string, ClusterTaskLog[]>;
@@ -7590,7 +7664,7 @@ function ClusterPage(props: {
   openDashboard: () => void;
   toast: (msg: string) => void;
 }) {
-  const { clusters, defaultClusterId, clusterMenuId, setClusterMenuId, setSelectedCluster, setDefaultCluster, clearDefaultCluster, unregisterCluster, onRenameCluster, onUpgradeCluster, onRegisterCluster, onRefreshRegistration, clusterTaskLogs, getAgentTokenForRegistration, prefetchAgentToken, openDashboard, toast } = props;
+  const { clusters, defaultClusterId, clusterMenuId, setClusterMenuId, setSelectedCluster, setDefaultCluster, clearDefaultCluster, unregisterCluster, onRenameCluster, onUpgradeCluster, onUpgradeVelero, onRegisterCluster, onRefreshRegistration, clusterTaskLogs, getAgentTokenForRegistration, prefetchAgentToken, openDashboard, toast } = props;
   const [registerOpen, setRegisterOpen] = useState(false);
   const [registerStep, setRegisterStep] = useState<1 | 2 | 3>(1);
   const [copied, setCopied] = useState(false);
@@ -7602,14 +7676,16 @@ function ClusterPage(props: {
   const [registrationBaseline, setRegistrationBaseline] = useState(0);
   const [registrationWaiting, setRegistrationWaiting] = useState(false);
   const [upgradeTarget, setUpgradeTarget] = useState<Cluster | null>(null);
+  const [veleroUpgradeTarget, setVeleroUpgradeTarget] = useState<Cluster | null>(null);
   const [unregisterTarget, setUnregisterTarget] = useState<Cluster | null>(null);
-  const [forceCleanupTarget, setForceCleanupTarget] = useState<Cluster | null>(null);
+  const [forceRemoveEnabled, setForceRemoveEnabled] = useState(false);
+  const [forceRemoveConfirmation, setForceRemoveConfirmation] = useState('');
   const [renameTarget, setRenameTarget] = useState<Cluster | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [renaming, setRenaming] = useState(false);
   const [unregistering, setUnregistering] = useState(false);
-  const [forceCleaning, setForceCleaning] = useState(false);
   const [upgradeSubmitting, setUpgradeSubmitting] = useState(false);
+  const [veleroUpgradeSubmitting, setVeleroUpgradeSubmitting] = useState(false);
   const [unregisterTaskId, setUnregisterTaskId] = useState<string | null>(null);
   const [unregisterTask, setUnregisterTask] = useState<ApiTask | null>(null);
   const [unregisterEvents, setUnregisterEvents] = useState<ApiTaskEvent[]>([]);
@@ -7835,18 +7911,23 @@ function ClusterPage(props: {
     setActionCopied(false);
   };
 
+  const openVeleroUpgrade = (cluster: Cluster, event: React.MouseEvent) => {
+    event.stopPropagation();
+    setVeleroUpgradeTarget(cluster);
+  };
+
+  const closeVeleroUpgrade = () => {
+    if (veleroUpgradeSubmitting) return;
+    setVeleroUpgradeTarget(null);
+  };
+
   const openUnregister = (cluster: Cluster, event: React.MouseEvent) => {
     event.stopPropagation();
     setClusterMenuId(null);
     setActionCopied(false);
+    setForceRemoveEnabled(false);
+    setForceRemoveConfirmation('');
     setUnregisterTarget(cluster);
-  };
-
-  const openForceCleanup = (cluster: Cluster, event: React.MouseEvent) => {
-    event.stopPropagation();
-    setClusterMenuId(null);
-    setActionCopied(false);
-    setForceCleanupTarget(cluster);
   };
 
   const openRename = (cluster: Cluster, event: React.MouseEvent) => {
@@ -7863,16 +7944,13 @@ function ClusterPage(props: {
   };
 
   const closeUnregister = () => {
+    if (unregistering) return;
     setUnregisterTarget(null);
+    setForceRemoveEnabled(false);
+    setForceRemoveConfirmation('');
     setUnregisterTaskId(null);
     setUnregisterTask(null);
     setUnregisterEvents([]);
-    setActionCopied(false);
-  };
-
-  const closeForceCleanup = () => {
-    if (forceCleaning) return;
-    setForceCleanupTarget(null);
     setActionCopied(false);
   };
 
@@ -8003,9 +8081,41 @@ function ClusterPage(props: {
     }
   };
 
+  const finishVeleroUpgrade = async () => {
+    if (!veleroUpgradeTarget) return;
+    setVeleroUpgradeSubmitting(true);
+    try {
+      await onUpgradeVelero(veleroUpgradeTarget.id);
+      toast(`${veleroUpgradeTarget.name} Velero upgrade task created`);
+      setVeleroUpgradeTarget(null);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Velero upgrade failed to submit');
+    } finally {
+      setVeleroUpgradeSubmitting(false);
+    }
+  };
+
   const finishUnregisterCluster = async () => {
     if (!unregisterTarget) return;
     setUnregistering(true);
+    if (forceRemoveEnabled) {
+      const target = unregisterTarget;
+      try {
+        const result = await apiPost<{ warning?: string }>(`/api/v1/clusters/${target.id}/force-cleanup`, {
+          reason: 'force remove requested from unregister dialog',
+        });
+        setUnregisterTarget(null);
+        setForceRemoveEnabled(false);
+        setForceRemoveConfirmation('');
+        toast(result.warning || `${target.name} force remove completed`);
+        await onRefreshRegistration();
+      } catch (error) {
+        toast(`Force remove failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+      } finally {
+        setUnregistering(false);
+      }
+      return;
+    }
     const task = await unregisterCluster(unregisterTarget);
     if (task) {
       setUnregisterTaskId(task.id);
@@ -8015,24 +8125,6 @@ function ClusterPage(props: {
       toast('Unregister task created. Track progress in Recent Tasks.');
     }
     setUnregistering(false);
-  };
-
-  const finishForceCleanupCluster = async () => {
-    if (!forceCleanupTarget) return;
-    const target = forceCleanupTarget;
-    setForceCleaning(true);
-    try {
-      const result = await apiPost<{ warning?: string }>(`/api/v1/clusters/${target.id}/force-cleanup`, {
-        reason: 'requested from platform cluster page',
-      });
-      setForceCleanupTarget(null);
-      toast(result.warning || `${target.name} force cleanup completed`);
-      await onRefreshRegistration();
-    } catch (error) {
-      toast(`Force cleanup failed: ${error instanceof Error ? error.message : 'unknown error'}`);
-    } finally {
-      setForceCleaning(false);
-    }
   };
 
   const finishRenameCluster = async () => {
@@ -8076,7 +8168,7 @@ function ClusterPage(props: {
             </div>
             <button type="button" onClick={openRegister} className="hbdr-dr-action-primary inline-flex items-center gap-1.5"><Plus size={14} />Register Cluster</button>
           </div>
-          <div className="flex flex-wrap gap-3 p-3">
+          <div className="hbdr-cluster-card-grid">
             {clusters.map(cluster => (
               <motion.div key={cluster.id} whileHover={{ y: -2 }} className={`cluster-card-premium ${cluster.connectionStatus !== 'online' ? 'cluster-card-offline' : ''} relative w-full cursor-default overflow-visible rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm transition-all hover:border-blue-200 hover:shadow-lg md:w-[340px] group ${clusterMenuId === cluster.id ? 'z-40' : 'z-0'}`}>
               {(() => {
@@ -8101,7 +8193,6 @@ function ClusterPage(props: {
                       <motion.div data-cluster-menu-root initial={{ opacity: 0, scale: 0.96, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 8 }} className="cluster-card-action-menu absolute right-0 top-9 z-50 w-44 rounded-xl border border-slate-100 bg-white py-2 shadow-2xl shadow-slate-200/70 ring-1 ring-slate-950/5" onClick={(event) => event.stopPropagation()}>
                         <button onClick={(event) => openRename(cluster, event)} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"><Edit2 size={15} />Edit Name</button>
                         <button onClick={(event) => openUnregister(cluster, event)} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-rose-600 hover:bg-rose-50"><Trash2 size={15} />Unregister Cluster</button>
-                        <button onClick={(event) => openForceCleanup(cluster, event)} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-rose-700 hover:bg-rose-50"><Trash2 size={15} />Force Cleanup</button>
                       </motion.div>
                     </>
                   )}
@@ -8168,22 +8259,34 @@ function ClusterPage(props: {
                 </div>
               )}
               <div className="cluster-agent-panel mb-2 grid grid-cols-3 gap-1.5 rounded-md border border-transparent bg-slate-50 px-2 py-1.5">
-                <div>
-                  <span className="block text-[9px] font-semibold uppercase tracking-wider text-slate-400">Agent</span>
-                  <p className="truncate font-mono text-[11px] font-semibold leading-tight text-slate-700">{cluster.agentVersion}</p>
+                <div className="cluster-components-cell">
+                  <div className="cluster-component-row">
+                    <span>Comm-agent</span>
+                    <p>{cluster.agentVersion}</p>
                   {cluster.agentUpgradeAvailable && cluster.agentUpgradeStatus !== 'upgrading' && cluster.connectionStatus === 'online' && (
                     <button
                       type="button"
                       onClick={(event) => openUpgrade(cluster, event)}
-                      className="mt-0.5 block max-w-full truncate text-left font-mono text-[10px] font-semibold leading-tight text-blue-600 hover:text-blue-700"
+                      className="cluster-component-update"
                       title={`Update available: ${cluster.latestAgentVersion || ''}@${shortDigest(cluster.latestAgentImageDigest)}`}
                     >
-                      Update available: {cluster.latestAgentVersion || 'new'}{cluster.latestAgentImageDigest ? `@${shortDigest(cluster.latestAgentImageDigest)}` : ''}
+                      Update
                     </button>
                   )}
                   {cluster.agentUpgradeStatus === 'upgrading' && (
-                    <span className="mt-0.5 block truncate text-[10px] font-semibold leading-tight text-blue-600">Upgrading...</span>
+                    <span className="cluster-component-progress">Upgrading</span>
                   )}
+                  </div>
+                  <div className="cluster-component-row">
+                    <span>Velero-agent</span>
+                    <p>{cluster.veleroVersion || 'unknown'}</p>
+                  {cluster.veleroUpgradeAvailable && cluster.veleroUpgradeStatus !== 'upgrading' && cluster.connectionStatus === 'online' && (
+                    <button type="button" onClick={(event) => openVeleroUpgrade(cluster, event)} className="cluster-component-update" title={`Update available: ${cluster.latestVeleroVersion || ''}@${shortDigest(cluster.latestVeleroImageDigest)}`}>
+                      Update
+                    </button>
+                  )}
+                  {cluster.veleroUpgradeStatus === 'upgrading' && <span className="cluster-component-progress">{formatPercent(cluster.veleroUpgradeProgress || 0)}%</span>}
+                  </div>
                 </div>
                 <div><span className="block text-[9px] font-semibold uppercase tracking-wider text-slate-400">Status</span><p className={`truncate text-[11px] font-semibold leading-tight ${readiness.className}`}>{readiness.label}</p></div>
                 <div><span className="block text-[9px] font-semibold uppercase tracking-wider text-slate-400">Last Seen</span><p className="text-[11px] font-semibold leading-tight text-slate-700">{formatLastSeen(cluster.lastSeenAt)}</p></div>
@@ -8501,75 +8604,134 @@ function ClusterPage(props: {
       </AnimatePresence>
 
       <AnimatePresence>
-        {unregisterTarget && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={closeUnregister} className="absolute inset-0 bg-slate-900/15" />
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="relative w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl">
-              <div className="p-8">
-                <div className="mb-4 flex items-start justify-between">
-                  <div>
-                    <h2 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-slate-900"><Trash2 className="text-rose-600" />Unregister Cluster</h2>
-                    <p className="mt-1 text-sm text-slate-500">Send an unregister task to the cluster agent and remove the cluster after agent cleanup succeeds.</p>
-                  </div>
-                  <button onClick={closeUnregister} className="rounded-full p-2 transition-colors hover:bg-slate-100"><X size={20} className="text-slate-400" /></button>
-                </div>
-
-                <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-                  <p className="font-bold text-rose-900">Confirm unregister</p>
-                  <p className="mt-2">The platform will send an unregister task to the cluster agent. The agent will uninstall HyperCDR components from this Kubernetes cluster, including the agent namespace and Velero resources configured by HyperCDR.</p>
-                  <p className="mt-2 font-semibold text-rose-800">This is a destructive operation for the HyperCDR management stack on this cluster. Existing application workloads are not intentionally removed, but backup/restore management for this cluster will stop after cleanup.</p>
-                </div>
-
-                <div className="mb-5 rounded-xl border border-slate-100 bg-slate-50 p-4 text-sm">
-                  <p className="font-bold text-slate-900">{unregisterTarget.name === 'unknown-cluster' ? 'Unnamed cluster' : unregisterTarget.name}</p>
-                  <p className="mt-1 break-all font-mono text-[11px] text-slate-500">{unregisterTarget.id}</p>
-                </div>
-
-                <div className="mt-8 flex justify-end gap-3">
-                  <button onClick={closeUnregister} disabled={unregistering} className="rounded-xl px-5 py-2 font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60">Cancel</button>
-                  <button disabled={unregistering} onClick={finishUnregisterCluster} className="rounded-xl bg-rose-600 px-6 py-2 font-bold text-white shadow-lg shadow-rose-200 transition-all hover:bg-rose-700 active:scale-95 disabled:cursor-wait disabled:bg-rose-300">{unregistering ? 'Creating Task...' : 'Confirm Unregister'}</button>
-                </div>
+        {veleroUpgradeTarget && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={closeVeleroUpgrade} className="hbdr-filter-drawer-backdrop" />
+            <motion.aside initial={{ opacity: 0, x: 34 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 34 }} transition={{ duration: 0.18, ease: 'easeOut' }} className="hbdr-filter-drawer hbdr-velero-upgrade-drawer" role="dialog" aria-modal="true" aria-label="Upgrade Velero">
+              <div className="hbdr-filter-drawer-head">
+                <div><strong>Upgrade Velero</strong><span>Upgrade the Velero server and node agents on every scheduled node.</span></div>
+                <button type="button" onClick={closeVeleroUpgrade} disabled={veleroUpgradeSubmitting} aria-label="Close Velero upgrade drawer"><X size={18} /></button>
               </div>
-            </motion.div>
-          </div>
+              <div className="hbdr-filter-drawer-body hbdr-velero-upgrade-body">
+                <section className="hbdr-advanced-filter-section">
+                  <h4>Version</h4>
+                  <div className="hbdr-advanced-filter-box hbdr-velero-version-box">
+                    <div><span>Current</span><strong>{veleroUpgradeTarget.veleroVersion || 'Unknown'}</strong><small>{shortDigest(veleroUpgradeTarget.veleroImageDigest)}</small></div>
+                    <ChevronRight size={18} />
+                    <div><span>Target</span><strong>{veleroUpgradeTarget.latestVeleroVersion || 'Latest'}</strong><small>{shortDigest(veleroUpgradeTarget.latestVeleroImageDigest)}</small></div>
+                  </div>
+                </section>
+                <section className="hbdr-advanced-filter-section">
+                  <h4>Upgrade Scope</h4>
+                  <div className="hbdr-advanced-filter-box hbdr-velero-scope-box">
+                    <div><CheckCircle2 size={16} /><span>Velero Server Deployment</span></div>
+                    <div><CheckCircle2 size={16} /><span>Node Agent DaemonSet · {veleroUpgradeTarget.veleroNodeAgentReady || 0}/{veleroUpgradeTarget.veleroNodeAgentDesired || 0} ready</span></div>
+                  </div>
+                </section>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-xs leading-5 text-amber-800">The platform creates an upgrade task only after you confirm. Active backup, drill, restore, cleanup, or upgrade tasks will block this operation.</div>
+              </div>
+              <div className="hbdr-filter-drawer-actions hbdr-velero-upgrade-actions">
+                <button type="button" onClick={closeVeleroUpgrade} disabled={veleroUpgradeSubmitting}>Cancel</button>
+                <button type="button" onClick={finishVeleroUpgrade} disabled={veleroUpgradeSubmitting}>{veleroUpgradeSubmitting ? 'Creating Task...' : 'Upgrade Velero'}</button>
+              </div>
+            </motion.aside>
+          </>
         )}
       </AnimatePresence>
 
       <AnimatePresence>
-        {forceCleanupTarget && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={closeForceCleanup} className="absolute inset-0 bg-slate-900/15" />
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="relative w-full max-w-xl overflow-hidden rounded-2xl bg-white shadow-2xl">
-              <div className="p-7">
-                <div className="mb-4 flex items-start justify-between">
-                  <div>
-                    <h2 className="flex items-center gap-2 text-xl font-bold tracking-tight text-slate-900"><Trash2 className="text-rose-600" />Force Cleanup</h2>
-                    <p className="mt-1 text-sm text-slate-500">Clean platform records and object storage data when the cluster agent is no longer available.</p>
+        {unregisterTarget && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={closeUnregister} className="hbdr-filter-drawer-backdrop" />
+            <motion.aside
+              initial={{ opacity: 0, x: 34 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 34 }}
+              transition={{ duration: 0.18, ease: 'easeOut' }}
+              className="hbdr-filter-drawer hbdr-unregister-drawer"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Unregister Cluster"
+            >
+              <div className="hbdr-filter-drawer-head">
+                <div className="hbdr-unregister-drawer-title">
+                  <div className="hbdr-unregister-drawer-title-icon" aria-hidden="true"><Trash2 size={17} /></div>
+                  <div className="hbdr-unregister-drawer-title-copy">
+                    <strong>Unregister Cluster</strong>
+                    <span>Review the impact before removing this cluster from HyperCDR.</span>
                   </div>
-                  <button onClick={closeForceCleanup} disabled={forceCleaning} className="rounded-full p-2 transition-colors hover:bg-slate-100 disabled:cursor-wait disabled:opacity-50"><X size={20} className="text-slate-400" /></button>
                 </div>
-
-                <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-                  <p className="font-bold text-rose-900">This operation bypasses the cluster agent.</p>
-                  <p className="mt-2">The platform will delete this cluster's HyperCDR records, protection plans, tasks, restore points, storage bindings, and object storage data under the cluster prefix.</p>
-                  <p className="mt-2 font-semibold text-rose-800">Kubernetes cluster-scoped resources cannot be verified if the agent namespace was already removed. Check the source cluster manually for remaining Velero CRDs, ClusterRoles, and ClusterRoleBindings.</p>
-                </div>
-
-                <div className="mb-5 rounded-xl border border-slate-100 bg-slate-50 p-4 text-sm">
-                  <p className="font-bold text-slate-900">{forceCleanupTarget.name === 'unknown-cluster' ? 'Unnamed cluster' : forceCleanupTarget.name}</p>
-                  <p className="mt-1 break-all font-mono text-[11px] text-slate-500">{forceCleanupTarget.id}</p>
-                  <p className="mt-2 break-all font-mono text-[11px] text-slate-500">hypercdr/clusters/{forceCleanupTarget.id}/</p>
-                </div>
-
-                <div className="mt-7 flex justify-end gap-3">
-                  <button onClick={closeForceCleanup} disabled={forceCleaning} className="rounded-xl px-5 py-2 font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60">Cancel</button>
-                  <button disabled={forceCleaning} onClick={finishForceCleanupCluster} className="rounded-xl bg-rose-600 px-6 py-2 font-bold text-white shadow-lg shadow-rose-200 transition-all hover:bg-rose-700 active:scale-95 disabled:cursor-wait disabled:bg-rose-300">{forceCleaning ? 'Cleaning...' : 'Confirm Cleanup'}</button>
-                </div>
+                <button type="button" onClick={closeUnregister} disabled={unregistering} aria-label="Close unregister drawer"><X size={18} /></button>
               </div>
-            </motion.div>
-          </div>
+
+              <div className="hbdr-filter-drawer-body hbdr-unregister-drawer-body">
+                <section className="hbdr-unregister-warning rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+                  <p className="font-bold text-rose-900">Unregistering this cluster will:</p>
+                  <ul className="mt-2 space-y-1.5 pl-4 text-rose-800">
+                    <li className="list-disc">Stop protection, backup, and restore management for this cluster.</li>
+                    <li className="list-disc">Remove HyperCDR and managed Velero resources through the cluster agent.</li>
+                    <li className="list-disc">Delete related protection plans, restore points, platform records, and backup objects.</li>
+                  </ul>
+                  <p className="mt-3 font-semibold text-rose-900">Application workloads are not intentionally removed. This operation cannot be undone.</p>
+                </section>
+
+                <section className="hbdr-unregister-cluster rounded-xl border border-slate-100 bg-slate-50 p-4 text-sm">
+                  <span>Selected Cluster</span>
+                  <p className="font-bold text-slate-900">{unregisterTarget.name === 'unknown-cluster' ? 'Unnamed cluster' : unregisterTarget.name}</p>
+                  <p className="mt-1 break-all font-mono text-[11px] text-slate-500">{unregisterTarget.id}</p>
+                </section>
+
+                <section className={`hbdr-unregister-force rounded-xl border p-4 transition-colors ${forceRemoveEnabled ? 'is-active border-rose-300 bg-rose-50/70' : 'border-slate-200 bg-white'}`}>
+                  <label className="flex cursor-pointer items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={forceRemoveEnabled}
+                      onChange={event => {
+                        setForceRemoveEnabled(event.target.checked);
+                        setForceRemoveConfirmation('');
+                      }}
+                      disabled={unregistering}
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+                    />
+                    <span>
+                      <span className="block text-sm font-bold text-slate-900">Force remove</span>
+                      <span className="mt-1 block text-xs leading-5 text-slate-500">Use only when the agent or Kubernetes cluster is permanently unavailable and normal unregister cannot complete.</span>
+                    </span>
+                  </label>
+
+                  {forceRemoveEnabled && (
+                    <div className="mt-4 border-t border-rose-200 pt-4">
+                      <p className="text-xs leading-5 text-rose-800">This bypasses the agent and directly deletes platform records and backup objects. Resources may remain in the Kubernetes cluster and must be cleaned manually.</p>
+                      <label className="mt-3 block text-xs font-semibold text-slate-700">
+                        Type <span className="font-mono text-rose-700">{unregisterTarget.name === 'unknown-cluster' ? unregisterTarget.id : unregisterTarget.name}</span> to confirm
+                        <input
+                          value={forceRemoveConfirmation}
+                          onChange={event => setForceRemoveConfirmation(event.target.value)}
+                          disabled={unregistering}
+                          autoComplete="off"
+                          className="mt-2 h-10 w-full rounded-lg border border-rose-200 bg-white px-3 font-mono text-sm text-slate-900 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-100"
+                        />
+                      </label>
+                    </div>
+                  )}
+                </section>
+              </div>
+
+              <div className="hbdr-filter-drawer-actions hbdr-unregister-drawer-actions">
+                  <button onClick={closeUnregister} disabled={unregistering} className="rounded-xl px-5 py-2 font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60">Cancel</button>
+                  <button
+                    disabled={unregistering || (forceRemoveEnabled && forceRemoveConfirmation !== (unregisterTarget.name === 'unknown-cluster' ? unregisterTarget.id : unregisterTarget.name))}
+                    onClick={finishUnregisterCluster}
+                    className="rounded-xl bg-rose-600 px-6 py-2 font-bold text-white shadow-lg shadow-rose-200 transition-all hover:bg-rose-700 active:scale-95 disabled:cursor-not-allowed disabled:bg-rose-300 disabled:shadow-none"
+                  >
+                    {unregistering ? (forceRemoveEnabled ? 'Removing...' : 'Creating Task...') : (forceRemoveEnabled ? 'Force Remove' : 'Confirm Unregister')}
+                  </button>
+              </div>
+            </motion.aside>
+          </>
         )}
       </AnimatePresence>
+
     </motion.div>
   );
 }
@@ -10175,6 +10337,7 @@ function PolicyPage({ policies, setPolicies }: { policies: PolicyItem[]; setPoli
                 {showScheduleConfig && (
                 <section className="hbdr-advanced-filter-section">
                   <h4>Schedule Type</h4>
+                  <p className="hbdr-policy-timezone-note">Schedule times use {platformTimeZoneLabel(platformTimeZone)}.</p>
                   <div className="hbdr-advanced-filter-box hbdr-policy-form-box">
                   <div className="grid grid-cols-2 gap-2">
                     {[

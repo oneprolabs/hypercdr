@@ -447,6 +447,21 @@ func (s *MemoryStore) UpdateHeartbeat(input HeartbeatInput) (Cluster, bool, erro
 	if input.VeleroStatus != "" {
 		cluster.VeleroStatus = input.VeleroStatus
 	}
+	if input.VeleroVersion != "" {
+		cluster.VeleroVersion = input.VeleroVersion
+	}
+	if input.VeleroImage != "" {
+		cluster.VeleroImage = input.VeleroImage
+	}
+	if input.VeleroImageDigest != "" {
+		cluster.VeleroImageDigest = input.VeleroImageDigest
+	}
+	cluster.VeleroServerReady = input.VeleroServerReady
+	cluster.VeleroNodeAgentDesired = input.VeleroNodeAgentDesired
+	cluster.VeleroNodeAgentReady = input.VeleroNodeAgentReady
+	if input.VeleroNodeAgentImageDigest != "" {
+		cluster.VeleroNodeAgentImageDigest = input.VeleroNodeAgentImageDigest
+	}
 	if input.NodeCount > 0 {
 		cluster.NodeCount = input.NodeCount
 	}

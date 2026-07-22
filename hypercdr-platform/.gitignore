@@ -6,6 +6,10 @@ dist/
 platform/frontend/dist/
 platform/frontend/visual-diffs/
 
+# Browser automation artifacts
+.playwright-cli/
+output/playwright/
+
 # Go build and module caches
 .gocache/
 .gocache-test/
