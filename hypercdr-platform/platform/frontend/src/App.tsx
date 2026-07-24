@@ -10,6 +10,7 @@ import {
   Archive,
   Bell,
   Boxes,
+  Building2,
   Calendar,
   Check,
   CheckCircle2,
@@ -19,6 +20,7 @@ import {
   Clock,
   Cloud,
   Database,
+  DatabaseBackup,
   Edit2,
   Eye,
   EyeOff,
@@ -33,7 +35,9 @@ import {
   Layers,
   Lock,
   Languages,
+  ListChecks,
   LogOut,
+  Mail,
   MoreVertical,
   Network,
   Play,
@@ -69,10 +73,12 @@ type View =
   | 'restore_points'
   | 'operations'
   | 'tags'
-  | 'alerts'
-  | 'settings'
+  | 'users'
+  | 'tenants'
+  | 'email_settings'
+  | 'profile'
   | 'upgrades'
-  | 'tenants';
+  ;
 
 type TopModule = 'overview' | 'dr' | 'config' | 'ops' | 'monitor' | 'settings';
 
@@ -180,12 +186,13 @@ const locales: Record<LocaleCode, {
       storage: ['Storage', 'Maintain shared restore-point repositories across clusters'],
       policies: ['Policies', 'Maintain application protection plans and recovery targets'],
       restore_points: ['Restore Points', 'View, drill, and take over restore points'],
-      operations: ['History', 'Backup, restore, and takeover audit'],
+      operations: ['History', 'Review user operations and their results'],
       tags: ['Tag Management', 'Create and maintain reusable application tags'],
-      alerts: ['Alerts', 'Cluster DR risks and event alerts'],
-      settings: ['System', 'Platform parameters and security policies'],
-      upgrades: ['Upgrade Management', 'Plan and audit platform and agent upgrades'],
-      tenants: ['Tenants', 'Tenants and administrator accounts'],
+      users: ['User Management', 'Create and maintain platform users'],
+      tenants: ['Tenant Management', 'Create and maintain isolated tenants'],
+      email_settings: ['Email Settings', 'Configure password recovery email delivery'],
+      profile: ['Basic Information', 'View and update your account'],
+      upgrades: ['Upgrade', 'Check and upgrade platform and cluster components'],
       login: ['', ''],
       dashboard: ['', ''],
     },
@@ -504,6 +511,7 @@ type ApiApplication = {
   pvCapacityBytes: number;
   resourceSummary?: ResourceSummary;
   protectionStatus?: string;
+  tags?: string[];
 };
 type ApiStorageRepo = {
   id: string;
@@ -530,6 +538,9 @@ type StorageRepositoryInput = {
   config: Record<string, string | boolean>;
   accessKey?: string;
   secretKey?: string;
+  accountName?: string;
+  accountKey?: string;
+  serviceAccountKey?: string;
 };
 type ApiPolicy = {
   id: string;
@@ -588,6 +599,9 @@ type ApiTask = {
   errorMessage?: string;
   payload?: Record<string, any>;
   createdAt?: string;
+  dispatchedAt?: string;
+  acceptedAt?: string;
+  startedAt?: string;
   completedAt?: string;
 };
 type ApiTaskEvent = {
@@ -598,6 +612,19 @@ type ApiTaskEvent = {
   message: string;
   payload?: Record<string, any>;
   createdAt?: string;
+};
+type ApiAuditLog = {
+  id: string;
+  actorId?: string;
+  actor: string;
+  action: string;
+  resourceType: string;
+  resourceId?: string;
+  resourceName?: string;
+  result: 'Success' | 'Failed' | string;
+  message?: string;
+  payload?: Record<string, any>;
+  createdAt: string;
 };
 type VolumeProgressInfo = {
   operation?: string;
@@ -617,6 +644,23 @@ type ApiTaskResponse = ApiTask | {
   task: ApiTask;
   warning?: string;
 };
+
+type ApiUnregisterPrecheck = {
+  clusterId: string;
+  agentOnline: boolean;
+  defaultCluster: boolean;
+  sourcePlanCount: number;
+  targetPlanCount: number;
+  restorePointCount: number;
+  storageRepositoryIds: string[];
+  activeTaskCount: number;
+  activeTaskTypes: string[];
+  unregisterActive: boolean;
+  objectStorageNeeded: boolean;
+  stage: string;
+  allowed: boolean;
+  blockers: string[];
+};
 type ApiTaskCancelResponse = {
   task: ApiTask;
   cancelTask?: ApiTask;
@@ -631,8 +675,15 @@ type ApiLoginResponse = {
   user: {
     id: string;
     email: string;
+    displayName?: string;
     role: string;
     status: string;
+    authProvider?: string;
+    timeZone?: string;
+    tenantId: string;
+    tenantName: string;
+    systemAdmin?: boolean;
+    mustChangePassword: boolean;
   };
   session: {
     token: string;
@@ -642,8 +693,32 @@ type ApiLoginResponse = {
 type AuthSession = ApiLoginResponse & {
   signedInAt: string;
 };
-type AuthFlow = 'login' | 'register' | 'forgot' | 'reset';
-type ApiAuthConfig = { googleEnabled: boolean; timeZone: string };
+type AuthFlow = 'login' | 'forgot' | 'reset';
+
+type ApiComponentRelease = {
+  id: string;
+  component: 'comm-agent' | 'velero';
+  version: string;
+  image: string;
+  imageDigest: string;
+  status: 'candidate' | 'active' | 'retired';
+  releaseNotes?: string;
+  publishedBy?: string;
+  publishedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type ApiComponentDiscovery = {
+  component: 'comm-agent' | 'velero';
+  registry: string;
+  repository: string;
+  tags: string[];
+};
+type ApiPlatformVersion = { version: string; gitCommit: string; buildTime: string; databaseSchemaVersion: string; deployMode: string };
+type ApiPlatformRelease = { id: string; version: string; apiImage: string; apiImageDigest: string; frontendImage: string; frontendImageDigest: string; databaseSchemaVersion: string; minimumAgentVersion?: string; rollbackSupported: boolean; releaseNotes?: string; status: 'candidate'|'active'|'retired'; publishedBy?: string; publishedAt?: string; createdAt: string };
+type ApiPlatformUpgrade = { id:string; releaseId:string; fromVersion:string; targetVersion:string; status:string; step:string; progress:number; errorMessage?:string; backupPath?:string; createdAt:string; completedAt?:string };
+type ApiPlatformPrecheck = { passed:boolean; currentVersion:string; checks:Array<{id:string;label:string;passed:boolean;detail?:unknown}> };
 
 type ClusterTaskLog = {
   task: ApiTask;
@@ -658,12 +733,13 @@ type ApiRestorePoint = {
   protectionPlanId?: string;
   appId?: string;
   storageRepoId?: string;
-  displayName: string;
+  taskCreatedAt?: string;
   veleroBackupName: string;
   pointType: string;
   status: string;
   sizeBytes?: number;
   completedAt?: string;
+  expiresAt?: string;
   sourceNamespace?: string;
   backupStorageName?: string;
   metadata?: Record<string, any>;
@@ -673,23 +749,21 @@ type ApiRestorePoint = {
 const AUTH_SESSION_KEY = 'hypercdr.auth.session';
 const AUTH_EXPIRED_EVENT = 'hypercdr:auth-expired';
 const NAV_VIEW_KEY = 'hypercdr.nav.view';
+const ACCOUNT_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SELECTED_CLUSTER_KEY = 'hypercdr.selectedClusterId';
 const DEFAULT_CLUSTER_KEY = 'hypercdr.defaultClusterId';
 const RESTORABLE_VIEWS = new Set<View>([
   'dashboard',
   'applications',
   'dr_tasks',
-  'failback',
   'clusters',
   'storage',
   'policies',
   'restore_points',
-  'operations',
   'tags',
-  'alerts',
-  'settings',
+  'users',
+  'profile',
   'upgrades',
-  'tenants',
 ]);
 
 function readStoredView(): View | null {
@@ -770,23 +844,37 @@ async function readApiError(response: Response): Promise<Error> {
 
 async function ensureApiResponse(response: Response, path: string): Promise<Response> {
   if (response.ok) return response;
-  if (response.status === 401 && !path.startsWith('/api/v1/auth/')) {
+  const publicAuthRequest = path === '/api/v1/auth/login' || path === '/api/v1/auth/captcha' || path === '/api/v1/auth/forgot-password' || path === '/api/v1/auth/reset-password';
+  if (response.status === 401 && !publicAuthRequest) {
     window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
   }
   throw await readApiError(response);
 }
 
+function apiHeaders(json = false): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (json) headers['Content-Type'] = 'application/json';
+  const token = readStoredAuthSession()?.session.token;
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
 async function apiGet<T>(path: string): Promise<T> {
-  const response = await ensureApiResponse(await fetch(path, { cache: 'no-store' }), path);
+  const response = await ensureApiResponse(await fetch(path, { cache: 'no-store', headers: apiHeaders() }), path);
   return response.json() as Promise<T>;
 }
 
 async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const response = await ensureApiResponse(await fetch(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: apiHeaders(true),
     body: JSON.stringify(body),
   }), path);
+  return response.json() as Promise<T>;
+}
+
+async function apiPut<T>(path: string, body: unknown): Promise<T> {
+  const response = await ensureApiResponse(await fetch(path, { method: 'PUT', headers: apiHeaders(true), body: JSON.stringify(body) }), path);
   return response.json() as Promise<T>;
 }
 
@@ -799,14 +887,14 @@ function isAgentTokenUsable(token: ApiAgentToken | null) {
 async function apiPatch<T>(path: string, body: unknown): Promise<T> {
   const response = await ensureApiResponse(await fetch(path, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: apiHeaders(true),
     body: JSON.stringify(body),
   }), path);
   return response.json() as Promise<T>;
 }
 
 async function apiDelete<T>(path: string): Promise<T> {
-  const response = await ensureApiResponse(await fetch(path, { method: 'DELETE' }), path);
+  const response = await ensureApiResponse(await fetch(path, { method: 'DELETE', headers: apiHeaders() }), path);
   return response.json() as Promise<T>;
 }
 
@@ -1455,8 +1543,34 @@ function taskDetailLabel(taskType: string): string {
   if (normalized === 'drill') return 'Drill';
   if (normalized === 'takeover') return 'Takeover';
   if (normalized === 'restore') return 'Restore';
+  if (normalized === 'retention-cleanup') return 'Cleanup';
+  if (normalized === 'protection-cleanup') return 'DR Cleanup';
+  if (normalized === 'storage-sync') return 'Storage Setup';
+  if (normalized === 'backup-cancel') return 'Cancel Sync';
   if (normalized.includes('backup') || normalized.includes('sync')) return 'Sync';
   return 'Task';
+}
+
+function taskDetailFullLabel(taskType: string): string {
+  return String(taskType || '').toLowerCase() === 'retention-cleanup' ? 'Retention Cleanup' : taskDetailLabel(taskType);
+}
+
+function taskOrigin(task: ApiTask): { label: 'Manual' | 'Scheduled' | 'System'; tone: 'manual' | 'scheduled' | 'system' } {
+  const taskType = String(task.type || '').toLowerCase();
+  const trigger = String(task.payload?.trigger || '').toLowerCase();
+  if (trigger === 'scheduled' || task.payload?.scheduled === true || taskType === 'schedule-sync') {
+    return { label: 'Scheduled', tone: 'scheduled' };
+  }
+  if (['retention-cleanup', 'protection-cleanup', 'storage-sync'].includes(taskType)) {
+    return { label: 'System', tone: 'system' };
+  }
+  return { label: 'Manual', tone: 'manual' };
+}
+
+function TaskOriginLabel({ task }: { task: ApiTask }) {
+  const origin = taskOrigin(task);
+  const Icon = origin.tone === 'scheduled' ? Calendar : origin.tone === 'system' ? Settings2 : User;
+  return <i className={`hbdr-task-origin is-${origin.tone}`}><Icon size={12} />{origin.label}</i>;
 }
 
 function recoveryPreparingMessage(events: ApiTaskEvent[] | undefined, taskType: string): string {
@@ -1741,6 +1855,13 @@ function storageFailurePresentation(task: ApiTask | undefined): { message: strin
     return {
       message: 'AWS object storage plugin is missing; Velero cannot access S3/MinIO.',
       solution: 'Install velero-plugin-for-aws, confirm velero.io/aws is registered, then reconfigure the BSL.',
+    };
+  }
+  const normalized = raw.toLowerCase();
+  if (normalized.includes('authorizationqueryparameterserror') && normalized.includes('incorrect date format')) {
+    return {
+      message: 'Object storage authentication failed: the configured region is invalid.',
+      solution: 'Set a valid S3 region, such as us-east-1, then retry.',
     };
   }
   const firstLine = raw.split('\n').map(line => line.trim()).find(Boolean);
@@ -2029,13 +2150,19 @@ type ApiRestorePointView = {
   sourceClusterId: string;
   protectionPlanId?: string;
   appId?: string;
+  storageRepoId?: string;
   backupTaskId?: string;
   sourceNamespace: string;
-  displayName: string;
+  taskCreatedAt?: string;
+  createdAt?: string;
   title: string;
   time: string;
   pointType: 'local' | 'remote';
   status: string;
+  sizeBytes?: number;
+  completedAt?: string;
+  expiresAt?: string;
+  backupStorageName?: string;
   veleroBackupName: string;
   includedNamespaces?: string[];
 };
@@ -2080,13 +2207,19 @@ function mapRestorePoint(raw: any): ApiRestorePointView {
     sourceClusterId: raw?.sourceClusterId,
     protectionPlanId: raw?.protectionPlanId,
     appId: raw?.appId,
+    storageRepoId: raw?.storageRepoId,
     backupTaskId: raw?.backupTaskId || raw?.metadata?.backupTaskId || '',
     sourceNamespace: ns,
-    displayName: raw?.displayName || '',
+    taskCreatedAt: raw?.taskCreatedAt || '',
+    createdAt: raw?.createdAt || '',
     title: `${storageName} · ${raw?.veleroBackupName || raw?.id?.slice(0, 8) || 'restore point'}`,
     time,
     pointType,
     status: raw?.status || 'available',
+    sizeBytes: raw?.sizeBytes,
+    completedAt: raw?.completedAt,
+    expiresAt: raw?.expiresAt,
+    backupStorageName: raw?.backupStorageName || raw?.metadata?.backupStorageName || '',
     veleroBackupName: raw?.veleroBackupName || '',
     includedNamespaces,
   };
@@ -2218,7 +2351,7 @@ function mapApps(apps: ApiApplication[], plans: ApiProtectionPlan[], policies: A
       targetCluster: target?.name,
       isProtected,
       lastBackup: isProtected ? 'synced recently' : undefined,
-      tags: [],
+      tags: app.tags || [],
     };
   });
 }
@@ -2277,25 +2410,27 @@ function mapStorageRepo(repo: ApiStorageRepo): StorageRepo {
       : 'unknown';
   const cfg = (repo.config || {}) as Record<string, unknown>;
   const urlStyle = typeof cfg.urlStyle === 'string' ? (cfg.urlStyle as string) : 'path';
+  const lastValidatedAt = repo.lastValidatedAt && new Date(repo.lastValidatedAt).getUTCFullYear() > 1 ? repo.lastValidatedAt : undefined;
   return {
     id: repo.id,
     name: repo.name,
     type: repo.type || 'S3',
     endpoint: repo.endpoint || '',
     bucket: repo.bucket || '',
-    region: repo.region || 'N/A',
+    // Keep display placeholders out of editable/API state.
+    region: repo.region || '',
     useTls: repo.tlsEnabled,
     status,
     updatedAt: repo.updatedAt || repo.createdAt || '',
-    lastValidatedAt: repo.lastValidatedAt && repo.lastValidatedAt !== '0001-01-01T00:00:00Z' ? repo.lastValidatedAt : undefined,
+    lastValidatedAt,
     urlStyle,
   };
 }
 
 function formatLastSeen(value?: string) {
-  if (!value) return 'unknown';
-  const timestamp = new Date(value).getTime();
-  if (!Number.isFinite(timestamp)) return 'unknown';
+  const date = parseUTCInstant(value);
+  if (!date) return 'unknown';
+  const timestamp = date.getTime();
   const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
   if (seconds < 60) return `${seconds}s ago`;
   const minutes = Math.floor(seconds / 60);
@@ -2305,14 +2440,30 @@ function formatLastSeen(value?: string) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-let platformTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+let userTimeZone = browserTimeZone;
+const availableTimeZones: string[] = (() => {
+  const supportedValuesOf = (Intl as any).supportedValuesOf as ((key: string) => string[]) | undefined;
+  const zones = supportedValuesOf ? supportedValuesOf('timeZone') : ['UTC', 'Asia/Shanghai', 'Asia/Tokyo', 'Europe/London', 'America/New_York', 'America/Los_Angeles'];
+  return Array.from(new Set([browserTimeZone, 'UTC', ...zones]));
+})();
+
+function parseUTCInstant(value?: string): Date | null {
+  if (!value) return null;
+  const normalized = value.trim();
+  if (!normalized) return null;
+  // API timestamps are UTC instants. Keep compatibility with legacy values
+  // that omitted the zone instead of letting browsers interpret them as local.
+  const explicitZone = /(?:z|[+-]\d{2}:?\d{2})$/i.test(normalized);
+  const timestamp = new Date(explicitZone || !normalized.includes('T') ? normalized : `${normalized}Z`);
+  return Number.isNaN(timestamp.getTime()) ? null : timestamp;
+}
 
 function formatDateTime(value?: string) {
-  if (!value) return '-';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '-';
+  const date = parseUTCInstant(value);
+  if (!date) return '-';
   return date.toLocaleString(undefined, {
-    timeZone: platformTimeZone,
+    timeZone: userTimeZone,
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -2322,11 +2473,10 @@ function formatDateTime(value?: string) {
 }
 
 function formatLocalDateTime(value?: string) {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
+  const date = parseUTCInstant(value);
+  if (!date) return '';
   const parts = new Intl.DateTimeFormat(undefined, {
-    timeZone: platformTimeZone,
+    timeZone: userTimeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -2339,12 +2489,19 @@ function formatLocalDateTime(value?: string) {
   return `${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')}:${part('second')}`;
 }
 
+function formatLocalDateKey(value?: string) {
+  const date = parseUTCInstant(value);
+  if (!date) return '';
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: userTimeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date);
+  const part = (type: string) => parts.find(item => item.type === type)?.value || '';
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
 function formatNextSyncTime(value?: string) {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime()) || date.getFullYear() <= 1) return '';
+  const date = parseUTCInstant(value);
+  if (!date || date.getUTCFullYear() <= 1) return '';
   const dayKey = (input: Date) => new Intl.DateTimeFormat('en-CA', {
-    timeZone: platformTimeZone,
+    timeZone: userTimeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -2353,16 +2510,26 @@ function formatNextSyncTime(value?: string) {
   const options: Intl.DateTimeFormatOptions = sameDay
     ? { hour: '2-digit', minute: '2-digit', hour12: false }
     : { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false };
-  return date.toLocaleString(undefined, { ...options, timeZone: platformTimeZone });
+  return date.toLocaleString(undefined, { ...options, timeZone: userTimeZone });
 }
 
-function platformTimeZoneLabel(timeZone = platformTimeZone) {
+function userTimeZoneLabel(timeZone = userTimeZone) {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone,
     timeZoneName: 'longOffset',
   }).formatToParts(new Date());
   const offset = parts.find(part => part.type === 'timeZoneName')?.value || 'GMT';
-  return `Platform Time Zone: ${offset} (${timeZone})`;
+  return `My Time Zone: ${offset} (${timeZone})`;
+}
+
+function timeZoneOptionLabel(timeZone: string, date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    timeZoneName: 'longOffset',
+  }).formatToParts(date);
+  const rawOffset = parts.find(part => part.type === 'timeZoneName')?.value || 'GMT';
+  const offset = rawOffset === 'GMT' ? 'UTC+00:00' : rawOffset.replace(/^GMT/, 'UTC');
+  return `${timeZone} (${offset})`;
 }
 
 function recoveryCompletedTargetTitle(restorePointLabel: string, completedAt: string | undefined, clusterName: string, namespace: string, actionLabel: string) {
@@ -2378,12 +2545,14 @@ function recoveryCompletedTargetLabel(clusterName: string, namespace: string) {
 
 function restorePointDisplayLabel(point?: {
   id?: string;
-  displayName?: string;
+  taskCreatedAt?: string;
+  createdAt?: string;
   title?: string;
   veleroBackupName?: string;
 } | null) {
   if (!point) return '';
-  if (point.displayName?.trim()) return point.displayName.trim();
+  const timestamp = formatLocalDateTime(point.taskCreatedAt || point.createdAt);
+  if (timestamp) return `RP-${timestamp}`;
   const label = point.title || point.veleroBackupName || (point.id ? point.id.slice(0, 8) : '');
   return label ? `RP-${label}` : '';
 }
@@ -2422,14 +2591,19 @@ function isS3CompatibleType(type: string) {
 function buildStorageRepositoryInput(repo: StorageRepo): StorageRepositoryInput {
   const config = repo.config || {};
   const isCompatible = isS3CompatibleType(repo.type);
-  const endpoint = String(config.endpoint || repo.endpoint || '');
-  const bucket = String(config.bucket || repo.bucket || '');
-  const region = String(config.region || repo.region || '');
+  const isAzure = repo.type === 'Azure';
+  const isGCS = repo.type === 'Google Cloud' || repo.type === 'GCS';
+  const azureDomain = String(config.blobDomain || 'blob.core.windows.net').replace(/^https?:\/\//, '');
+  const endpoint = String(isAzure ? `${String(config.accountName || '')}.${azureDomain}` : config.endpoint || repo.endpoint || '');
+  const bucket = String(isAzure ? config.container || repo.bucket || '' : config.bucket || repo.bucket || '');
+  const rawRegion = String(config.region || repo.region || '').trim();
+  const region = ['n/a', 'na', '-'].includes(rawRegion.toLowerCase()) ? '' : rawRegion;
   const accessKey = String(config.accessKey || '');
   const secretKey = String(config.secretKey || '');
   const payloadConfig: Record<string, string | boolean> = {};
   if (config.urlStyle) payloadConfig.urlStyle = String(config.urlStyle);
   if (config.prefix) payloadConfig.prefix = String(config.prefix);
+  if (isAzure && config.accountName) payloadConfig.storageAccount = String(config.accountName);
   return {
     name: repo.name,
     type: repo.type,
@@ -2440,7 +2614,76 @@ function buildStorageRepositoryInput(repo: StorageRepo): StorageRepositoryInput 
     config: payloadConfig,
     accessKey,
     secretKey,
+    accountName: isAzure ? String(config.accountName || '') : undefined,
+    accountKey: isAzure ? String(config.accountKey || '') : undefined,
+    serviceAccountKey: isGCS ? String(config.serviceAccountKey || '') : undefined,
   };
+}
+
+type ScheduleParts = { hour: number; minute: number; weekDay: number; monthDay: number };
+
+function datePartsInTimeZone(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  }).formatToParts(date);
+  const value = (type: string) => Number(parts.find(part => part.type === type)?.value || 0);
+  return { year: value('year'), month: value('month'), day: value('day'), hour: value('hour') % 24, minute: value('minute'), second: value('second') };
+}
+
+function zonedWallTimeToUTC(year: number, month: number, day: number, hour: number, minute: number, timeZone: string) {
+  const desired = Date.UTC(year, month - 1, day, hour, minute, 0);
+  let result = new Date(desired);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const actual = datePartsInTimeZone(result, timeZone);
+    const actualWall = Date.UTC(actual.year, actual.month - 1, actual.day, actual.hour, actual.minute, 0);
+    const correction = desired - actualWall;
+    if (correction === 0) break;
+    result = new Date(result.getTime() + correction);
+  }
+  return result;
+}
+
+function scheduleDisplayToUTC(policy: Pick<PolicyItem, 'type' | 'hour' | 'minute' | 'weekDay' | 'monthDay'>, now = new Date()): ScheduleParts {
+  if (policy.type === 'interval') return { hour: policy.hour, minute: policy.minute, weekDay: policy.weekDay, monthDay: policy.monthDay };
+  const localNow = datePartsInTimeZone(now, userTimeZone);
+  let year = localNow.year;
+  let month = localNow.month;
+  let day = localNow.day;
+  if (policy.type === 'weekly') {
+    const currentWeekDay = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+    day += (policy.weekDay - currentWeekDay + 7) % 7;
+  } else if (policy.type === 'monthly') {
+    day = Math.min(policy.monthDay, new Date(Date.UTC(year, month, 0)).getUTCDate());
+  }
+  const utc = zonedWallTimeToUTC(year, month, day, policy.hour, policy.minute, userTimeZone);
+  let utcMonthDay = utc.getUTCDate();
+  if (policy.type === 'monthly') {
+    const localMonthKey = year * 12 + month;
+    const utcMonthKey = utc.getUTCFullYear() * 12 + utc.getUTCMonth() + 1;
+    // Day 31 is the scheduler's "last day of month" representation. It keeps
+    // local day 1 schedules stable when their UTC instant falls in the prior
+    // month, whose actual final date varies between 28 and 31.
+    if (utcMonthKey < localMonthKey) utcMonthDay = 31;
+  }
+  return { hour: utc.getUTCHours(), minute: utc.getUTCMinutes(), weekDay: utc.getUTCDay(), monthDay: utcMonthDay };
+}
+
+function scheduleUTCToDisplay(policy: Pick<ApiPolicy, 'scheduleType' | 'hour' | 'minute' | 'weekDay' | 'monthDay'>, now = new Date()): ScheduleParts {
+  const type = policy.scheduleType;
+  if (!['daily', 'weekly', 'monthly'].includes(type)) return { hour: policy.hour || 0, minute: policy.minute || 0, weekDay: policy.weekDay || 0, monthDay: policy.monthDay || 1 };
+  let year = now.getUTCFullYear();
+  let month = now.getUTCMonth();
+  let day = now.getUTCDate();
+  if (type === 'weekly') {
+    day += ((policy.weekDay || 0) - now.getUTCDay() + 7) % 7;
+  } else if (type === 'monthly') {
+    day = Math.min(policy.monthDay || 1, new Date(Date.UTC(year, month + 1, 0)).getUTCDate());
+  }
+  const utc = new Date(Date.UTC(year, month, day, policy.hour || 0, policy.minute || 0));
+  const local = datePartsInTimeZone(utc, userTimeZone);
+  const localLastDay = new Date(Date.UTC(local.year, local.month, 0)).getUTCDate();
+  const displayMonthDay = type === 'monthly' && local.day === localLastDay ? 31 : local.day;
+  return { hour: local.hour, minute: local.minute, weekDay: new Date(Date.UTC(local.year, local.month - 1, local.day)).getUTCDay(), monthDay: displayMonthDay };
 }
 
 function mapPolicy(policy: ApiPolicy): PolicyItem {
@@ -2448,6 +2691,7 @@ function mapPolicy(policy: ApiPolicy): PolicyItem {
   const composition = ['manual', 'combined', 'schedule', 'retention'].includes(policy.composition)
     ? policy.composition as PolicyComposition
     : 'combined';
+  const displaySchedule = scheduleUTCToDisplay(policy);
   return {
     id: policy.id,
     name: policy.name,
@@ -2455,10 +2699,10 @@ function mapPolicy(policy: ApiPolicy): PolicyItem {
     type: scheduleType,
     intervalValue: policy.intervalValue || 1,
     intervalUnit: policy.intervalUnit === 'minute' || policy.intervalUnit === 'minutes' ? 'minutes' : 'hours',
-    hour: policy.hour || 0,
-    minute: policy.minute || 0,
-    weekDay: policy.weekDay || 0,
-    monthDay: policy.monthDay || 1,
+    hour: displaySchedule.hour,
+    minute: displaySchedule.minute,
+    weekDay: displaySchedule.weekDay,
+    monthDay: displaySchedule.monthDay,
     retention: policy.retentionCount || 0,
     status: policy.status === 'disabled' ? 'Disabled' : 'Active',
     bound: policy.boundCount || 0,
@@ -2486,17 +2730,15 @@ const topNav: Array<{ key: TopModule; view: View }> = [
   { key: 'overview', view: 'dashboard' },
   { key: 'dr', view: 'applications' },
   { key: 'config', view: 'clusters' },
-  { key: 'ops', view: 'operations' },
-  { key: 'monitor', view: 'alerts' },
-  { key: 'settings', view: 'settings' },
+  { key: 'ops', view: 'upgrades' },
+  { key: 'settings', view: 'profile' },
 ];
 
 function moduleForView(view: View): TopModule {
   if (view === 'dashboard') return 'overview';
   if (view === 'applications' || view === 'restore_points' || view === 'dr_tasks' || view === 'failback') return 'dr';
-  if (view === 'clusters' || view === 'storage' || view === 'policies') return 'config';
-  if (view === 'operations' || view === 'tags') return 'ops';
-  if (view === 'alerts') return 'monitor';
+  if (view === 'clusters' || view === 'storage' || view === 'policies' || view === 'tags') return 'config';
+  if (view === 'operations' || view === 'upgrades') return 'ops';
   return 'settings';
 }
 
@@ -2861,9 +3103,16 @@ function ListToolbarControls(props: {
 
 export default function App() {
   const [authSession, setAuthSession] = useState<AuthSession | null>(() => readStoredAuthSession());
+  const [passwordChangeCompleted, setPasswordChangeCompleted] = useState(false);
   const [view, setView] = useState<View>(() => readStoredAuthSession() ? (readStoredView() || 'dashboard') : 'login');
-  const [timeZoneLabel, setTimeZoneLabel] = useState(() => platformTimeZoneLabel());
-  const [loginEmail, setLoginEmail] = useState('admin');
+  const [timeZonePreference, setTimeZonePreference] = useState(() => authSession?.user.timeZone || '');
+  const [timeZoneDrawerOpen, setTimeZoneDrawerOpen] = useState(false);
+  const [draftTimeZone, setDraftTimeZone] = useState(() => authSession?.user.timeZone || '');
+  const [savingTimeZone, setSavingTimeZone] = useState(false);
+  const effectiveTimeZone = timeZonePreference || browserTimeZone;
+  userTimeZone = effectiveTimeZone;
+  const timeZoneLabel = userTimeZoneLabel(effectiveTimeZone);
+  const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginPasswordVisible, setLoginPasswordVisible] = useState(false);
   const [loginCaptchaCode, setLoginCaptchaCode] = useState('');
@@ -2872,9 +3121,9 @@ export default function App() {
   const [loginSubmitting, setLoginSubmitting] = useState(false);
   const [authFlow, setAuthFlow] = useState<AuthFlow>('login');
   const [authMessage, setAuthMessage] = useState('');
+  const [passwordResetCompleted, setPasswordResetCompleted] = useState(false);
   const [confirmPassword, setConfirmPassword] = useState('');
   const [resetToken, setResetToken] = useState('');
-  const [googleEnabled, setGoogleEnabled] = useState(false);
   const [locale, setLocale] = useState<LocaleCode>('en');
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
@@ -2892,6 +3141,27 @@ export default function App() {
   const [liveApiTasks, setLiveApiTasks] = useState<ApiTask[]>([]);
   const [liveApiRestorePointViews, setLiveApiRestorePointViews] = useState<ApiRestorePointView[]>([]);
   const [liveApiRestorePoints, setLiveApiRestorePoints] = useState<ApiRestorePoint[]>([]);
+
+  useEffect(() => {
+    const token = authSession?.session.token;
+    if (!token) return;
+    let cancelled = false;
+    void apiGet<AuthSession['user']>('/api/v1/auth/me').then(user => {
+      if (cancelled) return;
+      setAuthSession(current => {
+        if (!current || current.session.token !== token) return current;
+        const next = { ...current, user };
+        writeStoredAuthSession(next);
+        return next;
+      });
+      setTimeZonePreference(user.timeZone || '');
+      setDraftTimeZone(user.timeZone || '');
+    }).catch(() => {
+      // The shared API client handles expired sessions. Keep the cached session
+      // for transient network failures and refresh it on the next page load.
+    });
+    return () => { cancelled = true; };
+  }, [authSession?.session.token]);
   const [liveApiPolicies, setLiveApiPolicies] = useState<ApiPolicy[]>([]);
   const [liveApiPlans, setLiveApiPlans] = useState<ApiProtectionPlan[]>([]);
   const [liveApiApps, setLiveApiApps] = useState<ApiApplication[]>([]);
@@ -2905,6 +3175,7 @@ export default function App() {
   const [clusterMenuId, setClusterMenuId] = useState<string | null>(null);
   const prefetchedAgentTokenRef = useRef<ApiAgentToken | null>(null);
   const prefetchingAgentTokenRef = useRef<Promise<ApiAgentToken | null> | null>(null);
+  const agentTokenOwnerRef = useRef('');
 
   const [appStage, setAppStage] = useState<'select' | 'config' | 'run'>('select');
   const [search, setSearch] = useState('');
@@ -2917,38 +3188,46 @@ export default function App() {
   }, [toast]);
 
   useEffect(() => {
-    void apiGet<ApiAuthConfig>('/api/v1/auth/config').then(config => {
-      setGoogleEnabled(config.googleEnabled);
-      if (config.timeZone) {
-        platformTimeZone = config.timeZone;
-        setTimeZoneLabel(platformTimeZoneLabel(config.timeZone));
-      }
-    }).catch(() => setGoogleEnabled(false));
     const resetFromURL = new URLSearchParams(window.location.search).get('reset_token');
     if (resetFromURL) {
       setResetToken(resetFromURL); setAuthFlow('reset');
       window.history.replaceState(null, '', window.location.pathname);
     }
-    const hash = window.location.hash;
-    if (hash.startsWith('#google_auth=')) {
-      try {
-        const encoded = decodeURIComponent(hash.slice('#google_auth='.length));
-        const normalized = encoded.replace(/-/g, '+').replace(/_/g, '/');
-        const response = JSON.parse(atob(normalized)) as ApiLoginResponse;
-        const nextSession: AuthSession = { ...response, signedInAt: new Date().toISOString() };
-        setAuthSession(nextSession);
-        writeStoredAuthSession(nextSession);
-        window.history.replaceState(null, '', window.location.pathname + window.location.search);
-        clearStoredView();
-        setView('dashboard');
-      } catch {
-        setLoginError('Google sign-in response could not be verified');
-      }
-    } else if (new URLSearchParams(window.location.search).has('auth_error')) {
-      setLoginError('Google sign-in failed. Please try again.');
-      window.history.replaceState(null, '', window.location.pathname);
-    }
   }, []);
+
+  useEffect(() => {
+    const preference = authSession?.user.timeZone || '';
+    setTimeZonePreference(preference);
+    setDraftTimeZone(preference);
+  }, [authSession?.user.timeZone]);
+
+  const saveTimeZone = async () => {
+    if (!authSession) return;
+    setSavingTimeZone(true);
+    try {
+      const user = await apiPatch<AuthSession['user']>('/api/v1/auth/me', {
+        email: authSession.user.email,
+        displayName: authSession.user.displayName || '',
+        timeZone: draftTimeZone,
+      });
+      const next = { ...authSession, user };
+      setAuthSession(next);
+      writeStoredAuthSession(next);
+      setTimeZonePreference(user.timeZone || '');
+      userTimeZone = user.timeZone || browserTimeZone;
+      if (liveApiPolicies.length > 0) {
+        const remappedPolicies = liveApiPolicies.map(mapPolicy);
+        setPolicies(remappedPolicies);
+        setLivePolicies(remappedPolicies);
+      }
+      setTimeZoneDrawerOpen(false);
+      setToast(`Time zone changed to ${user.timeZone || browserTimeZone}`);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : 'Failed to update time zone');
+    } finally {
+      setSavingTimeZone(false);
+    }
+  };
 
   useEffect(() => {
     if (!accountMenuOpen) return;
@@ -2981,26 +3260,40 @@ export default function App() {
   }), []);
 
   const prefetchAgentToken = useCallback(() => {
+    const owner = authSession?.session.token || '';
+    if (agentTokenOwnerRef.current !== owner) {
+      agentTokenOwnerRef.current = owner;
+      prefetchedAgentTokenRef.current = null;
+      prefetchingAgentTokenRef.current = null;
+    }
+    if (!owner) return null;
     if (isAgentTokenUsable(prefetchedAgentTokenRef.current) || prefetchingAgentTokenRef.current) return prefetchingAgentTokenRef.current;
     prefetchedAgentTokenRef.current = null;
     const request = requestAgentToken()
       .then(token => {
-        prefetchedAgentTokenRef.current = token;
+        if (agentTokenOwnerRef.current === owner) prefetchedAgentTokenRef.current = token;
         return token;
       })
       .catch(() => null)
       .finally(() => {
-        prefetchingAgentTokenRef.current = null;
+        if (prefetchingAgentTokenRef.current === request) prefetchingAgentTokenRef.current = null;
       });
     prefetchingAgentTokenRef.current = request;
     return request;
-  }, [requestAgentToken]);
+  }, [authSession?.session.token, requestAgentToken]);
 
   const takePrefetchedAgentToken = useCallback(() => {
+    const owner = authSession?.session.token || '';
+    if (!owner || agentTokenOwnerRef.current !== owner) {
+      agentTokenOwnerRef.current = owner;
+      prefetchedAgentTokenRef.current = null;
+      prefetchingAgentTokenRef.current = null;
+      return null;
+    }
     const token = prefetchedAgentTokenRef.current;
     prefetchedAgentTokenRef.current = null;
     return isAgentTokenUsable(token) ? token : null;
-  }, []);
+  }, [authSession?.session.token]);
 
   const getAgentTokenForRegistration = useCallback(async () => {
     const prefetched = takePrefetchedAgentToken();
@@ -3102,7 +3395,7 @@ export default function App() {
       setAuthSession(nextSession);
       writeStoredAuthSession(nextSession);
       clearStoredView();
-      enterAfterLogin();
+      if (!nextSession.user.mustChangePassword) enterAfterLogin();
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : 'Login failed');
       await refreshLoginCaptcha(false);
@@ -3112,9 +3405,8 @@ export default function App() {
   }, [enterAfterLogin, loginCaptcha?.id, loginCaptchaCode, loginEmail, loginPassword, loginSubmitting, refreshLoginCaptcha]);
 
   const applyAuthFlow = useCallback((next: AuthFlow) => {
-    setAuthFlow(next); setLoginError(''); setAuthMessage(''); setLoginPassword(''); setConfirmPassword(''); setLoginCaptchaCode('');
-    if (next === 'register') setLoginEmail('');
-    if (next === 'login' || next === 'register') void refreshLoginCaptcha(false);
+    setAuthFlow(next); setLoginError(''); setAuthMessage(''); setPasswordResetCompleted(false); setLoginPassword(''); setConfirmPassword(''); setLoginCaptchaCode('');
+    if (next === 'login') void refreshLoginCaptcha(false);
   }, [refreshLoginCaptcha]);
 
   const switchAuthFlow = useCallback((next: AuthFlow) => {
@@ -3124,8 +3416,11 @@ export default function App() {
   }, [applyAuthFlow]);
 
   useEffect(() => {
-    const flowFromURL = new URLSearchParams(window.location.search).get('auth');
-    if (flowFromURL === 'register' || flowFromURL === 'forgot' || flowFromURL === 'reset') applyAuthFlow(flowFromURL);
+    const initialParams = new URLSearchParams(window.location.search);
+    const flowFromURL = initialParams.get('auth');
+    const tokenFromURL = initialParams.get('reset_token');
+    if (tokenFromURL) setResetToken(tokenFromURL);
+    if (flowFromURL === 'forgot' || flowFromURL === 'reset') applyAuthFlow(flowFromURL);
     const handleHistoryNavigation = (event: PopStateEvent) => {
       if (authSession) {
         const historyView = event.state?.view as View | undefined;
@@ -3140,7 +3435,7 @@ export default function App() {
       }
       const queryFlow = new URLSearchParams(window.location.search).get('auth');
       const next = event.state?.authFlow || queryFlow || 'login';
-      applyAuthFlow(next === 'register' || next === 'forgot' || next === 'reset' ? next : 'login');
+      applyAuthFlow(next === 'forgot' || next === 'reset' ? next : 'login');
     };
     window.addEventListener('popstate', handleHistoryNavigation);
     return () => window.removeEventListener('popstate', handleHistoryNavigation);
@@ -3151,25 +3446,18 @@ export default function App() {
     window.history.replaceState({ ...window.history.state, view }, '', window.location.href);
   }, [authSession, view]);
 
-  const submitRegistration = useCallback(async () => {
-    if (loginSubmitting) return;
-    if (!loginEmail.trim() || !loginPassword || !loginCaptchaCode.trim()) { setLoginError('Email, password, and verification code are required'); return; }
-    if (loginPassword !== confirmPassword) { setLoginError('Passwords do not match'); return; }
-    setLoginSubmitting(true); setLoginError(''); setAuthMessage('');
-    try {
-      const result = await apiPost<{message: string}>('/api/v1/auth/register', { email: loginEmail.trim(), password: loginPassword, captchaId: loginCaptcha?.id, captchaCode: loginCaptchaCode.trim() });
-      switchAuthFlow('login'); setAuthMessage(result.message);
-    } catch (error) { setLoginError(error instanceof Error ? error.message : 'Registration failed'); await refreshLoginCaptcha(false); }
-    finally { setLoginSubmitting(false); }
-  }, [confirmPassword, loginCaptcha?.id, loginCaptchaCode, loginEmail, loginPassword, loginSubmitting, refreshLoginCaptcha, switchAuthFlow]);
-
   const submitForgotPassword = useCallback(async () => {
     if (!loginEmail.trim() || loginSubmitting) { if (!loginEmail.trim()) setLoginError('Email is required'); return; }
+    if (!ACCOUNT_EMAIL_PATTERN.test(loginEmail.trim())) {
+      setLoginError(loginEmail.trim().toLowerCase() === 'admin'
+        ? 'The built-in admin account cannot be recovered by email. Contact the system administrator.'
+        : 'Enter a valid email address');
+      return;
+    }
     setLoginSubmitting(true); setLoginError(''); setAuthMessage('');
     try {
       const result = await apiPost<{message: string; resetToken?: string}>('/api/v1/auth/forgot-password', { email: loginEmail.trim() });
       setAuthMessage(result.message);
-      if (result.resetToken) { setResetToken(result.resetToken); setAuthFlow('reset'); }
     } catch (error) { setLoginError(error instanceof Error ? error.message : 'Reset request failed'); }
     finally { setLoginSubmitting(false); }
   }, [loginEmail, loginSubmitting]);
@@ -3178,12 +3466,18 @@ export default function App() {
     if (!resetToken.trim() || !loginPassword) { setLoginError('Reset token and new password are required'); return; }
     if (loginPassword !== confirmPassword) { setLoginError('Passwords do not match'); return; }
     setLoginSubmitting(true); setLoginError('');
-    try { const result = await apiPost<{message: string}>('/api/v1/auth/reset-password', { token: resetToken.trim(), password: loginPassword }); switchAuthFlow('login'); setAuthMessage(result.message); }
+    try {
+      await apiPost<{message: string}>('/api/v1/auth/reset-password', { token: resetToken.trim(), password: loginPassword });
+      setLoginPassword('');
+      setConfirmPassword('');
+      setPasswordResetCompleted(true);
+    }
     catch (error) { setLoginError(error instanceof Error ? error.message : 'Password reset failed'); }
     finally { setLoginSubmitting(false); }
   }, [confirmPassword, loginPassword, resetToken, switchAuthFlow]);
 
   const signOut = useCallback(() => {
+    void apiPost('/api/v1/auth/logout', {}).catch(() => undefined);
     setAccountMenuOpen(false);
     setAuthSession(null);
     clearStoredAuthSession();
@@ -3306,13 +3600,14 @@ export default function App() {
     }
     refreshLastStartedAtRef.current = now;
     const request = (async () => {
-      const [clusterRes, appRes, storageRes, policyRes, planRes, taskRes] = await Promise.all([
+      const [clusterRes, appRes, storageRes, policyRes, planRes, taskRes, tagRes] = await Promise.all([
         apiGet<ApiList<ApiCluster>>('/api/v1/clusters'),
         apiGet<ApiList<ApiApplication>>('/api/v1/applications'),
         apiGet<ApiList<ApiStorageRepo>>('/api/v1/storage-repositories'),
         apiGet<ApiList<ApiPolicy>>('/api/v1/policies'),
         apiGet<ApiList<ApiProtectionPlan>>('/api/v1/protection-plans'),
         apiGet<ApiList<ApiTask>>('/api/v1/tasks'),
+        apiGet<ApiList<TagItem>>('/api/v1/tags'),
       ]);
       const restorePointRes = await apiGet<ApiList<ApiRestorePoint>>('/api/v1/restore-points');
       const apiClusters = listItems(clusterRes);
@@ -3322,6 +3617,7 @@ export default function App() {
       const apiPlans = listItems(planRes);
       const apiRestorePoints = listItems(restorePointRes).map(mapRestorePoint);
       const apiTasks = listItems(taskRes);
+      setTags(listItems(tagRes));
       const nextAppTasks = buildAppTaskMap(apiTasks, apiApps, ['backup'], apiRestorePoints, apiPlans);
       const nextRecoveryTasks = buildAppTaskMap(apiTasks, apiApps, ['restore', 'drill', 'takeover'], apiRestorePoints, apiPlans);
       const nextStorage = apiStorage.map(mapStorageRepo);
@@ -3388,7 +3684,7 @@ export default function App() {
   useEffect(() => {
     if (!authSession || view === 'login') return;
     let cancelled = false;
-    const realtimeViews = new Set<View>(['dashboard', 'applications', 'clusters', 'alerts']);
+    const realtimeViews = new Set<View>(['dashboard', 'applications', 'clusters']);
     const loadPlatformData = async () => {
       try {
         await refreshPlatformData();
@@ -3445,6 +3741,7 @@ export default function App() {
 
 
   const secondaryNav = useMemo(() => {
+    if (view === 'profile') return null;
     if (activeModule === 'overview') return null;
     if (activeModule === 'dr') {
       return {
@@ -3463,6 +3760,7 @@ export default function App() {
           { label: 'Clusters', desc: 'Registration, default cluster, and agent status', view: 'clusters' as View, icon: Server },
           { label: 'Storage', desc: 'Maintain shared restore-point repositories across clusters', view: 'storage' as View, icon: Database },
           { label: 'Policies', desc: 'Maintain application protection plans and recovery targets', view: 'policies' as View, icon: ShieldCheck },
+          { label: 'Tag Management', desc: 'Create tags and reuse them in DR lists', view: 'tags' as View, icon: Archive },
         ],
       };
     }
@@ -3470,26 +3768,19 @@ export default function App() {
       return {
         title: 'Operations',
         items: [
-          { label: 'History', desc: 'Backup, restore, and takeover audit', view: 'operations' as View, icon: History },
-          { label: 'Tag Management', desc: 'Create tags and reuse them in DR lists', view: 'tags' as View, icon: Archive },
+          ...(authSession?.user.systemAdmin ? [{ label: 'Upgrade', desc: 'Check and upgrade platform and cluster components', view: 'upgrades' as View, icon: Upload }] : []),
         ],
-      };
-    }
-    if (activeModule === 'monitor') {
-      return {
-        title: 'Monitor & Alerts',
-        items: [{ label: 'Alerts', desc: 'Cluster DR risks and event alerts', view: 'alerts' as View, icon: Bell }],
       };
     }
     return {
       title: 'Settings',
       items: [
-        { label: 'System', desc: 'Platform parameters and security policies', view: 'settings' as View, icon: Settings },
-        { label: 'Upgrade Management', desc: 'Plan and audit platform and agent upgrades', view: 'upgrades' as View, icon: Upload },
-        { label: 'Tenants', desc: 'Tenants and administrator accounts', view: 'tenants' as View, icon: User },
+        ...(authSession?.user.role === 'admin' ? [{ label: 'User Management', desc: 'Create and maintain platform users', view: 'users' as View, icon: User }] : []),
+        ...(authSession?.user.systemAdmin ? [{ label: 'Tenant Management', desc: 'Create and maintain isolated tenants', view: 'tenants' as View, icon: Building2 }] : []),
+        ...(authSession?.user.systemAdmin ? [{ label: 'Email Settings', desc: 'Configure password recovery email delivery', view: 'email_settings' as View, icon: Settings2 }] : []),
       ],
     };
-  }, [activeModule]);
+  }, [activeModule, authSession?.user.role, authSession?.user.systemAdmin, view]);
 
   const openView = (nextView: View, options: { preserveSelectedCluster?: boolean } = {}) => {
     if (!options.preserveSelectedCluster && (nextView === 'dashboard' || nextView === 'applications' || nextView === 'failback')) {
@@ -3535,13 +3826,14 @@ export default function App() {
     setDefaultClusterId(null);
   };
 
-  const unregisterCluster = async (cluster: Cluster, event?: React.MouseEvent): Promise<ApiTask | null> => {
+  const unregisterCluster = async (cluster: Cluster, event?: React.MouseEvent, deleteBackupData = false): Promise<ApiTask | null> => {
     event?.stopPropagation();
     let result: ApiTaskResponse;
     try {
       result = await apiPost<ApiTaskResponse>(`/api/v1/clusters/${cluster.id}/unregister`, {
         deleteVelero: true,
         deleteNamespace: true,
+        deleteBackupData,
         reason: 'requested from platform cluster page',
       });
     } catch {
@@ -3556,6 +3848,11 @@ export default function App() {
 
   const updateAppTags = (clusterId: string | null, appNames: string[], updater: (currentTags: string[]) => string[]) => {
     if (!clusterId || appNames.length === 0) return;
+	const targets = liveApiApps.filter(app => app.clusterId === clusterId && appNames.includes(app.namespace || app.name));
+	void Promise.all(targets.map(app => apiPut(`/api/v1/applications/${app.id}/tags`, { tagIds: updater(app.tags || []) }))).catch(error => {
+	  setToast(error instanceof Error ? error.message : 'Failed to update application tags');
+	  void refreshPlatformData();
+	});
     const patchCluster = (cluster: Cluster) => {
       if (cluster.id !== clusterId) return cluster;
       return {
@@ -3576,6 +3873,36 @@ export default function App() {
       <OnboardingGate onboarding={onboarding} openClusters={() => openView('clusters')} />
     </div>
   );
+
+  if (passwordChangeCompleted) {
+    return <PasswordChangeSuccess onContinue={() => { setPasswordChangeCompleted(false); setView('login'); }} />;
+  }
+
+  if (authSession?.user.mustChangePassword) {
+    return <RequiredPasswordChange session={authSession} onChanged={() => { clearStoredAuthSession(); setAuthSession(null); setLoginPassword(''); setLoginCaptchaCode(''); setPasswordChangeCompleted(true); setView('login'); }} onSignOut={signOut} />;
+  }
+
+  if (view === 'login' && authFlow !== 'login') {
+    return (
+      <PasswordRecoveryPage
+        flow={authFlow}
+        email={loginEmail}
+        setEmail={setLoginEmail}
+        password={loginPassword}
+        setPassword={setLoginPassword}
+        confirmation={confirmPassword}
+        setConfirmation={setConfirmPassword}
+        resetToken={resetToken}
+        error={loginError}
+        message={authMessage}
+        busy={loginSubmitting}
+        completed={passwordResetCompleted}
+        onForgot={() => void submitForgotPassword()}
+        onReset={() => void submitPasswordReset()}
+        onBack={() => switchAuthFlow('login')}
+      />
+    );
+  }
 
   if (view === 'login') {
     return (
@@ -3627,10 +3954,10 @@ export default function App() {
 
             <div className="premium-login-card">
               <h2>
-                <span>{authFlow === 'login' ? 'Welcome to HyperCDR' : authFlow === 'register' ? 'Create your account' : authFlow === 'forgot' ? 'Forgot your password?' : 'Set a new password'}</span>
+                <span>{authFlow === 'login' ? 'Welcome to HyperCDR' : authFlow === 'forgot' ? 'Forgot your password?' : 'Set a new password'}</span>
                 <LanguageSwitcher locale={locale} setLocale={setLocale} compact />
               </h2>
-              {authFlow !== 'login' && <p className="hbdr-auth-description">{authFlow === 'register' ? 'Create an account to access the HyperCDR console.' : authFlow === 'forgot' ? 'Enter your account email and we will send reset instructions.' : 'Enter the reset token from your email and choose a new password.'}</p>}
+              {authFlow !== 'login' && <p className="hbdr-auth-description">{authFlow === 'forgot' ? 'Enter your registered email address and we will send a reset link.' : 'Choose a new password for your account.'}</p>}
               <div className="hbdr-login-form grid gap-4">
                 <label className="hbdr-login-field">
                   <User size={15} />
@@ -3639,9 +3966,10 @@ export default function App() {
                     value={loginEmail}
                     onChange={event => setLoginEmail(event.target.value)}
                     autoComplete="username"
+                    autoFocus={authFlow === 'login'}
                   />
                 </label>
-                {(authFlow === 'login' || authFlow === 'register' || authFlow === 'reset') && <div className="hbdr-login-field hbdr-login-password-field">
+                {(authFlow === 'login' || authFlow === 'reset') && <div className="hbdr-login-field hbdr-login-password-field">
                   <ShieldCheck size={15} />
                   <input
                     placeholder={authFlow === 'reset' ? 'New Password' : 'Password'}
@@ -3649,12 +3977,13 @@ export default function App() {
                     value={loginPassword}
                     onChange={event => setLoginPassword(event.target.value)}
                     onKeyDown={event => {
-                      if (event.key === 'Enter') void submitLogin();
+                      if (event.key === 'Enter') void (authFlow === 'reset' ? submitPasswordReset() : submitLogin());
                     }}
-                    autoComplete="current-password"
+                    autoComplete={authFlow === 'reset' ? 'new-password' : 'current-password'}
                   />
                   <button
                     type="button"
+                    tabIndex={-1}
                     className="hbdr-login-eye"
                     aria-label={loginPasswordVisible ? 'Hide password' : 'Show password'}
                     title={loginPasswordVisible ? 'Hide password' : 'Show password'}
@@ -3663,16 +3992,13 @@ export default function App() {
                     {loginPasswordVisible ? <EyeOff size={15} /> : <Eye size={15} />}
                   </button>
                 </div>}
-                {(authFlow === 'register' || authFlow === 'reset') && <label className="hbdr-login-field">
+                {authFlow === 'reset' && <label className="hbdr-login-field">
                   <ShieldCheck size={15} />
                   <input placeholder="Confirm Password" type="password" value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} autoComplete="new-password" />
                 </label>}
-                {authFlow === 'reset' && <label className="hbdr-login-field">
-                  <KeyRound size={15} />
-                  <input placeholder="Reset Token" value={resetToken} onChange={event => setResetToken(event.target.value)} autoComplete="off" />
-                </label>}
               </div>
-              {(authFlow === 'login' || authFlow === 'register') && <div className="hbdr-login-captcha-code" aria-label="Verification code">
+              {authFlow === 'reset' && !resetToken && <div className="hbdr-login-error">This password reset link is incomplete. Request a new link and try again.</div>}
+              {authFlow === 'login' && <div className="hbdr-login-captcha-code" aria-label="Verification code">
                 <label className="hbdr-login-field">
                   <CheckCircle2 size={15} />
                   <input
@@ -3686,7 +4012,7 @@ export default function App() {
                     autoComplete="off"
                   />
                 </label>
-                <button type="button" className="hbdr-login-captcha-image" aria-label="Refresh verification code" title="Refresh verification code" onClick={() => void refreshLoginCaptcha()}>
+                <button type="button" tabIndex={-1} className="hbdr-login-captcha-image" aria-label="Refresh verification code" title="Refresh verification code" onClick={() => void refreshLoginCaptcha()}>
                   {loginCaptcha?.image ? <img src={loginCaptcha.image} alt="Verification code" /> : <span>----</span>}
                 </button>
               </div>}
@@ -3695,19 +4021,12 @@ export default function App() {
               <button
                 className="w-full bg-blue-600 text-white"
                 disabled={loginSubmitting}
-                onClick={() => void (authFlow === 'login' ? submitLogin() : authFlow === 'register' ? submitRegistration() : authFlow === 'forgot' ? submitForgotPassword() : submitPasswordReset())}
+                onClick={() => void (authFlow === 'login' ? submitLogin() : authFlow === 'forgot' ? submitForgotPassword() : submitPasswordReset())}
               >
-                {loginSubmitting ? 'Please wait...' : authFlow === 'login' ? 'Sign In' : authFlow === 'register' ? 'Create Account' : authFlow === 'forgot' ? 'Send Reset Instructions' : 'Update Password'}
+                {loginSubmitting ? 'Please wait...' : authFlow === 'login' ? 'Sign In' : authFlow === 'forgot' ? 'Send Reset Instructions' : 'Update Password'}
               </button>
               {authFlow === 'login' ? <>
-                <div className="hbdr-login-forgot"><button type="button" onClick={() => switchAuthFlow('forgot')}>Forgot Password?</button></div>
-                <div className="hbdr-login-divider"><span>or</span></div>
-                <button type="button" className="hbdr-login-google" disabled={!googleEnabled} onClick={() => { window.location.href = '/api/v1/auth/google/start'; }} title={googleEnabled ? 'Continue with Google' : 'Google sign-in is not configured by the administrator'}>
-                  <span>G</span>
-                  {googleEnabled ? 'Continue with Google' : 'Google sign-in unavailable'}
-                </button>
-                <p className="hbdr-login-sso-note">{googleEnabled ? 'Use your work Google account' : 'Configure Google OAuth to enable this option'}</p>
-                <div className="hbdr-login-signup">Do not have an account? <button type="button" onClick={() => switchAuthFlow('register')}>Sign Up</button></div>
+                <div className="hbdr-login-forgot"><button type="button" onClick={() => switchAuthFlow('forgot')}>Forgot password?</button></div>
                 <p className="hbdr-login-eula">By continuing, you agree to our Terms and Privacy Policy.</p>
               </> : <div className="hbdr-login-signup hbdr-auth-back">Already have an account? <button type="button" onClick={() => switchAuthFlow('login')}>Back to Sign In</button></div>}
             </div>
@@ -3759,14 +4078,14 @@ export default function App() {
 
   return (
     <div className="premium-app hbdr-workspace min-h-screen flex bg-slate-50 text-slate-900">
-      <aside className="premium-sidebar w-64 bg-white border-r border-slate-200 flex flex-col z-20">
+      <aside className={`premium-sidebar w-64 bg-white border-r border-slate-200 flex flex-col ${accountMenuOpen ? 'z-[200]' : 'z-20'}`}>
         <div>
           <div>
-            <div><ShieldCheck size={22} /></div>
+            <div><HyperCDRLogoMark className="h-7 w-7" /></div>
             <h1>HyperCDR</h1>
           </div>
           <nav>
-            {topNav.map(item => {
+            {topNav.filter(item => item.key !== 'settings' || authSession?.user.role === 'admin').map(item => {
               const requiresOnboarding = ['dr', 'ops', 'config'].includes(item.key) && onboarding !== 'ready';
               const isConfig = item.key === 'config';
               const showBadge = isConfig && onboarding === 'register';
@@ -3774,7 +4093,7 @@ export default function App() {
               return (
                 <button
                   key={item.key}
-                  onClick={() => openView(item.view)}
+                  onClick={() => openView(item.key === 'settings' ? 'users' : item.view)}
                   disabled={false}
                   className={activeModule === item.key ? 'bg-blue-50 text-blue-700' : ''}
                 >
@@ -3793,11 +4112,7 @@ export default function App() {
           </nav>
         </div>
         <div>
-          <button className="hbdr-timezone-button hbdr-top-tooltip" data-tooltip={`Timezone · ${timeZoneLabel}`} aria-label={`Current timezone: ${timeZoneLabel}`}>{timeZoneLabel}</button>
-          <button className="hbdr-top-status hbdr-top-status-alert hbdr-top-tooltip" data-tooltip="Notifications" aria-label="Notifications: 0" onClick={() => setToast('No new alerts in Notification Center')}>
-            <AlertCircle size={16} />
-            <span>0</span>
-          </button>
+          <button type="button" onClick={() => { setDraftTimeZone(timeZonePreference); setTimeZoneDrawerOpen(true); }} className="hbdr-timezone-button hbdr-top-tooltip" data-tooltip={`Timezone · ${timeZoneLabel}`} aria-label={`Current timezone: ${timeZoneLabel}`}>{timeZoneLabel}</button>
           <span className="hbdr-top-tooltip hbdr-language-tooltip" data-tooltip="Switch language">
             <LanguageSwitcher locale={locale} setLocale={setLocale} compact />
           </span>
@@ -3823,9 +4138,9 @@ export default function App() {
                     <small>{authSession?.user.role || 'User'}</small>
                   </div>
                 </div>
-                <button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); openView('settings'); }}>
+                <button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); openView('profile'); }}>
                   <Settings size={16} />
-                  <span>Account settings</span>
+                  <span>Basic Information</span>
                 </button>
                 <button type="button" role="menuitem" className="hbdr-account-signout" onClick={signOut}>
                   <LogOut size={16} />
@@ -3947,10 +4262,6 @@ export default function App() {
                   setStage={setAppStage}
                   currentClusterId={drWorkspaceCluster?.id || null}
                   updateAppTags={updateAppTags}
-                  openRestorePoints={(namespaces) => {
-                    setRestorePointNamespaceFilter(Array.from(new Set(namespaces.filter(Boolean))));
-                    openView('restore_points');
-                  }}
                   openStorage={() => openView('storage')}
                   openClusters={() => openView('clusters')}
                   openPolicies={() => openView('policies')}
@@ -3970,6 +4281,7 @@ export default function App() {
             {view === 'clusters' && (
               <ClusterPage
                 clusters={liveClusters ?? clusters}
+                canUpgrade={authSession?.user.role === 'admin'}
                 defaultClusterId={defaultClusterId}
                 clusterMenuId={clusterMenuId}
                 setClusterMenuId={setClusterMenuId}
@@ -4070,13 +4382,34 @@ export default function App() {
             ))}
             {view === 'operations' && (onboarding !== 'ready' ? onboardingGate : <RealOperationsPage />)}
             {view === 'tags' && (onboarding !== 'ready' ? onboardingGate : <TagManagementPage tags={tags} setTags={setTags} clusters={clusters} setClusters={setClusters} toast={setToast} />)}
-            {view === 'alerts' && <AlertsPage />}
-            {view === 'settings' && <SettingsPage />}
-            {view === 'upgrades' && <UpgradeManagementPage />}
-            {view === 'tenants' && <TenantPage />}
+            {view === 'users' && authSession?.user.role === 'admin' && <UserManagementPage currentUser={authSession.user} toast={setToast} />}
+            {view === 'tenants' && authSession?.user.systemAdmin && <TenantPage toast={setToast} />}
+            {view === 'email_settings' && authSession?.user.systemAdmin && <EmailSettingsPage currentUser={authSession.user} toast={setToast} />}
+            {view === 'profile' && authSession && <ProfilePage session={authSession} setSession={next => { setAuthSession(next); writeStoredAuthSession(next); }} toast={setToast} />}
+            {view === 'upgrades' && authSession?.user.systemAdmin && <UpgradeManagementPage clusters={liveApiClusters} isAdmin toast={setToast} refreshPlatformData={refreshPlatformData} />}
           </AnimatePresence>
         </section>
       </main>
+
+      <AnimatePresence>
+        {timeZoneDrawerOpen && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="hbdr-filter-drawer-backdrop" onClick={() => !savingTimeZone && setTimeZoneDrawerOpen(false)} />
+            <motion.aside initial={{ opacity: 0, x: 34 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 34 }} transition={{ duration: 0.18, ease: 'easeOut' }} className="hbdr-filter-drawer hbdr-timezone-drawer" role="dialog" aria-modal="true" aria-label="My Time Zone">
+              <div className="hbdr-filter-drawer-head">
+                <div><h3>My Time Zone</h3><p>Times and restore point names use this time zone.</p></div>
+                <button type="button" disabled={savingTimeZone} onClick={() => setTimeZoneDrawerOpen(false)} aria-label="Close time zone settings"><X size={18} /></button>
+              </div>
+              <div className="hbdr-filter-drawer-body">
+                <div className="hbdr-timezone-current"><span>Current display</span><strong>{userTimeZoneLabel(draftTimeZone || browserTimeZone)}</strong></div>
+                <label className="hbdr-timezone-option"><input type="radio" name="time-zone" checked={draftTimeZone === ''} onChange={() => setDraftTimeZone('')} /><span><strong>Follow browser</strong><small>{browserTimeZone}</small></span></label>
+                <label className="hbdr-timezone-select-label">Specific time zone<select value={draftTimeZone} onChange={event => setDraftTimeZone(event.target.value)}><option value="">Follow browser — {timeZoneOptionLabel(browserTimeZone)}</option>{availableTimeZones.map(zone => <option key={zone} value={zone}>{timeZoneOptionLabel(zone)}</option>)}</select></label>
+              </div>
+              <div className="hbdr-filter-drawer-actions"><button type="button" disabled={savingTimeZone} onClick={() => setTimeZoneDrawerOpen(false)}>Cancel</button><button type="button" disabled={savingTimeZone} onClick={() => void saveTimeZone()}>{savingTimeZone ? 'Saving...' : 'Save'}</button></div>
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
 
       {toast && (
         <div className="fixed right-5 top-20 z-50 rounded border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 shadow-xl">
@@ -4680,7 +5013,6 @@ function ApplicationDrPage(props: {
   setStage: (stage: 'select' | 'config' | 'run') => void;
   currentClusterId: string | null;
   updateAppTags: (clusterId: string | null, appNames: string[], updater: (currentTags: string[]) => string[]) => void;
-  openRestorePoints: (namespaces: string[]) => void;
   openStorage: () => void;
   openClusters: () => void;
   openPolicies: () => void;
@@ -4693,7 +5025,7 @@ function ApplicationDrPage(props: {
   liveRestorePoints: ApiRestorePointView[];
   platformTasks: ApiTask[];
 }) {
-  const { apps, clusters, currentCluster, storage, policies, protectionPlans, setProtectionPlans, tags, stage, setStage, currentClusterId, updateAppTags, openRestorePoints, openStorage, openClusters, openPolicies, toast, refreshPlatformData, liveAppTasks, setLiveAppTasks, liveRecoveryTasks, setLiveRecoveryTasks, liveRestorePoints, platformTasks } = props;
+  const { apps, clusters, currentCluster, storage, policies, protectionPlans, setProtectionPlans, tags, stage, setStage, currentClusterId, updateAppTags, openStorage, openClusters, openPolicies, toast, refreshPlatformData, liveAppTasks, setLiveAppTasks, liveRecoveryTasks, setLiveRecoveryTasks, liveRestorePoints, platformTasks } = props;
   const [selectedSelectApps, setSelectedSelectApps] = useState<string[]>([]);
   const [selectedConfigApps, setSelectedConfigApps] = useState<string[]>([]);
   const [selectedRunApps, setSelectedRunApps] = useState<string[]>([]);
@@ -4745,7 +5077,18 @@ function ApplicationDrPage(props: {
   const drSupportAutoRequestedRef = useRef<Set<string>>(new Set());
   const [appBulkMenuOpen, setAppBulkMenuOpen] = useState(false);
   const [selectedDetailApp, setSelectedDetailApp] = useState<AppItem | null>(null);
+  const [namespaceDetailTab, setNamespaceDetailTab] = useState<'overview' | 'restorePoints' | 'tasks' | 'storage'>('overview');
+  const [namespaceDetailTaskId, setNamespaceDetailTaskId] = useState('');
+  const [namespaceRestorePointPage, setNamespaceRestorePointPage] = useState(1);
+  const [namespaceTaskPage, setNamespaceTaskPage] = useState(1);
   const [drSupportErrorDetail, setDrSupportErrorDetail] = useState<AppItem | null>(null);
+  const openNamespaceDetail = (app: AppItem, tab: 'overview' | 'restorePoints' | 'tasks' | 'storage' = 'overview') => {
+    setSelectedDetailApp(app);
+    setNamespaceDetailTab(tab);
+    setNamespaceDetailTaskId('');
+    setNamespaceRestorePointPage(1);
+    setNamespaceTaskPage(1);
+  };
   const currentClusterIdRef = useRef(currentClusterId);
   useEffect(() => {
     if (currentClusterIdRef.current === currentClusterId) return;
@@ -4760,6 +5103,10 @@ function ApplicationDrPage(props: {
     setProtectWizardOpen(false);
     setProtectWizardStep(1);
     setSelectedDetailApp(null);
+    setNamespaceDetailTab('overview');
+    setNamespaceDetailTaskId('');
+    setNamespaceRestorePointPage(1);
+    setNamespaceTaskPage(1);
     setDrSupportErrorDetail(null);
     setSyncTaskDetail(null);
     setSubmittingSyncTasks({});
@@ -5021,6 +5368,20 @@ function ApplicationDrPage(props: {
       window.clearInterval(timer);
     };
   }, [syncTaskDetail?.task.id]);
+  useEffect(() => {
+    if (!namespaceDetailTaskId || drTaskEvents[namespaceDetailTaskId]) return;
+    let cancelled = false;
+    void apiGet<ApiList<ApiTaskEvent>>(`/api/v1/tasks/${namespaceDetailTaskId}/events`)
+      .then(result => {
+        if (!cancelled) setDrTaskEvents(prev => ({ ...prev, [namespaceDetailTaskId]: listItems(result) }));
+      })
+      .catch(() => {
+        if (!cancelled) setDrTaskEvents(prev => ({ ...prev, [namespaceDetailTaskId]: [] }));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [namespaceDetailTaskId, drTaskEvents]);
   const unitMembers = (app: AppItem) => app.memberApps?.length ? app.memberApps : [app];
   const unitNamespaces = (app: AppItem) => unitMembers(app).map(item => item.namespace || item.name);
   const taskForUnit = (tasks: Record<string, ApiTask>, app: AppItem) => {
@@ -5681,7 +6042,15 @@ function ApplicationDrPage(props: {
       const app = info.row.original;
       const namespaces = unitNamespaces(app);
       return (
-        <div className="hbdr-dr-name-cell">
+        <button
+          type="button"
+          className="hbdr-dr-name-cell hbdr-dr-namespace-link"
+          aria-label={`View details for ${namespaces.join(', ')}`}
+          onClick={event => {
+            event.stopPropagation();
+            openNamespaceDetail(app);
+          }}
+        >
           <div className="hbdr-dr-namespace-icon"><Layers size={18} /></div>
           <div>
             {app.memberApps?.length ? (
@@ -5692,7 +6061,7 @@ function ApplicationDrPage(props: {
               <p className="hbdr-dr-app-name">{app.name}</p>
             )}
           </div>
-        </div>
+        </button>
       );
     },
     meta: { title: app => unitNamespaces(app).join(', ') },
@@ -5774,13 +6143,16 @@ function ApplicationDrPage(props: {
             : 'Reconfigure BackupStorageLocation';
           const storageFailure = canReconfigureStorage ? storageFailureForApp(app) : null;
           return (
-            <span className="hbdr-dr-status-cell">
+            <span className={`hbdr-dr-status-cell ${storageFailure ? 'is-storage-failure' : ''}`}>
               {storageFailure ? (
-                <TaskErrorStatus
-                  code={storageFailure.task.errorCode}
-                  title={storageFailure.presentation.message}
-                  onClick={() => setSyncTaskDetail({ app, task: storageFailure.task, failure: taskFailureSummary(storageFailure.task) })}
-                />
+                <span className="hbdr-dr-storage-failure">
+                  <TaskErrorStatus
+                    code={storageFailure.task.errorCode}
+                    title={storageFailure.presentation.message}
+                    onClick={() => setSyncTaskDetail({ app, task: storageFailure.task, failure: taskFailureSummary(storageFailure.task) })}
+                  />
+                  <span className="hbdr-dr-storage-failure-help">{storageFailure.presentation.solution}</span>
+                </span>
               ) : <span className="hbdr-dr-status-line">
                 <span className={`hbdr-dr-status hbdr-dr-status-${meta.tone}`} title={meta.title}>
                   {meta.tone === 'ok' && <CheckCircle2 size={14} />}
@@ -5818,6 +6190,7 @@ function ApplicationDrPage(props: {
                     }}
                   >
                     <RefreshCw size={12} />
+                    Retry
                   </button>
                 </span>
               )}
@@ -6000,7 +6373,8 @@ function ApplicationDrPage(props: {
       .sort((a, b) => (b.time || '').localeCompare(a.time || ''))
       .map(point => ({
         id: point.id,
-        displayName: point.displayName,
+        taskCreatedAt: point.taskCreatedAt,
+        createdAt: point.createdAt,
         backupTaskId: point.backupTaskId,
         veleroBackupName: point.veleroBackupName,
         title: point.title || point.veleroBackupName || 'Restore point',
@@ -6993,7 +7367,7 @@ function ApplicationDrPage(props: {
                         disabled={!singleSelectedApp}
                         onClick={() => {
                           if (!singleSelectedApp) return;
-                          setSelectedDetailApp(singleSelectedApp);
+                          openNamespaceDetail(singleSelectedApp);
                           setAppBulkMenuOpen(false);
                         }}
                         className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"
@@ -7034,17 +7408,6 @@ function ApplicationDrPage(props: {
                             className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-rose-600 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"
                           >
                             <ShieldOff size={14} />Cleanup Resources
-                          </button>
-                          <button
-                            disabled={selectedRunRows.length === 0 || selectedRunHasCleanupRunning}
-                            onClick={() => {
-                              setAppBulkMenuOpen(false);
-                              openRestorePoints(selectedRunRows.map(app => app.namespace || app.name));
-                            }}
-                            className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"
-                          >
-                            <span className="flex items-center gap-2"><Archive size={14} className="text-emerald-500" />View Restore Points</span>
-                            {selectedRunRows.length > 1 && <em className="rounded bg-slate-100 px-1 py-0.5 text-[9px] not-italic text-slate-400">{selectedRunRows.length}</em>}
                           </button>
                         </>
                       )}
@@ -7115,7 +7478,6 @@ function ApplicationDrPage(props: {
           columns={isRunStage ? appRunTableColumns : appConfigTableColumns}
           data={currentRows}
           getRowId={row => row.name}
-          onRowClick={row => toggleSelectedName(row.name)}
           getRowClassName={row => [
             selectedNames.includes(row.name) ? 'hbdr-dr-row-selected' : '',
             stage === 'select' && isDRUnsupported(row) ? 'hbdr-dr-row-unsupported' : '',
@@ -7470,6 +7832,58 @@ function ApplicationDrPage(props: {
                 ['PVCs', String(selectedDetailApp.pvcCount || selectedDetailApp.resourceSummary?.pvcs || 0)],
                 ['Storage Request', formatBytes(capacityBytes)],
               ];
+          const detailMembers = selectedDetailApp.memberApps?.length ? selectedDetailApp.memberApps : [selectedDetailApp];
+          const detailAppIds = new Set(detailMembers.map(member => member.apiId).filter(Boolean));
+          const detailNamespaceSet = new Set(namespaces);
+          const detailRestorePoints = liveRestorePoints
+            .filter(point => {
+              if (detailPlanId && point.protectionPlanId === detailPlanId) return true;
+              if (point.appId && detailAppIds.has(point.appId)) return true;
+              return point.sourceClusterId === (selectedDetailApp.clusterId || currentClusterId)
+                && [point.sourceNamespace, ...(point.includedNamespaces || [])].some(namespace => detailNamespaceSet.has(namespace));
+            })
+            .sort((a, b) => (b.taskCreatedAt || b.createdAt || b.time || '').localeCompare(a.taskCreatedAt || a.createdAt || a.time || ''));
+          const detailTasks = platformTasks
+            .filter(task => {
+              if (detailPlanId && task.protectionPlanId === detailPlanId) return true;
+              if (task.appId && detailAppIds.has(task.appId)) return true;
+              const taskNamespaces = namespacesFromPayload(task.payload || {});
+              return task.clusterId === (selectedDetailApp.clusterId || currentClusterId)
+                && taskNamespaces.some(namespace => detailNamespaceSet.has(namespace));
+            })
+            .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+          const detailRepository = storage.find(repo => repo.id === detailPlan?.storageRepoId)
+            || storage.find(repo => repo.name === selectedDetailApp.storage);
+          const selectedNamespaceTask = detailTasks.find(task => task.id === namespaceDetailTaskId) || null;
+          const generatedRestorePoints = selectedNamespaceTask && (selectedNamespaceTask.type === 'backup' || selectedNamespaceTask.type.includes('sync'))
+            ? liveRestorePoints.filter(point => point.backupTaskId === selectedNamespaceTask.id || point.id === selectedNamespaceTask.restorePointId)
+            : [];
+          const cleanupRestorePoints = selectedNamespaceTask && ['retention-cleanup', 'protection-cleanup'].includes(selectedNamespaceTask.type)
+            ? (Array.isArray(selectedNamespaceTask.payload?.restorePoints) ? selectedNamespaceTask.payload.restorePoints : []).map((raw: any) => {
+              const id = String(raw?.id || raw?.restorePointId || '');
+              const point = liveRestorePoints.find(item => item.id === id);
+              const rawTime = String(raw?.taskCreatedAt || '');
+              const label = point
+                ? restorePointDisplayLabel(point)
+                : rawTime ? `RP-${formatLocalDateTime(rawTime)}` : `Restore point ${id.slice(0, 8) || '-'}`;
+              return { id, point, label, time: point?.taskCreatedAt || point?.createdAt || rawTime };
+            })
+            : [];
+          const namespaceDetailPageSize = 10;
+          const restorePointPageCount = Math.max(1, Math.ceil(detailRestorePoints.length / namespaceDetailPageSize));
+          const taskPageCount = Math.max(1, Math.ceil(detailTasks.length / namespaceDetailPageSize));
+          const activeRestorePointPage = Math.min(namespaceRestorePointPage, restorePointPageCount);
+          const activeTaskPage = Math.min(namespaceTaskPage, taskPageCount);
+          const pagedDetailRestorePoints = detailRestorePoints.slice((activeRestorePointPage - 1) * namespaceDetailPageSize, activeRestorePointPage * namespaceDetailPageSize);
+          const pagedDetailTasks = detailTasks.slice((activeTaskPage - 1) * namespaceDetailPageSize, activeTaskPage * namespaceDetailPageSize);
+          const detailTabs = detailStage === 'run'
+            ? [
+              { id: 'overview' as const, label: 'Overview' },
+              { id: 'restorePoints' as const, label: 'Restore Points', count: detailRestorePoints.length },
+              { id: 'tasks' as const, label: 'Tasks', count: detailTasks.length },
+              { id: 'storage' as const, label: 'Storage' },
+            ]
+            : [{ id: 'overview' as const, label: 'Overview' }];
           return (
             <div className="fixed inset-0 z-50 flex justify-end">
               <motion.div
@@ -7511,6 +7925,35 @@ function ApplicationDrPage(props: {
                   </div>
                 </div>
                 <div className="hbdr-filter-drawer-body hbdr-app-detail-drawer-body">
+                  <nav className="hbdr-namespace-detail-tabs" aria-label="Namespace detail sections">
+                    {detailTabs.map(tab => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        className={namespaceDetailTab === tab.id ? 'is-active' : ''}
+                        onClick={() => {
+                          setNamespaceDetailTab(tab.id);
+                          setNamespaceDetailTaskId('');
+                        }}
+                      >
+                        {tab.label}
+                        {'count' in tab && <span>{tab.count}</span>}
+                      </button>
+                    ))}
+                  </nav>
+                  {namespaceDetailTab === 'overview' && <div className="hbdr-namespace-detail-panel">
+                  <section className="hbdr-app-detail-section hbdr-app-detail-namespace-section">
+                    <div className="hbdr-app-detail-section-title">
+                      <Layers size={15} className="text-indigo-500" />
+                      <h4>{namespaces.length > 1 ? 'Namespaces' : 'Namespace'}</h4>
+                    </div>
+                    <div className="hbdr-app-detail-chip-list">
+                      {namespaces.map(namespace => (
+                        <span key={namespace}>{namespace}</span>
+                      ))}
+                    </div>
+                  </section>
+
                   <div className="grid grid-cols-2 gap-3">
                     {primaryFacts.map(([label, value]) => (
                       <div key={label} className="hbdr-app-detail-fact">
@@ -7521,20 +7964,6 @@ function ApplicationDrPage(props: {
                   </div>
 
                   <div className="mt-4 grid grid-cols-1 gap-4">
-                    {detailStage === 'run' && (
-                      <section className="hbdr-app-detail-section">
-                        <div className="hbdr-app-detail-section-title">
-                          <Layers size={15} className="text-indigo-500" />
-                          <h4>Namespaces</h4>
-                        </div>
-                        <div className="hbdr-app-detail-chip-list">
-                          {namespaces.map(namespace => (
-                            <span key={namespace}>{namespace}</span>
-                          ))}
-                        </div>
-                      </section>
-                    )}
-
                     {detailStage !== 'run' && (
                       <section className="hbdr-app-detail-section">
                         <div className="hbdr-app-detail-section-title">
@@ -7631,6 +8060,173 @@ function ApplicationDrPage(props: {
                       )}
                     </div>
                   </div>
+                  </div>}
+
+                  {namespaceDetailTab === 'restorePoints' && (
+                    <div className="hbdr-namespace-detail-panel">
+                      <div className="hbdr-namespace-detail-section-head">
+                        <div><strong>Restore Points</strong><span>Recovery points stored for this namespace or DR plan.</span></div>
+                        <em>{detailRestorePoints.length}</em>
+                      </div>
+                      {detailRestorePoints.length > 0 ? (
+                        <div className="hbdr-namespace-detail-list">
+                          {pagedDetailRestorePoints.map(point => (
+                            <section key={point.id} className="hbdr-namespace-rp-row">
+                              <div className="hbdr-namespace-rp-icon" title="Stored recovery point"><DatabaseBackup size={17} /></div>
+                              <div className="min-w-0">
+                                <strong title={restorePointDisplayLabel(point)}>{restorePointDisplayLabel(point)}</strong>
+                                <span>{formatLocalDateTime(point.taskCreatedAt || point.createdAt) || '-'} · {point.pointType === 'local' ? 'Local Snapshot' : 'Remote Snapshot'}</span>
+                              </div>
+                              <div className="hbdr-namespace-rp-meta">
+                                <em className={`is-${(point.status || 'unknown').toLowerCase()}`}>{point.status || 'Unknown'}</em>
+                                <span>{point.sizeBytes ? formatBytes(point.sizeBytes) : '-'}</span>
+                              </div>
+                            </section>
+                          ))}
+                          <div className="hbdr-namespace-detail-pagination">
+                            <span>{(activeRestorePointPage - 1) * namespaceDetailPageSize + 1}-{Math.min(activeRestorePointPage * namespaceDetailPageSize, detailRestorePoints.length)} of {detailRestorePoints.length}</span>
+                            <div>
+                              <button type="button" disabled={activeRestorePointPage <= 1} onClick={() => setNamespaceRestorePointPage(page => Math.max(1, page - 1))}>Prev</button>
+                              <em>{activeRestorePointPage} / {restorePointPageCount}</em>
+                              <button type="button" disabled={activeRestorePointPage >= restorePointPageCount} onClick={() => setNamespaceRestorePointPage(page => Math.min(restorePointPageCount, page + 1))}>Next</button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="hbdr-namespace-detail-empty"><DatabaseBackup size={25} /><strong>No restore points</strong><span>No restore point has been created for this namespace or DR plan.</span></div>
+                      )}
+                    </div>
+                  )}
+
+                  {namespaceDetailTab === 'tasks' && (
+                    <div className="hbdr-namespace-detail-panel">
+                      {selectedNamespaceTask ? (
+                        <div className="hbdr-namespace-task-detail">
+                          <button type="button" className="hbdr-namespace-task-back" onClick={() => setNamespaceDetailTaskId('')}>← Back to tasks</button>
+                          <div className="hbdr-namespace-task-summary">
+                            <div><span>Task</span><strong>{taskDetailFullLabel(selectedNamespaceTask.type)}</strong></div>
+                            <div><span>Source</span><strong><TaskOriginLabel task={selectedNamespaceTask} /></strong></div>
+                            <div><span>Status</span><strong>{selectedNamespaceTask.status}</strong></div>
+                            <div><span>Created</span><strong>{formatLocalDateTime(selectedNamespaceTask.createdAt) || '-'}</strong></div>
+                            <div><span>Started</span><strong>{formatLocalDateTime(selectedNamespaceTask.startedAt) || '-'}</strong></div>
+                            <div><span>Completed</span><strong>{formatLocalDateTime(selectedNamespaceTask.completedAt) || '-'}</strong></div>
+                            <div><span>Progress</span><strong>{selectedNamespaceTask.progress || 0}%</strong></div>
+                          </div>
+                          {selectedNamespaceTask.type === 'retention-cleanup' && (
+                            <div className="hbdr-task-purpose">
+                              <DatabaseBackup size={17} />
+                              <div><strong>Retention Cleanup</strong><span>Removes expired restore points according to the protection policy retention settings.</span></div>
+                            </div>
+                          )}
+                          {generatedRestorePoints.length > 0 && (
+                            <section className="hbdr-task-restore-points">
+                              <div className="hbdr-namespace-detail-section-head">
+                                <div><strong>Generated Restore Point</strong><span>Recovery point created by this sync task.</span></div>
+                                <em>{generatedRestorePoints.length}</em>
+                              </div>
+                              <div className="hbdr-namespace-detail-list">
+                                {generatedRestorePoints.map(point => (
+                                  <div key={point.id} className="hbdr-task-restore-point-row">
+                                    <span className="hbdr-namespace-rp-icon"><DatabaseBackup size={16} /></span>
+                                    <span><strong>{restorePointDisplayLabel(point)}</strong><small>{formatLocalDateTime(point.taskCreatedAt || point.createdAt) || '-'}</small></span>
+                                    <em>{point.status || 'Unknown'}</em>
+                                  </div>
+                                ))}
+                              </div>
+                            </section>
+                          )}
+                          {cleanupRestorePoints.length > 0 && (
+                            <section className="hbdr-task-restore-points">
+                              <div className="hbdr-namespace-detail-section-head">
+                                <div>
+                                  <strong>{isSucceededStatus(selectedNamespaceTask.status) ? 'Cleaned Restore Points' : 'Restore Points to Clean'}</strong>
+                                  <span>Restore points included in this retention cleanup task.</span>
+                                </div>
+                                <em>{cleanupRestorePoints.length}</em>
+                              </div>
+                              <div className="hbdr-namespace-detail-list">
+                                {cleanupRestorePoints.map((item, index) => (
+                                  <div key={item.id || index} className="hbdr-task-restore-point-row">
+                                    <span className="hbdr-namespace-rp-icon"><DatabaseBackup size={16} /></span>
+                                    <span><strong>{item.label}</strong><small>{formatLocalDateTime(item.time) || '-'}</small></span>
+                                    <em>{isSucceededStatus(selectedNamespaceTask.status) ? 'Cleaned' : isFailedStatus(selectedNamespaceTask.status) ? 'Failed' : 'Pending'}</em>
+                                  </div>
+                                ))}
+                              </div>
+                            </section>
+                          )}
+                          <TaskProcessTimeline task={selectedNamespaceTask} events={drTaskEvents[selectedNamespaceTask.id] || []} />
+                          {(isFailedStatus(selectedNamespaceTask.status) || taskHasWarning(selectedNamespaceTask)) && (
+                            <TaskErrorDetailBlock
+                              failure={taskFailureSummary(selectedNamespaceTask, drTaskEvents[selectedNamespaceTask.id] || [])}
+                              details={taskFailureDetails(selectedNamespaceTask, drTaskEvents[selectedNamespaceTask.id] || [])}
+                            />
+                          )}
+                          <TaskFinalResult task={selectedNamespaceTask} events={drTaskEvents[selectedNamespaceTask.id] || []} />
+                        </div>
+                      ) : (
+                        <>
+                          <div className="hbdr-namespace-detail-section-head">
+                            <div><strong>Tasks</strong><span>Sync and recovery activity for this namespace or DR plan.</span></div>
+                            <em>{detailTasks.length}</em>
+                          </div>
+                          {detailTasks.length > 0 ? (
+                            <div className="hbdr-namespace-detail-list">
+                              {pagedDetailTasks.map(task => (
+                                <button key={task.id} type="button" className="hbdr-namespace-task-row" onClick={() => setNamespaceDetailTaskId(task.id)}>
+                                  <span className="hbdr-namespace-task-icon" title="Task execution"><ListChecks size={17} /></span>
+                                  <span className="min-w-0">
+                                    <span className="hbdr-namespace-task-title">
+                                      <strong>{taskDetailLabel(task.type)}</strong>
+                                      <TaskOriginLabel task={task} />
+                                    </span>
+                                    <small>{formatLocalDateTime(task.createdAt) || '-'}{task.completedAt ? ` · Completed ${formatLocalDateTime(task.completedAt)}` : ''}</small>
+                                  </span>
+                                  <em className={`is-${(task.status || 'unknown').toLowerCase()}`}>{task.status || 'Unknown'}</em>
+                                  <ChevronRight size={15} />
+                                </button>
+                              ))}
+                              <div className="hbdr-namespace-detail-pagination">
+                                <span>{(activeTaskPage - 1) * namespaceDetailPageSize + 1}-{Math.min(activeTaskPage * namespaceDetailPageSize, detailTasks.length)} of {detailTasks.length}</span>
+                                <div>
+                                  <button type="button" disabled={activeTaskPage <= 1} onClick={() => setNamespaceTaskPage(page => Math.max(1, page - 1))}>Prev</button>
+                                  <em>{activeTaskPage} / {taskPageCount}</em>
+                                  <button type="button" disabled={activeTaskPage >= taskPageCount} onClick={() => setNamespaceTaskPage(page => Math.min(taskPageCount, page + 1))}>Next</button>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="hbdr-namespace-detail-empty"><History size={24} /><strong>No tasks</strong><span>No task has been recorded for this namespace or DR plan.</span></div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {namespaceDetailTab === 'storage' && (
+                    <div className="hbdr-namespace-detail-panel">
+                      <div className="hbdr-namespace-detail-section-head">
+                        <div><strong>Storage</strong><span>Repository binding and non-sensitive connection details.</span></div>
+                        {detailRepository && <em className={`is-${detailRepository.status}`}>{detailRepository.status}</em>}
+                      </div>
+                      {detailRepository ? (
+                        <div className="hbdr-namespace-storage-grid">
+                          <div><span>Repository</span><strong>{detailRepository.name}</strong></div>
+                          <div><span>Type</span><strong>{detailRepository.type || '-'}</strong></div>
+                          <div className="is-wide"><span>Endpoint</span><strong title={detailRepository.endpoint || '-'}>{detailRepository.endpoint || '-'}</strong></div>
+                          <div><span>Bucket</span><strong>{detailRepository.bucket || '-'}</strong></div>
+                          <div><span>Region</span><strong>{detailRepository.region || '-'}</strong></div>
+                          <div><span>TLS</span><strong>{detailRepository.useTls ? 'Enabled' : 'Disabled'}</strong></div>
+                          <div><span>URL Style</span><strong>{detailRepository.urlStyle || 'path'}</strong></div>
+                          <div><span>Status</span><strong>{detailRepository.status}</strong></div>
+                          <div><span>Storage Used</span><strong>{storageUsage.label || '-'}</strong></div>
+                          <div><span>Last Verified</span><strong>{detailRepository.lastValidatedAt ? formatLocalDateTime(detailRepository.lastValidatedAt) : 'Never'}</strong></div>
+                        </div>
+                      ) : (
+                        <div className="hbdr-namespace-detail-empty"><Database size={24} /><strong>No repository bound</strong><span>This namespace does not currently have a storage repository configuration.</span></div>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="hbdr-filter-drawer-actions hbdr-app-detail-drawer-actions">
                   <button onClick={() => setSelectedDetailApp(null)}>Close</button>
@@ -7646,13 +8242,14 @@ function ApplicationDrPage(props: {
 
 function ClusterPage(props: {
   clusters: Cluster[];
+  canUpgrade: boolean;
   defaultClusterId: string | null;
   clusterMenuId: string | null;
   setClusterMenuId: (id: string | null) => void;
   setSelectedCluster: (cluster: Cluster) => void;
   setDefaultCluster: (cluster: Cluster, event?: React.MouseEvent) => void;
   clearDefaultCluster: (event?: React.MouseEvent) => void;
-  unregisterCluster: (cluster: Cluster, event?: React.MouseEvent) => Promise<ApiTask | null>;
+  unregisterCluster: (cluster: Cluster, event?: React.MouseEvent, deleteBackupData?: boolean) => Promise<ApiTask | null>;
   onRenameCluster: (clusterId: string, name: string) => void;
   onUpgradeCluster: (clusterId: string) => Promise<void>;
   onUpgradeVelero: (clusterId: string) => Promise<void>;
@@ -7664,22 +8261,25 @@ function ClusterPage(props: {
   openDashboard: () => void;
   toast: (msg: string) => void;
 }) {
-  const { clusters, defaultClusterId, clusterMenuId, setClusterMenuId, setSelectedCluster, setDefaultCluster, clearDefaultCluster, unregisterCluster, onRenameCluster, onUpgradeCluster, onUpgradeVelero, onRegisterCluster, onRefreshRegistration, clusterTaskLogs, getAgentTokenForRegistration, prefetchAgentToken, openDashboard, toast } = props;
+  const { clusters, canUpgrade, defaultClusterId, clusterMenuId, setClusterMenuId, setSelectedCluster, setDefaultCluster, clearDefaultCluster, unregisterCluster, onRenameCluster, onUpgradeCluster, onUpgradeVelero, onRegisterCluster, onRefreshRegistration, clusterTaskLogs, getAgentTokenForRegistration, prefetchAgentToken, openDashboard, toast } = props;
   const [registerOpen, setRegisterOpen] = useState(false);
   const [registerStep, setRegisterStep] = useState<1 | 2 | 3>(1);
   const [copied, setCopied] = useState(false);
   const [caCopied, setCaCopied] = useState(false);
-  const [prepareNodeCommand, setPrepareNodeCommand] = useState(`curl -sSL ${window.location.origin}/prepare-node.sh | bash`);
+  const [prepareNodeCommand, setPrepareNodeCommand] = useState('');
   const [installCommand, setInstallCommand] = useState(`curl -sSL ${window.location.origin}/install.sh | bash -s -- --token pending --endpoint ${window.location.origin.replace(/^http/, 'ws')}/ws/agent --executor-mode kubernetes`);
   const [installLoading, setInstallLoading] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
-  const [registrationBaseline, setRegistrationBaseline] = useState(0);
+  const [registrationBaseline, setRegistrationBaseline] = useState<string[]>([]);
   const [registrationWaiting, setRegistrationWaiting] = useState(false);
   const [upgradeTarget, setUpgradeTarget] = useState<Cluster | null>(null);
   const [veleroUpgradeTarget, setVeleroUpgradeTarget] = useState<Cluster | null>(null);
   const [unregisterTarget, setUnregisterTarget] = useState<Cluster | null>(null);
   const [forceRemoveEnabled, setForceRemoveEnabled] = useState(false);
   const [forceRemoveConfirmation, setForceRemoveConfirmation] = useState('');
+  const [unregisterPrecheck, setUnregisterPrecheck] = useState<ApiUnregisterPrecheck | null>(null);
+  const [unregisterPrecheckLoading, setUnregisterPrecheckLoading] = useState(false);
+  const [deleteBackupData, setDeleteBackupData] = useState(false);
   const [renameTarget, setRenameTarget] = useState<Cluster | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [renaming, setRenaming] = useState(false);
@@ -7689,7 +8289,7 @@ function ClusterPage(props: {
   const [unregisterTaskId, setUnregisterTaskId] = useState<string | null>(null);
   const [unregisterTask, setUnregisterTask] = useState<ApiTask | null>(null);
   const [unregisterEvents, setUnregisterEvents] = useState<ApiTaskEvent[]>([]);
-  const [clusterResourceDetail, setClusterResourceDetail] = useState<{ cluster: Cluster; type: 'namespaces' | 'nodes' | 'storageClasses' } | null>(null);
+  const [clusterResourceDetail, setClusterResourceDetail] = useState<{ cluster: Cluster; type: 'overview' | 'namespaces' | 'nodes' | 'storageClasses' } | null>(null);
   const [actionCopied, setActionCopied] = useState(false);
   const registryCACommandRef = useRef<HTMLTextAreaElement | null>(null);
   const installCommandRef = useRef<HTMLTextAreaElement | null>(null);
@@ -7873,14 +8473,15 @@ function ClusterPage(props: {
     setRegisterStep(1);
     setCopied(false);
     setInstallError(null);
-    setRegistrationBaseline(clusters.length);
+    setRegistrationBaseline(clusters.map(cluster => cluster.id));
     setRegistrationWaiting(false);
     setInstallLoading(true);
-    setPrepareNodeCommand(`curl -sSL ${window.location.origin}/prepare-node.sh | bash`);
+    setPrepareNodeCommand('');
     try {
       const token = await getAgentTokenForRegistration();
-      setPrepareNodeCommand(token.prepareNodeCommand || `curl -sSL ${window.location.origin}/prepare-node.sh | bash`);
+      setPrepareNodeCommand(token.prepareNodeCommand || '');
       setInstallCommand(token.installCommand);
+      setRegisterStep(3);
       setRegisterOpen(true);
       void prefetchAgentToken();
     } catch {
@@ -7927,7 +8528,14 @@ function ClusterPage(props: {
     setActionCopied(false);
     setForceRemoveEnabled(false);
     setForceRemoveConfirmation('');
+    setDeleteBackupData(false);
+    setUnregisterPrecheck(null);
     setUnregisterTarget(cluster);
+    setUnregisterPrecheckLoading(true);
+    void apiGet<ApiUnregisterPrecheck>(`/api/v1/clusters/${cluster.id}/unregister/precheck`)
+      .then(setUnregisterPrecheck)
+      .catch(error => toast(error instanceof Error ? error.message : 'Failed to check cluster unregister readiness'))
+      .finally(() => setUnregisterPrecheckLoading(false));
   };
 
   const openRename = (cluster: Cluster, event: React.MouseEvent) => {
@@ -7948,6 +8556,8 @@ function ClusterPage(props: {
     setUnregisterTarget(null);
     setForceRemoveEnabled(false);
     setForceRemoveConfirmation('');
+    setDeleteBackupData(false);
+    setUnregisterPrecheck(null);
     setUnregisterTaskId(null);
     setUnregisterTask(null);
     setUnregisterEvents([]);
@@ -8003,11 +8613,9 @@ function ClusterPage(props: {
       try {
         const nextClusters = await onRefreshRegistration();
         if (cancelled) return;
-        if (nextClusters.length > registrationBaseline) {
-          const latest = nextClusters[0];
-          if (latest) {
-            setSelectedCluster(latest);
-          }
+        const latest = nextClusters.find(cluster => !registrationBaseline.includes(cluster.id));
+        if (latest) {
+          setSelectedCluster(latest);
           toast(`${latest?.name || 'Cluster'} registered and connected`);
           closeRegister();
         }
@@ -8024,8 +8632,9 @@ function ClusterPage(props: {
   }, [registerOpen, registerStep, registrationBaseline, onRefreshRegistration, setSelectedCluster, toast]);
 
   useEffect(() => {
-    if (!registerOpen || registrationWaiting || clusters.length <= registrationBaseline) return;
-    const latest = clusters[0];
+    if (!registerOpen || registrationWaiting) return;
+    const latest = clusters.find(cluster => !registrationBaseline.includes(cluster.id));
+    if (!latest) return;
     if (latest) {
       setSelectedCluster(latest);
       toast(`${latest.name === 'unknown-cluster' ? 'Cluster' : latest.name} registered and connected`);
@@ -8116,7 +8725,7 @@ function ClusterPage(props: {
       }
       return;
     }
-    const task = await unregisterCluster(unregisterTarget);
+    const task = await unregisterCluster(unregisterTarget, undefined, deleteBackupData);
     if (task) {
       setUnregisterTaskId(task.id);
       setUnregisterTask(task);
@@ -8191,7 +8800,7 @@ function ClusterPage(props: {
                     <>
                       <div className="fixed inset-0 z-30" onClick={(event) => { event.stopPropagation(); setClusterMenuId(null); }} />
                       <motion.div data-cluster-menu-root initial={{ opacity: 0, scale: 0.96, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 8 }} className="cluster-card-action-menu absolute right-0 top-9 z-50 w-44 rounded-xl border border-slate-100 bg-white py-2 shadow-2xl shadow-slate-200/70 ring-1 ring-slate-950/5" onClick={(event) => event.stopPropagation()}>
-                        <button onClick={(event) => openRename(cluster, event)} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"><Edit2 size={15} />Edit Name</button>
+                        <button onClick={(event) => { event.stopPropagation(); setClusterMenuId(null); setClusterResourceDetail({ cluster, type: 'overview' }); }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"><Eye size={15} />View Detail</button>
                         <button onClick={(event) => openUnregister(cluster, event)} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-rose-600 hover:bg-rose-50"><Trash2 size={15} />Unregister Cluster</button>
                       </motion.div>
                     </>
@@ -8263,7 +8872,7 @@ function ClusterPage(props: {
                   <div className="cluster-component-row">
                     <span>Comm-agent</span>
                     <p>{cluster.agentVersion}</p>
-                  {cluster.agentUpgradeAvailable && cluster.agentUpgradeStatus !== 'upgrading' && cluster.connectionStatus === 'online' && (
+                  {canUpgrade && cluster.agentUpgradeAvailable && cluster.agentUpgradeStatus !== 'upgrading' && cluster.connectionStatus === 'online' && (
                     <button
                       type="button"
                       onClick={(event) => openUpgrade(cluster, event)}
@@ -8280,7 +8889,7 @@ function ClusterPage(props: {
                   <div className="cluster-component-row">
                     <span>Velero-agent</span>
                     <p>{cluster.veleroVersion || 'unknown'}</p>
-                  {cluster.veleroUpgradeAvailable && cluster.veleroUpgradeStatus !== 'upgrading' && cluster.connectionStatus === 'online' && (
+                  {canUpgrade && cluster.veleroUpgradeAvailable && cluster.veleroUpgradeStatus !== 'upgrading' && cluster.connectionStatus === 'online' && (
                     <button type="button" onClick={(event) => openVeleroUpgrade(cluster, event)} className="cluster-component-update" title={`Update available: ${cluster.latestVeleroVersion || ''}@${shortDigest(cluster.latestVeleroImageDigest)}`}>
                       Update
                     </button>
@@ -8469,13 +9078,13 @@ function ClusterPage(props: {
                 <div className="mb-4 flex items-start justify-between">
                   <div>
                     <h2 className="flex items-center gap-2 text-xl font-bold tracking-tight text-slate-900"><PlusCircle className="text-blue-600" />Register New Cluster</h2>
-                    <p className="mt-1 text-xs text-slate-500">Install node trust, then install the agent stack.</p>
+                    <p className="mt-1 text-xs text-slate-500">{prepareNodeCommand ? 'Install private registry trust, then install the agent stack.' : 'Install the agent stack with cluster-admin access.'}</p>
                   </div>
                   <button onClick={closeRegister} className="rounded-full p-2 transition-colors hover:bg-slate-100"><X size={20} className="text-slate-400" /></button>
                 </div>
 
                 <div className="space-y-4">
-                  <div className="flex gap-3 rounded-xl border border-blue-100 bg-blue-50 p-3">
+                  {prepareNodeCommand && <><div className="flex gap-3 rounded-xl border border-blue-100 bg-blue-50 p-3">
                     <div className="mt-1"><ShieldCheck size={20} className="text-blue-600" /></div>
                     <div className="text-sm">
                       <p className="mb-1 font-bold text-blue-900">1. Install Harbor CA on every node</p>
@@ -8507,12 +9116,12 @@ function ClusterPage(props: {
                       {caCopied ? <CheckCircle2 size={12} /> : <Check size={12} />}
                       {caCopied ? 'Copied' : 'Copy'}
                     </button>
-                  </div>
+                  </div></>}
 
                   <div className="flex gap-3 rounded-xl border border-blue-100 bg-blue-50 p-3">
                     <div className="mt-1"><Terminal size={18} className="text-blue-600" /></div>
                     <div className="text-sm">
-                      <p className="mb-1 font-bold text-blue-900">2. Install agent stack</p>
+                      <p className="mb-1 font-bold text-blue-900">{prepareNodeCommand ? '2' : '1'}. Install agent stack</p>
                       <p className="leading-relaxed text-blue-700">Run once with cluster-admin kubectl access to install Velero and comm-agent.</p>
                     </div>
                   </div>
@@ -8550,17 +9159,13 @@ function ClusterPage(props: {
                     </div>
                     <div className="text-sm">
                       <p className="mb-1 font-bold text-emerald-900">3. Wait for connection</p>
-                      <p className="leading-relaxed text-emerald-700">Start waiting after the install command finishes. The cluster appears after agent connection.</p>
+                      <p className="leading-relaxed text-emerald-700">Connection detection starts automatically. The cluster appears as soon as the agent registers.</p>
                     </div>
                   </div>
 
                   <div className="flex justify-end gap-3 pt-1">
                     <button onClick={closeRegister} className="rounded-xl px-5 py-2 font-medium text-slate-600 transition-colors hover:bg-slate-50">Cancel</button>
-                    {registrationWaiting ? (
-                      <button onClick={finishRegisterCluster} className="rounded-xl bg-emerald-600 px-6 py-2 font-bold text-white shadow-lg shadow-emerald-200 transition-all hover:bg-emerald-700 active:scale-95">Continue in Background</button>
-                    ) : (
-                      <button disabled={installLoading} onClick={() => setRegisterStep(3)} className="rounded-xl bg-blue-600 px-6 py-2 font-bold text-white shadow-lg shadow-blue-200 transition-all hover:bg-blue-700 active:scale-95 disabled:cursor-wait disabled:opacity-60">Start Waiting</button>
-                    )}
+                    <button onClick={finishRegisterCluster} className="rounded-xl bg-emerald-600 px-6 py-2 font-bold text-white shadow-lg shadow-emerald-200 transition-all hover:bg-emerald-700 active:scale-95">Continue in Background</button>
                   </div>
                 </div>
               </div>
@@ -8666,19 +9271,21 @@ function ClusterPage(props: {
 
               <div className="hbdr-filter-drawer-body hbdr-unregister-drawer-body">
                 <section className="hbdr-unregister-warning rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-                  <p className="font-bold text-rose-900">Unregistering this cluster will:</p>
-                  <ul className="mt-2 space-y-1.5 pl-4 text-rose-800">
-                    <li className="list-disc">Stop protection, backup, and restore management for this cluster.</li>
-                    <li className="list-disc">Remove HyperCDR and managed Velero resources through the cluster agent.</li>
-                    <li className="list-disc">Delete related protection plans, restore points, platform records, and backup objects.</li>
-                  </ul>
-                  <p className="mt-3 font-semibold text-rose-900">Application workloads are not intentionally removed. This operation cannot be undone.</p>
+                  <p className="font-bold text-rose-900">Unregister impact</p>
+                  <p className="mt-2 leading-5 text-rose-800">HyperCDR and managed Velero resources will be removed from the cluster. Application workloads are not removed.</p>
                 </section>
 
                 <section className="hbdr-unregister-cluster rounded-xl border border-slate-100 bg-slate-50 p-4 text-sm">
                   <span>Selected Cluster</span>
                   <p className="font-bold text-slate-900">{unregisterTarget.name === 'unknown-cluster' ? 'Unnamed cluster' : unregisterTarget.name}</p>
                   <p className="mt-1 break-all font-mono text-[11px] text-slate-500">{unregisterTarget.id}</p>
+                </section>
+
+                <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm">
+                  <div className="flex items-center justify-between"><strong className="text-slate-900">Readiness check</strong><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${unregisterPrecheck?.allowed ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{unregisterPrecheckLoading ? 'Checking' : unregisterPrecheck?.allowed ? 'Ready' : 'Blocked'}</span></div>
+                  {unregisterPrecheck && <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-500"><span>Source configurations <strong className="text-slate-800">{unregisterPrecheck.sourcePlanCount}</strong></span><span>Target references <strong className="text-slate-800">{unregisterPrecheck.targetPlanCount}</strong></span><span>Restore points <strong className="text-slate-800">{unregisterPrecheck.restorePointCount}</strong></span><span>Active tasks <strong className="text-slate-800">{unregisterPrecheck.activeTaskCount}</strong></span></div>}
+                  {unregisterPrecheck?.blockers.map(blocker => <p key={blocker} className="mt-2 rounded bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">{blocker}</p>)}
+                  {unregisterPrecheck?.restorePointCount ? <label className="mt-3 flex items-start gap-2 border-t border-slate-100 pt-3 text-xs text-slate-600"><input type="checkbox" checked={deleteBackupData} onChange={event=>setDeleteBackupData(event.target.checked)} disabled={unregistering||forceRemoveEnabled} className="mt-0.5"/><span><strong className="block text-slate-800">Delete backup data and restore points</strong>This is required before normal unregister and cannot be undone.</span></label> : unregisterPrecheck?.objectStorageNeeded ? <p className="mt-3 border-t border-slate-100 pt-3 text-xs leading-5 text-blue-700"><strong className="block text-blue-800">Historical storage data detected</strong>The cluster storage prefix will be checked and cleaned automatically before unregister.</p> : <p className="mt-3 border-t border-slate-100 pt-3 text-xs text-emerald-700">This cluster has never used object storage. Object storage will not be accessed.</p>}
                 </section>
 
                 <section className={`hbdr-unregister-force rounded-xl border p-4 transition-colors ${forceRemoveEnabled ? 'is-active border-rose-300 bg-rose-50/70' : 'border-slate-200 bg-white'}`}>
@@ -8701,7 +9308,7 @@ function ClusterPage(props: {
 
                   {forceRemoveEnabled && (
                     <div className="mt-4 border-t border-rose-200 pt-4">
-                      <p className="text-xs leading-5 text-rose-800">This bypasses the agent and directly deletes platform records and backup objects. Resources may remain in the Kubernetes cluster and must be cleaned manually.</p>
+                      <p className="text-xs leading-5 text-rose-800">This bypasses the agent and removes platform records only. Kubernetes resources and backup objects are not deleted and may require manual cleanup.</p>
                       <label className="mt-3 block text-xs font-semibold text-slate-700">
                         Type <span className="font-mono text-rose-700">{unregisterTarget.name === 'unknown-cluster' ? unregisterTarget.id : unregisterTarget.name}</span> to confirm
                         <input
@@ -8720,7 +9327,7 @@ function ClusterPage(props: {
               <div className="hbdr-filter-drawer-actions hbdr-unregister-drawer-actions">
                   <button onClick={closeUnregister} disabled={unregistering} className="rounded-xl px-5 py-2 font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60">Cancel</button>
                   <button
-                    disabled={unregistering || (forceRemoveEnabled && forceRemoveConfirmation !== (unregisterTarget.name === 'unknown-cluster' ? unregisterTarget.id : unregisterTarget.name))}
+                    disabled={unregistering || unregisterPrecheckLoading || (!forceRemoveEnabled && (!unregisterPrecheck?.allowed || Boolean(unregisterPrecheck.restorePointCount && !deleteBackupData))) || (forceRemoveEnabled && (Boolean(unregisterPrecheck?.targetPlanCount) || forceRemoveConfirmation !== (unregisterTarget.name === 'unknown-cluster' ? unregisterTarget.id : unregisterTarget.name)))}
                     onClick={finishUnregisterCluster}
                     className="rounded-xl bg-rose-600 px-6 py-2 font-bold text-white shadow-lg shadow-rose-200 transition-all hover:bg-rose-700 active:scale-95 disabled:cursor-not-allowed disabled:bg-rose-300 disabled:shadow-none"
                   >
@@ -9093,7 +9700,7 @@ function StoragePage({ storage, clusters, onStorageCreated }: { storage: Storage
     };
     if (type === 'S3') return { ...base, config: { bucket: '', region: '', accessKey: '', secretKey: '' } };
     if (type === 'S3-Compatible') return { ...base, config: { bucket: '', region: '', endpoint: '', accessKey: '', secretKey: '', useSsl: true, urlStyle: 'path' } };
-    if (type === 'Azure') return { ...base, region: 'N/A', config: { accountName: '', accountKey: '', container: '', blobDomain: 'blob.core.windows.net' } };
+    if (type === 'Azure') return { ...base, region: '', config: { accountName: '', accountKey: '', container: '', blobDomain: 'blob.core.windows.net' } };
     if (type === 'Google Cloud') return { ...base, config: { bucket: '', region: '', serviceAccountKey: '' } };
     return { ...base, useTls: false, config: { nfsServer: '', nfsPath: '' } };
   };
@@ -9105,7 +9712,7 @@ function StoragePage({ storage, clusters, onStorageCreated }: { storage: Storage
     const config = { ...(editingRepo.config || {}), [key]: value };
     const patch: Partial<StorageRepo> = { config };
     if (key === 'bucket' || key === 'container' || key === 'nfsPath') patch.bucket = String(value);
-    if (key === 'region') patch.region = String(value || (editingRepo.type === 'Azure' ? 'N/A' : ''));
+    if (key === 'region') patch.region = String(value || '');
     if (key === 'endpoint' || key === 'blobDomain') patch.endpoint = String(value);
     if (key === 'useSsl') patch.useTls = Boolean(value);
     if (key === 'nfsServer' || key === 'nfsPath') {
@@ -9119,8 +9726,9 @@ function StoragePage({ storage, clusters, onStorageCreated }: { storage: Storage
   const storageReady = (repo: StorageRepo | null) => {
     if (!repo?.name.trim()) return false;
     const c = repo.config || {};
-    if (repo.type === 'S3') return Boolean(c.bucket && c.region && c.accessKey && c.secretKey);
-		if (isS3CompatibleType(repo.type)) return Boolean(c.bucket && c.endpoint && c.accessKey && c.secretKey);
+    const alreadySaved = Boolean(repo.id && !repo.id.startsWith('repo-'));
+    if (repo.type === 'S3') return Boolean(c.bucket && c.region && (alreadySaved || c.accessKey && c.secretKey));
+		if (isS3CompatibleType(repo.type)) return Boolean(c.bucket && c.endpoint && (alreadySaved || c.accessKey && c.secretKey));
     if (repo.type === 'Azure') return Boolean(c.accountName && c.accountKey && c.container);
     if (repo.type === 'Google Cloud') return Boolean(c.bucket && c.serviceAccountKey);
     if (repo.type === 'NFS') return Boolean(c.nfsServer && c.nfsPath);
@@ -9352,10 +9960,21 @@ function StoragePage({ storage, clusters, onStorageCreated }: { storage: Storage
 		}
 	};
 
-	const saveEditedStorage = () => {
+	const saveEditedStorage = async () => {
     if (!editingRepo || !storageReady(editingRepo)) return;
-    setRepos(prev => prev.map(repo => repo.id === editingRepo.id ? normalizeStorageRepo(editingRepo) : repo));
-    setEditingRepo(null);
+		setSavingStorage(true);
+		setStorageError(null);
+		try {
+			const updated = await apiPatch<ApiStorageRepo>(`/api/v1/storage-repositories/${editingRepo.id}`, buildStorageRepositoryInput(editingRepo));
+			const saved = normalizeStorageRepo(mapStorageRepo(updated));
+			setRepos(prev => prev.map(repo => repo.id === saved.id ? saved : repo));
+			onStorageCreated?.(saved);
+			setEditingRepo(null);
+		} catch (error) {
+			setStorageError(error instanceof Error ? error.message : 'Failed to update storage repository');
+		} finally {
+			setSavingStorage(false);
+		}
 	};
 
 	const syncSelectedStorage = async () => {
@@ -9432,11 +10051,20 @@ function StoragePage({ storage, clusters, onStorageCreated }: { storage: Storage
   };
 
 
-  const deleteStorage = () => {
+  const deleteStorage = async () => {
     if (!deleteRepo) return;
-    setRepos(prev => prev.filter(repo => repo.id !== deleteRepo.id));
-    setSelectedRepoIds(prev => prev.filter(id => id !== deleteRepo.id));
-    setDeleteRepo(null);
+		setSavingStorage(true);
+		setStorageError(null);
+		try {
+			await apiDelete(`/api/v1/storage-repositories/${deleteRepo.id}`);
+			setRepos(prev => prev.filter(repo => repo.id !== deleteRepo.id));
+			setSelectedRepoIds(prev => prev.filter(id => id !== deleteRepo.id));
+			setDeleteRepo(null);
+		} catch (error) {
+			setStorageError(error instanceof Error ? error.message : 'Failed to delete storage repository');
+		} finally {
+			setSavingStorage(false);
+		}
   };
 
   function repoIconClass(type: string) {
@@ -9453,7 +10081,7 @@ function StoragePage({ storage, clusters, onStorageCreated }: { storage: Storage
         <div className={allowTypeChange ? 'grid grid-cols-1 gap-4' : 'grid grid-cols-1 gap-4 md:grid-cols-2'}>
           <EditField label="Name" value={editingRepo.name} placeholder="My Backup Repo" onChange={value => setEditingRepo({ ...editingRepo, name: value })} />
           {!allowTypeChange && (
-            <label className="flex flex-col gap-1.5 text-xs font-bold uppercase tracking-widest text-slate-600">
+            <label className="flex flex-col gap-1.5 text-xs font-semibold tracking-normal text-slate-600">
               Type
               <div className="flex h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-3.5 text-xs font-bold uppercase text-slate-600">
                 <span>{editingRepo.type}</span>
@@ -9472,7 +10100,7 @@ function StoragePage({ storage, clusters, onStorageCreated }: { storage: Storage
               <EditField label="SECRET ACCESS KEY (SK)" type="password" value={storageConfigValue('secretKey')} placeholder="Enter secret access key" onChange={value => updateEditingConfig('secretKey', value)} />
             </div>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <EditField label="BUCKET/Path" value={storageConfigValue('bucket')} placeholder="bucket-name" onChange={value => updateEditingConfig('bucket', value)} />
+              <EditField label="Bucket Name" value={storageConfigValue('bucket')} placeholder="Enter bucket name" onChange={value => updateEditingConfig('bucket', value)} />
               <EditField label="Region (REGION)" value={storageConfigValue('region')} placeholder="us-west-2" onChange={value => updateEditingConfig('region', value)} />
             </div>
             {isS3CompatibleType(editingRepo.type) && (() => {
@@ -9551,10 +10179,10 @@ function StoragePage({ storage, clusters, onStorageCreated }: { storage: Storage
         {editingRepo.type === 'Google Cloud' && (
           <div className="hbdr-storage-field-stack">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <EditField label="Bucket/Path" value={storageConfigValue('bucket')} placeholder="gcs-bucket-name" onChange={value => updateEditingConfig('bucket', value)} />
+              <EditField label="Bucket Name" value={storageConfigValue('bucket')} placeholder="Enter bucket name" onChange={value => updateEditingConfig('bucket', value)} />
               <EditField label="Region" value={storageConfigValue('region')} placeholder="us-central1" onChange={value => updateEditingConfig('region', value)} />
             </div>
-            <label className="flex flex-col gap-1.5 text-xs font-bold uppercase tracking-widest text-slate-600">
+            <label className="flex flex-col gap-1.5 text-xs font-semibold tracking-normal text-slate-600">
               SERVICE ACCOUNT KEY
               <textarea value={storageConfigValue('serviceAccountKey')} onChange={event => updateEditingConfig('serviceAccountKey', event.target.value)} placeholder={'{ "type": "service_account", ... }'} rows={4} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-xs text-slate-700 outline-none transition-all focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
             </label>
@@ -9635,9 +10263,9 @@ function StoragePage({ storage, clusters, onStorageCreated }: { storage: Storage
                     <>
                       <div className="fixed inset-0 z-30" onClick={() => setStorageBulkMenuOpen(false)} />
                       <motion.div initial={{ opacity: 0, y: 8, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8, scale: 0.96 }} className="absolute left-0 top-11 z-40 w-48 overflow-hidden rounded-2xl border border-slate-100 bg-white py-1 shadow-2xl shadow-slate-200/80 ring-1 ring-slate-950/5">
-                        <button disabled={!singleSelectedRepo} onClick={() => { if (!singleSelectedRepo) return; setDetailRepo(normalizeStorageRepo(singleSelectedRepo)); setStorageBulkMenuOpen(false); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"><Eye size={14} />View Details</button>
-                        <button disabled={!singleSelectedRepo} onClick={() => { if (!singleSelectedRepo) return; setStorageTestMessage(null); setStorageError(null); setEditingRepo(normalizeStorageRepo(singleSelectedRepo)); setStorageBulkMenuOpen(false); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"><Settings size={14} />Edit Storage</button>
-                        <button onClick={() => { if (!selectedRepos[0]) return; setDeleteRepo(selectedRepos[0]); setStorageBulkMenuOpen(false); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-rose-600 hover:bg-rose-50"><Trash2 size={14} />Delete Repository</button>
+                        <button disabled={!singleSelectedRepo} onClick={() => { if (!singleSelectedRepo) return; setDetailRepo(normalizeStorageRepo(singleSelectedRepo)); setStorageBulkMenuOpen(false); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"><Eye size={14} />View</button>
+                        <button disabled={!singleSelectedRepo} onClick={() => { if (!singleSelectedRepo) return; setStorageTestMessage(null); setStorageError(null); setEditingRepo(normalizeStorageRepo(singleSelectedRepo)); setStorageBulkMenuOpen(false); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"><Settings size={14} />Edit</button>
+                        <button disabled={!singleSelectedRepo} onClick={() => { if (!singleSelectedRepo) return; setDeleteRepo(singleSelectedRepo); setStorageBulkMenuOpen(false); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"><Trash2 size={14} />Delete</button>
                       </motion.div>
                     </>
                   )}
@@ -9816,11 +10444,11 @@ function StoragePage({ storage, clusters, onStorageCreated }: { storage: Storage
               <Info label="Name" value={detailRepo.name} />
               <Info label="Type" value={detailRepo.type} />
               <Info label="Endpoint" value={detailRepo.endpoint || '-'} />
-              <Info label="Bucket/Path" value={detailRepo.bucket || '-'} />
+              <Info label="Bucket Name" value={detailRepo.bucket || '-'} />
               <Info label="Region" value={detailRepo.region || 'N/A'} />
               <Info label="Use TLS" value={detailRepo.useTls ? 'Yes' : 'No'} />
-              <Info label="Status" value={detailRepo.status === 'connected' ? 'CONNECTED' : 'WARNING'} />
-              <Info label="Last Verified" value={detailRepo.updatedAt} />
+              <Info label="Status" value={detailRepo.status === 'connected' ? 'CONNECTED' : detailRepo.status === 'warning' ? 'WARNING' : 'UNKNOWN'} />
+              <Info label="Last Verified" value={detailRepo.lastValidatedAt ? formatDateTime(detailRepo.lastValidatedAt) : 'Never'} />
             </div>
             <div className="mt-5 flex justify-end gap-3">
               <button onClick={() => setDetailRepo(null)} className="rounded-xl px-5 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50">Close</button>
@@ -9858,7 +10486,7 @@ function StoragePage({ storage, clusters, onStorageCreated }: { storage: Storage
               </div>
               <div className="hbdr-storage-drawer-footer">
                 <div className="hbdr-filter-drawer-actions hbdr-storage-drawer-actions">
-                  <button type="button" onClick={saveEditedStorage} disabled={!storageReady(editingRepo)}>Save Changes</button>
+                  <button type="button" onClick={()=>void saveEditedStorage()} disabled={!storageReady(editingRepo) || savingStorage}>{savingStorage ? 'Saving...' : 'Save Changes'}</button>
                   <button type="button" onClick={closeEditStorage}>Cancel</button>
                 </div>
               </div>
@@ -9872,15 +10500,16 @@ function StoragePage({ storage, clusters, onStorageCreated }: { storage: Storage
               <div className="rounded-2xl border border-rose-100 bg-rose-50 p-4 text-sm leading-6 text-rose-700">
                 Confirm storage repository deletion <strong>{deleteRepo.name}</strong>? After deletion, this repository can no longer be used as a new DR recovery target.
               </div>
+              {storageError && <div className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-xs font-bold text-rose-700">{storageError}</div>}
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <Info label="Name" value={deleteRepo.name} />
                 <Info label="Type" value={deleteRepo.type} />
-                <Info label="Bucket/Path" value={deleteRepo.bucket || '-'} />
-                <Info label="Last Verified" value={deleteRepo.updatedAt} />
+                <Info label="Bucket Name" value={deleteRepo.bucket || '-'} />
+                <Info label="Last Verified" value={deleteRepo.lastValidatedAt ? formatDateTime(deleteRepo.lastValidatedAt) : 'Never'} />
               </div>
               <div className="flex justify-end gap-3">
                 <button onClick={() => setDeleteRepo(null)} className="rounded-xl px-5 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50">Cancel</button>
-                <button onClick={deleteStorage} className="rounded-xl bg-rose-600 px-8 py-2.5 text-sm font-bold text-white shadow-lg shadow-rose-100 transition-all hover:bg-rose-700 active:scale-95">Confirm Delete</button>
+                <button onClick={()=>void deleteStorage()} disabled={savingStorage} className="rounded-xl bg-rose-600 px-8 py-2.5 text-sm font-bold text-white shadow-lg shadow-rose-100 transition-all hover:bg-rose-700 active:scale-95 disabled:opacity-50">{savingStorage ? 'Deleting...' : 'Delete'}</button>
               </div>
             </div>
           </ModalFrame>
@@ -9916,6 +10545,9 @@ function PolicyPage({ policies, setPolicies }: { policies: PolicyItem[]; setPoli
   const [policyForm, setPolicyForm] = useState(defaultPolicyForm());
   const [policyModalOpen, setPolicyModalOpen] = useState(false);
   const [deletePolicy, setDeletePolicy] = useState<PolicyItem | null>(null);
+  const [detailPolicy, setDetailPolicy] = useState<PolicyItem | null>(null);
+  const [policyError, setPolicyError] = useState<string | null>(null);
+  const [savingPolicy, setSavingPolicy] = useState(false);
   const showScheduleConfig = policyForm.composition !== 'retention';
   const showRetentionConfig = policyForm.composition !== 'schedule';
 
@@ -10116,27 +10748,34 @@ function PolicyPage({ policies, setPolicies }: { policies: PolicyItem[]; setPoli
       intervalValue: Math.max(1, Number(policyForm.intervalValue) || 1),
       retention: Math.max(1, Number(policyForm.retention) || 1),
     };
+    const utcSchedule = scheduleDisplayToUTC(normalizedForm);
     const input = {
       name: normalizedForm.name.trim(),
       composition: normalizedForm.composition,
       scheduleType: normalizedForm.type,
       intervalValue: normalizedForm.intervalValue,
       intervalUnit: normalizedForm.intervalUnit,
-      hour: normalizedForm.hour,
-      minute: normalizedForm.minute,
-      weekDay: normalizedForm.weekDay,
-      monthDay: normalizedForm.monthDay,
+      hour: utcSchedule.hour,
+      minute: utcSchedule.minute,
+      weekDay: utcSchedule.weekDay,
+      monthDay: utcSchedule.monthDay,
       retentionCount: normalizedForm.retention,
       retentionDays: 0,
       status: 'active',
     };
+		setSavingPolicy(true);
+		setPolicyError(null);
     try {
-      const created = await apiPost<ApiPolicy>('/api/v1/policies', input);
+      const created = editingPolicyId
+				? await apiPatch<ApiPolicy>(`/api/v1/policies/${editingPolicyId}`, input)
+				: await apiPost<ApiPolicy>('/api/v1/policies', input);
       const mapped = mapPolicy(created);
       setPolicies(prev => prev.some(p => p.id === mapped.id) ? prev.map(p => p.id === mapped.id ? mapped : p) : [mapped, ...prev]);
       closePolicyModal();
     } catch (error) {
-      console.error('Failed to create policy', error);
+			setPolicyError(error instanceof Error ? error.message : 'Failed to save policy');
+		} finally {
+			setSavingPolicy(false);
     }
   };
 
@@ -10145,11 +10784,20 @@ function PolicyPage({ policies, setPolicies }: { policies: PolicyItem[]; setPoli
     setMenuId(null);
   };
 
-  const confirmDeletePolicy = () => {
+  const confirmDeletePolicy = async () => {
     if (!deletePolicy) return;
-    setPolicies(prev => prev.filter(policy => policy.id !== deletePolicy.id));
-    setSelectedPolicyIds(prev => prev.filter(id => id !== deletePolicy.id));
-    setDeletePolicy(null);
+		setSavingPolicy(true);
+		setPolicyError(null);
+		try {
+			await apiDelete(`/api/v1/policies/${deletePolicy.id}`);
+			setPolicies(prev => prev.filter(policy => policy.id !== deletePolicy.id));
+			setSelectedPolicyIds(prev => prev.filter(id => id !== deletePolicy.id));
+			setDeletePolicy(null);
+		} catch (error) {
+			setPolicyError(error instanceof Error ? error.message : 'Failed to delete policy');
+		} finally {
+			setSavingPolicy(false);
+		}
   };
 
   return (
@@ -10183,9 +10831,9 @@ function PolicyPage({ policies, setPolicies }: { policies: PolicyItem[]; setPoli
                       <>
                         <div className="fixed inset-0 z-30" onClick={() => setPolicyBulkMenuOpen(false)} />
                         <motion.div initial={{ opacity: 0, y: 8, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8, scale: 0.96 }} className="absolute left-0 top-11 z-40 w-48 overflow-hidden rounded-2xl border border-slate-100 bg-white py-1 shadow-2xl shadow-slate-200/80 ring-1 ring-slate-950/5">
-                          <button disabled={!singleSelectedPolicy} onClick={() => { if (!singleSelectedPolicy) return; openEditPolicy(singleSelectedPolicy); setPolicyBulkMenuOpen(false); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"><Edit2 size={14} />Edit Policy</button>
-                          <button disabled={!singleSelectedPolicy} onClick={() => { if (!singleSelectedPolicy) return; togglePolicyStatus(singleSelectedPolicy); setPolicyBulkMenuOpen(false); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"><RefreshCw size={14} />{singleSelectedPolicy?.status === 'Active' ? 'Disable Policy' : 'Enable Policy'}</button>
-                          <button disabled={!singleSelectedPolicy} onClick={() => { if (!singleSelectedPolicy) return; setDeletePolicy(singleSelectedPolicy); setPolicyBulkMenuOpen(false); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"><Trash2 size={14} />Delete Policy</button>
+                          <button disabled={!singleSelectedPolicy} onClick={() => { if (!singleSelectedPolicy) return; setDetailPolicy(singleSelectedPolicy); setPolicyBulkMenuOpen(false); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"><Eye size={14} />View</button>
+                          <button disabled={!singleSelectedPolicy} onClick={() => { if (!singleSelectedPolicy) return; openEditPolicy(singleSelectedPolicy); setPolicyBulkMenuOpen(false); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"><Edit2 size={14} />Edit</button>
+                          <button disabled={!singleSelectedPolicy} onClick={() => { if (!singleSelectedPolicy) return; setDeletePolicy(singleSelectedPolicy); setPolicyBulkMenuOpen(false); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"><Trash2 size={14} />Delete</button>
                         </motion.div>
                       </>
                     )}
@@ -10286,6 +10934,8 @@ function PolicyPage({ policies, setPolicies }: { policies: PolicyItem[]; setPoli
       )}
 
       <AnimatePresence>
+		{policyError && <div className="rounded border border-rose-100 bg-rose-50 px-4 py-3 text-xs font-bold text-rose-700">{policyError}</div>}
+		{detailPolicy && <ModalFrame title="Policy Details" onClose={()=>setDetailPolicy(null)}><div className="grid grid-cols-1 gap-3 md:grid-cols-2"><Info label="Name" value={detailPolicy.name}/><Info label="Status" value={detailPolicy.status}/><Info label="Schedule" value={formatPolicySchedule(detailPolicy)}/><Info label="Retention" value={formatPolicyRetention(detailPolicy)}/><Info label="Composition" value={formatPolicyComposition(detailPolicy.composition)}/><Info label="Bound Apps" value={`${detailPolicy.bound}`}/></div><div className="mt-5 flex justify-end gap-3"><button onClick={()=>setDetailPolicy(null)} className="rounded-xl px-5 py-2 text-sm font-medium text-slate-600">Close</button><button onClick={()=>{openEditPolicy(detailPolicy);setDetailPolicy(null)}} className="rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-bold text-white">Edit</button></div></ModalFrame>}
         {policyModalOpen && (
           <>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={closePolicyModal} className="hbdr-filter-drawer-backdrop" />
@@ -10337,7 +10987,7 @@ function PolicyPage({ policies, setPolicies }: { policies: PolicyItem[]; setPoli
                 {showScheduleConfig && (
                 <section className="hbdr-advanced-filter-section">
                   <h4>Schedule Type</h4>
-                  <p className="hbdr-policy-timezone-note">Schedule times use {platformTimeZoneLabel(platformTimeZone)}.</p>
+                  <p className="hbdr-policy-timezone-note">Schedule times use {userTimeZoneLabel(userTimeZone)}.</p>
                   <div className="hbdr-advanced-filter-box hbdr-policy-form-box">
                   <div className="grid grid-cols-2 gap-2">
                     {[
@@ -10415,7 +11065,7 @@ function PolicyPage({ policies, setPolicies }: { policies: PolicyItem[]; setPoli
               </div>
 
               <div className="hbdr-filter-drawer-actions hbdr-policy-drawer-actions">
-                <button type="button" onClick={savePolicy} disabled={!policyForm.name.trim()}><CheckCircle2 size={15} />{editingPolicyId ? 'Update Policy' : 'Save Policy'}</button>
+                <button type="button" onClick={()=>void savePolicy()} disabled={!policyForm.name.trim() || savingPolicy}><CheckCircle2 size={15} />{savingPolicy ? 'Saving...' : editingPolicyId ? 'Update Policy' : 'Save Policy'}</button>
                 <button type="button" onClick={closePolicyModal}>Cancel</button>
               </div>
             </motion.div>
@@ -10428,6 +11078,7 @@ function PolicyPage({ policies, setPolicies }: { policies: PolicyItem[]; setPoli
               <div className="rounded-2xl border border-rose-100 bg-rose-50 p-4 text-sm leading-6 text-rose-700">
                 Confirm policy deletion <strong>{deletePolicy.name}</strong>? Bound applications will not be automatically migrated.
               </div>
+              {policyError && <div className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-xs font-bold text-rose-700">{policyError}</div>}
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <Info label="Policy Name" value={deletePolicy.name} />
                 <Info label="Schedule" value={formatPolicySchedule(deletePolicy)} />
@@ -10436,7 +11087,7 @@ function PolicyPage({ policies, setPolicies }: { policies: PolicyItem[]; setPoli
               </div>
               <div className="flex justify-end gap-3">
                 <button onClick={() => setDeletePolicy(null)} className="rounded-xl px-5 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50">Cancel</button>
-                <button onClick={confirmDeletePolicy} className="rounded-xl bg-rose-600 px-8 py-2.5 text-sm font-bold text-white shadow-lg shadow-rose-100 transition-all hover:bg-rose-700 active:scale-95">Delete</button>
+                <button onClick={()=>void confirmDeletePolicy()} disabled={savingPolicy} className="rounded-xl bg-rose-600 px-8 py-2.5 text-sm font-bold text-white shadow-lg shadow-rose-100 transition-all hover:bg-rose-700 active:scale-95 disabled:opacity-50">{savingPolicy ? 'Deleting...' : 'Delete'}</button>
               </div>
             </div>
           </ModalFrame>
@@ -12185,17 +12836,17 @@ function FailbackPage({ toast }: { toast: (msg: string) => void }) {
 
 function RealOperationsPage() {
   const [selectedJob, setSelectedJob] = useState<string | null>(null);
-  const [tasks, setTasks] = useState<ApiTask[]>([]);
-  const [taskEvents, setTaskEvents] = useState<ApiTaskEvent[]>([]);
+  const [auditLogs, setAuditLogs] = useState<ApiAuditLog[]>([]);
+  const [query,setQuery]=useState(''); const [statusFilter,setStatusFilter]=useState('all'); const [typeFilter,setTypeFilter]=useState('all'); const [dateFrom,setDateFrom]=useState(''); const [dateTo,setDateTo]=useState('');
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
-        const response = await apiGet<ApiList<ApiTask>>('/api/v1/tasks');
-        if (!cancelled) setTasks(listItems(response));
+        const response = await apiGet<ApiList<ApiAuditLog>>('/api/v1/audit-logs?limit=1000');
+        if (!cancelled) setAuditLogs(listItems(response));
       } catch {
-        // Keep the current task list visible if one refresh fails.
+        // Keep the current audit list visible if one refresh fails.
       }
     };
     load();
@@ -12204,44 +12855,17 @@ function RealOperationsPage() {
     };
   }, []);
 
-  const selectedTask = tasks.find(task => task.id === selectedJob) || null;
-
-  useEffect(() => {
-    if (!selectedJob) {
-      setTaskEvents([]);
-      return;
-    }
-    let cancelled = false;
-    const loadEvents = async () => {
-      try {
-        const response = await apiGet<ApiList<ApiTaskEvent>>(`/api/v1/tasks/${selectedJob}/events`);
-        if (!cancelled) setTaskEvents(listItems(response));
-      } catch {
-        if (!cancelled) setTaskEvents([]);
-      }
-    };
-    loadEvents();
-    const timer = selectedTask && isActiveTaskStatus(selectedTask.status) ? window.setInterval(loadEvents, 5000) : undefined;
-    return () => {
-      cancelled = true;
-      if (timer) window.clearInterval(timer);
-    };
-  }, [selectedJob, selectedTask?.status]);
-
-  const statusLabel = (status: string) => {
-    if (status === 'succeeded') return 'Success';
-    if (status === 'failed') return 'Alert';
-    if (['accepted', 'dispatched', 'running', 'queued'].includes(status)) return 'Running';
-    return status || 'Unknown';
-  };
-  const jobs = tasks.map(task => ({
-    id: task.id,
-    type: task.type === 'backup' ? 'Backup' : task.type === 'drill' ? 'DR Drill' : task.type === 'takeover' ? 'Takeover' : task.type === 'restore' ? 'Restore' : task.type,
-    object: String(task.payload?.sourceNamespace || task.appId || task.restorePointId || task.clusterId),
-    status: statusLabel(task.status),
-    user: 'system',
-    time: formatLocalDateTime(task.createdAt),
-  }));
+  const selectedAudit = auditLogs.find(item => item.id === selectedJob) || null;
+  const jobs = auditLogs.map(item => ({
+    id: item.id,
+    type: item.action,
+    object: item.resourceName || [item.resourceType, item.resourceId].filter(Boolean).join(' · ') || item.resourceType,
+    status: item.result || 'Success',
+    user: item.actor || 'Unknown',
+    time: formatLocalDateTime(item.createdAt),
+    dateKey: formatLocalDateKey(item.createdAt),
+  })).filter(job => (statusFilter==='all'||job.status===statusFilter)&&(typeFilter==='all'||job.type===typeFilter)&&(!dateFrom||job.dateKey>=dateFrom)&&(!dateTo||job.dateKey<=dateTo)&&(!query.trim()||[job.id,job.type,job.object,job.status,job.user].some(value=>String(value).toLowerCase().includes(query.trim().toLowerCase()))));
+  const exportAudit=()=>{const escape=(value:unknown)=>`"${String(value??'').replace(/"/g,'""')}"`;const csv=[['Operation','Resource','Result','User','Time'],...jobs.map(job=>[job.type,job.object,job.status,job.user,job.time])].map(row=>row.map(escape).join(',')).join('\n');const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=`hypercdr-operation-history-${new Date().toISOString().slice(0,10)}.csv`;link.click();URL.revokeObjectURL(url)};
   const operationColumns: HyperTableColumn<typeof jobs[number]>[] = [
     {
       id: 'select',
@@ -12261,23 +12885,59 @@ function RealOperationsPage() {
       enableResizing: false,
       meta: { align: 'center' },
     },
-    { id: 'type', header: 'Type', accessorFn: job => job.type, size: 150, minSize: 120, cell: info => <span className="font-black text-slate-900">{info.row.original.type}</span>, meta: { title: job => job.type } },
-    { id: 'object', header: 'Object', accessorFn: job => job.object, size: 280, minSize: 180, maxSize: 520, cell: info => info.row.original.object, meta: { title: job => job.object } },
-    { id: 'status', header: 'Status', accessorFn: job => job.status, size: 130, minSize: 110, cell: info => <span className={info.row.original.status === 'Success' ? 'text-emerald-600' : info.row.original.status === 'Alert' ? 'text-amber-600' : 'text-blue-600'}>{info.row.original.status}</span>, meta: { title: job => job.status } },
+    { id: 'type', header: 'Operation', accessorFn: job => job.type, size: 190, minSize: 150, cell: info => <span className="font-black text-slate-900">{info.row.original.type}</span>, meta: { title: job => job.type } },
+    { id: 'object', header: 'Resource', accessorFn: job => job.object, size: 300, minSize: 180, maxSize: 520, cell: info => info.row.original.object, meta: { title: job => job.object } },
+    { id: 'status', header: 'Result', accessorFn: job => job.status, size: 130, minSize: 110, cell: info => <span className={info.row.original.status === 'Success' ? 'text-emerald-600' : 'text-rose-600'}>{info.row.original.status}</span>, meta: { title: job => job.status } },
     { id: 'user', header: 'User', accessorFn: job => job.user, size: 150, minSize: 120, cell: info => info.row.original.user, meta: { title: job => job.user } },
     { id: 'time', header: 'Time', accessorFn: job => job.time, size: 190, minSize: 150, maxSize: 280, cell: info => info.row.original.time, meta: { title: job => job.time } },
   ];
 
   return (
     <motion.div key="operations" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
-      <SearchBar title="History" desc="Backup, restore, and takeover audit." action="Export Audit" onAction={() => setSelectedJob(null)} />
-      <div className="rounded border border-slate-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5">
-          <div>
-            <p className="text-sm font-black text-slate-900">Task Audit</p>
-            <p className="mt-1 text-xs font-medium text-slate-400">{selectedJob ? `Selected ${selectedJob}` : 'Select a job to view execution details'}</p>
+      <div className="hbdr-page-hero">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-blue-600 shadow-sm"><History size={18} /></div>
+            <div className="hbdr-history-page-title">
+              <h3 className="text-xs font-black uppercase tracking-tight text-slate-800">History</h3>
+              <p className="mt-0.5 text-[11px] font-medium text-slate-400">Review user operations and their results.</p>
+            </div>
           </div>
-          <button disabled={!selectedJob} onClick={() => setSelectedJob(null)} className="hbdr-dr-action-primary hbdr-dr-action-ghost">Clear Selection</button>
+          <div />
+        </div>
+      </div>
+
+      <div className="hbdr-dr-table-card hbdr-history-table-list">
+        <div className="hbdr-dr-table-head">
+          <div className="hbdr-dr-toolbar">
+            <div className="hbdr-dr-action-group">
+              <button type="button" onClick={exportAudit} className="hbdr-dr-action-primary">Export</button>
+              <button type="button" disabled={!selectedJob} onClick={() => setSelectedJob(null)} className="hbdr-dr-more">Clear Selection</button>
+            </div>
+            <div className="hbdr-dr-query-group hbdr-history-query-group">
+              <select aria-label="Filter by type" value={typeFilter} onChange={event => setTypeFilter(event.target.value)}>
+                <option value="all">All types</option>
+                {Array.from(new Set(auditLogs.map(item => item.action))).sort().map(action => <option key={action} value={action}>{action}</option>)}
+              </select>
+              <select aria-label="Filter by status" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
+                <option value="all">All statuses</option>
+                <option value="Success">Success</option>
+                <option value="Failed">Failed</option>
+              </select>
+              <label className="hbdr-history-date-field">
+                <span>From</span>
+                <input aria-label="From date" type="date" value={dateFrom} onChange={event => setDateFrom(event.target.value)} />
+              </label>
+              <label className="hbdr-history-date-field">
+                <span>To</span>
+                <input aria-label="To date" type="date" value={dateTo} onChange={event => setDateTo(event.target.value)} />
+              </label>
+              {(dateFrom || dateTo) && <button type="button" title="Clear dates" aria-label="Clear dates" onClick={() => { setDateFrom(''); setDateTo(''); }}><X size={16} /></button>}
+              <label className="hbdr-dr-search">
+                <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Enter search text" />
+              </label>
+            </div>
+          </div>
         </div>
         <HyperTable
           variant="page"
@@ -12287,63 +12947,41 @@ function RealOperationsPage() {
           getRowId={row => row.id}
           onRowClick={row => setSelectedJob(row.id)}
           getRowClassName={row => selectedJob === row.id ? 'hbdr-dr-row-selected' : ''}
-          emptyMessage="No task audit records available."
+          emptyMessage="No user operation records available."
+          className="hbdr-history-hyper-table"
         />
       </div>
       <AnimatePresence>
-        {selectedTask && (
-          <ModalFrame title="Task Details" onClose={() => setSelectedJob(null)}>
-            <div className="space-y-4">
-              <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{selectedTask.type}</p>
-                    <p className="mt-1 break-all font-mono text-xs font-bold text-slate-700">{selectedTask.id}</p>
-                  </div>
-                  <span className={`text-sm font-black ${taskStatusClass(selectedTask.status)}`}>{taskStatusLabel(selectedTask.status)}</span>
-                </div>
-                <div className="mt-4 h-2 overflow-hidden rounded-full bg-white">
-                  <div className={`h-full rounded-full ${selectedTask.status === 'failed' ? 'bg-rose-500' : selectedTask.status === 'succeeded' ? 'bg-emerald-500' : 'bg-blue-500'}`} style={{ width: `${Math.max(4, selectedTask.progress || 0)}%` }} />
-                </div>
-                <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-slate-500">
-                  <div><span className="font-semibold text-slate-400">Cluster</span><p className="mt-1 break-all font-mono text-slate-700">{selectedTask.clusterId}</p></div>
-                  <div><span className="font-semibold text-slate-400">Command</span><p className="mt-1 break-all font-mono text-slate-700">{selectedTask.commandId || '-'}</p></div>
-                  <div><span className="font-semibold text-slate-400">Created</span><p className="mt-1 font-semibold text-slate-700">{formatDateTime(selectedTask.createdAt)}</p></div>
-                  <div><span className="font-semibold text-slate-400">Completed</span><p className="mt-1 font-semibold text-slate-700">{formatDateTime(selectedTask.completedAt)}</p></div>
-                </div>
+        {selectedAudit && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="hbdr-filter-drawer-backdrop" onClick={() => setSelectedJob(null)} />
+            <motion.aside initial={{ opacity: 0, x: 34 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 34 }} transition={{ duration: 0.18, ease: 'easeOut' }} className="hbdr-filter-drawer hbdr-history-detail-drawer" role="dialog" aria-modal="true" aria-label="Operation details">
+              <div className="hbdr-filter-drawer-head">
+                <div><h3>Operation Details</h3><p>Recorded user action and platform response.</p></div>
+                <button type="button" onClick={() => setSelectedJob(null)} aria-label="Close operation details"><X size={18} /></button>
               </div>
-              {selectedTask.status === 'failed' && (
-                <div className="rounded-xl border border-rose-100 bg-rose-50 p-4 text-sm text-rose-700">
-                  <p className="font-bold text-rose-900">{selectedTask.errorCode || 'TASK_FAILED'}</p>
-                  {taskFailureDetails(selectedTask, taskEvents).map((detail, index) => (
-                    <p key={`${index}-${detail}`} className="mt-1 whitespace-pre-wrap break-words">{detail}</p>
-                  ))}
-                  {taskFailureDetails(selectedTask, taskEvents).length === 0 && <p className="mt-1">{taskDetailLabel(selectedTask.type)} failed.</p>}
+              <div className="hbdr-filter-drawer-body hbdr-resource-detail">
+                <div className="hbdr-resource-detail-section">
+                  <h4>Summary</h4>
+                  <dl>
+                    <div><dt>Operation</dt><dd>{selectedAudit.action}</dd></div>
+                    <div><dt>Result</dt><dd className={selectedAudit.result === 'Success' ? 'text-emerald-600' : 'text-rose-600'}>{selectedAudit.result}</dd></div>
+                    <div><dt>User</dt><dd>{selectedAudit.actor || 'Unknown'}</dd></div>
+                    <div><dt>Time</dt><dd>{formatLocalDateTime(selectedAudit.createdAt)}</dd></div>
+                  </dl>
                 </div>
-              )}
-              <div className="max-h-72 overflow-y-auto rounded-xl border border-slate-100">
-                {taskEvents.length > 0 ? taskEvents.map(event => (
-                  <div key={event.id} className="border-b border-slate-100 px-4 py-3 text-xs last:border-b-0">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className={`font-bold ${event.level === 'error' ? 'text-rose-600' : 'text-slate-700'}`}>{event.reason || event.level}</span>
-                      <span className="shrink-0 text-slate-400">{formatDateTime(event.createdAt)}</span>
-                    </div>
-                    <p className="mt-1 whitespace-pre-wrap break-words text-slate-500">{event.message}</p>
-                    {eventRestoreResultErrors(event).length > 0 && (
-                      <ul className="mt-2 space-y-1 text-rose-600">
-                        {eventRestoreResultErrors(event).map((error, index) => (
-                          <li key={`${index}-${error}`} className="whitespace-pre-wrap break-words">- {error}</li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                )) : (
-                  <div className="px-4 py-6 text-center text-xs font-medium text-slate-400">No task events yet.</div>
-                )}
+                <div className="hbdr-resource-detail-section">
+                  <h4>Resource</h4>
+                  <dl>
+                    <div><dt>Type</dt><dd>{selectedAudit.resourceType}</dd></div>
+                    <div><dt>Name</dt><dd>{selectedAudit.resourceName || '-'}</dd></div>
+                    <div><dt>ID</dt><dd className="break-all font-mono">{selectedAudit.resourceId || '-'}</dd></div>
+                  </dl>
+                </div>
+                {selectedAudit.message && <div className={`hbdr-resource-detail-section ${selectedAudit.result === 'Failed' ? 'text-rose-700' : ''}`}><h4>Details</h4><p className="whitespace-pre-wrap break-words text-xs leading-5">{selectedAudit.message}</p></div>}
               </div>
-
-            </div>
-          </ModalFrame>
+            </motion.aside>
+          </>
         )}
       </AnimatePresence>
     </motion.div>
@@ -12533,7 +13171,7 @@ function TagManagementPage({
     setEditingTag(null);
     setDraftName('');
   };
-  const saveTag = () => {
+  const saveTag = async () => {
     const normalizedName = draftName.trim();
     if (!normalizedName) {
       toast('Enter a tag name');
@@ -12544,19 +13182,16 @@ function TagManagementPage({
       toast('Tag name already exists');
       return;
     }
-    if (editingTag) {
-      setTags(prev => prev.map(tag => tag.id === editingTag.id ? { ...tag, name: normalizedName } : tag));
-      toast('Tag updated');
-    } else {
-      const id = createUuid();
-      setTags(prev => [{ id, name: normalizedName, createdAt: new Date().toISOString() }, ...prev]);
-      toast('Tag created');
-    }
-    closeTagModal();
+    try {
+      const saved = editingTag ? await apiPatch<TagItem>(`/api/v1/tags/${editingTag.id}`, { name: normalizedName }) : await apiPost<TagItem>('/api/v1/tags', { name: normalizedName });
+      setTags(prev => editingTag ? prev.map(tag => tag.id === saved.id ? saved : tag) : [saved, ...prev]);
+      toast(editingTag ? 'Tag updated' : 'Tag created'); closeTagModal();
+    } catch (error) { toast(error instanceof Error ? error.message : 'Failed to save tag'); }
   };
-  const confirmDeleteTags = () => {
+  const confirmDeleteTags = async () => {
     if (deleteTags.length === 0) return;
     const deleteIds = deleteTags.map(tag => tag.id);
+    try { await Promise.all(deleteIds.map(id => apiDelete(`/api/v1/tags/${id}`))); } catch(error) { toast(error instanceof Error ? error.message : 'Failed to delete tags'); return; }
     setTags(prev => prev.filter(tag => !deleteIds.includes(tag.id)));
     setClusters(prev => prev.map(cluster => ({
       ...cluster,
@@ -12659,44 +13294,1147 @@ function TagManagementPage({
   );
 }
 
-function AlertsPage() {
-  const [alerts, setAlerts] = useState<Array<{ id: string; level: string; source: string; message: string; time: string; handled: boolean }>>([]);
-  const pending = alerts.filter(item => !item.handled).length;
-  const alertColumns: HyperTableColumn<typeof alerts[number]>[] = [
+type ApiPlatformUser = ApiLoginResponse['user'];
+
+function UserManagementPage({ currentUser, toast }: { currentUser: ApiLoginResponse['user']; toast: (message: string) => void }) {
+  const canManageTenants = currentUser.systemAdmin === true || currentUser.email === "admin";
+  const [users, setUsers] = useState<ApiPlatformUser[]>([]);
+  const [tenants, setTenants] = useState<ApiTenant[]>([]);
+  const [editing, setEditing] = useState<ApiPlatformUser | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [email, setEmail] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [role, setRole] = useState("operator");
+  const [status, setStatus] = useState("active");
+  const [tenantId, setTenantId] = useState(currentUser.tenantId);
+  const [passwordTarget, setPasswordTarget] = useState<ApiPlatformUser | null>(
+    null,
+  );
+  const [deleteTarget, setDeleteTarget] = useState<ApiPlatformUser | null>(
+    null,
+  );
+  const [replacementPassword, setReplacementPassword] = useState("");
+  const [replacementPasswordConfirm, setReplacementPasswordConfirm] =
+    useState("");
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [userBulkMenuOpen, setUserBulkMenuOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [userActionBusy, setUserActionBusy] = useState(false);
+  const load = useCallback(async () => {
+    const result = await apiGet<ApiList<ApiPlatformUser>>("/api/v1/users");
+    setUsers(listItems(result));
+  }, []);
+  useEffect(() => {
+    void load().catch((error) =>
+      toast(error instanceof Error ? error.message : "Failed to load users"),
+    );
+  }, [load, toast]);
+  useEffect(() => { if (canManageTenants) void apiGet<ApiList<ApiTenant>>('/api/v1/tenants').then(result => setTenants(listItems(result))).catch(error => toast(error instanceof Error ? error.message : 'Failed to load tenants')); }, [canManageTenants, toast]);
+  const openCreate = () => {
+    setCreating(true);
+    setEditing(null);
+    setEmail("");
+    setDisplayName("");
+    setPassword("");
+    setConfirmPassword("");
+    setRole("operator");
+    setStatus("active");
+    setTenantId(canManageTenants ? '' : currentUser.tenantId);
+  };
+  const openEdit = (user: ApiPlatformUser) => {
+    setCreating(false);
+    setEditing(user);
+    setEmail(user.email);
+    setDisplayName(user.displayName || "");
+    setPassword("");
+    setRole(user.role);
+    setStatus(user.status);
+    setTenantId(user.tenantId);
+  };
+  const closeEditor = () => {
+    setCreating(false);
+    setEditing(null);
+  };
+  const save = async () => {
+    setUserActionBusy(true);
+    try {
+      if (creating) await apiPost("/api/v1/users", { tenantId, email, displayName, password, role, status });
+      else if (editing) await apiPatch(`/api/v1/users/${editing.id}`, { tenantId, email, displayName, role, status });
+      closeEditor();
+      await load();
+      toast("User saved");
+    } finally {
+      setUserActionBusy(false);
+    }
+  };
+  const resetPassword = async () => {
+    if (!passwordTarget || replacementPassword !== replacementPasswordConfirm)
+      return;
+    setUserActionBusy(true);
+    try {
+      await apiPost(`/api/v1/users/${passwordTarget.id}/password`, { password: replacementPassword });
+      setPasswordTarget(null);
+      setReplacementPassword("");
+      setReplacementPasswordConfirm("");
+      toast("Password updated");
+    } finally {
+      setUserActionBusy(false);
+    }
+  };
+  const deleteUser = async () => {
+    if (!deleteTarget) return;
+    setUserActionBusy(true);
+    try {
+      await apiDelete(`/api/v1/users/${deleteTarget.id}`);
+      setDeleteTarget(null);
+      setSelectedUserIds((current) => current.filter((id) => id !== deleteTarget.id));
+      await load();
+      toast("User deleted");
+    } finally {
+      setUserActionBusy(false);
+    }
+  };
+  const filteredUsers = users.filter((user) =>
+    [
+      user.email,
+      user.displayName,
+      user.role,
+      user.status,
+      user.authProvider,
+      user.tenantName,
+    ].some((value) =>
+      String(value || "")
+        .toLowerCase()
+        .includes(query.trim().toLowerCase()),
+    ),
+  );
+  const selectedUsers = users.filter((user) =>
+    selectedUserIds.includes(user.id),
+  );
+  const singleSelectedUser =
+    selectedUsers.length === 1 ? selectedUsers[0] : null;
+  const toggleSelectedUser = (id: string) =>
+    setSelectedUserIds((current) =>
+      current.includes(id)
+        ? current.filter((item) => item !== id)
+        : [...current, id],
+    );
+  const userColumns: HyperTableColumn<ApiPlatformUser>[] = [
     {
-      id: 'level',
-      header: 'Level',
-      accessorFn: alert => alert.level,
+      id: "select",
+      header: "",
+      size: 46,
+      minSize: 46,
+      maxSize: 52,
+      enableSorting: false,
+      enableResizing: false,
+      cell: (info) => (
+        <input
+          type="checkbox"
+          checked={selectedUserIds.includes(info.row.original.id)}
+          onClick={(event) => event.stopPropagation()}
+          onChange={() => toggleSelectedUser(info.row.original.id)}
+          aria-label={`Select ${info.row.original.email}`}
+        />
+      ),
+      meta: { align: "center" },
+    },
+    {
+      id: "user",
+      header: "User",
+      accessorFn: (user) => user.displayName || user.email,
+      size: 320,
+      minSize: 220,
+      cell: (info) => {
+        const user = info.row.original;
+        return (
+          <div>
+            <p className="text-xs font-black text-slate-900">
+              {user.displayName || user.email}
+            </p>
+            <p className="mt-0.5 text-[11px] text-slate-400">
+              {user.email}
+              {user.email === "admin" ? " · Built-in account" : ""}
+            </p>
+          </div>
+        );
+      },
+      meta: { title: (user) => user.displayName || user.email },
+    },
+    {
+      id: "tenant",
+      header: "Tenant",
+      accessorFn: user => user.tenantName || tenants.find(item => item.id === user.tenantId)?.name || user.tenantId,
+      size: 190,
+      minSize: 150,
+      cell: info => <span className="text-xs font-semibold text-slate-500">{info.row.original.tenantName || tenants.find(item => item.id === info.row.original.tenantId)?.name || 'Unknown tenant'}</span>,
+      meta: { title: user => user.tenantName || tenants.find(item => item.id === user.tenantId)?.name || user.tenantId },
+    },
+    {
+      id: "role",
+      header: "Role",
+      accessorFn: (user) => user.role,
+      size: 150,
+      minSize: 120,
+      cell: (info) => (
+        <span className="text-xs font-semibold capitalize text-slate-600">
+          {info.row.original.systemAdmin ? 'System administrator' : info.row.original.role === 'admin' ? 'Administrator' : 'Operator'}
+        </span>
+      ),
+      meta: { title: (user) => user.role },
+    },
+    {
+      id: "status",
+      header: "Status",
+      accessorFn: (user) => user.status,
+      size: 140,
+      minSize: 110,
+      cell: (info) => (
+        <span
+          className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-bold capitalize ${info.row.original.status === "active" ? "border-emerald-100 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-500"}`}
+        >
+          {info.row.original.status}
+        </span>
+      ),
+      meta: { title: (user) => user.status },
+    },
+    {
+      id: "provider",
+      header: "Sign-in",
+      accessorFn: (user) => user.authProvider || "password",
+      size: 130,
+      minSize: 110,
+      cell: (info) => (
+        <span className="text-xs font-semibold capitalize text-slate-500">
+          {info.row.original.authProvider || "password"}
+        </span>
+      ),
+      meta: { title: (user) => user.authProvider || "password" },
+    },
+  ];
+  return (
+    <motion.div
+      key="users"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="space-y-5"
+    >
+      <div className="hbdr-page-hero">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-blue-600 shadow-sm"><User size={18} /></div>
+            <div>
+              <h3 className="text-sm font-black tracking-tight text-slate-900">User Management</h3>
+              <p className="mt-0.5 text-[11px] font-medium text-slate-400">Create and maintain platform users.</p>
+            </div>
+          </div>
+          <div />
+        </div>
+      </div>
+      <div className="hbdr-dr-table-card hbdr-user-management-table">
+        <div className="hbdr-dr-table-head">
+          <div className="hbdr-dr-toolbar">
+            <div className="hbdr-dr-action-group">
+              <button
+                type="button"
+                onClick={openCreate}
+                className="hbdr-dr-action-primary"
+              >
+                New
+              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  disabled={!singleSelectedUser}
+                  onClick={() => setUserBulkMenuOpen((open) => !open)}
+                  className="hbdr-dr-more"
+                >
+                  More{" "}
+                  <ChevronDown
+                    size={15}
+                    className={
+                      userBulkMenuOpen
+                        ? "rotate-180 transition-transform"
+                        : "transition-transform"
+                    }
+                  />
+                </button>
+                <AnimatePresence>
+                  {userBulkMenuOpen && singleSelectedUser && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-30"
+                        onClick={() => setUserBulkMenuOpen(false)}
+                      />
+                      <motion.div
+                        initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                        className="absolute left-0 top-11 z-40 w-48 overflow-hidden rounded-2xl border border-slate-100 bg-white py-1 shadow-2xl shadow-slate-200/80 ring-1 ring-slate-950/5"
+                      >
+                        <button
+                          onClick={() => {
+                            openEdit(singleSelectedUser);
+                            setUserBulkMenuOpen(false);
+                          }}
+                          className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50"
+                        >
+                          <Edit2 size={14} />
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => {
+                            setPasswordTarget(singleSelectedUser);
+                            setReplacementPassword("");
+                            setReplacementPasswordConfirm("");
+                            setUserBulkMenuOpen(false);
+                          }}
+                          className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50"
+                        >
+                          <KeyRound size={14} />
+                          Reset Password
+                        </button>
+                        <button
+                          disabled={singleSelectedUser.email === "admin"}
+                          onClick={() => {
+                            setDeleteTarget(singleSelectedUser);
+                            setUserBulkMenuOpen(false);
+                          }}
+                          className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-300"
+                        >
+                          <Trash2 size={14} />
+                          Delete
+                        </button>
+                      </motion.div>
+                    </>
+                  )}
+                </AnimatePresence>
+              </div>
+            </div>
+            <div className="hbdr-dr-query-group hbdr-user-query-group">
+              <label className="hbdr-dr-search">
+                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Enter search text" />
+              </label>
+            </div>
+          </div>
+        </div>
+        <HyperTable
+          variant="page"
+          density="comfortable"
+          columns={userColumns}
+          data={filteredUsers}
+          getRowId={(user) => user.id}
+          onRowClick={(user) => toggleSelectedUser(user.id)}
+          getRowClassName={(user) =>
+            selectedUserIds.includes(user.id) ? "hbdr-dr-row-selected" : ""
+          }
+          selectedCount={selectedUserIds.length}
+          emptyMessage={
+            query
+              ? "No users match the current search."
+              : "No users have been created."
+          }
+        />
+      </div>
+      <AnimatePresence>
+        {(creating || editing) && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="hbdr-filter-drawer-backdrop" onClick={closeEditor} />
+            <motion.aside initial={{ opacity: 0, x: 34 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 34 }} transition={{ duration: 0.18, ease: "easeOut" }} className="hbdr-filter-drawer hbdr-user-management-drawer" role="dialog" aria-modal="true" aria-label={creating ? "New User" : "Edit User"}>
+              <div className="hbdr-filter-drawer-head"><div><strong>{creating ? "New User" : "Edit User"}</strong><span>{creating ? "Create a platform account and assign its access role." : "Update account information, role, and access status."}</span></div><button type="button" onClick={closeEditor} aria-label="Close user drawer"><X size={18} /></button></div>
+              <div className="hbdr-filter-drawer-body"><div className="space-y-4">
+              <EditField label={editing?.email === "admin" ? "Account" : "Email Address"} value={email} onChange={setEmail} disabled={editing?.email === "admin"} />
+              <EditField
+                label="Display Name"
+                value={displayName}
+                onChange={setDisplayName}
+              />
+              <label className="block text-xs font-semibold tracking-normal text-slate-600">Tenant{canManageTenants && !editing?.systemAdmin ? <select value={tenantId} onChange={event=>setTenantId(event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 outline-none transition-all hover:border-slate-300 focus:border-blue-500 focus:shadow-[0_0_0_4px_rgba(59,130,246,0.12)]"><option value="">Select a tenant</option>{tenants.filter(item=>item.status==='active'||item.id===tenantId).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select> : <input value={editing?.tenantName || currentUser.tenantName || tenants.find(item=>item.id===tenantId)?.name || ''} disabled className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-500" />}</label>
+              {creating && (
+                <>
+                  <EditField
+                    label="Password"
+                    type="password"
+                    value={password}
+                    onChange={setPassword}
+                  />
+                  <EditField
+                    label="Confirm Password"
+                    type="password"
+                    value={confirmPassword}
+                    onChange={setConfirmPassword}
+                  />
+                  <PasswordValidation
+                    password={password}
+                    confirmation={confirmPassword}
+                  />
+                </>
+              )}
+              <label className="block text-xs font-semibold tracking-normal text-slate-600">
+                Role
+                <select
+                  value={role}
+                  disabled={editing?.email === "admin"}
+                  onChange={(e) => setRole(e.target.value)}
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3"
+                >
+                  <option value="operator">Operator</option>
+                  <option value="admin">Administrator</option>
+                </select>
+              </label>
+              {editing && (
+                <label className="block text-xs font-semibold tracking-normal text-slate-600">
+                  Status
+                  <select
+                    value={status}
+                    disabled={editing.email === "admin"}
+                    onChange={(e) => setStatus(e.target.value)}
+                    className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3"
+                  >
+                    <option value="active">Active</option>
+                    <option value="disabled">Disabled</option>
+                  </select>
+                </label>
+              )}
+              <div className="hbdr-filter-drawer-actions mt-6">
+                <button
+                  disabled={
+                    userActionBusy ||
+                    (editing?.email !== "admin" && !ACCOUNT_EMAIL_PATTERN.test(email.trim())) ||
+                    (canManageTenants && editing?.email !== "admin" && !tenantId) ||
+                    (creating &&
+                      (password.length < 8 || password !== confirmPassword || !tenantId))
+                  }
+                  className="hbdr-dr-action-primary"
+                  onClick={() =>
+                    void save().catch((error) =>
+                      toast(
+                        error instanceof Error
+                          ? error.message
+                          : "Failed to save user",
+                      ),
+                    )
+                  }
+                >
+                  {userActionBusy ? "Saving..." : "Save"}
+                </button>
+                <button disabled={userActionBusy} onClick={closeEditor}>Cancel</button>
+              </div>
+            </div></div></motion.aside>
+          </>
+        )}
+        {passwordTarget && (
+          <ModalFrame
+            title="Reset Password"
+            onClose={() => setPasswordTarget(null)}
+          >
+            <div className="space-y-4">
+              <p className="text-sm text-slate-500">
+                Set a new password for{" "}
+                <strong className="text-slate-800">
+                  {passwordTarget.email}
+                </strong>
+                .
+              </p>
+              <EditField
+                label="New Password"
+                type="password"
+                value={replacementPassword}
+                onChange={setReplacementPassword}
+              />
+              <EditField
+                label="Confirm New Password"
+                type="password"
+                value={replacementPasswordConfirm}
+                onChange={setReplacementPasswordConfirm}
+              />
+              <PasswordValidation
+                password={replacementPassword}
+                confirmation={replacementPasswordConfirm}
+              />
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setPasswordTarget(null)}>Cancel</button>
+                <button
+                  disabled={
+                    userActionBusy ||
+                    replacementPassword.length < 8 ||
+                    replacementPassword !== replacementPasswordConfirm
+                  }
+                  className="hbdr-dr-action-primary"
+                  onClick={() =>
+                    void resetPassword().catch((error) =>
+                      toast(
+                        error instanceof Error
+                          ? error.message
+                          : "Password update failed",
+                      ),
+                    )
+                  }
+                >
+                  {userActionBusy ? "Resetting..." : "Reset Password"}
+                </button>
+              </div>
+            </div>
+          </ModalFrame>
+        )}
+        {deleteTarget && (
+          <ModalFrame title="Delete User" onClose={() => setDeleteTarget(null)}>
+            <div className="space-y-5">
+              <div className="rounded-xl border border-rose-100 bg-rose-50 p-4 text-sm leading-6 text-rose-700">
+                Delete <strong>{deleteTarget.email}</strong>? This user will
+                immediately lose platform access.
+              </div>
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setDeleteTarget(null)}>Cancel</button>
+                <button
+                  disabled={userActionBusy}
+                  className="rounded-lg bg-rose-600 px-4 py-2 text-xs font-bold text-white"
+                  onClick={() =>
+                    void deleteUser().catch((error) =>
+                      toast(
+                        error instanceof Error
+                          ? error.message
+                          : "Delete failed",
+                      ),
+                    )
+                  }
+                >
+                  {userActionBusy ? "Deleting..." : "Delete User"}
+                </button>
+              </div>
+            </div>
+          </ModalFrame>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
+function HyperCDRLogoMark({ className = '' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 128 128" aria-hidden="true" className={className}>
+      <defs>
+        <linearGradient id="hcdr-sidebar-frame" x1="24" y1="28" x2="104" y2="100" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#ffcf3d" />
+          <stop offset="0.48" stopColor="#67e8f9" />
+          <stop offset="1" stopColor="#6d7cff" />
+        </linearGradient>
+        <filter id="hcdr-sidebar-glow" x="-25%" y="-25%" width="150%" height="150%">
+          <feGaussianBlur stdDeviation="3" result="blur" />
+          <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.35 0 0 0 0 0.68 0 0 0 0 1 0 0 0 0.45 0" />
+          <feMerge><feMergeNode /><feMergeNode in="SourceGraphic" /></feMerge>
+        </filter>
+      </defs>
+      <path d="M64 18 101 39v50l-37 21-37-21V39l37-21Z" fill="rgba(7,10,18,0.84)" stroke="url(#hcdr-sidebar-frame)" strokeWidth="5" filter="url(#hcdr-sidebar-glow)" />
+      <rect x="47" y="45" width="15" height="15" rx="4" fill="#67e8f9" />
+      <rect x="66" y="45" width="15" height="15" rx="4" fill="#ffffff" opacity="0.92" />
+      <rect x="47" y="64" width="15" height="15" rx="4" fill="#ffffff" opacity="0.92" />
+      <rect x="66" y="64" width="15" height="15" rx="4" fill="#ffcf3d" />
+    </svg>
+  );
+}
+
+function PasswordValidation({
+  password,
+  confirmation,
+}: {
+  password: string;
+  confirmation: string;
+}) {
+  const longEnough = password.length >= 8;
+  const matches = confirmation.length > 0 && password === confirmation;
+  const variety = [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/].filter((pattern) =>
+    pattern.test(password),
+  ).length;
+  const strength =
+    password.length === 0
+      ? 0
+      : password.length >= 12 && variety >= 3
+        ? 3
+        : longEnough && variety >= 2
+          ? 2
+          : 1;
+  const strengthLabel = ["Not entered", "Weak", "Good", "Strong"][strength];
+  return (
+    <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-3">
+      <div className="mb-2 flex items-center justify-between text-[11px] font-semibold">
+        <span className="text-slate-500">Password strength</span>
+        <span
+          className={
+            strength >= 3
+              ? "text-emerald-600"
+              : strength === 2
+                ? "text-blue-600"
+                : strength === 1
+                  ? "text-amber-600"
+                  : "text-slate-400"
+          }
+        >
+          {strengthLabel}
+        </span>
+      </div>
+      <div className="mb-3 grid grid-cols-3 gap-1">
+        {[1, 2, 3].map((level) => (
+          <span
+            key={level}
+            className={`h-1 rounded-full ${strength >= level ? (strength >= 3 ? "bg-emerald-500" : strength === 2 ? "bg-blue-500" : "bg-amber-400") : "bg-slate-200"}`}
+          />
+        ))}
+      </div>
+      <div className="grid gap-2 text-[11px] font-semibold sm:grid-cols-2">
+        <span
+          className={
+            longEnough
+              ? "flex items-center gap-1.5 text-emerald-600"
+              : "flex items-center gap-1.5 text-slate-400"
+          }
+        >
+          <CheckCircle2 size={13} />
+          8–128 characters
+        </span>
+        <span
+          className={
+            matches
+              ? "flex items-center gap-1.5 text-emerald-600"
+              : confirmation
+                ? "flex items-center gap-1.5 text-rose-600"
+                : "flex items-center gap-1.5 text-slate-400"
+          }
+        >
+          {matches ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}
+          Passwords match
+        </span>
+      </div>
+      <p className="mt-2 text-[10px] leading-4 text-slate-400">
+        For a stronger password, combine uppercase and lowercase letters,
+        numbers, and symbols.
+      </p>
+    </div>
+  );
+}
+
+function RequiredPasswordChange({
+  session,
+  onChanged,
+  onSignOut,
+}: {
+  session: AuthSession;
+  onChanged: () => void;
+  onSignOut: () => void;
+}) {
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const valid = currentPassword.length > 0 && newPassword.length >= 8 && newPassword !== currentPassword && newPassword === confirmPassword;
+  const submit = async () => {
+    if (!valid || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await apiPost<ApiPlatformUser>('/api/v1/auth/change-password', { currentPassword, newPassword });
+      onChanged();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Password update failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="min-h-screen bg-slate-50 px-5 py-10">
+      <div className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-lg items-center justify-center">
+        <section className="w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-200/60">
+          <div className="border-b border-slate-100 px-7 py-6">
+            <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-600"><KeyRound size={20} /></div>
+            <h1 className="text-xl font-black tracking-tight text-slate-900">Change your temporary password</h1>
+            <p className="mt-2 text-sm leading-6 text-slate-500">For account security, set a new password before entering HyperCDR.</p>
+            <p className="mt-3 text-xs font-semibold text-slate-400">Signed in as <span className="text-slate-600">{session.user.email}</span></p>
+          </div>
+          <div className="space-y-4 px-7 py-6">
+            <EditField label="Current Password" type="password" value={currentPassword} onChange={setCurrentPassword} />
+            <EditField label="New Password" type="password" value={newPassword} onChange={setNewPassword} />
+            <EditField label="Confirm New Password" type="password" value={confirmPassword} onChange={setConfirmPassword} />
+            <PasswordValidation password={newPassword} confirmation={confirmPassword} />
+            {newPassword && currentPassword === newPassword && <p className="text-xs font-semibold text-rose-600">New password must be different from the temporary password.</p>}
+            {error && <div className="rounded-lg border border-rose-100 bg-rose-50 px-3 py-2.5 text-xs font-semibold text-rose-700">{error}</div>}
+          </div>
+          <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50/70 px-7 py-5">
+            <button type="button" onClick={onSignOut} disabled={busy} className="text-xs font-bold text-slate-500 hover:text-slate-700">Sign out</button>
+            <button type="button" onClick={() => void submit()} disabled={!valid || busy} className="hbdr-dr-action-primary">{busy ? 'Updating...' : 'Change Password'}</button>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function PasswordChangeSuccess({ onContinue }: { onContinue: () => void }) {
+  return (
+    <div className="min-h-screen bg-slate-50 px-5 py-10">
+      <div className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-lg items-center justify-center">
+        <section className="w-full overflow-hidden rounded-2xl border border-slate-200 bg-white text-center shadow-xl shadow-slate-200/60">
+          <div className="px-8 py-9">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 text-emerald-600"><CheckCircle2 size={28} /></div>
+            <h1 className="mt-5 text-xl font-black tracking-tight text-slate-900">Password changed successfully</h1>
+            <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-slate-500">Your previous sessions have been signed out. Sign in again with your new password to continue.</p>
+          </div>
+          <div className="border-t border-slate-100 bg-slate-50/70 px-8 py-5">
+            <button type="button" autoFocus onClick={onContinue} className="hbdr-dr-action-primary mx-auto">Go to Sign In</button>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function PasswordRecoveryPage({
+  flow,
+  email,
+  setEmail,
+  password,
+  setPassword,
+  confirmation,
+  setConfirmation,
+  resetToken,
+  error,
+  message,
+  busy,
+  completed,
+  onForgot,
+  onReset,
+  onBack,
+}: {
+  flow: Exclude<AuthFlow, 'login'>;
+  email: string;
+  setEmail: (value: string) => void;
+  password: string;
+  setPassword: (value: string) => void;
+  confirmation: string;
+  setConfirmation: (value: string) => void;
+  resetToken: string;
+  error: string;
+  message: string;
+  busy: boolean;
+  completed: boolean;
+  onForgot: () => void;
+  onReset: () => void;
+  onBack: () => void;
+}) {
+  const instructionsSent = flow === 'forgot' && Boolean(message);
+  const passwordValid = password.length >= 8 && password.length <= 128 && password === confirmation;
+
+  if (completed) {
+    return (
+      <div className="min-h-screen bg-slate-50 px-5 py-10">
+        <div className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-lg items-center justify-center">
+          <section className="w-full overflow-hidden rounded-2xl border border-slate-200 bg-white text-center shadow-xl shadow-slate-200/60">
+            <div className="px-8 py-9">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 text-emerald-600"><CheckCircle2 size={28} /></div>
+              <h1 className="mt-5 text-xl font-black tracking-tight text-slate-900">Password reset successfully</h1>
+              <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-slate-500">Your password has been updated and existing sessions have been signed out. Use your new password to sign in.</p>
+            </div>
+            <div className="border-t border-slate-100 bg-slate-50/70 px-8 py-5">
+              <button type="button" autoFocus onClick={onBack} className="hbdr-dr-action-primary mx-auto">Go to Sign In</button>
+            </div>
+          </section>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-50 px-5 py-10">
+      <div className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-lg items-center justify-center">
+        <section className="w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-200/60">
+          <div className="border-b border-slate-100 px-7 py-6">
+            <div className={`mb-5 flex h-11 w-11 items-center justify-center rounded-xl ${instructionsSent ? 'bg-emerald-50 text-emerald-600' : 'bg-blue-50 text-blue-600'}`}>
+              {instructionsSent ? <Mail size={20} /> : <KeyRound size={20} />}
+            </div>
+            <h1 className="text-xl font-black tracking-tight text-slate-900">
+              {instructionsSent ? 'Check your email' : flow === 'forgot' ? 'Forgot your password?' : 'Set a new password'}
+            </h1>
+            <p className="mt-2 text-sm leading-6 text-slate-500">
+              {instructionsSent
+                ? 'If the email address is registered, password reset instructions have been sent.'
+                : flow === 'forgot'
+                  ? 'Enter your registered email address. We will send you a secure reset link valid for 15 minutes.'
+                  : 'Choose a new password for your HyperCDR account.'}
+            </p>
+          </div>
+
+          {!instructionsSent && <div className="space-y-4 px-7 py-6">
+            {flow === 'forgot' ? (
+              <EditField label="Email Address" value={email} onChange={setEmail} placeholder="name@example.com" />
+            ) : (
+              <>
+                {!resetToken && <div className="rounded-lg border border-rose-100 bg-rose-50 px-3 py-2.5 text-xs font-semibold text-rose-700">This reset link is incomplete or invalid. Request a new link and try again.</div>}
+                <EditField label="New Password" type="password" value={password} onChange={setPassword} />
+                <EditField label="Confirm New Password" type="password" value={confirmation} onChange={setConfirmation} />
+                <PasswordValidation password={password} confirmation={confirmation} />
+              </>
+            )}
+            {error && <div className="rounded-lg border border-rose-100 bg-rose-50 px-3 py-2.5 text-xs font-semibold text-rose-700">{error}</div>}
+          </div>}
+
+          <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50/70 px-7 py-5">
+            <button type="button" onClick={onBack} disabled={busy} className="text-xs font-bold text-slate-500 hover:text-slate-700">Back to Sign In</button>
+            {!instructionsSent && <button
+              type="button"
+              onClick={flow === 'forgot' ? onForgot : onReset}
+              disabled={busy || (flow === 'forgot' ? !email.trim() : !resetToken || !passwordValid)}
+              className="hbdr-dr-action-primary"
+            >
+              {busy ? 'Please wait...' : flow === 'forgot' ? 'Send Reset Instructions' : 'Reset Password'}
+            </button>}
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function ProfilePage({
+  session,
+  setSession,
+  toast,
+}: {
+  session: AuthSession;
+  setSession: (session: AuthSession) => void;
+  toast: (message: string) => void;
+}) {
+  const [displayName, setDisplayName] = useState(
+    session.user.displayName || "",
+  );
+  const [email, setEmail] = useState(session.user.email);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [profileEditorOpen, setProfileEditorOpen] = useState(false);
+  const [passwordEditorOpen, setPasswordEditorOpen] = useState(false);
+  const save = async () => {
+    const user = await apiPatch<ApiPlatformUser>("/api/v1/auth/me", {
+      email,
+      displayName,
+    });
+    setSession({ ...session, user });
+    setProfileEditorOpen(false);
+    toast("Basic information updated");
+  };
+  const change = async () => {
+    if (newPassword !== confirmNewPassword) return;
+    await apiPost("/api/v1/auth/change-password", {
+      currentPassword,
+      newPassword,
+    });
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmNewPassword("");
+    setPasswordEditorOpen(false);
+    toast("Password updated");
+  };
+  const initial = (session.user.displayName || session.user.email || "U")
+    .trim()
+    .charAt(0)
+    .toUpperCase();
+  const passwordAccount =
+    (session.user.authProvider || "password") === "password";
+  return (
+    <motion.div
+      key="profile"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="space-y-5"
+    >
+      <SearchBar
+        title="Basic Information"
+        desc="Account profile and security settings."
+      />
+      <section className="hbdr-section-card overflow-hidden">
+        <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-4">
+          <User size={18} className="text-blue-600" />
+          <h3 className="text-sm font-black text-slate-900">
+            Account Information
+          </h3>
+        </div>
+        <div className="flex flex-col gap-6 p-6 md:flex-row md:items-center">
+          <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-3xl font-black text-white shadow-lg shadow-blue-100">
+            {initial}
+          </div>
+          <div className="grid min-w-0 flex-1 gap-x-12 gap-y-5 sm:grid-cols-2">
+            <div>
+              <span className="text-xs font-semibold text-slate-400">
+                Display Name
+              </span>
+              <p className="mt-1 text-sm font-bold text-slate-800">
+                {session.user.displayName || "Not set"}
+              </p>
+            </div>
+            <div>
+              <span className="text-xs font-semibold text-slate-400">
+                Email Address
+              </span>
+              <p className="mt-1 text-sm font-bold text-slate-800">
+                {session.user.email}
+              </p>
+            </div>
+            <div>
+              <span className="text-xs font-semibold text-slate-400">
+                User ID
+              </span>
+              <p className="mt-1 break-all font-mono text-xs font-semibold text-slate-600">
+                {session.user.id}
+              </p>
+            </div>
+            <div>
+              <span className="text-xs font-semibold text-slate-400">Role</span>
+              <p className="mt-1 text-sm font-bold capitalize text-slate-800">
+                {session.user.role}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setDisplayName(session.user.displayName || "");
+              setEmail(session.user.email);
+              setProfileEditorOpen(true);
+            }}
+            className="hbdr-dr-action-primary shrink-0"
+          >
+            <Edit2 size={14} />
+            Edit
+          </button>
+        </div>
+      </section>
+      <section className="hbdr-section-card overflow-hidden">
+        <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-4">
+          <Lock size={18} className="text-emerald-600" />
+          <h3 className="text-sm font-black text-slate-900">
+            Security Settings
+          </h3>
+        </div>
+        <div className="flex flex-col gap-5 p-6 md:flex-row md:items-end">
+          <div className="flex-1">
+            <p className="text-sm font-bold text-slate-800">Login Password</p>
+            <p className="mt-2 text-xs leading-5 text-slate-500">
+              Use a strong, unique password and update it regularly to keep your
+              account secure.
+            </p>
+            <div className="mt-5 flex items-center gap-2 text-xs font-bold text-emerald-600">
+              <CheckCircle2 size={16} />
+              {passwordAccount ? "Configured" : "Managed by Google"}
+            </div>
+          </div>
+          {passwordAccount && (
+            <button
+              type="button"
+              onClick={() => {
+                setCurrentPassword("");
+                setNewPassword("");
+                setConfirmNewPassword("");
+                setPasswordEditorOpen(true);
+              }}
+              className="hbdr-dr-action-primary shrink-0"
+            >
+              <KeyRound size={14} />
+              Change Password
+            </button>
+          )}
+        </div>
+      </section>
+      <AnimatePresence>
+        {profileEditorOpen && (
+          <ModalFrame
+            title="Edit Basic Information"
+            onClose={() => setProfileEditorOpen(false)}
+          >
+            <div className="space-y-4">
+              <EditField
+                label="Email Address"
+                value={email}
+                onChange={setEmail}
+              />
+              <EditField
+                label="Display Name"
+                value={displayName}
+                onChange={setDisplayName}
+              />
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setProfileEditorOpen(false)}>
+                  Cancel
+                </button>
+                <button
+                  disabled={!email.trim()}
+                  className="hbdr-dr-action-primary"
+                  onClick={() =>
+                    void save().catch((e) =>
+                      toast(e instanceof Error ? e.message : "Update failed"),
+                    )
+                  }
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </ModalFrame>
+        )}
+        {passwordEditorOpen && (
+          <ModalFrame
+            title="Change Password"
+            onClose={() => setPasswordEditorOpen(false)}
+          >
+            <div className="space-y-4">
+              <EditField
+                label="Current Password"
+                type="password"
+                value={currentPassword}
+                onChange={setCurrentPassword}
+              />
+              <EditField
+                label="New Password"
+                type="password"
+                value={newPassword}
+                onChange={setNewPassword}
+              />
+              <EditField
+                label="Confirm New Password"
+                type="password"
+                value={confirmNewPassword}
+                onChange={setConfirmNewPassword}
+              />
+              <PasswordValidation
+                password={newPassword}
+                confirmation={confirmNewPassword}
+              />
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setPasswordEditorOpen(false)}>
+                  Cancel
+                </button>
+                <button
+                  disabled={
+                    !currentPassword ||
+                    newPassword.length < 8 ||
+                    newPassword !== confirmNewPassword
+                  }
+                  className="hbdr-dr-action-primary"
+                  onClick={() =>
+                    void change().catch((e) =>
+                      toast(
+                        e instanceof Error
+                          ? e.message
+                          : "Password update failed",
+                      ),
+                    )
+                  }
+                >
+                  Change Password
+                </button>
+              </div>
+            </div>
+          </ModalFrame>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
+function AlertsPage() {
+  const [alerts, setAlerts] = useState<
+    Array<{
+      id: string;
+      level: string;
+      source: string;
+      message: string;
+      time: string;
+      handled: boolean;
+    }>
+  >([]);
+  const pending = alerts.filter((item) => !item.handled).length;
+  const alertColumns: HyperTableColumn<(typeof alerts)[number]>[] = [
+    {
+      id: "level",
+      header: "Level",
+      accessorFn: (alert) => alert.level,
       size: 120,
       minSize: 100,
-      cell: info => {
+      cell: (info) => {
         const alert = info.row.original;
-        return <span className={`w-fit rounded-full border px-2 py-1 text-[10px] font-black ${alert.level === 'Critical' ? 'border-rose-100 bg-rose-50 text-rose-700' : alert.level === 'Warning' ? 'border-amber-100 bg-amber-50 text-amber-700' : 'border-blue-100 bg-blue-50 text-blue-700'}`}>{alert.level}</span>;
+        return (
+          <span
+            className={`w-fit rounded-full border px-2 py-1 text-[10px] font-black ${alert.level === "Critical" ? "border-rose-100 bg-rose-50 text-rose-700" : alert.level === "Warning" ? "border-amber-100 bg-amber-50 text-amber-700" : "border-blue-100 bg-blue-50 text-blue-700"}`}
+          >
+            {alert.level}
+          </span>
+        );
       },
-      meta: { title: alert => alert.level },
+      meta: { title: (alert) => alert.level },
     },
-    { id: 'source', header: 'Source', accessorFn: alert => alert.source, size: 170, minSize: 130, cell: info => <span className="text-xs font-bold text-slate-700">{info.row.original.source}</span>, meta: { title: alert => alert.source } },
-    { id: 'message', header: 'Message', accessorFn: alert => alert.message, size: 360, minSize: 220, maxSize: 720, cell: info => <span className="text-xs font-semibold text-slate-500">{info.row.original.message}</span>, meta: { title: alert => alert.message } },
-    { id: 'time', header: 'Time', accessorFn: alert => alert.time, size: 190, minSize: 150, cell: info => <span className="text-xs font-semibold text-slate-400">{info.row.original.time}</span>, meta: { title: alert => alert.time } },
     {
-      id: 'action',
-      header: 'Action',
-      accessorFn: alert => alert.handled ? 'Acknowledged' : 'Acknowledge',
+      id: "source",
+      header: "Source",
+      accessorFn: (alert) => alert.source,
+      size: 170,
+      minSize: 130,
+      cell: (info) => (
+        <span className="text-xs font-bold text-slate-700">
+          {info.row.original.source}
+        </span>
+      ),
+      meta: { title: (alert) => alert.source },
+    },
+    {
+      id: "message",
+      header: "Message",
+      accessorFn: (alert) => alert.message,
+      size: 360,
+      minSize: 220,
+      maxSize: 720,
+      cell: (info) => (
+        <span className="text-xs font-semibold text-slate-500">
+          {info.row.original.message}
+        </span>
+      ),
+      meta: { title: (alert) => alert.message },
+    },
+    {
+      id: "time",
+      header: "Time",
+      accessorFn: (alert) => alert.time,
+      size: 190,
+      minSize: 150,
+      cell: (info) => (
+        <span className="text-xs font-semibold text-slate-400">
+          {info.row.original.time}
+        </span>
+      ),
+      meta: { title: (alert) => alert.time },
+    },
+    {
+      id: "action",
+      header: "Action",
+      accessorFn: (alert) => (alert.handled ? "Acknowledged" : "Acknowledge"),
       size: 150,
       minSize: 130,
       enableSorting: false,
-      cell: info => {
+      cell: (info) => {
         const alert = info.row.original;
         return (
           <button
             disabled={alert.handled}
-            onClick={event => {
+            onClick={(event) => {
               event.stopPropagation();
-              setAlerts(prev => prev.map(item => item.id === alert.id ? { ...item, handled: true } : item));
+              setAlerts((prev) =>
+                prev.map((item) =>
+                  item.id === alert.id ? { ...item, handled: true } : item,
+                ),
+              );
             }}
             className="hbdr-dr-action-primary hbdr-dr-action-ghost"
           >
-            {alert.handled ? 'Acknowledged' : 'Acknowledge'}
+            {alert.handled ? "Acknowledged" : "Acknowledge"}
           </button>
         );
       },
@@ -12704,19 +14442,45 @@ function AlertsPage() {
   ];
 
   return (
-    <motion.div key="alerts" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
-      <SearchBar title="Alerts" desc="Cluster DR risks and event alerts." action="Refresh Alerts" onAction={() => setAlerts(prev => [...prev])} />
+    <motion.div
+      key="alerts"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="space-y-5"
+    >
+      <SearchBar
+        title="Alerts"
+        desc="Cluster DR risks and event alerts."
+        action="Refresh Alerts"
+        onAction={() => setAlerts((prev) => [...prev])}
+      />
       <div className="rounded border border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5">
-          <div><p className="text-sm font-black text-slate-900">Current Alerts</p><p className="mt-1 text-xs font-medium text-slate-400">Pending {pending} items</p></div>
-          <button disabled={pending === 0} onClick={() => setAlerts(prev => prev.map(item => ({ ...item, handled: true })))} className="hbdr-dr-action-primary">Acknowledge All</button>
+          <div>
+            <p className="text-sm font-black text-slate-900">Current Alerts</p>
+            <p className="mt-1 text-xs font-medium text-slate-400">
+              Pending {pending} items
+            </p>
+          </div>
+          <button
+            disabled={pending === 0}
+            onClick={() =>
+              setAlerts((prev) =>
+                prev.map((item) => ({ ...item, handled: true })),
+              )
+            }
+            className="hbdr-dr-action-primary"
+          >
+            Acknowledge All
+          </button>
         </div>
         <HyperTable
           variant="page"
           density="comfortable"
           columns={alertColumns}
           data={alerts}
-          getRowId={row => row.id}
+          getRowId={(row) => row.id}
           emptyMessage="No alerts available."
         />
       </div>
@@ -12774,38 +14538,235 @@ function SettingsPage() {
   );
 }
 
-function UpgradeManagementPage() {
+function UpgradeManagementPage({ clusters, isAdmin, toast, refreshPlatformData }: { clusters: ApiCluster[]; isAdmin: boolean; toast: (message: string) => void; refreshPlatformData: () => Promise<unknown> }) {
+  const [releases, setReleases] = useState<ApiComponentRelease[]>([]);
+  const [discovery, setDiscovery] = useState<Partial<Record<'comm-agent' | 'velero', ApiComponentDiscovery>>>({});
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState('');
+  const [candidateComponent, setCandidateComponent] = useState<'comm-agent' | 'velero'>('comm-agent');
+  const [candidateImage, setCandidateImage] = useState('');
+  const [candidateVersion, setCandidateVersion] = useState('');
+  const [candidateNotes, setCandidateNotes] = useState('');
+  const [candidateOpen, setCandidateOpen] = useState(false);
+  const [publishTarget, setPublishTarget] = useState<ApiComponentRelease | null>(null);
+  const [platformVersion, setPlatformVersion] = useState<ApiPlatformVersion | null>(null);
+  const [platformReleases, setPlatformReleases] = useState<ApiPlatformRelease[]>([]);
+  const [platformUpgrades, setPlatformUpgrades] = useState<ApiPlatformUpgrade[]>([]);
+  const [platformVersions, setPlatformVersions] = useState<string[]>([]);
+  const [platformTarget, setPlatformTarget] = useState<ApiPlatformRelease | null>(null);
+  const [platformPrecheck, setPlatformPrecheck] = useState<ApiPlatformPrecheck | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await apiGet<ApiList<ApiComponentRelease>>('/api/v1/component-releases');
+      setReleases(listItems(response));
+      const [runtime, platformReleaseRes, platformUpgradeRes] = await Promise.all([apiGet<ApiPlatformVersion>('/api/v1/platform/version'), apiGet<ApiList<ApiPlatformRelease>>('/api/v1/platform/releases'), apiGet<ApiList<ApiPlatformUpgrade>>('/api/v1/platform/upgrades')]);
+      setPlatformVersion(runtime); setPlatformReleases(listItems(platformReleaseRes)); setPlatformUpgrades(listItems(platformUpgradeRes));
+      try { const found = await apiGet<{versions:string[]}>('/api/v1/platform/releases/discover'); setPlatformVersions(found.versions || []); } catch { setPlatformVersions([]); }
+      const discovered = await Promise.all((['comm-agent', 'velero'] as const).map(async component => {
+        try { return await apiGet<ApiComponentDiscovery>(`/api/v1/component-releases/discover?component=${component}`); }
+        catch { return null; }
+      }));
+      const next: Partial<Record<'comm-agent' | 'velero', ApiComponentDiscovery>> = {};
+      discovered.forEach(item => { if (item) next[item.component] = item; });
+      setDiscovery(next);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Failed to load component releases');
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const pollUpgradeState = async () => {
+      try {
+        const [runtime, releaseRes, upgradeRes] = await Promise.all([
+          apiGet<ApiPlatformVersion>('/api/v1/platform/version'),
+          apiGet<ApiList<ApiPlatformRelease>>('/api/v1/platform/releases'),
+          apiGet<ApiList<ApiPlatformUpgrade>>('/api/v1/platform/upgrades'),
+        ]);
+        if (cancelled) return;
+        setPlatformVersion(runtime);
+        setPlatformReleases(listItems(releaseRes));
+        setPlatformUpgrades(listItems(upgradeRes));
+      } catch {
+        // The API is expected to be briefly unavailable while its container is replaced.
+        // Keep retrying so progress resumes without requiring a browser refresh.
+      }
+    };
+    const timer = window.setInterval(pollUpgradeState, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const openCandidate = (component: 'comm-agent' | 'velero', tag?: string) => {
+    const source = discovery[component];
+    setCandidateComponent(component);
+    setCandidateVersion(tag || '');
+    setCandidateImage(tag && source ? `${source.registry}/${source.repository}:${tag}` : '');
+    setCandidateNotes('');
+    setCandidateOpen(true);
+  };
+
+  const createCandidate = async () => {
+    if (!candidateImage.trim()) { toast('Candidate image is required'); return; }
+    setBusy('create');
+    try {
+      await apiPost<ApiComponentRelease>('/api/v1/component-releases', { component: candidateComponent, version: candidateVersion.trim(), image: candidateImage.trim(), releaseNotes: candidateNotes.trim() });
+      setCandidateOpen(false);
+      toast('Candidate image validated and registered');
+      await load();
+    } catch (error) { toast(error instanceof Error ? error.message : 'Candidate validation failed'); }
+    finally { setBusy(''); }
+  };
+
+  const publish = async () => {
+    if (!publishTarget) return;
+    setBusy(publishTarget.id);
+    try {
+      await apiPost<ApiComponentRelease>(`/api/v1/component-releases/${publishTarget.id}/activate`, {});
+      toast(`${publishTarget.version} is now the ${publishTarget.component} target release`);
+      setPublishTarget(null);
+      await Promise.all([load(), refreshPlatformData()]);
+    } catch (error) { toast(error instanceof Error ? error.message : 'Release publish failed'); }
+    finally { setBusy(''); }
+  };
+
+  const registerPlatformRelease = async (version: string) => { setBusy(`platform-${version}`); try { await apiPost('/api/v1/platform/releases',{version,databaseSchemaVersion:'000009',minimumAgentVersion:'v20260721.4',rollbackSupported:true,releaseNotes:`HyperCDR platform ${version}`});toast(`${version} platform package validated`);await load(); } catch(error){toast(error instanceof Error?error.message:'Platform package validation failed')} finally{setBusy('')} };
+  const preparePlatformUpgrade = async (release: ApiPlatformRelease) => { setBusy(`precheck-${release.id}`); try { const result=await apiGet<ApiPlatformPrecheck>(`/api/v1/platform/upgrades/precheck?releaseId=${release.id}`);setPlatformPrecheck(result);setPlatformTarget(release); } catch(error){toast(error instanceof Error?error.message:'Pre-check failed')} finally{setBusy('')} };
+  const startPlatformUpgrade = async () => { if(!platformTarget)return;setBusy(`upgrade-${platformTarget.id}`);try{await apiPost('/api/v1/platform/upgrades',{releaseId:platformTarget.id});toast('Platform upgrade task created. The external upgrader continues during API restart.');setPlatformTarget(null);setPlatformPrecheck(null);await load()}catch(error){toast(error instanceof Error?error.message:'Platform upgrade could not start')}finally{setBusy('')} };
+
+  const componentPanel = (component: 'comm-agent' | 'velero', title: string) => {
+    const items = releases.filter(item => item.component === component);
+    const active = items.find(item => item.status === 'active');
+    const upToDate = active ? clusters.filter(cluster => component === 'comm-agent'
+      ? cluster.agentImageDigest === active.imageDigest
+      : cluster.veleroImageDigest === active.imageDigest && cluster.veleroNodeAgentImageDigest === active.imageDigest).length : 0;
+    const unknown = component === 'velero' ? clusters.filter(cluster => !cluster.veleroImageDigest || !cluster.veleroNodeAgentImageDigest).length : clusters.filter(cluster => !cluster.agentImageDigest).length;
+    const affected = Math.max(0, clusters.length - upToDate - unknown);
+    const tags = discovery[component]?.tags || [];
+    const reportedVersions = Array.from(new Set(clusters.map(cluster => component === 'comm-agent' ? cluster.agentVersion : cluster.veleroVersion).filter(Boolean)));
+    const currentVersion = reportedVersions.length === 0 ? 'Unknown' : reportedVersions.length === 1 ? reportedVersions[0] : 'Mixed versions';
+    return (
+      <div className="border-b border-slate-100 last:border-b-0">
+        <div className="grid items-center gap-3 px-5 py-4 md:grid-cols-[minmax(180px,1.2fr)_minmax(150px,1fr)_minmax(150px,1fr)_120px]">
+          <strong className="text-sm text-slate-900">{title}</strong>
+          <div><span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Current version</span><span className="mt-1 block text-sm font-semibold text-slate-700">{currentVersion}</span></div>
+          <div><span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Latest version</span><span className="mt-1 block text-sm font-bold text-slate-900">{active?.version || 'Not configured'}</span></div>
+          <span className={`justify-self-start rounded-full px-2.5 py-1 text-[10px] font-black md:justify-self-end ${affected > 0 ? 'bg-blue-50 text-blue-700' : unknown > 0 ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>{affected > 0 ? `${affected} to update` : unknown > 0 ? `${unknown} unknown` : 'Up to date'}</span>
+        </div>
+        {advancedOpen && <><div className="border-t border-slate-100 px-5 py-4">
+          <div className="rounded-lg border border-slate-200 bg-white p-4"><div className="flex items-center justify-between"><h4 className="text-xs font-black text-slate-800">Available versions</h4><button type="button" onClick={() => openCandidate(component)} className="text-[10px] font-bold text-blue-600"><Plus size={12} className="mr-1 inline" />Register version</button></div>
+            <div className="mt-3 flex max-h-32 flex-wrap gap-2 overflow-auto">
+              {tags.slice(0, 20).map(tag => <button key={tag} type="button" onClick={() => openCandidate(component, tag)} className="rounded border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-[10px] font-semibold text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700">{tag}</button>)}
+              {!tags.length && <p className="text-xs text-slate-400">Harbor discovery is temporarily unavailable. A full image can still be registered manually.</p>}
+            </div>
+          </div>
+        </div>
+        <div className="border-t border-slate-100 px-5 py-4">
+          <h4 className="mb-3 text-xs font-black text-slate-800">Registered versions</h4>
+          <div className="space-y-2">
+            {items.map(item => <div key={item.id} className="grid items-center gap-3 rounded border border-slate-100 bg-white px-3 py-2.5 md:grid-cols-[120px_1fr_110px_120px]">
+              <strong className="text-xs text-slate-800">{item.version}</strong><span className="truncate font-mono text-[10px] text-slate-400" title={item.image}>{item.image}</span><span className={`w-fit rounded-full px-2 py-0.5 text-[9px] font-black uppercase ${item.status === 'active' ? 'bg-emerald-50 text-emerald-700' : item.status === 'candidate' ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>{item.status}</span>
+              {item.status !== 'active' ? <button type="button" onClick={() => setPublishTarget(item)} className="rounded border border-blue-200 px-2 py-1 text-[10px] font-bold text-blue-700 hover:bg-blue-50">Set as target</button> : <span className="text-right text-[10px] font-semibold text-slate-400">{item.publishedBy || 'system'}</span>}
+            </div>)}
+            {!items.length && <p className="py-4 text-center text-xs text-slate-400">{loading ? 'Loading releases...' : 'No releases registered.'}</p>}
+          </div>
+        </div></>}
+      </div>
+    );
+  };
+
+  const compareReleaseVersions = (left: string, right: string) => left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' });
+  const currentPlatformVersion = platformVersion?.version || '';
+  const latestPlatformRelease = platformReleases
+    .filter(item => !currentPlatformVersion || compareReleaseVersions(item.version, currentPlatformVersion) > 0)
+    .sort((left, right) => compareReleaseVersions(right.version, left.version))[0]
+    || platformReleases.find(item => item.version === currentPlatformVersion);
+  const platformUpdateAvailable = Boolean(latestPlatformRelease && currentPlatformVersion && compareReleaseVersions(latestPlatformRelease.version, currentPlatformVersion) > 0);
+  const activePlatformUpgrade = platformUpgrades.find(job => !['succeeded', 'failed', 'cancelled', 'rolled_back'].includes(job.status));
+
   return (
     <motion.div key="upgrades" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
-      <SearchBar title="Upgrade Management" desc="Plan and audit platform and cluster agent upgrades." />
-      <div className="hbdr-section-card">
-        <div className="flex min-h-[260px] flex-col items-center justify-center px-6 py-12 text-center">
-          <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-blue-600"><Upload size={22} /></span>
-          <h3 className="mt-4 text-sm font-black text-slate-900">Upgrade management is being prepared</h3>
-          <p className="mt-2 max-w-lg text-xs font-semibold leading-6 text-slate-500">This section will provide version discovery, compatibility checks, scheduled upgrades, execution progress, and upgrade history.</p>
+      <SearchBar title="Upgrade" desc="Check versions, start upgrades, and follow their progress." action="Refresh" onAction={() => void load()} />
+      <section className="hbdr-section-card overflow-hidden">
+        <div className="hbdr-section-toolbar"><div><h3>Platform</h3><p>HyperCDR management platform</p></div></div>
+        <div className="grid items-center gap-3 px-5 py-4 md:grid-cols-[minmax(180px,1.2fr)_minmax(150px,1fr)_minmax(150px,1fr)_120px]">
+          <strong className="text-sm text-slate-900">HyperCDR Platform</strong>
+          <div><span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Current version</span><span className="mt-1 block text-sm font-semibold text-slate-700">{platformVersion?.version || 'Unknown'}</span></div>
+          <div><span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Latest version</span><span className="mt-1 block text-sm font-bold text-slate-900">{platformUpdateAvailable ? latestPlatformRelease?.version : platformVersion?.version || latestPlatformRelease?.version || 'Not available'}</span></div>
+          {activePlatformUpgrade
+            ? <span className="justify-self-start rounded-full bg-blue-50 px-3 py-1.5 text-[10px] font-black text-blue-700 md:justify-self-end">Upgrading...</span>
+            : isAdmin && latestPlatformRelease && platformUpdateAvailable
+              ? <button type="button" disabled={busy===`precheck-${latestPlatformRelease.id}`} onClick={()=>void preparePlatformUpgrade(latestPlatformRelease)} className="justify-self-start rounded bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50 md:justify-self-end">{busy===`precheck-${latestPlatformRelease.id}` ? 'Checking...' : 'Upgrade'}</button>
+              : <span className="justify-self-start rounded-full bg-emerald-50 px-3 py-1.5 text-[10px] font-black text-emerald-700 md:justify-self-end">Up to date</span>}
         </div>
-      </div>
+        {activePlatformUpgrade && <div className="border-t border-slate-100 px-5 py-4"><div className="flex items-center justify-between text-xs"><strong>{activePlatformUpgrade.fromVersion} → {activePlatformUpgrade.targetVersion}</strong><span className="text-slate-500">{activePlatformUpgrade.progress}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-blue-600 transition-all" style={{width:`${activePlatformUpgrade.progress}%`}} /></div><p className="mt-2 text-xs text-slate-500">{activePlatformUpgrade.step}</p></div>}
+        {advancedOpen && <><div className="border-t border-slate-100 px-5 py-4"><h4 className="mb-3 text-xs font-black">Available Harbor versions</h4><div className="flex flex-wrap gap-2">{platformVersions.slice(0,20).map(version=><button key={version} disabled={busy===`platform-${version}`} onClick={()=>void registerPlatformRelease(version)} className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-semibold hover:border-indigo-200 hover:bg-indigo-50">{version}</button>)}{!platformVersions.length&&<p className="text-xs text-slate-400">No matching platform versions found.</p>}</div></div><div className="border-t border-slate-100 px-5 py-4"><h4 className="mb-3 text-xs font-black">Registered platform versions</h4><div className="space-y-2">{platformReleases.map(release=><div key={release.id} className="flex items-center justify-between rounded border border-slate-100 px-3 py-2.5"><strong className="text-xs">{release.version}</strong><span className="text-[10px] font-bold uppercase text-slate-400">{release.status}</span></div>)}</div></div></>}
+      </section>
+      <section className="hbdr-section-card overflow-hidden"><div className="hbdr-section-toolbar"><div><h3>Cluster Components</h3><p>Versions reported by registered clusters</p></div></div>{componentPanel('comm-agent', 'Comm Agent')}{componentPanel('velero', 'Velero Agent')}</section>
+      {platformUpgrades.length>0&&<section className="hbdr-section-card overflow-hidden"><div className="hbdr-section-toolbar"><div><h3>Upgrade History</h3><p>Recent platform upgrade results.</p></div></div><div className="divide-y divide-slate-100 px-5">{platformUpgrades.slice(0,5).map(job=><div key={job.id} className="flex items-center justify-between py-3 text-xs"><span>{job.fromVersion} → <strong>{job.targetVersion}</strong></span><span className={job.status==='succeeded'?'font-bold text-emerald-700':job.status==='failed'?'font-bold text-rose-700':'text-slate-500'}>{job.status==='succeeded'?'Succeeded':job.status==='failed'?'Failed':`${job.progress}%`}</span></div>)}</div></section>}
+      <AnimatePresence>{candidateOpen && <ModalFrame title="Register Candidate Release" subtitle="The platform validates the image in Harbor and records its immutable digest." icon={<Upload size={18} />} onClose={() => setCandidateOpen(false)}>
+        <div className="space-y-4"><label className="block text-xs font-bold text-slate-600">Component<select value={candidateComponent} onChange={event => setCandidateComponent(event.target.value as 'comm-agent' | 'velero')} className="mt-1 h-10 w-full rounded border border-slate-200 px-3"><option value="comm-agent">Comm Agent</option><option value="velero">Velero Agent</option></select></label><label className="block text-xs font-bold text-slate-600">Version<input value={candidateVersion} onChange={event => setCandidateVersion(event.target.value)} className="mt-1 h-10 w-full rounded border border-slate-200 px-3" placeholder="v20260722.1" /></label><label className="block text-xs font-bold text-slate-600">Full image<input value={candidateImage} onChange={event => setCandidateImage(event.target.value)} className="mt-1 h-10 w-full rounded border border-slate-200 px-3 font-mono text-xs" placeholder="registry/hypercdr/comm-agent:v20260722.1" /></label><label className="block text-xs font-bold text-slate-600">Release notes<textarea value={candidateNotes} onChange={event => setCandidateNotes(event.target.value)} className="mt-1 min-h-20 w-full rounded border border-slate-200 p-3 text-xs" /></label><div className="flex justify-end gap-2"><button onClick={() => setCandidateOpen(false)} className="rounded px-4 py-2 text-xs font-bold text-slate-500">Cancel</button><button disabled={busy === 'create'} onClick={() => void createCandidate()} className="rounded bg-blue-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{busy === 'create' ? 'Validating...' : 'Validate & Register'}</button></div></div>
+      </ModalFrame>}</AnimatePresence>
+      <AnimatePresence>{publishTarget && <ModalFrame title="Publish Target Release" subtitle="This changes the upgrade target immediately but never upgrades clusters automatically." icon={<ShieldCheck size={18} />} onClose={() => setPublishTarget(null)}>
+        <div className="space-y-4"><div className="rounded border border-blue-100 bg-blue-50 p-4"><strong className="text-sm text-blue-900">{publishTarget.component} · {publishTarget.version}</strong><p className="mt-1 break-all text-xs text-blue-700">{publishTarget.image}</p><p className="mt-2 font-mono text-[10px] text-blue-500">sha256:{shortDigest(publishTarget.imageDigest)}</p></div><p className="text-xs leading-5 text-slate-600">Eligible clusters will display Update after publication. Users must confirm each cluster upgrade. Existing tasks keep their original target snapshot.</p><div className="flex justify-end gap-2"><button onClick={() => setPublishTarget(null)} className="rounded px-4 py-2 text-xs font-bold text-slate-500">Cancel</button><button disabled={busy === publishTarget.id} onClick={() => void publish()} className="rounded bg-blue-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{busy === publishTarget.id ? 'Publishing...' : 'Publish Target'}</button></div></div>
+      </ModalFrame>}</AnimatePresence>
+      <AnimatePresence>{platformTarget&&platformPrecheck&&<ModalFrame title="Confirm Platform Upgrade" subtitle={`${platformVersion?.version || 'current'} → ${platformTarget.version}`} icon={<Upload size={18}/>} onClose={()=>{setPlatformTarget(null);setPlatformPrecheck(null)}}><div className="space-y-4"><div className={`rounded-lg border p-4 ${platformPrecheck.passed?'border-emerald-100 bg-emerald-50':'border-rose-100 bg-rose-50'}`}><strong className={`text-sm ${platformPrecheck.passed?'text-emerald-800':'text-rose-800'}`}>{platformPrecheck.passed?'Ready to upgrade':'Upgrade is not available'}</strong><p className={`mt-1 text-xs leading-5 ${platformPrecheck.passed?'text-emerald-700':'text-rose-700'}`}>{platformPrecheck.passed?'The system check passed. Management services may be briefly unavailable during the upgrade.':platformPrecheck.checks.filter(check=>!check.passed).map(check=>check.label).join(' · ')}</p></div><p className="text-xs leading-5 text-slate-500">The system creates a database backup before switching versions. Cluster protection data is not changed.</p><div className="flex justify-end gap-2"><button onClick={()=>{setPlatformTarget(null);setPlatformPrecheck(null)}} className="rounded px-4 py-2 text-xs font-bold text-slate-500">Cancel</button><button disabled={!platformPrecheck.passed||busy===`upgrade-${platformTarget.id}`} onClick={()=>void startPlatformUpgrade()} className="rounded bg-indigo-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-40">Start Upgrade</button></div></div></ModalFrame>}</AnimatePresence>
     </motion.div>
   );
 }
 
-function TenantPage() {
-  const [tenants, setTenants] = useState([
-    { id: 'tenant-prod', name: 'Production Tenant', domain: 'prod', admin: 'prod-admin', users: 12, status: 'Enabled' },
-    { id: 'tenant-dev', name: 'Development Tenant', domain: 'dev', admin: 'dev-admin', users: 8, status: 'Enabled' },
-  ]);
+type ApiEmailSettings = { enabled:boolean; host:string; port:number; security:'none'|'starttls'|'tls'; username:string; passwordConfigured:boolean; senderName:string; senderEmail:string; updatedAt?:string };
+
+function EmailSettingsPage({ currentUser, toast }: { currentUser: ApiLoginResponse['user']; toast:(message:string)=>void }) {
+  const [form,setForm]=useState<ApiEmailSettings>({enabled:true,host:'',port:587,security:'starttls',username:'',passwordConfigured:false,senderName:'HyperCDR',senderEmail:''});
+  const [password,setPassword]=useState(''); const [recipient,setRecipient]=useState(currentUser.email==='admin'?'':currentUser.email); const [busy,setBusy]=useState('');
+  const load=useCallback(async()=>setForm(await apiGet<ApiEmailSettings>('/api/v1/email-settings')),[]);
+  useEffect(()=>{void load().catch(error=>toast(error instanceof Error?error.message:'Failed to load email settings'))},[load,toast]);
+  const update=<K extends keyof ApiEmailSettings>(key:K,value:ApiEmailSettings[K])=>setForm(current=>({...current,[key]:value}));
+  const save=async()=>{setBusy('save');try{const saved=await apiPut<ApiEmailSettings>('/api/v1/email-settings',{...form,enabled:true,password});setForm(saved);setPassword('');toast('Email settings saved. Password recovery is ready to use.')}finally{setBusy('')}};
+  const test=async()=>{setBusy('test');try{await apiPost('/api/v1/email-settings/test',{recipient});toast('Test email sent')}finally{setBusy('')}};
+  return <motion.div key="email-settings" initial={{opacity:0}} animate={{opacity:1}} className="space-y-5"><div className="hbdr-page-hero"><div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-blue-600 shadow-sm"><Settings2 size={18}/></div><div><h3 className="text-sm font-black tracking-tight text-slate-900">Email Settings</h3><p className="mt-0.5 text-[11px] font-medium text-slate-400">Configure email delivery for password recovery.</p></div></div></div><section className="hbdr-section-card overflow-hidden"><div className="hbdr-section-toolbar"><div><h3>SMTP Configuration</h3><p>Saving a valid configuration makes password recovery available automatically. Passwords are encrypted and never displayed.</p></div></div><div className="grid gap-4 p-5 md:grid-cols-2"><EditField label="SMTP Server" value={form.host} onChange={value=>update('host',value)} placeholder="smtp.example.com"/><EditField label="Port" value={String(form.port)} onChange={value=>update('port',Number(value)||0)}/><label className="block text-xs font-semibold tracking-normal text-slate-600">Encryption<select value={form.security} onChange={event=>update('security',event.target.value as ApiEmailSettings['security'])} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3"><option value="starttls">STARTTLS</option><option value="tls">TLS</option><option value="none">None</option></select></label><EditField label="Username" value={form.username} onChange={value=>update('username',value)}/><EditField label="Password" type="password" value={password} onChange={setPassword} placeholder={form.passwordConfigured?'Configured — leave blank to keep':'Enter SMTP password'}/><EditField label="Sender Name" value={form.senderName} onChange={value=>update('senderName',value)}/><EditField label="Sender Email" value={form.senderEmail} onChange={value=>update('senderEmail',value)} placeholder="noreply@example.com"/></div><div className="flex justify-end border-t border-slate-100 px-5 py-4"><button disabled={busy!==''||form.port<1||form.port>65535} onClick={()=>void save().catch(error=>toast(error instanceof Error?error.message:'Failed to save email settings'))} className="hbdr-dr-action-primary">{busy==='save'?'Saving...':'Save'}</button></div></section><section className="hbdr-section-card overflow-hidden"><div className="hbdr-section-toolbar"><div><h3>Test Email</h3><p>Verify connectivity and credentials before users request password recovery.</p></div></div><div className="flex flex-col gap-3 p-5 md:flex-row md:items-end"><div className="flex-1"><EditField label="Recipient Email" value={recipient} onChange={setRecipient} placeholder="admin@example.com"/></div><button disabled={busy!==''||!ACCOUNT_EMAIL_PATTERN.test(recipient)} onClick={()=>void test().catch(error=>toast(error instanceof Error?error.message:'Failed to send test email'))} className="hbdr-dr-action-primary">{busy==='test'?'Sending...':'Send Test Email'}</button></div></section></motion.div>;
+}
+
+type ApiTenant = { id: string; name: string; description: string; status: 'active' | 'disabled'; userCount: number; clusterCount: number; createdAt: string; updatedAt: string };
+
+function TenantPage({ toast }: { toast: (message: string) => void }) {
+  const [tenants, setTenants] = useState<ApiTenant[]>([]);
   const [selectedTenant, setSelectedTenant] = useState<string | null>(null);
-  const [tenantMessage, setTenantMessage] = useState('');
-  const tenantColumns: HyperTableColumn<typeof tenants[number]>[] = [
+  const [query, setQuery] = useState('');
+  const [editing, setEditing] = useState<ApiTenant | 'new' | null>(null);
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [status, setStatus] = useState<'active' | 'disabled'>('active');
+  const [busy, setBusy] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const load = useCallback(async () => setTenants(listItems(await apiGet<ApiList<ApiTenant>>('/api/v1/tenants'))), []);
+  useEffect(() => { void load().catch(error => toast(error instanceof Error ? error.message : 'Failed to load tenants')); }, [load, toast]);
+  const selected = tenants.find(item => item.id === selectedTenant);
+  const openNew = () => { setEditing('new'); setName(''); setDescription(''); setStatus('active'); };
+  const openEdit = () => { if (selected) { setEditing(selected); setName(selected.name); setDescription(selected.description ?? ''); setStatus(selected.status); } };
+  const save = async () => { setBusy(true); try { if (editing === 'new') await apiPost('/api/v1/tenants', {name,description,status}); else if (editing) await apiPatch(`/api/v1/tenants/${editing.id}`, {name,description,status}); setEditing(null); await load(); toast('Tenant saved'); } finally { setBusy(false); } };
+  const remove = async () => { if (!selected) return; setBusy(true); try { await apiDelete(`/api/v1/tenants/${selected.id}`); setSelectedTenant(null); await load(); toast('Tenant deleted'); } finally { setBusy(false); } };
+  const visibleTenants = tenants.filter(item => [item.name,item.description,item.status].some(value=>String(value||'').toLowerCase().includes(query.trim().toLowerCase())));
+  const tenantColumns: HyperTableColumn<ApiTenant>[] = [
     {
       id: 'select',
       header: '',
       cell: info => (
         <input
-          type="radio"
+          type="checkbox"
           checked={selectedTenant === info.row.original.id}
           onClick={event => event.stopPropagation()}
-          onChange={() => setSelectedTenant(info.row.original.id)}
+          onChange={() => setSelectedTenant(current => current === info.row.original.id ? null : info.row.original.id)}
         />
       ),
       size: 42,
@@ -12819,47 +14780,59 @@ function TenantPage() {
       id: 'name',
       header: 'Tenant',
       accessorFn: tenant => tenant.name,
-      size: 280,
+      size: 220,
       minSize: 200,
       maxSize: 520,
-      cell: info => <div><p className="text-sm font-black text-slate-900">{info.row.original.name}</p><p className="text-xs text-slate-400">Login Domain: {info.row.original.domain}</p></div>,
-      meta: { title: tenant => `${tenant.name} / ${tenant.domain}` },
+      cell: info => <p className="text-sm font-black text-slate-900">{info.row.original.name}</p>,
+      meta: { title: tenant => tenant.name },
     },
-    { id: 'users', header: 'Users', accessorFn: tenant => tenant.users, size: 120, minSize: 100, cell: info => <span className="text-xs font-semibold text-slate-500">{info.row.original.users} users</span>, meta: { title: tenant => `${tenant.users} users` } },
-    { id: 'admin', header: 'Admin', accessorFn: tenant => tenant.admin, size: 170, minSize: 130, cell: info => <span className="text-xs font-semibold text-slate-500">{info.row.original.admin}</span>, meta: { title: tenant => tenant.admin } },
-    { id: 'status', header: 'Status', accessorFn: tenant => tenant.status, size: 120, minSize: 100, cell: info => <span className={`w-fit rounded-full border px-2 py-1 text-[10px] font-black ${info.row.original.status === 'Enabled' ? 'border-emerald-100 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>{info.row.original.status}</span>, meta: { title: tenant => tenant.status } },
-    { id: 'mode', header: 'Mode', accessorFn: () => 'Multi-tenant', size: 140, minSize: 120, cell: () => <span className="text-xs font-semibold text-slate-400">Multi-tenant</span>, meta: { title: () => 'Multi-tenant' } },
+    { id: 'description', header: 'Description', accessorFn: tenant => tenant.description || '', size: 320, minSize: 200, cell: info => <span className="block truncate text-xs font-medium text-slate-500">{info.row.original.description || '—'}</span>, meta: { title: tenant => tenant.description || 'No description' } },
+    { id: 'users', header: 'Users', accessorFn: tenant => tenant.userCount, size: 120, minSize: 100, cell: info => <span className="text-xs font-semibold text-slate-500">{info.row.original.userCount}</span>, meta: { title: tenant => `${tenant.userCount}` } },
+    { id: 'clusters', header: 'Clusters', accessorFn: tenant => tenant.clusterCount, size: 120, minSize: 100, cell: info => <span className="text-xs font-semibold text-slate-500">{info.row.original.clusterCount}</span>, meta: { title: tenant => `${tenant.clusterCount}` } },
+    { id: 'status', header: 'Status', accessorFn: tenant => tenant.status, size: 120, minSize: 100, cell: info => <span className={`w-fit rounded-full border px-2 py-1 text-[10px] font-black ${info.row.original.status === 'active' ? 'border-emerald-100 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>{info.row.original.status === 'active' ? 'Active' : 'Disabled'}</span>, meta: { title: tenant => tenant.status } },
   ];
 
   return (
     <motion.div key="tenants" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
-      <SearchBar title="Tenants" desc="Tenants and administrator accounts." action="Add Tenant" onAction={() => setTenants(prev => [{ id: `tenant-${Date.now()}`, name: 'New Tenant', domain: 'new', admin: 'tenant-admin', users: 1, status: 'Enabled' }, ...prev])} />
-      <div className="hbdr-dr-table-card">
-        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5">
-          <div><p className="text-sm font-black text-slate-900">Tenant List</p><p className="mt-1 text-xs font-medium text-slate-400">{selectedTenant ? `Selected ${selectedTenant}` : 'Select a tenant to disable it or manage users'}</p></div>
-          <div className="flex gap-2">
-            <button onClick={() => setTenants(prev => [{ id: `tenant-${Date.now()}`, name: 'New Tenant', domain: 'new', admin: 'tenant-admin', users: 1, status: 'Enabled' }, ...prev])} className="hbdr-dr-action-primary">Add Tenant</button>
-            <button disabled={!selectedTenant} onClick={() => setTenants(prev => prev.map(item => item.id === selectedTenant ? { ...item, status: item.status === 'Enabled' ? 'Disabled' : 'Enabled' } : item))} className="hbdr-dr-action-primary hbdr-dr-action-ghost">Enable / Disable Tenant</button>
-            <button disabled={!selectedTenant} onClick={() => setTenantMessage('User management panel opened. Maintain tenant administrators and users here.')} className="hbdr-dr-action-primary">User Management</button>
+      <div className="hbdr-page-hero">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-blue-600 shadow-sm"><Building2 size={18}/></div><div><h3 className="text-sm font-black tracking-tight text-slate-900">Tenant Management</h3><p className="mt-0.5 text-[11px] font-medium text-slate-400">Create and maintain isolated resource tenants.</p></div></div>
+          <div />
+        </div>
+      </div>
+      <div className="hbdr-dr-table-card hbdr-user-management-table">
+        <div className="hbdr-dr-table-head">
+          <div className="hbdr-dr-toolbar">
+            <div className="hbdr-dr-action-group">
+              <button type="button" onClick={openNew} className="hbdr-dr-action-primary">New</button>
+              <div className="relative">
+                <button type="button" disabled={!selected} onClick={()=>setMoreOpen(value=>!value)} className="hbdr-dr-more">More <ChevronDown size={15} className={moreOpen?'rotate-180 transition-transform':'transition-transform'}/></button>
+                <AnimatePresence>{moreOpen && selected && <><div className="fixed inset-0 z-30" onClick={()=>setMoreOpen(false)}/><motion.div initial={{opacity:0,y:8,scale:.96}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:8,scale:.96}} className="absolute left-0 top-11 z-40 w-48 overflow-hidden rounded-2xl border border-slate-100 bg-white py-1 shadow-2xl shadow-slate-200/80 ring-1 ring-slate-950/5"><button onClick={()=>{openEdit();setMoreOpen(false)}} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50"><Edit2 size={14}/>Edit</button><button disabled={selected.id===storeDefaultTenantId||selected.userCount>0||selected.clusterCount>0||busy} onClick={()=>{setMoreOpen(false);void remove().catch(error=>toast(error instanceof Error?error.message:'Failed to delete tenant'))}} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-300"><Trash2 size={14}/>Delete</button></motion.div></>}</AnimatePresence>
+              </div>
+            </div>
+            <div className="hbdr-dr-query-group hbdr-user-query-group"><label className="hbdr-dr-search"><input value={query} onChange={event=>setQuery(event.target.value)} placeholder="Enter search text"/></label></div>
           </div>
         </div>
         <HyperTable
           variant="page"
           density="comfortable"
           columns={tenantColumns}
-          data={tenants}
+          data={visibleTenants}
           getRowId={row => row.id}
-          onRowClick={row => setSelectedTenant(row.id)}
+          onRowClick={row => setSelectedTenant(current => current === row.id ? null : row.id)}
           getRowClassName={row => selectedTenant === row.id ? 'hbdr-dr-row-selected' : ''}
+          selectedCount={selectedTenant ? 1 : 0}
           emptyMessage="No tenants available."
         />
       </div>
-      {tenantMessage && <div className="rounded border border-blue-100 bg-blue-50 px-4 py-3 text-xs font-bold text-blue-700">{tenantMessage}</div>}
+      <AnimatePresence>{editing && <><motion.div className="hbdr-filter-drawer-backdrop" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} onClick={()=>setEditing(null)} /><motion.aside className="hbdr-filter-drawer hbdr-user-management-drawer" initial={{x:34,opacity:0}} animate={{x:0,opacity:1}} exit={{x:34,opacity:0}} role="dialog" aria-modal="true" aria-label={editing==='new'?'New Tenant':'Edit Tenant'}><div className="hbdr-filter-drawer-head"><div><strong>{editing === 'new' ? 'New Tenant' : 'Edit Tenant'}</strong><span>{editing==='new'?'Create an isolated tenant for users and resources.':'Update tenant information and access status.'}</span></div><button onClick={()=>setEditing(null)} aria-label="Close tenant drawer"><X size={18}/></button></div><div className="hbdr-filter-drawer-body"><div className="space-y-4"><EditField label="Tenant Name" value={name} onChange={setName}/><label className="block text-xs font-semibold tracking-normal text-slate-600">Description<textarea value={description} onChange={event=>setDescription(event.target.value)} maxLength={500} rows={4} placeholder="Briefly describe this tenant" className="mt-1 w-full resize-none rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100" /></label><label className="block text-xs font-semibold tracking-normal text-slate-600">Status<select value={status} onChange={event=>setStatus(event.target.value as 'active'|'disabled')} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3"><option value="active">Active</option><option value="disabled">Disabled</option></select></label><div className="hbdr-filter-drawer-actions mt-6"><button className="hbdr-dr-action-primary" disabled={!name.trim()||busy} onClick={()=>void save().catch(error=>toast(error instanceof Error?error.message:'Failed to save tenant'))}>{busy?'Saving...':'Save'}</button><button disabled={busy} onClick={()=>setEditing(null)}>Cancel</button></div></div></div></motion.aside></>}</AnimatePresence>
     </motion.div>
   );
 }
 
-function SearchBar({ title, desc, action, onAction }: { title: string; desc: string; action?: string; onAction?: () => void }) {
+const storeDefaultTenantId = '00000000-0000-0000-0000-000000000001';
+
+function SearchBar({ title, desc, action, onAction, query, onQueryChange }: { title: string; desc: string; action?: string; onAction?: () => void; query?: string; onQueryChange?: (value:string)=>void }) {
   const ActionIcon = action?.includes('Refresh') ? RefreshCw : action?.includes('Save') ? Check : action?.includes('Export') ? Archive : Plus;
   return (
     <div className="hbdr-page-hero">
@@ -12869,7 +14842,7 @@ function SearchBar({ title, desc, action, onAction }: { title: string; desc: str
           <div><h3 className="text-sm font-black text-slate-900">{title}</h3><p className="text-xs font-medium text-slate-400">{desc}</p></div>
         </div>
         <div className="flex gap-2">
-          <input className="h-9 w-72 rounded border border-slate-200 px-3 text-xs font-semibold outline-none focus:border-blue-400" placeholder="Quick Search" />
+          <input value={query} onChange={event=>onQueryChange?.(event.target.value)} className="h-9 w-72 rounded border border-slate-200 px-3 text-xs font-semibold outline-none focus:border-blue-400" placeholder="Quick Search" />
           {action && <button onClick={onAction} className="rounded bg-blue-600 px-4 py-2 text-xs font-black text-white"><ActionIcon size={14} className="mr-1 inline" />{action}</button>}
         </div>
       </div>
@@ -12937,6 +14910,7 @@ function EditField({
   type = 'text',
   hint,
   required,
+  disabled,
 }: {
   label: string;
   value: string;
@@ -12945,9 +14919,10 @@ function EditField({
   type?: string;
   hint?: string;
   required?: boolean;
+  disabled?: boolean;
 }) {
   return (
-    <label className="flex flex-col gap-1 text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">
+    <label className="flex flex-col gap-1 text-xs font-semibold tracking-normal text-slate-600">
       <span className="flex items-center gap-1.5">
         {label}
         {required && <span className="text-rose-500">*</span>}
@@ -12956,8 +14931,9 @@ function EditField({
         type={type}
         value={value}
         placeholder={placeholder}
+        disabled={disabled}
         onChange={event => onChange(event.target.value)}
-        className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-800 outline-none transition-all placeholder:font-normal placeholder:text-slate-300 hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:shadow-[0_0_0_4px_rgba(59,130,246,0.12)]"
+        className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-800 outline-none transition-all placeholder:font-normal placeholder:text-slate-300 hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:shadow-[0_0_0_4px_rgba(59,130,246,0.12)] disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
       />
       {hint && <span className="text-[10px] font-medium normal-case tracking-normal text-slate-400">{hint}</span>}
     </label>

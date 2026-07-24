@@ -1,0 +1,87 @@
+package httpserver
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"hypercdr-platform/platform/backend/internal/config"
+	"hypercdr-platform/platform/backend/internal/store"
+)
+
+func tenantRequest(req *http.Request, user store.User) *http.Request {
+	return req.WithContext(context.WithValue(req.Context(), requestUserContextKey{}, user))
+}
+
+func TestTenantListsAndMutationsAreIsolated(t *testing.T) {
+	repo := store.NewMemoryStore()
+	tenantA, _ := repo.CreateTenant(store.TenantInput{Name: "Tenant A", Status: "active"})
+	tenantB, _ := repo.CreateTenant(store.TenantInput{Name: "Tenant B", Status: "active"})
+	storageA, _ := repo.CreateStorageRepository(store.StorageRepositoryInput{TenantID: tenantA.ID, Name: "A", Type: "S3"})
+	storageB, _ := repo.CreateStorageRepository(store.StorageRepositoryInput{TenantID: tenantB.ID, Name: "B", Type: "S3"})
+	r := &Router{cfg: config.Config{}, logger: slog.New(slog.NewTextHandler(io.Discard, nil)), store: repo}
+	userB := store.User{ID: "user-b", TenantID: tenantB.ID, Role: "admin", Status: "active"}
+
+	listReq := tenantRequest(httptest.NewRequest(http.MethodGet, "/api/v1/storage-repositories", nil), userB)
+	listRes := httptest.NewRecorder()
+	r.listStorageRepositories(listRes, listReq)
+	var result struct {
+		Items []store.StorageRepository `json:"items"`
+	}
+	if err := json.Unmarshal(listRes.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 1 || result.Items[0].TenantID != tenantB.ID {
+		t.Fatalf("tenant B saw unexpected storage: %#v", result.Items)
+	}
+
+	body := bytes.NewBufferString(`{"name":"changed","type":"S3"}`)
+	updateReq := tenantRequest(httptest.NewRequest(http.MethodPatch, "/api/v1/storage-repositories/"+storageA.ID, body), userB)
+	updateReq.SetPathValue("id", storageA.ID)
+	updateRes := httptest.NewRecorder()
+	r.tenantGuard("storage", r.updateStorageRepository)(updateRes, updateReq)
+	if updateRes.Code != http.StatusNotFound {
+		t.Fatalf("cross-tenant update returned %d, want 404", updateRes.Code)
+	}
+
+	systemAdmin := store.User{ID: "system-admin", TenantID: tenantA.ID, Email: store.DefaultAdminEmail, Role: "admin", Status: "active", SystemAdmin: true}
+	adminListReq := tenantRequest(httptest.NewRequest(http.MethodGet, "/api/v1/storage-repositories", nil), systemAdmin)
+	adminListRes := httptest.NewRecorder()
+	r.listStorageRepositories(adminListRes, adminListReq)
+	result.Items = nil
+	if err := json.Unmarshal(adminListRes.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 1 || result.Items[0].TenantID != tenantA.ID {
+		t.Fatalf("system admin saw resources outside its tenant: %#v", result.Items)
+	}
+
+	adminUpdateReq := tenantRequest(httptest.NewRequest(http.MethodPatch, "/api/v1/storage-repositories/"+storageB.ID, bytes.NewBufferString(`{"name":"changed","type":"S3"}`)), systemAdmin)
+	adminUpdateReq.SetPathValue("id", storageB.ID)
+	adminUpdateRes := httptest.NewRecorder()
+	r.tenantGuard("storage", r.updateStorageRepository)(adminUpdateRes, adminUpdateReq)
+	if adminUpdateRes.Code != http.StatusNotFound {
+		t.Fatalf("system admin cross-tenant update returned %d, want 404", adminUpdateRes.Code)
+	}
+}
+
+func TestAgentRegistrationUsesTokenTenant(t *testing.T) {
+	repo := store.NewMemoryStore()
+	tenant, _ := repo.CreateTenant(store.TenantInput{Name: "Agent Tenant", Status: "active"})
+	token, err := repo.CreateAgentToken(tenant.ID, "creator", "registration", 60_000_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cluster, _, err := repo.RegisterCluster(store.RegisterClusterInput{Token: token.Token, ClusterName: "tenant-cluster"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cluster.TenantID != tenant.ID {
+		t.Fatalf("cluster tenant=%s want %s", cluster.TenantID, tenant.ID)
+	}
+}

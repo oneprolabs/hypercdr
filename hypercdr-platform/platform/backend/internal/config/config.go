@@ -20,9 +20,12 @@ type Config struct {
 	VeleroVersion            string
 	VeleroImage              string
 	VeleroAWSPlugin          string
+	VeleroAzurePlugin        string
+	VeleroGCPPlugin          string
 	RegistryCAPath           string
 	FrontendDir              string
 	SecretKey                string
+	ReleaseToken             string
 	GoogleClientID           string
 	GoogleClientSecret       string
 	PasswordResetRevealToken bool
@@ -32,6 +35,9 @@ type Config struct {
 	SMTPPassword             string
 	SMTPFrom                 string
 	LogLevel                 slog.Level
+	DeployMode               string
+	DeployDir                string
+	UpgraderEndpoint         string
 }
 
 func Load() Config {
@@ -50,9 +56,12 @@ func Load() Config {
 		VeleroVersion:            getEnv("HCDR_VELERO_VERSION", "v1.17.1"),
 		VeleroImage:              getEnv("HCDR_VELERO_IMAGE", defaultImage(imageRegistry, "velero:v1.17.1-hcdr.1-20260716")),
 		VeleroAWSPlugin:          getEnv("HCDR_VELERO_AWS_PLUGIN_IMAGE", defaultImage(imageRegistry, "velero-plugin-for-aws:v1.13.0")),
-		RegistryCAPath:           getEnv("HCDR_REGISTRY_CA_PATH", "/data/harbor/cert/hypercdr-ca.crt"),
+		VeleroAzurePlugin:        getEnv("HCDR_VELERO_AZURE_PLUGIN_IMAGE", defaultImage(imageRegistry, "velero-plugin-for-microsoft-azure:v1.13.0")),
+		VeleroGCPPlugin:          getEnv("HCDR_VELERO_GCP_PLUGIN_IMAGE", defaultImage(imageRegistry, "velero-plugin-for-gcp:v1.13.0")),
+		RegistryCAPath:           getEnv("HCDR_REGISTRY_CA_PATH", ""),
 		FrontendDir:              os.Getenv("HCDR_FRONTEND_DIR"),
 		SecretKey:                os.Getenv("HCDR_SECRET_KEY"),
+		ReleaseToken:             strings.TrimSpace(os.Getenv("HCDR_RELEASE_TOKEN")),
 		GoogleClientID:           os.Getenv("HCDR_GOOGLE_CLIENT_ID"),
 		GoogleClientSecret:       os.Getenv("HCDR_GOOGLE_CLIENT_SECRET"),
 		PasswordResetRevealToken: parseBool("HCDR_PASSWORD_RESET_REVEAL_TOKEN", false),
@@ -62,6 +71,9 @@ func Load() Config {
 		SMTPPassword:             os.Getenv("HCDR_SMTP_PASSWORD"),
 		SMTPFrom:                 getEnv("HCDR_SMTP_FROM", "HyperCDR <noreply@localhost>"),
 		LogLevel:                 parseLogLevel(getEnv("HCDR_LOG_LEVEL", "info")),
+		DeployMode:               getEnv("HCDR_DEPLOY_MODE", "development"),
+		DeployDir:                getEnv("HCDR_DEPLOY_DIR", "/var/lib/hypercdr"),
+		UpgraderEndpoint:         strings.TrimRight(getEnv("HCDR_UPGRADER_ENDPOINT", "http://127.0.0.1:18081"), "/"),
 	}
 }
 

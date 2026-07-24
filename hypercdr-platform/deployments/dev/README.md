@@ -1,15 +1,17 @@
 # HyperCDR Development Mode
 
-This mode runs PostgreSQL in Docker and runs the backend and Vite frontend from
-source. Vite terminates HTTPS/WSS and proxies to the backend over HTTP, matching
-the standard frontend nginx to API topology. It is separate from the standard
-release and Bootstrap deployment flow.
+This mode builds the backend from source and runs the frontend with the Vite
+development server and HMR. Vite terminates HTTPS/WSS and proxies to the
+backend over HTTP, so frontend source changes appear without rebuilding an
+image. By default it reuses the standard platform PostgreSQL container when
+one is available, preserving the current users, tenants, clusters, and other
+platform data. It is separate from the standard release and Bootstrap flow.
 
 Runtime files are stored outside the source tree under `/data/hypercdr/.dev`.
 Go/npm caches remain under `/data/hypercdr/.cache`.
 The backend and frontend run as transient `hypercdr-dev-api` and
 `hypercdr-dev-frontend` systemd services; no permanent unit files are installed.
-Vite runs with the real frontend source as its root. A Git-ignored
+The frontend build uses the real frontend source as its root. A Git-ignored
 `platform/frontend/node_modules` symlink points to external dependencies under
 `/data/hypercdr/.dev/frontend` and is removed by `stop-dev.sh`.
 

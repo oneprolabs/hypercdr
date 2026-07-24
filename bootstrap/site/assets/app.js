@@ -5,7 +5,7 @@ const defaultRegistry = `${portalHost}:5001/hypercdr`;
 const defaultImageTag = 'v20260714.5';
 const defaultNamespace = 'hypercdr-system';
 const defaultStorageClass = 'longhorn';
-const defaultHostDataDir = '/data/hypercdr/deploy';
+const defaultHostDataDir = '/var/lib/hypercdr';
 
 const fields = [
   'k8s-access-mode',
@@ -13,8 +13,12 @@ const fields = [
   'k8s-node-port',
   'k8s-public-url',
   'k8s-registry',
+  'k8s-registry-trust',
+  'k8s-registry-ca-file',
   'host-public-url',
   'host-registry',
+  'host-registry-trust',
+  'host-registry-ca-file',
 ];
 
 function value(id) {
@@ -39,7 +43,9 @@ function k8sPublicBaseURL() {
 }
 
 function initializeDefaults() {
-  document.getElementById('current-host').textContent = portalHost;
+  const deploy = document.getElementById('deploy');
+  const dockerPanel = document.getElementById('docker-panel');
+  if (deploy && dockerPanel) deploy.prepend(dockerPanel);
   setDefaultValue('k8s-node-ip', portalHost);
   setDefaultValue('k8s-public-url', `https://${portalHost}:30080`);
   setDefaultValue('k8s-registry', defaultRegistry);
@@ -60,6 +66,16 @@ function updateAccessMode() {
 
 function updateCommands() {
   updateAccessMode();
+  const k8sPrivateCA = value('k8s-registry-trust') === 'private-ca';
+  const hostPrivateCA = value('host-registry-trust') === 'private-ca';
+  for (const element of document.querySelectorAll('.k8s-private-ca-field')) element.classList.toggle('hidden', !k8sPrivateCA);
+  for (const element of document.querySelectorAll('.host-private-ca-field')) element.classList.toggle('hidden', !hostPrivateCA);
+  document.getElementById('host-private-ca-step').classList.toggle('hidden', !hostPrivateCA);
+  document.getElementById('host-install-number').textContent = hostPrivateCA ? '2' : '1';
+  document.getElementById('host-install-title').textContent = hostPrivateCA ? 'step-2-install-platform.sh' : 'step-1-install-platform.sh';
+  const k8sTrustArgs = k8sPrivateCA
+    ? [`  --registry-trust private-ca \\`, `  --registry-ca-file ${shellQuote(value('k8s-registry-ca-file') || '/path/to/registry-ca.crt')} \\`]
+    : ['  --registry-trust system \\'];
   const k8sCommand = [
     `curl -fsSL ${releaseURL}/hypercdr-bootstrap.tar.gz -o hypercdr-bootstrap.tar.gz`,
     'rm -rf hypercdr-bootstrap',
@@ -71,6 +87,7 @@ function updateCommands() {
     `  --namespace ${shellQuote(defaultNamespace)} \\`,
     `  --public-base-url ${shellQuote(k8sPublicBaseURL())} \\`,
     `  --registry ${shellQuote(value('k8s-registry'))} \\`,
+    ...k8sTrustArgs,
     `  --image-tag ${shellQuote(defaultImageTag)} \\`,
     `  --storage-class ${shellQuote(defaultStorageClass)} \\`,
     `  --node-port ${shellQuote(value('k8s-node-port'))} \\`,
@@ -85,55 +102,41 @@ function updateCommands() {
     'tar -xzf hypercdr-bootstrap.tar.gz -C hypercdr-bootstrap',
     'cd hypercdr-bootstrap',
     'chmod +x prepare-docker-registry.sh',
-    `./prepare-docker-registry.sh --registry ${shellQuote(value('host-registry'))}`,
-  ].join('\n');
-
-  const hostCheckCommand = [
-    'test -d hypercdr-bootstrap || { echo "Run step 1 first."; exit 1; }',
-    'cd hypercdr-bootstrap',
-    'chmod +x check-harbor.sh',
-    `./check-harbor.sh --registry ${shellQuote(value('host-registry'))} --image-tag ${shellQuote(defaultImageTag)}`,
+    './prepare-docker-registry.sh \\',
+    `  --registry ${shellQuote(value('host-registry'))} \\`,
+    '  --registry-trust private-ca \\',
+    `  --ca-file ${shellQuote(value('host-registry-ca-file') || '/path/to/registry-ca.crt')}`,
   ].join('\n');
 
   const hostInstallCommand = [
-    'test -d hypercdr-bootstrap || { echo "Run step 1 first."; exit 1; }',
+    `curl -fsSL ${releaseURL}/hypercdr-bootstrap.tar.gz -o hypercdr-bootstrap.tar.gz`,
+    'rm -rf hypercdr-bootstrap',
+    'mkdir -p hypercdr-bootstrap',
+    'tar -xzf hypercdr-bootstrap.tar.gz -C hypercdr-bootstrap',
     'cd hypercdr-bootstrap',
     'chmod +x install-platform.sh',
     './install-platform.sh docker \\',
     `  --public-base-url ${shellQuote(value('host-public-url'))} \\`,
     `  --data-dir ${shellQuote(defaultHostDataDir)} \\`,
     `  --registry ${shellQuote(value('host-registry'))} \\`,
+    `  --registry-trust ${hostPrivateCA ? 'private-ca' : 'system'} \\`,
+    ...(hostPrivateCA ? [`  --registry-ca-file ${shellQuote(value('host-registry-ca-file') || '/path/to/registry-ca.crt')} \\`] : []),
     `  --image-tag ${shellQuote(defaultImageTag)} \\`,
     '  --execute',
   ].join('\n');
 
   document.getElementById('k8s-command').textContent = k8sCommand;
   document.getElementById('host-prepare-command').textContent = hostPrepareCommand;
-  document.getElementById('host-check-command').textContent = hostCheckCommand;
   document.getElementById('host-install-command').textContent = hostInstallCommand;
 }
 
 async function loadManifest() {
-  const list = document.getElementById('artifact-list');
   try {
     const response = await fetch(`${releasePath}/manifest.json`, { cache: 'no-store' });
     const manifest = await response.json();
     document.getElementById('release-version').textContent = manifest.version;
-    document.getElementById('release-build').textContent = `Built ${manifest.buildTime}`;
-
-    list.innerHTML = '';
-    for (const artifact of manifest.artifacts) {
-      const link = document.createElement('a');
-      link.className = 'artifact';
-      link.href = `${releasePath}/${artifact.file}`;
-      link.download = artifact.file;
-      link.innerHTML = `<strong>${artifact.name}</strong><small>${artifact.file}</small><small>${artifact.description}</small>`;
-      list.appendChild(link);
-    }
   } catch (error) {
     document.getElementById('release-version').textContent = 'dev';
-    document.getElementById('release-build').textContent = 'Manifest unavailable';
-    list.textContent = 'Unable to load release manifest.';
   }
 }
 

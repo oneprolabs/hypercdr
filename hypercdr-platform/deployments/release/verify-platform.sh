@@ -7,7 +7,7 @@ source "${SCRIPT_DIR}/common.sh"
 
 HOST="${HCDR_PLATFORM_HOST:-${DEFAULT_HOST}}"
 REGISTRY="${HCDR_IMAGE_REGISTRY:-}"
-DEPLOY_DIR="${HCDR_DEPLOY_DIR:-/data/hypercdr/deploy}"
+DEPLOY_DIR="${HCDR_DEPLOY_DIR:-/var/lib/hypercdr}"
 FRONTEND_URL="http://${HOST}:3002"
 
 usage() {
@@ -41,6 +41,7 @@ REGISTRY_HOST="${REGISTRY%%/*}"
 
 log "Docker Compose services"
 (cd "${DEPLOY_DIR}" && docker compose ps)
+(cd "${DEPLOY_DIR}" && docker compose ps --services --status running | grep -q '^hypercdr-platform-upgrader$')
 
 log "Checking frontend"
 curl -fsS "${FRONTEND_URL}/" >/dev/null

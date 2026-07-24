@@ -47,7 +47,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  margin-bottom: 42px;
+  margin-bottom: 24px;
   border: 1px solid rgba(184, 197, 214, 0.72);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.76);
@@ -55,6 +55,11 @@ body {
   padding: 12px 14px;
   backdrop-filter: blur(14px);
 }
+
+.header-version { border: 1px solid var(--line); border-radius: 999px; background: #f8fafc; color: var(--muted); padding: 5px 9px; font-size: 11px; font-weight: 700; }
+.install-intro { margin: 0 0 20px; }
+.install-intro h1 { font-size: 30px; }
+.install-intro .summary { margin-top: 9px; }
 
 .panel,
 .version-card,
@@ -250,9 +255,22 @@ h2 {
 }
 
 .deploy-layout {
-  grid-template-columns: minmax(0, 1.18fr) minmax(330px, 0.82fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
 }
+
+#docker-panel { order: 1; }
+#k8s-panel { order: 2; }
+
+.install-step { margin-top: 18px; }
+.install-step-heading { display: flex; align-items: center; gap: 10px; margin-top: 18px; }
+.install-step-heading > span { display: grid; width: 26px; height: 26px; flex: 0 0 26px; place-items: center; border-radius: 50%; background: #e8f5f2; color: var(--accent-dark); font-size: 12px; font-weight: 800; }
+.install-step-heading strong, .install-step-heading small { display: block; }
+.install-step-heading strong { color: var(--ink); font-size: 13px; }
+.install-step-heading small { margin-top: 2px; color: var(--muted); font-size: 11px; }
+.command-window { position: relative; }
+.command-copy { position: absolute; top: 7px; right: 9px; min-height: 28px; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.1); padding: 5px 9px; font-size: 10px; font-weight: 750; }
+.command-copy:hover { background: rgba(255,255,255,.18); }
 
 .panel {
   padding: 22px;
@@ -322,6 +340,43 @@ h2 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px 16px;
+}
+
+.configuration-sections {
+  display: grid;
+  gap: 18px;
+}
+
+.configuration-section {
+  border-top: 1px solid #e4eaf2;
+  padding-top: 14px;
+}
+
+.configuration-section:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.configuration-section-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 11px;
+}
+
+.configuration-section-heading h3 {
+  flex: 0 0 auto;
+  margin: 0;
+  color: #1f2937;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.configuration-section-heading p {
+  margin: 0;
+  color: #7a8699;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .hidden {
@@ -569,6 +624,12 @@ button:hover,
 
   .mode-steps {
     grid-template-columns: 1fr;
+  }
+
+  .configuration-section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
   }
 
   .topbar {

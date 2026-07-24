@@ -24,6 +24,13 @@ func (r *Router) schedulerLoop() {
 }
 
 func (r *Router) runSchedulerTick(now time.Time) {
+	if jobs, err := r.store.ListPlatformUpgradeJobs(); err == nil {
+		for _, job := range jobs {
+			if !isTerminalPlatformUpgradeStatus(job.Status) {
+				return
+			}
+		}
+	}
 	r.reconcilePlatformSchedules(now)
 	due, err := r.store.ListDueProtectionPlanSchedules(now)
 	if err != nil {
@@ -35,8 +42,12 @@ func (r *Router) runSchedulerTick(now time.Time) {
 	}
 }
 
+func isTerminalPlatformUpgradeStatus(status string) bool {
+	return status == "succeeded" || status == "failed" || status == "cancelled" || status == "rolled_back"
+}
+
 func (r *Router) reconcilePlatformSchedules(now time.Time) {
-	location := serverLocation()
+	location := time.UTC
 	plans, err := r.store.ListProtectionPlans("")
 	if err != nil {
 		r.logger.Error("failed to list protection plans for schedule reconcile", "error", err)
@@ -178,7 +189,7 @@ func (r *Router) enableProtectionPlanSchedule(plan store.ProtectionPlan, policy 
 }
 
 func nextPolicyFireAt(policy store.Policy, after time.Time) time.Time {
-	return nextPolicyFireAtInLocation(policy, after, serverLocation())
+	return nextPolicyFireAtInLocation(policy, after, time.UTC)
 }
 
 func nextPolicyFireAtInLocation(policy store.Policy, after time.Time, location *time.Location) time.Time {

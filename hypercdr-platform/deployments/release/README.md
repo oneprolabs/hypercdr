@@ -16,9 +16,14 @@ Edit `release.conf`, then build and push a release:
 ./release-all.sh v20260714.5 --config ./release.conf
 ```
 
-The release script only builds, pushes, and verifies image pulls. Control plane
-installation stays in the bootstrap page, and control plane upgrades should be
-triggered from the platform UI.
+After tests pass, the release script builds and pushes the images, mirrors the
+three Velero object-storage plugins, verifies Harbor pulls, and registers the
+version as a platform candidate. It never starts an upgrade. Control plane
+upgrades remain an explicit administrator action in the platform UI.
+
+For the initial seed release, when no platform exists yet, use
+`--skip-register`. Normal releases require the installer-generated token at
+`/var/lib/hypercdr/release-token`.
 
 ## Lower-level flow
 
@@ -33,6 +38,7 @@ These scripts build and push:
 
 - `platform-api`
 - `platform-frontend`
+- `platform-upgrader`
 - `comm-agent`
 
 Build work is written to `/data/hypercdr/.build/platform/<version>` and shared

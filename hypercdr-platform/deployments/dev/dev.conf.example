@@ -4,6 +4,8 @@ HCDR_DEV_DIR=/data/hypercdr/.dev
 HCDR_DEV_FRONTEND_PORT=3002
 HCDR_DEV_API_PORT=18080
 HCDR_DEV_POSTGRES_PORT=15432
+HCDR_DEV_REUSE_PLATFORM_POSTGRES=true
+HCDR_PLATFORM_DEPLOY_ENV=/var/lib/hypercdr/.env
 
 HCDR_DEV_TLS_CERT_FILE=/data/hypercdr/certs/platform.crt
 HCDR_DEV_TLS_KEY_FILE=/data/hypercdr/certs/platform.key

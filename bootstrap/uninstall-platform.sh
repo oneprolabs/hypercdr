@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DATA_DIR="${HCDR_DATA_DIR:-/data/hypercdr/deploy}"
+DATA_DIR="${HCDR_DATA_DIR:-/var/lib/hypercdr}"
 COMPOSE_FILE="${HCDR_COMPOSE_FILE:-}"
 PURGE_DATA="false"
 REMOVE_IMAGES="false"
@@ -15,7 +15,7 @@ Usage:
   ./uninstall-platform.sh [options]
 
 Options:
-  --data-dir PATH       HyperCDR data/deploy directory, default: /data/hypercdr/deploy.
+  --data-dir PATH       HyperCDR data/deploy directory, default: /var/lib/hypercdr.
   --compose-file PATH   Docker Compose file. Defaults to ./compose.yaml when present,
                         or <data-dir>/docker-compose.yaml when present.
   --purge-data          Delete <data-dir> after containers are removed.
@@ -26,6 +26,7 @@ Options:
 This script removes only HyperCDR control plane containers:
   hypercdr-platform-frontend
   hypercdr-platform-api
+  hypercdr-platform-upgrader
   hypercdr-postgres
 
 It does not uninstall Harbor and does not stop the bootstrap portal.
@@ -77,6 +78,7 @@ Execute changes:       ${EXECUTE}
 Target containers:
   hypercdr-platform-frontend
   hypercdr-platform-api
+  hypercdr-platform-upgrader
   hypercdr-postgres
 EOF
 
@@ -91,7 +93,7 @@ fi
 require_command docker
 
 images=()
-for name in hypercdr-platform-frontend hypercdr-platform-api hypercdr-postgres; do
+for name in hypercdr-platform-frontend hypercdr-platform-api hypercdr-platform-upgrader hypercdr-postgres; do
   image="$(container_image "${name}")"
   if [[ -n "${image}" ]]; then
     images+=("${image}")
@@ -106,7 +108,7 @@ if [[ -n "${COMPOSE_FILE}" && -f "${COMPOSE_FILE}" ]]; then
     docker compose -f "${compose_name}" down --remove-orphans
   )
 else
-  docker rm -f hypercdr-platform-frontend hypercdr-platform-api hypercdr-postgres >/dev/null 2>&1 || true
+  docker rm -f hypercdr-platform-frontend hypercdr-platform-api hypercdr-platform-upgrader hypercdr-postgres >/dev/null 2>&1 || true
 fi
 
 if [[ "${REMOVE_IMAGES}" == "true" ]]; then

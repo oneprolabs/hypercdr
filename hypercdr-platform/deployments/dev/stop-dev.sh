@@ -18,10 +18,14 @@ if [[ -L "${frontend_node_modules}" ]]; then
   rm -f "${frontend_node_modules}"
 fi
 
-dev_log "Stopping development PostgreSQL"
-HCDR_DEV_DIR="${HCDR_DEV_DIR}" \
-HCDR_DEV_POSTGRES_PORT="${HCDR_DEV_POSTGRES_PORT}" \
-HCDR_IMAGE_REGISTRY="${HCDR_IMAGE_REGISTRY}" \
-  docker compose -f "${SCRIPT_DIR}/compose.yaml" down --remove-orphans
+if docker inspect hypercdr-dev-postgres >/dev/null 2>&1; then
+  dev_log "Stopping development PostgreSQL"
+  HCDR_DEV_DIR="${HCDR_DEV_DIR}" \
+  HCDR_DEV_POSTGRES_PORT="${HCDR_DEV_POSTGRES_PORT}" \
+  HCDR_IMAGE_REGISTRY="${HCDR_IMAGE_REGISTRY}" \
+    docker compose -f "${SCRIPT_DIR}/compose.yaml" down --remove-orphans
+else
+  dev_log "Keeping shared platform PostgreSQL running"
+fi
 
 dev_log "Development mode stopped; data remains in ${HCDR_DEV_DIR}/data"

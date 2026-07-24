@@ -11,6 +11,9 @@ SKIP_TESTS="${HCDR_RELEASE_SKIP_TESTS:-false}"
 LOGIN="true"
 CLI_REGISTRY=""
 CLI_SKIP_TESTS=""
+SKIP_REGISTER="false"
+PLATFORM_URL="${HCDR_PLATFORM_URL:-https://${DEFAULT_HOST}:3002}"
+RELEASE_TOKEN_FILE="${HCDR_RELEASE_TOKEN_FILE:-/var/lib/hypercdr/release-token}"
 
 usage() {
   cat <<'USAGE'
@@ -24,6 +27,10 @@ Options:
   --registry PREFIX   Override HCDR_IMAGE_REGISTRY.
   --skip-tests        Skip Go tests during build.
   --no-login          Skip docker login.
+  --platform-url URL  Platform API URL, default https://192.168.8.149:3002.
+  --release-token-file PATH
+                      Release token file, default /var/lib/hypercdr/release-token.
+  --skip-register     Build/push only when no platform exists yet.
   -h, --help          Show help.
 
 Required config:
@@ -43,6 +50,9 @@ while [[ $# -gt 0 ]]; do
     --registry) CLI_REGISTRY="${2:?missing value for --registry}"; shift 2 ;;
     --skip-tests) CLI_SKIP_TESTS="true"; shift ;;
     --no-login) LOGIN="false"; shift ;;
+    --platform-url) PLATFORM_URL="${2:?missing value for --platform-url}"; shift 2 ;;
+    --release-token-file) RELEASE_TOKEN_FILE="${2:?missing value for --release-token-file}"; shift 2 ;;
+    --skip-register) SKIP_REGISTER="true"; shift ;;
     -h|--help) usage; exit 0 ;;
     *)
       if [[ -z "${VERSION}" ]]; then VERSION="$1"; shift; else die "unknown argument: $1"; fi
@@ -68,6 +78,7 @@ fi
 require_version "${VERSION}"
 require_registry "${HCDR_IMAGE_REGISTRY:-}"
 require_cmd docker
+require_cmd curl
 
 REGISTRY="${HCDR_IMAGE_REGISTRY%/}"
 REGISTRY_HOST="${REGISTRY%%/*}"
@@ -128,14 +139,54 @@ log "Building release images"
 log "Pushing release images"
 "${SCRIPT_DIR}/push-release.sh" "${VERSION}" --registry "${REGISTRY}"
 
+log "Mirroring Velero object-storage plugins"
+plugin_sync_args=(--registry "${REGISTRY}" --version "${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}")
+if [[ -n "${HCDR_VELERO_PLUGIN_SOURCE_REGISTRY:-}" ]]; then
+  plugin_sync_args+=(--source-registry "${HCDR_VELERO_PLUGIN_SOURCE_REGISTRY}")
+fi
+"${SCRIPT_DIR}/sync-velero-plugins.sh" "${plugin_sync_args[@]}"
+
 log "Verifying pushed image pulls"
 for image in \
   "${REGISTRY}/platform-api:${VERSION}" \
   "${REGISTRY}/platform-frontend:${VERSION}" \
-  "${REGISTRY}/comm-agent:${VERSION}"; do
+  "${REGISTRY}/platform-upgrader:${VERSION}" \
+  "${REGISTRY}/comm-agent:${VERSION}" \
+  "${REGISTRY}/velero-plugin-for-aws:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}" \
+  "${REGISTRY}/velero-plugin-for-microsoft-azure:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}" \
+  "${REGISTRY}/velero-plugin-for-gcp:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}"; do
   docker pull "${image}" >/dev/null
   log "Pull OK: ${image}"
 done
+
+if [[ "${SKIP_REGISTER}" == "true" ]]; then
+  log "Skipping platform release registration"
+else
+  [[ -r "${RELEASE_TOKEN_FILE}" ]] || die "release token file is not readable: ${RELEASE_TOKEN_FILE}; use --skip-register only for the initial seed release"
+  RELEASE_TOKEN="$(tr -d '\r\n' < "${RELEASE_TOKEN_FILE}")"
+  [[ -n "${RELEASE_TOKEN}" ]] || die "release token file is empty: ${RELEASE_TOKEN_FILE}"
+  log "Registering candidate release ${VERSION} with ${PLATFORM_URL}"
+  curl_args=(-fsS --max-time 30 -X POST "${PLATFORM_URL%/}/api/v1/platform/releases" -H "Content-Type: application/json" -H "X-HyperCDR-Release-Token: ${RELEASE_TOKEN}")
+  if [[ -n "${HCDR_PLATFORM_CA_FILE:-}" ]]; then
+    curl_args+=(--cacert "${HCDR_PLATFORM_CA_FILE}")
+  else
+    curl_args+=(--insecure)
+  fi
+  DATABASE_SCHEMA_VERSION="$(find "${SCRIPT_DIR}/../../platform/backend/internal/migrations/sql" -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort | tail -n 1 | cut -d_ -f1)"
+  [[ -n "${DATABASE_SCHEMA_VERSION}" ]] || die "failed to determine database schema version"
+  curl "${curl_args[@]}" --data "{\"version\":\"${VERSION}\",\"databaseSchemaVersion\":\"${DATABASE_SCHEMA_VERSION}\",\"minimumAgentVersion\":\"v20260721.4\",\"rollbackSupported\":true,\"releaseNotes\":\"HyperCDR platform ${VERSION}\"}" >/dev/null
+  log "Candidate release registered: ${VERSION}"
+
+  log "Registering comm-agent candidate ${VERSION} with ${PLATFORM_URL}"
+  component_curl_args=(-fsS --max-time 30 -X POST "${PLATFORM_URL%/}/api/v1/component-releases" -H "Content-Type: application/json" -H "X-HyperCDR-Release-Token: ${RELEASE_TOKEN}")
+  if [[ -n "${HCDR_PLATFORM_CA_FILE:-}" ]]; then
+    component_curl_args+=(--cacert "${HCDR_PLATFORM_CA_FILE}")
+  else
+    component_curl_args+=(--insecure)
+  fi
+  curl "${component_curl_args[@]}" --data "{\"component\":\"comm-agent\",\"version\":\"${VERSION}\",\"image\":\"${REGISTRY}/comm-agent:${VERSION}\",\"releaseNotes\":\"HyperCDR Comm Agent ${VERSION}\"}" >/dev/null
+  log "Comm-agent candidate registered: ${VERSION}"
+fi
 
 cat <<EOF
 

@@ -5,6 +5,40 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHART_DIR="${SCRIPT_DIR}/charts/hypercdr-platform"
 RELEASE_NAME="${RELEASE_NAME:-hypercdr}"
 
+install_header() {
+  printf '\n============================================================\n'
+  printf ' HyperCDR Control Plane Installation\n'
+  printf '============================================================\n'
+}
+
+install_step() {
+  printf '\n[%s/%s] %s\n' "$1" "$2" "$3"
+}
+
+install_ok() {
+  printf '      OK  %s\n' "$1"
+}
+
+install_fail() {
+  printf '  FAILED  %s\n' "$1" >&2
+}
+
+run_logged() {
+  local label="$1"
+  shift
+  local output_file
+  output_file="$(mktemp)"
+  if "$@" >"${output_file}" 2>&1; then
+    rm -f "${output_file}"
+    install_ok "${label}"
+    return 0
+  fi
+  install_fail "${label}"
+  sed 's/^/          /' "${output_file}" >&2
+  rm -f "${output_file}"
+  return 1
+}
+
 usage() {
   cat <<'USAGE'
 HyperCDR control plane bootstrap installer
@@ -16,8 +50,10 @@ Usage:
 Kubernetes options:
   --kubeconfig PATH            Optional kubeconfig path for kubectl and helm
   --namespace NAME             Namespace for the control plane, default: hypercdr-system
-  --public-base-url URL        URL users and agents will use, for example https://NODE_IP:NODE_PORT
-  --registry REGISTRY          Harbor project prefix, required. Example: 192.168.8.149:5001/hypercdr
+  --public-base-url URL        Container DR control plane URL used by users and agents
+  --registry REGISTRY          Harbor registry and project, required. Example: 192.168.8.149:5001/hypercdr
+  --registry-trust MODE        system (default) or private-ca
+  --registry-ca-file PATH      PEM CA certificate, required for private-ca
   --image-tag TAG              Platform/agent image tag, default v20260714.5.
   --storage-class NAME         StorageClass for bundled PostgreSQL PVC, default: longhorn
   --database-mode MODE         bundled or external, default: bundled
@@ -27,9 +63,11 @@ Kubernetes options:
   --execute                    Run helm commands. Without this flag, prints and validates the plan only.
 
 Docker options:
-  --public-base-url URL        URL users and agents will use, for example https://HOST_IP:3002
-  --data-dir PATH              Persistent data directory, default: /data/hypercdr/deploy
-  --registry REGISTRY          Harbor project prefix, required. Example: 192.168.8.149:5001/hypercdr
+  --public-base-url URL        Container DR control plane URL used by users and agents
+  --data-dir PATH              Persistent data directory, default: /var/lib/hypercdr
+  --registry REGISTRY          Harbor registry and project, required. Example: 192.168.8.149:5001/hypercdr
+  --registry-trust MODE        system (default) or private-ca
+  --registry-ca-file PATH      PEM CA certificate, required for private-ca
   --image-tag TAG              Platform/agent image tag, default v20260714.5.
   --velero-image IMAGE         Velero image, default <registry>/velero:v1.17.1-hcdr.1-20260716.
   --velero-aws-plugin-image IMAGE
@@ -58,11 +96,13 @@ namespace="hypercdr-system"
 kubeconfig=""
 public_base_url=""
 registry=""
+registry_trust="system"
+registry_ca_file=""
 storage_class="longhorn"
 database_mode="bundled"
 node_port=""
 secret_key="dev-secret-change-me"
-data_dir="/data/hypercdr/deploy"
+data_dir="/var/lib/hypercdr"
 http_port=""
 api_port="18080"
 image_tag="${HCDR_IMAGE_TAG:-v20260714.5}"
@@ -79,6 +119,8 @@ while [[ $# -gt 0 ]]; do
     --namespace) namespace="${2:?missing value for --namespace}"; shift 2 ;;
     --public-base-url) public_base_url="${2:?missing value for --public-base-url}"; shift 2 ;;
     --registry) registry="${2:?missing value for --registry}"; shift 2 ;;
+    --registry-trust) registry_trust="${2:?missing value for --registry-trust}"; shift 2 ;;
+    --registry-ca-file) registry_ca_file="${2:?missing value for --registry-ca-file}"; shift 2 ;;
     --image-tag) image_tag="${2:?missing value for --image-tag}"; shift 2 ;;
     --velero-image) velero_image="${2:?missing value for --velero-image}"; shift 2 ;;
     --velero-aws-plugin-image) velero_aws_plugin_image="${2:?missing value for --velero-aws-plugin-image}"; shift 2 ;;
@@ -107,6 +149,20 @@ if [[ -z "$registry" ]]; then
   echo "--registry is required" >&2
   exit 2
 fi
+
+case "${registry_trust}" in
+  system)
+    [[ -z "${registry_ca_file}" ]] || { echo "--registry-ca-file requires --registry-trust private-ca" >&2; exit 2; }
+    ;;
+  private-ca)
+    [[ -n "${registry_ca_file}" ]] || { echo "--registry-ca-file is required with --registry-trust private-ca" >&2; exit 2; }
+    [[ -r "${registry_ca_file}" ]] || { echo "registry CA file is not readable: ${registry_ca_file}" >&2; exit 1; }
+    if command -v openssl >/dev/null 2>&1; then
+      openssl x509 -in "${registry_ca_file}" -noout >/dev/null 2>&1 || { echo "registry CA file is not a valid PEM certificate: ${registry_ca_file}" >&2; exit 1; }
+    fi
+    ;;
+  *) echo "--registry-trust must be system or private-ca" >&2; exit 2 ;;
+esac
 
 agent_ws_endpoint="${public_base_url/https:/wss:}"
 agent_ws_endpoint="${agent_ws_endpoint/http:/ws:}/ws/agent"
@@ -138,6 +194,24 @@ require_command() {
   fi
 }
 
+preflight_registry() {
+  require_command curl
+  local normalized="${registry#http://}"
+  normalized="${normalized#https://}"
+  local registry_host="${normalized%%/*}"
+  local curl_args=(-sS -o /dev/null -w "%{http_code}" --connect-timeout 8 --max-time 20)
+  if [[ "${registry_trust}" == "private-ca" ]]; then
+    curl_args+=(--cacert "${registry_ca_file}")
+  fi
+  local status
+  status="$(curl "${curl_args[@]}" "https://${registry_host}/v2/" || true)"
+  case "${status}" in
+    200|401) return 0 ;;
+    000) echo "Unable to establish a trusted TLS connection to ${registry_host}. Check DNS, network, and certificate trust." >&2; exit 1 ;;
+    *) echo "${registry_host} did not return a valid OCI Registry response (HTTP ${status})." >&2; exit 1 ;;
+  esac
+}
+
 print_common() {
   cat <<EOF
 HyperCDR control plane deployment plan
@@ -146,6 +220,8 @@ Release name:         ${RELEASE_NAME}
 Public base URL:      ${public_base_url}
 Agent WebSocket URL:  ${agent_ws_endpoint}
 Image registry:       ${registry}
+Registry trust:       ${registry_trust}
+Registry CA file:     ${registry_ca_file:-"(system trust store)"}
 Default admin:        admin / admin123
 Execute changes:      ${execute}
 EOF
@@ -162,6 +238,7 @@ run_k8s() {
   if [[ "$execute" == "true" ]]; then
     require_command kubectl
     require_command helm
+    preflight_registry
   fi
 
   local tls_enabled="false"
@@ -236,6 +313,8 @@ helm ${helm_args[*]} upgrade --install ${RELEASE_NAME} ${CHART_DIR} \\
   --set-string global.agentWebSocketURL=${agent_ws_endpoint} \\
   --set-string global.imageRegistry=${registry} \\
   --set-string platform.image.tag=${image_tag} \\
+  --set platform.registryCA.enabled=$([[ "${registry_trust}" == "private-ca" ]] && echo true || echo false) \\
+  $([[ "${registry_trust}" == "private-ca" ]] && echo "--set-file platform.registryCA.certificate=${registry_ca_file} \\" || true)
   --set platform.tls.enabled=${tls_enabled} \\
   $([[ "${tls_enabled}" == "true" ]] && echo "--set-file platform.tls.cert=${tls_cert_file} \\" || true)
   $([[ "${tls_enabled}" == "true" ]] && echo "--set-file platform.tls.key=${tls_key_file} \\" || true)
@@ -277,6 +356,11 @@ EOF
     tls_helm_args+=(--set-file "platform.tls.cert=${tls_cert_file}" --set-file "platform.tls.key=${tls_key_file}")
   fi
 
+  registry_ca_helm_args=(--set "platform.registryCA.enabled=false")
+  if [[ "${registry_trust}" == "private-ca" ]]; then
+    registry_ca_helm_args=(--set "platform.registryCA.enabled=true" --set-file "platform.registryCA.certificate=${registry_ca_file}")
+  fi
+
   helm "${helm_args[@]}" upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
     --namespace "${namespace}" \
     --create-namespace \
@@ -285,6 +369,7 @@ EOF
     --set-string "global.agentWebSocketURL=${agent_ws_endpoint}" \
     --set-string "global.imageRegistry=${registry}" \
     --set-string "platform.image.tag=${image_tag}" \
+    "${registry_ca_helm_args[@]}" \
     "${tls_helm_args[@]}" \
     --set "platform.service.nodePort=${node_port}" \
     --set-string "postgresql.mode=${database_mode}" \
@@ -313,13 +398,30 @@ EOF
 
 run_docker() {
   require_command docker
+  require_command openssl
   local tls_enabled="false"
   local tls_dir="${data_dir}/tls"
   local tls_cert_file="${tls_dir}/platform.crt"
   local tls_key_file="${tls_dir}/platform.key"
-  local source_registry_ca_file="${SCRIPT_DIR}/charts/hypercdr-platform/files/registry-ca.crt"
-  local registry_ca_file="${data_dir}/certs/registry-ca.crt"
+  local installed_registry_ca_file="${data_dir}/certs/registry-ca.crt"
   local target_compose_file="${data_dir}/docker-compose.yaml"
+  local postgres_password=""
+  local release_token=""
+  if [[ -f "${data_dir}/.env" ]]; then
+    while IFS='=' read -r key value; do
+      if [[ "${key}" == "HCDR_POSTGRES_PASSWORD" ]]; then postgres_password="${value}"; break; fi
+    done < "${data_dir}/.env"
+    # Compatibility with installations created before the password setting was
+    # introduced. Their initialized database still uses the legacy password.
+    if [[ -z "${postgres_password}" ]]; then postgres_password="hypercdr"; fi
+  else
+    postgres_password="$(openssl rand -hex 24)"
+  fi
+  if [[ -f "${data_dir}/release-token" ]]; then
+    release_token="$(tr -d '\r\n' < "${data_dir}/release-token")"
+  else
+    release_token="$(openssl rand -hex 32)"
+  fi
   local public_host
   public_host="$(extract_host_from_url "$public_base_url")"
   if [[ -z "$http_port" ]]; then
@@ -351,47 +453,66 @@ run_docker() {
     [[ -r "${input_tls_key_file}" ]] || { echo "TLS private key is not readable: ${input_tls_key_file}" >&2; exit 1; }
   fi
 
-  print_common
-  cat <<EOF
-Mode:                 Docker Compose
-Data directory:       ${data_dir}
-HTTPS enabled:        ${tls_enabled}
-Host port:            ${http_port}
-API port:             ${api_port}
-Image tag:            ${image_tag}
-Agent image:          ${registry}/comm-agent:${image_tag}
-Velero image:         ${velero_image}
-Velero AWS plugin:    ${velero_aws_plugin_image}
-TLS cert file:        $([[ "${tls_enabled}" == "true" ]] && echo "${tls_cert_file}" || echo "(disabled)")
-Registry CA file:     ${registry_ca_file}
+  if [[ "$execute" != "true" ]]; then
+    install_header
+    cat <<EOF
+ Mode             Docker Compose
+ Platform URL     ${public_base_url}
+ Image registry   ${registry}
+ Registry trust   ${registry_trust}
+ Release          ${image_tag}
+ Data directory   ${data_dir}
+ Frontend port    ${http_port}
+ API port         ${api_port}
 
-Planned command:
-mkdir -p ${data_dir}/certs
-cp ${SCRIPT_DIR}/compose.yaml ${target_compose_file}
-cp ${source_registry_ca_file} ${registry_ca_file}
-cat > ${data_dir}/.env <<ENV
-HCDR_PUBLIC_BASE_URL=${public_base_url}
-HCDR_AGENT_WS_ENDPOINT=${agent_ws_endpoint}
-HCDR_IMAGE_REGISTRY=${registry}
-HCDR_IMAGE_TAG=${image_tag}
-HCDR_AGENT_IMAGE=${registry}/comm-agent:${image_tag}
-HCDR_VELERO_IMAGE=${velero_image}
-HCDR_VELERO_AWS_PLUGIN_IMAGE=${velero_aws_plugin_image}
-HCDR_DATA_DIR=${data_dir}
-HCDR_FRONTEND_PORT=${http_port}
-HCDR_API_PORT=${api_port}
-HCDR_TLS_ENABLED=${tls_enabled}
-HCDR_TLS_DIR=${tls_dir}
-HCDR_REGISTRY_CA_FILE=${registry_ca_file}
-HCDR_SECRET_KEY=<redacted>
-ENV
-cd ${data_dir}
-docker compose -f docker-compose.yaml up -d
+ Planned stages
+   1. Validate host and registry
+   2. Verify required images
+   3. Prepare persistent configuration
+   4. Prepare platform TLS
+   5. Write runtime settings
+   6. Start and verify control plane
+
+ Dry-run only. Add --execute to start installation.
 EOF
-  if [[ "$execute" == "true" ]]; then
+    return
+  fi
+
+    install_header
+    printf ' Mode             Docker Compose\n'
+    printf ' Platform URL     %s\n' "${public_base_url}"
+    printf ' Image registry   %s\n' "${registry}"
+    printf ' Release          %s\n' "${image_tag}"
+    printf ' Data directory   %s\n' "${data_dir}"
+
+    install_step 1 6 "Validate host and registry"
+    run_logged "Registry connection is trusted" preflight_registry
+
+    install_step 2 6 "Verify required images"
+    for required_image in \
+      "${registry}/platform-api:${image_tag}" \
+      "${registry}/platform-frontend:${image_tag}" \
+      "${registry}/platform-upgrader:${image_tag}" \
+      "${registry}/postgres:16"; do
+      docker manifest inspect "${required_image}" >/dev/null 2>&1 || {
+        install_fail "Required image is unavailable: ${required_image}"
+        exit 1
+      }
+    done
+    install_ok "All required images are available"
+
+    install_step 3 6 "Prepare persistent configuration"
     mkdir -p "${data_dir}/certs"
+    printf '%s\n' "${release_token}" > "${data_dir}/release-token"
+    chmod 600 "${data_dir}/release-token"
     cp "${SCRIPT_DIR}/compose.yaml" "${target_compose_file}"
-    cp "${source_registry_ca_file}" "${registry_ca_file}"
+    if [[ "${registry_trust}" == "private-ca" ]]; then
+      cp "${registry_ca_file}" "${installed_registry_ca_file}"
+      chmod 644 "${installed_registry_ca_file}"
+    fi
+    install_ok "Configuration files are prepared"
+
+    install_step 4 6 "Prepare platform TLS"
     if [[ "${tls_enabled}" == "true" ]]; then
       require_command openssl
       mkdir -p "${tls_dir}"
@@ -412,11 +533,21 @@ EOF
       chmod 600 "${tls_key_file}"
       chmod 644 "${tls_cert_file}"
     fi
+    install_ok "Platform TLS is ready"
+
+    install_step 5 6 "Write runtime settings"
     cat > "${data_dir}/.env" <<EOF
 HCDR_PUBLIC_BASE_URL=${public_base_url}
 HCDR_AGENT_WS_ENDPOINT=${agent_ws_endpoint}
 HCDR_IMAGE_REGISTRY=${registry}
 HCDR_IMAGE_TAG=${image_tag}
+RELEASE_VERSION=${image_tag}
+PLATFORM_API_IMAGE=${registry}/platform-api:${image_tag}
+PLATFORM_FRONTEND_IMAGE=${registry}/platform-frontend:${image_tag}
+PLATFORM_UPGRADER_IMAGE=${registry}/platform-upgrader:${image_tag}
+POSTGRES_IMAGE=${registry}/postgres:16
+HCDR_POSTGRES_PASSWORD=${postgres_password}
+HCDR_DATABASE_URL=postgres://hypercdr:${postgres_password}@hypercdr-postgres:5432/hypercdr?sslmode=disable
 HCDR_AGENT_IMAGE=${registry}/comm-agent:${image_tag}
 HCDR_VELERO_IMAGE=${velero_image}
 HCDR_VELERO_AWS_PLUGIN_IMAGE=${velero_aws_plugin_image}
@@ -425,22 +556,43 @@ HCDR_FRONTEND_PORT=${http_port}
 HCDR_API_PORT=${api_port}
 HCDR_TLS_ENABLED=${tls_enabled}
 HCDR_TLS_DIR=${tls_dir}
-HCDR_REGISTRY_CA_FILE=${registry_ca_file}
+HCDR_REGISTRY_CA_PATH=$([[ "${registry_trust}" == "private-ca" ]] && echo "/etc/hypercdr/registry/ca.crt" || true)
+HCDR_REGISTRY_CA_FILE=$([[ "${registry_trust}" == "private-ca" ]] && echo "${installed_registry_ca_file}" || echo "/dev/null")
 HCDR_SECRET_KEY=${secret_key}
+HCDR_RELEASE_TOKEN=${release_token}
 EOF
-    (cd "${data_dir}" && docker compose -f "${target_compose_file}" up -d)
+    chmod 600 "${data_dir}/.env"
+    install_ok "Runtime settings saved"
+
+    install_step 6 6 "Start and verify control plane"
+    run_logged "Containers started" bash -c 'cd "$1" && docker compose --project-name hypercdr -f "$2" up -d' _ "${data_dir}" "${target_compose_file}"
+    local ready="false"
+    local attempt
+    for attempt in $(seq 1 60); do
+      if curl -kfsS --connect-timeout 2 --max-time 5 "${public_base_url%/}/readyz" >/dev/null 2>&1; then
+        ready="true"
+        break
+      fi
+      sleep 2
+    done
+    if [[ "${ready}" != "true" ]]; then
+      install_fail "Control plane did not become ready within 120 seconds"
+      echo "          Check: cd ${data_dir} && docker compose ps" >&2
+      echo "          Logs:  cd ${data_dir} && docker compose logs --tail=200" >&2
+      exit 1
+    fi
+    install_ok "Control plane is ready"
     cat <<EOF
 
-HyperCDR control plane installed.
+============================================================
+ Installation completed successfully
+============================================================
+ Platform URL      ${public_base_url}
+ Username          admin
+ Initial password  admin123
 
-Access URL:
-  ${public_base_url}
-
-Default administrator:
-  Username: admin
-  Password: admin123
+ Change the initial password after the first sign-in.
 EOF
-  fi
 }
 
 case "$mode" in

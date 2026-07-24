@@ -332,13 +332,16 @@ type AgentUpgradeCommand struct {
 }
 
 type VeleroUpgradeCommand struct {
-	ClusterID      string `json:"clusterId"`
-	Namespace      string `json:"namespace"`
-	Image          string `json:"image"`
-	Version        string `json:"version,omitempty"`
-	ExpectedDigest string `json:"expectedDigest,omitempty"`
-	DeploymentName string `json:"deploymentName,omitempty"`
-	DaemonSetName  string `json:"daemonSetName,omitempty"`
+	ClusterID        string `json:"clusterId"`
+	Namespace        string `json:"namespace"`
+	Image            string `json:"image"`
+	Version          string `json:"version,omitempty"`
+	ExpectedDigest   string `json:"expectedDigest,omitempty"`
+	DeploymentName   string `json:"deploymentName,omitempty"`
+	DaemonSetName    string `json:"daemonSetName,omitempty"`
+	AWSPluginImage   string `json:"awsPluginImage,omitempty"`
+	AzurePluginImage string `json:"azurePluginImage,omitempty"`
+	GCPPluginImage   string `json:"gcpPluginImage,omitempty"`
 }
 
 type UnregisterCommand struct {
@@ -418,6 +421,7 @@ type ProtectionCleanupCommand struct {
 	StorageRepo          string                  `json:"storageRepo,omitempty"`
 	CleanupObjectStorage bool                    `json:"cleanupObjectStorage,omitempty"`
 	RestorePoints        []RetentionRestorePoint `json:"restorePoints,omitempty"`
+	RestoreNames         []string                `json:"restoreNames,omitempty"`
 }
 
 type RestoreCommand struct {
@@ -453,8 +457,11 @@ type StorageSyncCommand struct {
 }
 
 type S3Credentials struct {
-	AccessKey string `json:"accessKey,omitempty"`
-	SecretKey string `json:"secretKey,omitempty"`
+	AccessKey         string `json:"accessKey,omitempty"`
+	SecretKey         string `json:"secretKey,omitempty"`
+	AccountName       string `json:"accountName,omitempty"`
+	AccountKey        string `json:"accountKey,omitempty"`
+	ServiceAccountKey string `json:"serviceAccountKey,omitempty"`
 }
 
 type ExcludeRule struct {

@@ -58,6 +58,21 @@ func TestDynamicManifestApplierCreatesAndUpdatesVeleroBackup(t *testing.T) {
 	}
 }
 
+func TestRestoreObjectPrefix(t *testing.T) {
+	prefix, err := restoreObjectPrefix("hypercdr/clusters/cluster-a", "hcdr-restore-demo-1234")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prefix != "hypercdr/clusters/cluster-a/restores/hcdr-restore-demo-1234/" {
+		t.Fatalf("unexpected restore prefix %q", prefix)
+	}
+	for _, invalid := range []string{"", "../other", "nested/name", ".", ".."} {
+		if _, err := restoreObjectPrefix("hypercdr/clusters/cluster-a", invalid); err == nil {
+			t.Fatalf("expected restore name %q to be rejected", invalid)
+		}
+	}
+}
+
 func TestDynamicManifestApplierAppliesConfigMap(t *testing.T) {
 	client := fake.NewSimpleDynamicClient(runtime.NewScheme())
 	applier := NewDynamicManifestApplierWithClient(client)

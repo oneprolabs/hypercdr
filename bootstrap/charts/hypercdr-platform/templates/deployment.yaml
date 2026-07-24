@@ -48,8 +48,10 @@ spec:
               value: {{ .Values.platform.logLevel | quote }}
             - name: HCDR_FRONTEND_DIR
               value: /opt/hypercdr/frontend
+            {{- if .Values.platform.registryCA.enabled }}
             - name: HCDR_REGISTRY_CA_PATH
               value: /etc/hypercdr/registry/ca.crt
+            {{- end }}
             - name: HCDR_TLS_ENABLED
               value: {{ ternary "true" "false" .Values.platform.tls.enabled | quote }}
             {{- if .Values.platform.tls.enabled }}
@@ -78,7 +80,7 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 3
           volumeMounts:
-            {{- if and .Values.platform.registryCA.enabled (.Files.Get "files/registry-ca.crt") }}
+            {{- if .Values.platform.registryCA.enabled }}
             - name: registry-ca
               mountPath: /etc/hypercdr/registry
               readOnly: true
@@ -91,7 +93,7 @@ spec:
           resources:
             {{- toYaml .Values.platform.resources | nindent 12 }}
       volumes:
-        {{- if and .Values.platform.registryCA.enabled (.Files.Get "files/registry-ca.crt") }}
+        {{- if .Values.platform.registryCA.enabled }}
         - name: registry-ca
           secret:
             secretName: {{ include "hypercdr.fullname" . }}-registry-ca

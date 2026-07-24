@@ -67,14 +67,23 @@ func BuildBackupStorageLocationManifest(input StorageBuildInput) (BackupStorageL
 	}
 
 	config := map[string]string{}
-	if input.Command.Endpoint != "" {
+	typeName := strings.ToLower(strings.TrimSpace(input.Command.Type))
+	isAzure := typeName == "azure"
+	isGCS := typeName == "gcp" || typeName == "gcs" || typeName == "google cloud"
+	if input.Command.Endpoint != "" && !isAzure && !isGCS {
 		config["s3Url"] = normalizeS3URL(input.Command.Endpoint, input.Command.TLSEnabled)
 	}
-	if input.Command.Region != "" {
-		config["region"] = input.Command.Region
+	region := normalizedS3Region(input.Command.Type, input.Command.Region)
+	if region != "" {
+		config["region"] = region
 	}
 	if !input.Command.TLSEnabled {
-		config["insecureSkipTLSVerify"] = "true"
+		if !isAzure && !isGCS {
+			config["insecureSkipTLSVerify"] = "true"
+		}
+	}
+	if isAzure && input.Command.Credentials != nil && input.Command.Credentials.AccountName != "" {
+		config["storageAccount"] = input.Command.Credentials.AccountName
 	}
 	for key, value := range input.Command.Config {
 		if text, ok := value.(string); ok && text != "" {
@@ -130,6 +139,19 @@ func BuildBackupStorageLocationManifest(input StorageBuildInput) (BackupStorageL
 	return manifest, nil
 }
 
+func normalizedS3Region(storageType, region string) string {
+	region = strings.TrimSpace(region)
+	switch strings.ToLower(region) {
+	case "n/a", "na", "-":
+		region = ""
+	}
+	typeName := strings.ToLower(strings.TrimSpace(storageType))
+	if region == "" && (typeName == "s3" || typeName == "s3-compatible" || typeName == "s3 compatible") {
+		return "us-east-1"
+	}
+	return region
+}
+
 func normalizeS3URL(endpoint string, tlsEnabled bool) string {
 	endpoint = strings.TrimSpace(endpoint)
 	if endpoint == "" || strings.Contains(endpoint, "://") {
@@ -151,6 +173,13 @@ func BuildStorageManifests(input StorageBuildInput) (StorageManifests, error) {
 		return manifests, nil
 	}
 	cloudCredentials := awsCredentialsFile(input.Command.Credentials.AccessKey, input.Command.Credentials.SecretKey)
+	typeName := strings.ToLower(strings.TrimSpace(input.Command.Type))
+	if typeName == "azure" {
+		cloudCredentials = azureCredentialsFile(input.Command.Credentials.AccountKey)
+	}
+	if typeName == "gcp" || typeName == "gcs" || typeName == "google cloud" {
+		cloudCredentials = strings.TrimSpace(input.Command.Credentials.ServiceAccountKey)
+	}
 	if cloudCredentials == "" {
 		return manifests, nil
 	}
@@ -174,6 +203,13 @@ func BuildStorageManifests(input StorageBuildInput) (StorageManifests, error) {
 	return manifests, nil
 }
 
+func azureCredentialsFile(accountKey string) string {
+	if strings.TrimSpace(accountKey) == "" {
+		return ""
+	}
+	return "AZURE_STORAGE_ACCOUNT_ACCESS_KEY=" + strings.TrimSpace(accountKey) + "\n"
+}
+
 func awsCredentialsFile(accessKey string, secretKey string) string {
 	if accessKey == "" && secretKey == "" {
 		return ""
@@ -187,7 +223,7 @@ func providerName(value string) string {
 		return "aws"
 	case "azure", "Azure":
 		return "azure"
-	case "gcp", "GCP":
+	case "gcp", "GCP", "gcs", "GCS", "Google Cloud", "google cloud":
 		return "gcp"
 	default:
 		if value == "" {
@@ -196,7 +232,6 @@ func providerName(value string) string {
 		return value
 	}
 }
-
 
 // mapUIStorageConfig translates HyperCDR storage-repository UI config fields
 // into Velero BackupStorageLocation spec.config entries. The first result is

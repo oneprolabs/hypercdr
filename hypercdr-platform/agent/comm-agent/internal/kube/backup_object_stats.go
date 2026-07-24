@@ -341,6 +341,58 @@ func (a *DynamicManifestApplier) DeleteBackupObjectsByNamePrefix(ctx context.Con
 	return []string{fmt.Sprintf("%s (%d objects)", prefix, removed)}, nil
 }
 
+func (a *DynamicManifestApplier) DeleteRestoreObjects(ctx context.Context, namespace string, storageLocation string, restoreNames []string) ([]string, error) {
+	if strings.TrimSpace(namespace) == "" || strings.TrimSpace(storageLocation) == "" {
+		return nil, nil
+	}
+	names := uniqueNonEmptyStrings(restoreNames)
+	if len(names) == 0 {
+		return nil, nil
+	}
+	bsl, err := a.readBackupStorageLocation(ctx, namespace, storageLocation)
+	if err != nil {
+		return nil, err
+	}
+	if bsl.Provider != "" && bsl.Provider != "aws" {
+		return nil, fmt.Errorf("restore object cleanup only supports aws-compatible storage, got %s", bsl.Provider)
+	}
+	creds, err := a.readS3Credentials(ctx, namespace, bsl.Credential)
+	if err != nil {
+		return nil, err
+	}
+	endpoint, secure, err := normalizeObjectStoreEndpoint(bsl.Endpoint, bsl.Secure)
+	if err != nil {
+		return nil, err
+	}
+	client, err := minio.New(endpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(creds.AccessKey, creds.SecretKey, ""),
+		Secure: secure,
+		Region: bsl.Region,
+	})
+	if err != nil {
+		return nil, err
+	}
+	deleted := make([]string, 0, len(names))
+	for _, restoreName := range names {
+		prefix, err := restoreObjectPrefix(bsl.Prefix, restoreName)
+		if err != nil {
+			return deleted, err
+		}
+		removed := int64(0)
+		for object := range client.ListObjects(ctx, bsl.Bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
+			if object.Err != nil {
+				return deleted, object.Err
+			}
+			if err := client.RemoveObject(ctx, bsl.Bucket, object.Key, minio.RemoveObjectOptions{}); err != nil {
+				return deleted, err
+			}
+			removed++
+		}
+		deleted = append(deleted, fmt.Sprintf("%s (%d objects)", prefix, removed))
+	}
+	return deleted, nil
+}
+
 func (a *DynamicManifestApplier) readBackupStorageLocation(ctx context.Context, namespace string, name string) (backupStorageLocationInfo, error) {
 	resource := schema.GroupVersionResource{Group: "velero.io", Version: "v1", Resource: "backupstoragelocations"}
 	item, err := a.client.Resource(resource).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
@@ -462,6 +514,19 @@ func restoreResultsKey(rootPrefix string, restoreName string) string {
 	}
 	parts = append(parts, "restores", restoreName, "restore-"+restoreName+"-results.gz")
 	return strings.Join(parts, "/")
+}
+
+func restoreObjectPrefix(rootPrefix string, restoreName string) (string, error) {
+	restoreName = strings.TrimSpace(restoreName)
+	if restoreName == "" || strings.Contains(restoreName, "/") || restoreName == "." || restoreName == ".." {
+		return "", fmt.Errorf("invalid restore name %q", restoreName)
+	}
+	parts := []string{}
+	if trimmed := strings.Trim(rootPrefix, "/"); trimmed != "" {
+		parts = append(parts, trimmed)
+	}
+	parts = append(parts, "restores", restoreName)
+	return strings.Join(parts, "/") + "/", nil
 }
 
 func kopiaRepositoryPrefix(rootPrefix string, namespace string) string {

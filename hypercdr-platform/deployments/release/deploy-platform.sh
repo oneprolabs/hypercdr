@@ -7,12 +7,14 @@ source "${SCRIPT_DIR}/common.sh"
 
 REGISTRY="${HCDR_IMAGE_REGISTRY:-}"
 HOST="${HCDR_PLATFORM_HOST:-${DEFAULT_HOST}}"
-DEPLOY_DIR="${HCDR_DEPLOY_DIR:-/data/hypercdr/deploy}"
+DEPLOY_DIR="${HCDR_DEPLOY_DIR:-/var/lib/hypercdr}"
 VERSION=""
 EXECUTE="false"
 POSTGRES_IMAGE="${HCDR_POSTGRES_IMAGE:-postgres:16}"
 VELERO_IMAGE="${HCDR_VELERO_IMAGE:-}"
 VELERO_AWS_PLUGIN_IMAGE="${HCDR_VELERO_AWS_PLUGIN_IMAGE:-}"
+VELERO_AZURE_PLUGIN_IMAGE="${HCDR_VELERO_AZURE_PLUGIN_IMAGE:-}"
+VELERO_GCP_PLUGIN_IMAGE="${HCDR_VELERO_GCP_PLUGIN_IMAGE:-}"
 
 usage() {
   cat <<'USAGE'
@@ -24,7 +26,7 @@ Usage:
 Options:
   --registry REGISTRY     Image registry prefix. Required unless HCDR_IMAGE_REGISTRY is set.
   --host HOST             Public platform host, default 192.168.8.149.
-  --deploy-dir DIR        Deploy directory, default /data/hypercdr/deploy.
+  --deploy-dir DIR        Deploy directory, default /var/lib/hypercdr.
   --velero-image IMAGE    Velero image to expose through install.sh.
   --execute               Run docker compose pull/up after rendering files.
   -h, --help              Show help.
@@ -54,6 +56,8 @@ fi
 if [[ -z "${VELERO_AWS_PLUGIN_IMAGE}" ]]; then
   VELERO_AWS_PLUGIN_IMAGE="${REGISTRY}/velero-plugin-for-aws:v1.13.0"
 fi
+if [[ -z "${VELERO_AZURE_PLUGIN_IMAGE}" ]]; then VELERO_AZURE_PLUGIN_IMAGE="${REGISTRY}/velero-plugin-for-microsoft-azure:v1.13.0"; fi
+if [[ -z "${VELERO_GCP_PLUGIN_IMAGE}" ]]; then VELERO_GCP_PLUGIN_IMAGE="${REGISTRY}/velero-plugin-for-gcp:v1.13.0"; fi
 if [[ "${POSTGRES_IMAGE}" == "postgres:16" ]]; then
   POSTGRES_IMAGE="${REGISTRY}/postgres:16"
 fi
@@ -66,10 +70,17 @@ if [[ ! -s "${SECRET_KEY_FILE}" ]]; then
   chmod 600 "${SECRET_KEY_FILE}"
 fi
 SECRET_KEY="$(cat "${SECRET_KEY_FILE}")"
+POSTGRES_PASSWORD_FILE="${DEPLOY_DIR}/postgres_password"
+if [[ ! -s "${POSTGRES_PASSWORD_FILE}" ]]; then
+  openssl rand -hex 24 > "${POSTGRES_PASSWORD_FILE}"
+  chmod 600 "${POSTGRES_PASSWORD_FILE}"
+fi
+POSTGRES_PASSWORD="$(cat "${POSTGRES_PASSWORD_FILE}")"
 
 PLATFORM_API_IMAGE="$(image_ref "${REGISTRY}" platform-api "${VERSION}")"
 PLATFORM_FRONTEND_IMAGE="$(image_ref "${REGISTRY}" platform-frontend "${VERSION}")"
 COMM_AGENT_IMAGE="$(image_ref "${REGISTRY}" comm-agent "${VERSION}")"
+PLATFORM_UPGRADER_IMAGE="$(image_ref "${REGISTRY}" platform-upgrader "${VERSION}")"
 
 log "Rendering ${DEPLOY_DIR}/.env"
 cat >"${DEPLOY_DIR}/.env" <<EOF
@@ -79,9 +90,11 @@ PLATFORM_HOST=${HOST}
 
 PLATFORM_API_IMAGE=${PLATFORM_API_IMAGE}
 PLATFORM_FRONTEND_IMAGE=${PLATFORM_FRONTEND_IMAGE}
+PLATFORM_UPGRADER_IMAGE=${PLATFORM_UPGRADER_IMAGE}
 POSTGRES_IMAGE=${POSTGRES_IMAGE}
 
-HCDR_DATABASE_URL=postgres://hypercdr:hypercdr@hypercdr-postgres:5432/hypercdr?sslmode=disable
+HCDR_POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+HCDR_DATABASE_URL=postgres://hypercdr:${POSTGRES_PASSWORD}@hypercdr-postgres:5432/hypercdr?sslmode=disable
 HCDR_HTTP_ADDR=0.0.0.0:18080
 HCDR_PUBLIC_BASE_URL=http://${HOST}:3002
 HCDR_AGENT_WS_ENDPOINT=ws://${HOST}:3002/ws/agent
@@ -89,11 +102,16 @@ HCDR_IMAGE_REGISTRY=${REGISTRY}
 HCDR_AGENT_IMAGE=${COMM_AGENT_IMAGE}
 HCDR_VELERO_IMAGE=${VELERO_IMAGE}
 HCDR_VELERO_AWS_PLUGIN_IMAGE=${VELERO_AWS_PLUGIN_IMAGE}
+HCDR_VELERO_AZURE_PLUGIN_IMAGE=${VELERO_AZURE_PLUGIN_IMAGE}
+HCDR_VELERO_GCP_PLUGIN_IMAGE=${VELERO_GCP_PLUGIN_IMAGE}
 HCDR_REGISTRY_CA_PATH=/etc/hypercdr/registry-ca.crt
 HCDR_SECRET_KEY=${SECRET_KEY}
 HCDR_TLS_ENABLED=false
 HCDR_LOG_LEVEL=info
+HCDR_DEPLOY_MODE=docker-compose
+HCDR_DEPLOY_DIR=/deploy
 EOF
+chmod 600 "${DEPLOY_DIR}/.env"
 
 log "Rendering ${DEPLOY_DIR}/docker-compose.yaml"
 cat >"${DEPLOY_DIR}/docker-compose.yaml" <<'EOF'
@@ -104,9 +122,7 @@ services:
     environment:
       POSTGRES_DB: hypercdr
       POSTGRES_USER: hypercdr
-      POSTGRES_PASSWORD: hypercdr
-    ports:
-      - "15432:5432"
+      POSTGRES_PASSWORD: ${HCDR_POSTGRES_PASSWORD}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hypercdr -d hypercdr"]
       interval: 5s
@@ -114,6 +130,7 @@ services:
       retries: 20
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
+    restart: unless-stopped
 
   hypercdr-platform-api:
     image: ${PLATFORM_API_IMAGE}
@@ -130,10 +147,14 @@ services:
       HCDR_AGENT_IMAGE: ${HCDR_AGENT_IMAGE}
       HCDR_VELERO_IMAGE: ${HCDR_VELERO_IMAGE}
       HCDR_VELERO_AWS_PLUGIN_IMAGE: ${HCDR_VELERO_AWS_PLUGIN_IMAGE}
+      HCDR_VELERO_AZURE_PLUGIN_IMAGE: ${HCDR_VELERO_AZURE_PLUGIN_IMAGE}
+      HCDR_VELERO_GCP_PLUGIN_IMAGE: ${HCDR_VELERO_GCP_PLUGIN_IMAGE}
       HCDR_REGISTRY_CA_PATH: ${HCDR_REGISTRY_CA_PATH}
       HCDR_SECRET_KEY: ${HCDR_SECRET_KEY}
       HCDR_TLS_ENABLED: ${HCDR_TLS_ENABLED}
       HCDR_LOG_LEVEL: ${HCDR_LOG_LEVEL}
+      HCDR_DEPLOY_MODE: ${HCDR_DEPLOY_MODE}
+      HCDR_DEPLOY_DIR: ${HCDR_DEPLOY_DIR}
     command: ["/bin/sh", "-c", "/usr/local/bin/platform-migrate && exec /usr/local/bin/platform-api"]
     ports:
       - "18080:18080"
@@ -149,6 +170,21 @@ services:
     ports:
       - "3002:3002"
     restart: unless-stopped
+
+  hypercdr-platform-upgrader:
+    image: ${PLATFORM_UPGRADER_IMAGE}
+    container_name: hypercdr-platform-upgrader
+    depends_on:
+      hypercdr-postgres:
+        condition: service_healthy
+    environment:
+      HCDR_DATABASE_URL: ${HCDR_DATABASE_URL}
+      HCDR_DEPLOY_DIR: /deploy
+      HCDR_PLATFORM_HEALTH_URL: http://hypercdr-platform-api:18080/healthz
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./:/deploy
+    restart: unless-stopped
 EOF
 
 cat <<EOF
@@ -161,8 +197,11 @@ Images:
   ${PLATFORM_API_IMAGE}
   ${PLATFORM_FRONTEND_IMAGE}
   ${COMM_AGENT_IMAGE}
+  ${PLATFORM_UPGRADER_IMAGE}
   ${VELERO_IMAGE}
   ${VELERO_AWS_PLUGIN_IMAGE}
+  ${VELERO_AZURE_PLUGIN_IMAGE}
+  ${VELERO_GCP_PLUGIN_IMAGE}
 EOF
 
 if [[ "${EXECUTE}" == "true" ]]; then

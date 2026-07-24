@@ -1,8 +1,13 @@
 package httpserver
 
 import (
+	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
@@ -11,7 +16,9 @@ import (
 	"io"
 	"log/slog"
 	"math/big"
+	"net"
 	"net/http"
+	"net/mail"
 	"net/smtp"
 	"net/url"
 	"os"
@@ -23,6 +30,7 @@ import (
 	"sync"
 	"time"
 
+	"hypercdr-platform/platform/backend/internal/buildinfo"
 	"hypercdr-platform/platform/backend/internal/config"
 	"hypercdr-platform/platform/backend/internal/protocol"
 	"hypercdr-platform/platform/backend/internal/store"
@@ -49,6 +57,8 @@ type Router struct {
 	imageDigests  map[string]imageDigestCacheEntry
 	schedulerOnce sync.Once
 }
+
+type requestUserContextKey struct{}
 
 const (
 	agentPongWait   = 90 * time.Second
@@ -95,7 +105,84 @@ func NewRouter(cfg config.Config, logger *slog.Logger, repo store.Store) http.Ha
 	}
 	router.routes()
 	router.startScheduler()
-	return router.withAccessLog(router.mux)
+	return router.withAccessLog(router.withPlatformAuth(router.withAuditLog(router.mux)))
+}
+
+func (r *Router) withPlatformAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		path := req.URL.Path
+		publicAuth := path == "/api/v1/auth/captcha" || path == "/api/v1/auth/login" || path == "/api/v1/auth/forgot-password" || path == "/api/v1/auth/reset-password" || path == "/api/v1/auth/config"
+		if _, isMemory := r.store.(*store.MemoryStore); isMemory || !strings.HasPrefix(path, "/api/v1/") || publicAuth || path == "/api/v1/agent-tokens/validate" {
+			next.ServeHTTP(w, req)
+			return
+		}
+		pipelineReleaseMutation := req.Method == http.MethodPost && (path == "/api/v1/platform/releases" || path == "/api/v1/component-releases")
+		if pipelineReleaseMutation && validReleaseToken(r.cfg.ReleaseToken, req.Header.Get("X-HyperCDR-Release-Token")) {
+			pipeline := store.User{Email: "release-pipeline", Role: "admin", Status: "active"}
+			next.ServeHTTP(w, req.WithContext(context.WithValue(req.Context(), requestUserContextKey{}, pipeline)))
+			return
+		}
+		header := strings.TrimSpace(req.Header.Get("Authorization"))
+		if !strings.HasPrefix(header, "Bearer ") {
+			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "authentication_required", "message": "Sign in to continue."})
+			return
+		}
+		user, ok, err := r.store.AuthenticatePlatformSession(strings.TrimSpace(strings.TrimPrefix(header, "Bearer ")))
+		if err != nil {
+			r.logger.Error("session authentication failed", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "session_check_failed"})
+			return
+		}
+		if !ok {
+			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "session_expired", "message": "Your session has expired. Sign in again."})
+			return
+		}
+		passwordChangeAllowed := path == "/api/v1/auth/me" || path == "/api/v1/auth/change-password" || path == "/api/v1/auth/logout"
+		if user.MustChangePassword && !passwordChangeAllowed {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "password_change_required", "message": "Change your temporary password before continuing."})
+			return
+		}
+		if requiresAdmin(req) && user.Role != "admin" {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "administrator_required", "message": "Administrator permission is required."})
+			return
+		}
+		if requiresSystemAdmin(req) && !user.SystemAdmin && user.Email != "release-pipeline" {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "system_administrator_required", "message": "System administrator permission is required."})
+			return
+		}
+		next.ServeHTTP(w, req.WithContext(context.WithValue(req.Context(), requestUserContextKey{}, user)))
+	})
+}
+
+func validReleaseToken(expected, provided string) bool {
+	expected = strings.TrimSpace(expected)
+	provided = strings.TrimSpace(provided)
+	if expected == "" || provided == "" || len(expected) != len(provided) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(expected), []byte(provided)) == 1
+}
+
+func requiresAdmin(req *http.Request) bool {
+	p := req.URL.Path
+	if strings.HasPrefix(p, "/api/v1/users") {
+		return true
+	}
+	if req.Method != http.MethodGet && (strings.HasPrefix(p, "/api/v1/platform/releases") || strings.HasPrefix(p, "/api/v1/platform/upgrades") || strings.HasPrefix(p, "/api/v1/component-releases")) {
+		return true
+	}
+	return (strings.Contains(p, "/agent/upgrade") || strings.Contains(p, "/velero/upgrade")) && req.Method == http.MethodPost
+}
+
+func requiresSystemAdmin(req *http.Request) bool {
+	p := req.URL.Path
+	if strings.HasPrefix(p, "/api/v1/tenants") {
+		return true
+	}
+	if strings.HasPrefix(p, "/api/v1/email-settings") {
+		return true
+	}
+	return strings.HasPrefix(p, "/api/v1/platform/releases") || strings.HasPrefix(p, "/api/v1/platform/upgrades") || strings.HasPrefix(p, "/api/v1/component-releases")
 }
 
 type backupTaskRequest struct {
@@ -111,48 +198,179 @@ type backupTaskRequest struct {
 	ExcludedResources       []string            `json:"excludedResources"`
 	IncludeClusterResources bool                `json:"includeClusterResources"`
 	Trigger                 string              `json:"trigger"`
+	RequestedBy             string              `json:"-"`
+}
+
+func requestActor(req *http.Request) string {
+	if user, ok := requestUser(req); ok {
+		return user.Email
+	}
+	return "System"
+}
+
+func tenantVisible(req *http.Request, tenantID string) bool {
+	user, ok := requestUser(req)
+	return !ok || tenantID == user.TenantID
+}
+
+func (r *Router) clusterVisible(req *http.Request, clusterID string) bool {
+	clusters, err := r.store.ListClusters()
+	if err != nil {
+		return false
+	}
+	for _, cluster := range clusters {
+		if cluster.ID == clusterID {
+			return tenantVisible(req, cluster.TenantID)
+		}
+	}
+	return false
+}
+
+func (r *Router) tenantGuard(kind string, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		user, ok := requestUser(req)
+		if !ok {
+			next(w, req)
+			return
+		}
+		id := req.PathValue("id")
+		allowed := false
+		switch kind {
+		case "cluster":
+			items, _ := r.store.ListClusters()
+			for _, item := range items {
+				if item.ID == id && item.TenantID == user.TenantID {
+					allowed = true
+					break
+				}
+			}
+		case "storage":
+			item, found, _ := r.store.GetStorageRepository(id)
+			allowed = found && item.TenantID == user.TenantID
+		case "policy":
+			items, _ := r.store.ListPolicies()
+			for _, item := range items {
+				if item.ID == id && item.TenantID == user.TenantID {
+					allowed = true
+					break
+				}
+			}
+		case "tag":
+			items, _ := r.store.ListTags()
+			for _, item := range items {
+				if item.ID == id && item.TenantID == user.TenantID {
+					allowed = true
+					break
+				}
+			}
+		case "plan":
+			item, found, _ := r.store.GetProtectionPlan(id)
+			allowed = found && item.TenantID == user.TenantID
+		case "application":
+			app, found, _ := r.store.GetApplication(id)
+			if found {
+				clusters, _ := r.store.ListClusters()
+				for _, cluster := range clusters {
+					if cluster.ID == app.ClusterID && cluster.TenantID == user.TenantID {
+						allowed = true
+						break
+					}
+				}
+			}
+		case "task":
+			items, _ := r.store.ListTasks("")
+			for _, item := range items {
+				if item.ID == id && item.TenantID == user.TenantID {
+					allowed = true
+					break
+				}
+			}
+		}
+		if !allowed {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "resource_not_found"})
+			return
+		}
+		next(w, req)
+	}
 }
 
 func (r *Router) routes() {
 	r.mux.HandleFunc("GET /healthz", r.healthz)
 	r.mux.HandleFunc("GET /readyz", r.readyz)
+	r.mux.HandleFunc("GET /api/v1/platform/version", r.platformVersion)
+	r.mux.HandleFunc("GET /api/v1/platform/releases", r.listPlatformReleases)
+	r.mux.HandleFunc("GET /api/v1/platform/releases/discover", r.discoverPlatformReleases)
+	r.mux.HandleFunc("POST /api/v1/platform/releases", r.createPlatformRelease)
+	r.mux.HandleFunc("POST /api/v1/platform/releases/{id}/activate", r.activatePlatformRelease)
+	r.mux.HandleFunc("GET /api/v1/platform/upgrades", r.listPlatformUpgrades)
+	r.mux.HandleFunc("GET /api/v1/platform/upgrades/precheck", r.precheckPlatformUpgrade)
+	r.mux.HandleFunc("POST /api/v1/platform/upgrades", r.createPlatformUpgrade)
 	r.mux.HandleFunc("GET /api/v1/auth/captcha", r.createCaptcha)
 	r.mux.HandleFunc("POST /api/v1/auth/login", r.login)
-	r.mux.HandleFunc("GET /api/v1/auth/config", r.authConfig)
-	r.mux.HandleFunc("POST /api/v1/auth/register", r.registerUser)
 	r.mux.HandleFunc("POST /api/v1/auth/forgot-password", r.forgotPassword)
 	r.mux.HandleFunc("POST /api/v1/auth/reset-password", r.resetPassword)
-	r.mux.HandleFunc("GET /api/v1/auth/google/start", r.googleStart)
-	r.mux.HandleFunc("GET /api/v1/auth/google/callback", r.googleCallback)
+	r.mux.HandleFunc("GET /api/v1/auth/config", r.authConfig)
+	r.mux.HandleFunc("POST /api/v1/auth/logout", r.logout)
+	r.mux.HandleFunc("GET /api/v1/auth/me", r.currentUser)
+	r.mux.HandleFunc("GET /api/v1/audit-logs", r.listAuditLogs)
+	r.mux.HandleFunc("PATCH /api/v1/auth/me", r.updateCurrentUser)
+	r.mux.HandleFunc("POST /api/v1/auth/change-password", r.changeOwnPassword)
+	r.mux.HandleFunc("GET /api/v1/users", r.listUsers)
+	r.mux.HandleFunc("POST /api/v1/users", r.createUser)
+	r.mux.HandleFunc("PATCH /api/v1/users/{id}", r.updateUser)
+	r.mux.HandleFunc("DELETE /api/v1/users/{id}", r.deleteUser)
+	r.mux.HandleFunc("POST /api/v1/users/{id}/password", r.resetUserPassword)
+	r.mux.HandleFunc("GET /api/v1/tenants", r.listTenants)
+	r.mux.HandleFunc("POST /api/v1/tenants", r.createTenant)
+	r.mux.HandleFunc("GET /api/v1/tenants/{id}", r.getTenant)
+	r.mux.HandleFunc("PATCH /api/v1/tenants/{id}", r.updateTenant)
+	r.mux.HandleFunc("DELETE /api/v1/tenants/{id}", r.deleteTenant)
+	r.mux.HandleFunc("GET /api/v1/email-settings", r.getEmailSettings)
+	r.mux.HandleFunc("PUT /api/v1/email-settings", r.updateEmailSettings)
+	r.mux.HandleFunc("POST /api/v1/email-settings/test", r.testEmailSettings)
 	r.mux.HandleFunc("GET /api/v1/clusters", r.listClusters)
-	r.mux.HandleFunc("PATCH /api/v1/clusters/{id}", r.updateCluster)
-	r.mux.HandleFunc("DELETE /api/v1/clusters/{id}", r.deleteCluster)
-	r.mux.HandleFunc("POST /api/v1/clusters/{id}/default", r.setDefaultCluster)
-	r.mux.HandleFunc("POST /api/v1/clusters/{id}/force-cleanup", r.forceCleanupCluster)
-	r.mux.HandleFunc("POST /api/v1/clusters/{id}/unregister", r.unregisterCluster)
-	r.mux.HandleFunc("POST /api/v1/clusters/{id}/agent/upgrade", r.upgradeClusterAgent)
-	r.mux.HandleFunc("POST /api/v1/clusters/{id}/velero/upgrade", r.upgradeClusterVelero)
-	r.mux.HandleFunc("POST /api/v1/clusters/{id}/inventory/request", r.requestClusterInventory)
-	r.mux.HandleFunc("GET /api/v1/clusters/{id}/inventory/requests/{requestId}", r.getClusterInventoryRequest)
+	r.mux.HandleFunc("PATCH /api/v1/clusters/{id}", r.tenantGuard("cluster", r.updateCluster))
+	r.mux.HandleFunc("DELETE /api/v1/clusters/{id}", r.tenantGuard("cluster", r.deleteCluster))
+	r.mux.HandleFunc("POST /api/v1/clusters/{id}/default", r.tenantGuard("cluster", r.setDefaultCluster))
+	r.mux.HandleFunc("POST /api/v1/clusters/{id}/force-cleanup", r.tenantGuard("cluster", r.forceCleanupCluster))
+	r.mux.HandleFunc("GET /api/v1/clusters/{id}/unregister/precheck", r.tenantGuard("cluster", r.precheckUnregisterCluster))
+	r.mux.HandleFunc("POST /api/v1/clusters/{id}/unregister", r.tenantGuard("cluster", r.unregisterCluster))
+	r.mux.HandleFunc("POST /api/v1/clusters/{id}/agent/upgrade", r.tenantGuard("cluster", r.upgradeClusterAgent))
+	r.mux.HandleFunc("POST /api/v1/clusters/{id}/velero/upgrade", r.tenantGuard("cluster", r.upgradeClusterVelero))
+	r.mux.HandleFunc("GET /api/v1/component-releases", r.listComponentReleases)
+	r.mux.HandleFunc("POST /api/v1/component-releases", r.createComponentRelease)
+	r.mux.HandleFunc("POST /api/v1/component-releases/{id}/activate", r.activateComponentRelease)
+	r.mux.HandleFunc("GET /api/v1/component-releases/discover", r.discoverComponentReleases)
+	r.mux.HandleFunc("POST /api/v1/clusters/{id}/inventory/request", r.tenantGuard("cluster", r.requestClusterInventory))
+	r.mux.HandleFunc("GET /api/v1/clusters/{id}/inventory/requests/{requestId}", r.tenantGuard("cluster", r.getClusterInventoryRequest))
 	r.mux.HandleFunc("GET /api/v1/applications", r.listApplications)
-	r.mux.HandleFunc("PATCH /api/v1/applications/{id}", r.updateApplication)
+	r.mux.HandleFunc("PATCH /api/v1/applications/{id}", r.tenantGuard("application", r.updateApplication))
+	r.mux.HandleFunc("PUT /api/v1/applications/{id}/tags", r.tenantGuard("application", r.setApplicationTags))
+	r.mux.HandleFunc("GET /api/v1/tags", r.listTags)
+	r.mux.HandleFunc("POST /api/v1/tags", r.createTag)
+	r.mux.HandleFunc("PATCH /api/v1/tags/{id}", r.tenantGuard("tag", r.updateTag))
+	r.mux.HandleFunc("DELETE /api/v1/tags/{id}", r.tenantGuard("tag", r.deleteTag))
 	r.mux.HandleFunc("GET /api/v1/storage-repositories", r.listStorageRepositories)
 	r.mux.HandleFunc("POST /api/v1/storage-repositories", r.createStorageRepository)
+	r.mux.HandleFunc("PATCH /api/v1/storage-repositories/{id}", r.tenantGuard("storage", r.updateStorageRepository))
+	r.mux.HandleFunc("DELETE /api/v1/storage-repositories/{id}", r.tenantGuard("storage", r.deleteStorageRepository))
 	r.mux.HandleFunc("POST /api/v1/storage-repositories/test", r.testStorageRepositoryDraft)
-	r.mux.HandleFunc("POST /api/v1/storage-repositories/{id}/sync", r.syncStorageRepository)
-	r.mux.HandleFunc("POST /api/v1/storage-repositories/{id}/test", r.testStorageRepository)
+	r.mux.HandleFunc("POST /api/v1/storage-repositories/{id}/sync", r.tenantGuard("storage", r.syncStorageRepository))
+	r.mux.HandleFunc("POST /api/v1/storage-repositories/{id}/test", r.tenantGuard("storage", r.testStorageRepository))
 	r.mux.HandleFunc("GET /api/v1/policies", r.listPolicies)
 	r.mux.HandleFunc("POST /api/v1/policies", r.createPolicy)
+	r.mux.HandleFunc("PATCH /api/v1/policies/{id}", r.tenantGuard("policy", r.updatePolicy))
+	r.mux.HandleFunc("DELETE /api/v1/policies/{id}", r.tenantGuard("policy", r.deletePolicy))
 	r.mux.HandleFunc("GET /api/v1/protection-plans", r.listProtectionPlans)
 	r.mux.HandleFunc("POST /api/v1/protection-plans", r.createProtectionPlan)
-	r.mux.HandleFunc("POST /api/v1/protection-plans/{id}/activate", r.activateProtectionPlan)
-	r.mux.HandleFunc("POST /api/v1/protection-plans/{id}/storage/reconfigure", r.reconfigureProtectionPlanStorage)
-	r.mux.HandleFunc("DELETE /api/v1/protection-plans/{id}", r.deleteProtectionPlan)
+	r.mux.HandleFunc("POST /api/v1/protection-plans/{id}/activate", r.tenantGuard("plan", r.activateProtectionPlan))
+	r.mux.HandleFunc("POST /api/v1/protection-plans/{id}/storage/reconfigure", r.tenantGuard("plan", r.reconfigureProtectionPlanStorage))
+	r.mux.HandleFunc("DELETE /api/v1/protection-plans/{id}", r.tenantGuard("plan", r.deleteProtectionPlan))
 	r.mux.HandleFunc("GET /api/v1/restore-points", r.listRestorePoints)
 	r.mux.HandleFunc("POST /api/v1/restore-points/delete", r.deleteRestorePoints)
 	r.mux.HandleFunc("GET /api/v1/tasks", r.listTasks)
-	r.mux.HandleFunc("GET /api/v1/tasks/{id}/events", r.listTaskEvents)
-	r.mux.HandleFunc("POST /api/v1/tasks/{id}/cancel", r.cancelTask)
+	r.mux.HandleFunc("GET /api/v1/tasks/{id}/events", r.tenantGuard("task", r.listTaskEvents))
+	r.mux.HandleFunc("POST /api/v1/tasks/{id}/cancel", r.tenantGuard("task", r.cancelTask))
 	r.mux.HandleFunc("POST /api/v1/tasks/backup", r.createBackupTask)
 	r.mux.HandleFunc("POST /api/v1/tasks/restore", r.createRestoreTask)
 	r.mux.HandleFunc("POST /api/v1/tasks/drill", r.createDrillTask)
@@ -167,6 +385,159 @@ func (r *Router) routes() {
 	if strings.TrimSpace(r.cfg.FrontendDir) != "" {
 		r.mux.HandleFunc("GET /", r.frontend)
 	}
+}
+
+type auditResponseWriter struct {
+	http.ResponseWriter
+	status int
+	body   bytes.Buffer
+}
+
+func (w *auditResponseWriter) WriteHeader(status int) {
+	if w.status == 0 {
+		w.status = status
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *auditResponseWriter) Write(body []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	if w.body.Len() < 64*1024 {
+		remaining := 64*1024 - w.body.Len()
+		if len(body) < remaining {
+			remaining = len(body)
+		}
+		_, _ = w.body.Write(body[:remaining])
+	}
+	return w.ResponseWriter.Write(body)
+}
+
+func (r *Router) withAuditLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		user, authenticated := requestUser(req)
+		if !authenticated || !isAuditedMutation(req) {
+			next.ServeHTTP(w, req)
+			return
+		}
+		action, resourceType, pathResourceID, recognized := auditOperation(req)
+		if !recognized {
+			next.ServeHTTP(w, req)
+			return
+		}
+		recorder := &auditResponseWriter{ResponseWriter: w}
+		next.ServeHTTP(recorder, req)
+		status := recorder.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		response := map[string]any{}
+		_ = json.Unmarshal(recorder.body.Bytes(), &response)
+		resourceID := auditResponseString(response, "id")
+		if resourceID == "" {
+			resourceID = pathResourceID
+		}
+		resourceName := auditResponseString(response, "name")
+		if resourceName == "" {
+			resourceName = auditResponseString(response, "displayName")
+		}
+		if resourceName == "" {
+			resourceName = auditResponseString(response, "email")
+		}
+		if payload, ok := response["payload"].(map[string]any); ok && resourceName == "" {
+			resourceName = auditResponseString(payload, "sourceNamespace")
+		}
+		result := "Success"
+		message := auditResponseString(response, "message")
+		if status >= http.StatusBadRequest {
+			result = "Failed"
+			if message == "" {
+				message = auditResponseString(response, "error")
+			}
+		}
+		_, err := r.store.CreateAuditLog(store.AuditLogInput{ActorID: user.ID, Actor: user.Email, Action: action, ResourceType: resourceType, ResourceID: validAuditUUID(resourceID), ResourceName: resourceName, Result: result, Message: message, Payload: map[string]any{"httpStatus": status}})
+		if err != nil {
+			r.logger.Error("write audit log failed", "error", err, "action", action, "actor", user.Email)
+		}
+	})
+}
+
+func isAuditedMutation(req *http.Request) bool {
+	if req.Method != http.MethodPost && req.Method != http.MethodPatch && req.Method != http.MethodPut && req.Method != http.MethodDelete {
+		return false
+	}
+	path := req.URL.Path
+	return path != "/api/v1/auth/login" && !strings.HasPrefix(path, "/api/v1/agent-tokens") && !strings.HasPrefix(path, "/api/v1/audit-logs")
+}
+
+func auditOperation(req *http.Request) (string, string, string, bool) {
+	path := req.URL.Path
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	resourceType, resourceID := "Platform", ""
+	if len(parts) >= 3 {
+		resourceType = strings.ReplaceAll(parts[2], "-", " ")
+	}
+	if len(parts) >= 4 {
+		resourceID = parts[3]
+	}
+	action := map[string]string{
+		"POST /api/v1/auth/logout": "Sign Out", "PATCH /api/v1/auth/me": "Update Profile", "POST /api/v1/auth/change-password": "Change Password",
+		"POST /api/v1/users": "Create User", "PATCH /api/v1/users": "Update User", "DELETE /api/v1/users": "Delete User", "POST /api/v1/users/password": "Reset User Password",
+		"PATCH /api/v1/clusters": "Update Cluster", "DELETE /api/v1/clusters": "Delete Cluster", "POST /api/v1/clusters/default": "Set Default Cluster", "POST /api/v1/clusters/force-cleanup": "Force Clean Cluster", "POST /api/v1/clusters/unregister": "Unregister Cluster", "POST /api/v1/clusters/agent/upgrade": "Upgrade Comm Agent", "POST /api/v1/clusters/velero/upgrade": "Upgrade Velero Agent", "POST /api/v1/clusters/inventory/request": "Refresh Cluster Inventory",
+		"PATCH /api/v1/applications": "Update Application", "PUT /api/v1/applications/tags": "Update Application Tags",
+		"POST /api/v1/tags": "Create Tag", "PATCH /api/v1/tags": "Update Tag", "DELETE /api/v1/tags": "Delete Tag",
+		"POST /api/v1/storage-repositories": "Create Storage", "PATCH /api/v1/storage-repositories": "Update Storage", "DELETE /api/v1/storage-repositories": "Delete Storage", "POST /api/v1/storage-repositories/test": "Test Storage Connection", "POST /api/v1/storage-repositories/sync": "Sync Storage",
+		"POST /api/v1/policies": "Create Policy", "PATCH /api/v1/policies": "Update Policy", "DELETE /api/v1/policies": "Delete Policy",
+		"POST /api/v1/protection-plans": "Create DR Configuration", "POST /api/v1/protection-plans/storage/reconfigure": "Reconfigure DR Storage", "DELETE /api/v1/protection-plans": "Delete DR Configuration",
+		"POST /api/v1/restore-points/delete": "Delete Restore Point", "POST /api/v1/tasks/cancel": "Cancel Task", "POST /api/v1/tasks/backup": "Start Sync", "POST /api/v1/tasks/restore": "Start Restore", "POST /api/v1/tasks/drill": "Start Drill", "POST /api/v1/tasks/takeover": "Start Takeover",
+		"POST /api/v1/component-releases": "Register Component Version", "POST /api/v1/component-releases/activate": "Publish Component Version", "POST /api/v1/platform/releases": "Register Platform Version", "POST /api/v1/platform/releases/activate": "Publish Platform Version", "POST /api/v1/platform/upgrades": "Start Platform Upgrade",
+	}
+	normalized := make([]string, 0, len(parts))
+	for _, segment := range parts {
+		if validAuditUUID(segment) == "" {
+			normalized = append(normalized, segment)
+		}
+	}
+	lookup := req.Method + " /" + strings.Join(normalized, "/")
+	if value := action[lookup]; value != "" {
+		return value, strings.Title(resourceType), resourceID, true
+	}
+	return "", "", "", false
+}
+
+func auditResponseString(values map[string]any, key string) string {
+	if value, ok := values[key].(string); ok {
+		return strings.TrimSpace(value)
+	}
+	return ""
+}
+
+func validAuditUUID(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) == 36 && strings.Count(value, "-") == 4 {
+		return value
+	}
+	return ""
+}
+
+func (r *Router) listAuditLogs(w http.ResponseWriter, req *http.Request) {
+	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(req.URL.Query().Get("offset"))
+	items, err := r.store.ListAuditLogs(limit, offset)
+	if err != nil {
+		r.logger.Error("list audit logs failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_audit_logs_failed"})
+		return
+	}
+	visible := items[:0]
+	for _, item := range items {
+		if tenantVisible(req, item.TenantID) {
+			visible = append(visible, item)
+		}
+	}
+	items = visible
+	writeJSON(w, http.StatusOK, map[string]any{"items": nonNilSlice(items)})
 }
 
 func (r *Router) healthz(w http.ResponseWriter, req *http.Request) {
@@ -185,6 +556,233 @@ func (r *Router) readyz(w http.ResponseWriter, req *http.Request) {
 		"status":      status,
 		"databaseSet": r.cfg.DatabaseURL != "",
 	})
+}
+
+func (r *Router) platformVersion(w http.ResponseWriter, req *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"version": buildinfo.Version, "gitCommit": buildinfo.GitCommit, "buildTime": buildinfo.BuildTime,
+		"databaseSchemaVersion": buildinfo.SchemaVersion, "deployMode": r.cfg.DeployMode,
+	})
+}
+
+func (r *Router) listPlatformReleases(w http.ResponseWriter, req *http.Request) {
+	items, err := r.store.ListPlatformReleases()
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "list_platform_releases_failed"})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": nonNilSlice(items)})
+}
+
+func (r *Router) registryTags(ctx context.Context, image string) (string, string, []string, error) {
+	registry, repository, _, ok := splitContainerImage(image)
+	if !ok {
+		return "", "", nil, fmt.Errorf("invalid image")
+	}
+	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
+	tokenURL := fmt.Sprintf("https://%s/service/token?service=harbor-registry&scope=repository:%s:pull", registry, repository)
+	tokenReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, tokenURL, nil)
+	tokenResp, err := client.Do(tokenReq)
+	if err != nil {
+		return "", "", nil, err
+	}
+	defer tokenResp.Body.Close()
+	var tokenBody struct {
+		Token string `json:"token"`
+	}
+	if tokenResp.StatusCode >= 300 || json.NewDecoder(tokenResp.Body).Decode(&tokenBody) != nil || tokenBody.Token == "" {
+		return "", "", nil, fmt.Errorf("registry token failed")
+	}
+	tagsReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("https://%s/v2/%s/tags/list", registry, repository), nil)
+	tagsReq.Header.Set("Authorization", "Bearer "+tokenBody.Token)
+	tagsResp, err := client.Do(tagsReq)
+	if err != nil {
+		return "", "", nil, err
+	}
+	defer tagsResp.Body.Close()
+	var result struct {
+		Name string   `json:"name"`
+		Tags []string `json:"tags"`
+	}
+	if tagsResp.StatusCode >= 300 || json.NewDecoder(tagsResp.Body).Decode(&result) != nil {
+		return "", "", nil, fmt.Errorf("registry tags failed")
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(result.Tags)))
+	return registry, result.Name, result.Tags, nil
+}
+
+func (r *Router) discoverPlatformReleases(w http.ResponseWriter, req *http.Request) {
+	registry := strings.TrimRight(r.cfg.ImageRegistry, "/")
+	apiImage := registry + "/platform-api:latest"
+	frontendImage := registry + "/platform-frontend:latest"
+	upgraderImage := registry + "/platform-upgrader:latest"
+	_, _, apiTags, err := r.registryTags(req.Context(), apiImage)
+	if err != nil {
+		writeJSON(w, 502, map[string]any{"error": "platform_api_discovery_failed", "message": err.Error()})
+		return
+	}
+	_, _, frontendTags, err := r.registryTags(req.Context(), frontendImage)
+	if err != nil {
+		writeJSON(w, 502, map[string]any{"error": "platform_frontend_discovery_failed", "message": err.Error()})
+		return
+	}
+	_, _, upgraderTags, err := r.registryTags(req.Context(), upgraderImage)
+	if err != nil {
+		writeJSON(w, 502, map[string]any{"error": "platform_upgrader_discovery_failed", "message": err.Error()})
+		return
+	}
+	front := map[string]bool{}
+	for _, tag := range frontendTags {
+		front[tag] = true
+	}
+	upgrader := map[string]bool{}
+	for _, tag := range upgraderTags {
+		upgrader[tag] = true
+	}
+	versions := []string{}
+	for _, tag := range apiTags {
+		if front[tag] && upgrader[tag] {
+			versions = append(versions, tag)
+		}
+	}
+	writeJSON(w, 200, map[string]any{"registry": registry, "versions": versions})
+}
+
+func (r *Router) createPlatformRelease(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Version, DatabaseSchemaVersion, MinimumAgentVersion, ReleaseNotes string
+		RollbackSupported                                                 bool
+	}
+	if decodeJSON(req, &body) != nil || strings.TrimSpace(body.Version) == "" {
+		writeJSON(w, 400, map[string]any{"error": "version_required"})
+		return
+	}
+	registry := strings.TrimRight(r.cfg.ImageRegistry, "/")
+	apiImage := registry + "/platform-api:" + body.Version
+	frontendImage := registry + "/platform-frontend:" + body.Version
+	upgraderImage := registry + "/platform-upgrader:" + body.Version
+	apiDigest, err := r.resolveImageDigest(req.Context(), apiImage)
+	if err != nil {
+		writeJSON(w, 502, map[string]any{"error": "platform_api_image_unavailable", "message": err.Error()})
+		return
+	}
+	frontendDigest, err := r.resolveImageDigest(req.Context(), frontendImage)
+	if err != nil {
+		writeJSON(w, 502, map[string]any{"error": "platform_frontend_image_unavailable", "message": err.Error()})
+		return
+	}
+	if _, err = r.resolveImageDigest(req.Context(), upgraderImage); err != nil {
+		writeJSON(w, 502, map[string]any{"error": "platform_upgrader_image_unavailable", "message": err.Error()})
+		return
+	}
+	schema := strings.TrimSpace(body.DatabaseSchemaVersion)
+	if schema == "" {
+		schema = buildinfo.SchemaVersion
+	}
+	item, err := r.store.UpsertPlatformRelease(store.PlatformReleaseInput{Version: body.Version, APIImage: apiImage, APIImageDigest: apiDigest, FrontendImage: frontendImage, FrontendImageDigest: frontendDigest, DatabaseSchemaVersion: schema, MinimumAgentVersion: body.MinimumAgentVersion, RollbackSupported: body.RollbackSupported, ReleaseNotes: body.ReleaseNotes, Status: "candidate"})
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "create_platform_release_failed"})
+		return
+	}
+	writeJSON(w, 201, item)
+}
+func (r *Router) activatePlatformRelease(w http.ResponseWriter, req *http.Request) {
+	items, err := r.store.ListPlatformReleases()
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "list_platform_releases_failed"})
+		return
+	}
+	id := req.PathValue("id")
+	var selected store.PlatformRelease
+	for _, v := range items {
+		if v.ID == id {
+			selected = v
+		}
+	}
+	if selected.ID == "" {
+		writeJSON(w, 404, map[string]any{"error": "platform_release_not_found"})
+		return
+	}
+	apiDigest, e1 := r.resolveImageDigest(req.Context(), selected.APIImage)
+	frontDigest, e2 := r.resolveImageDigest(req.Context(), selected.FrontendImage)
+	if e1 != nil || e2 != nil || apiDigest != selected.APIImageDigest || frontDigest != selected.FrontendImageDigest {
+		writeJSON(w, 409, map[string]any{"error": "platform_release_images_changed"})
+		return
+	}
+	item, ok, err := r.store.ActivatePlatformRelease(id, "admin")
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "activate_platform_release_failed"})
+		return
+	}
+	if !ok {
+		writeJSON(w, 404, map[string]any{"error": "platform_release_not_found"})
+		return
+	}
+	writeJSON(w, 200, item)
+}
+
+func (r *Router) platformPrecheck(releaseID string) ([]map[string]any, bool, store.PlatformRelease) {
+	items, _ := r.store.ListPlatformReleases()
+	var release store.PlatformRelease
+	for _, v := range items {
+		if v.ID == releaseID {
+			release = v
+		}
+	}
+	clusters, _ := r.store.ListClusters()
+	tasks, _ := r.store.ListTasks("")
+	activeTasks := 0
+	for _, t := range tasks {
+		if !isTerminalTaskStatus(t.Status) {
+			activeTasks++
+		}
+	}
+	offline := 0
+	for _, c := range clusters {
+		if !r.hub.has(c.ID) {
+			offline++
+		}
+	}
+	checks := []map[string]any{{"id": "release", "label": "Release package is registered", "passed": release.ID != ""}, {"id": "mode", "label": "Formal deployment mode", "passed": r.cfg.DeployMode != "development", "detail": r.cfg.DeployMode}, {"id": "tasks", "label": "No active DR tasks", "passed": activeTasks == 0, "detail": activeTasks}, {"id": "agents", "label": "All registered agents are online", "passed": offline == 0, "detail": offline}, {"id": "version", "label": "Target differs from running version", "passed": release.Version != "" && release.Version != buildinfo.Version}}
+	passed := true
+	for _, c := range checks {
+		if ok, _ := c["passed"].(bool); !ok {
+			passed = false
+		}
+	}
+	return checks, passed, release
+}
+func (r *Router) precheckPlatformUpgrade(w http.ResponseWriter, req *http.Request) {
+	checks, passed, _ := r.platformPrecheck(req.URL.Query().Get("releaseId"))
+	writeJSON(w, 200, map[string]any{"passed": passed, "checks": checks, "currentVersion": buildinfo.Version})
+}
+func (r *Router) listPlatformUpgrades(w http.ResponseWriter, req *http.Request) {
+	items, err := r.store.ListPlatformUpgradeJobs()
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "list_platform_upgrades_failed"})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": nonNilSlice(items)})
+}
+func (r *Router) createPlatformUpgrade(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		ReleaseID string `json:"releaseId"`
+	}
+	if decodeJSON(req, &body) != nil {
+		writeJSON(w, 400, map[string]any{"error": "invalid_json"})
+		return
+	}
+	checks, passed, release := r.platformPrecheck(body.ReleaseID)
+	if !passed {
+		writeJSON(w, 409, map[string]any{"error": "platform_precheck_failed", "checks": checks})
+		return
+	}
+	job, err := r.store.CreatePlatformUpgradeJob(store.PlatformUpgradeJobInput{Release: release, FromVersion: buildinfo.Version, RequestedBy: "admin"})
+	if err != nil {
+		writeJSON(w, 409, map[string]any{"error": "platform_upgrade_active", "message": err.Error()})
+		return
+	}
+	writeJSON(w, 202, job)
 }
 
 func (r *Router) frontend(w http.ResponseWriter, req *http.Request) {
@@ -252,7 +850,6 @@ func (r *Router) login(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	now := time.Now().UTC()
 	if !r.consumeCaptcha(body.CaptchaID, body.CaptchaCode) {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "captcha_invalid", "message": "Verification code is incorrect"})
 		return
@@ -272,13 +869,456 @@ func (r *Router) login(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	session, err := r.store.CreatePlatformSession(user.ID, time.Hour)
+	if err != nil {
+		r.logger.Error("failed to create platform session", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "session_create_failed"})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"user": user,
 		"session": map[string]any{
-			"token":     "hcs_" + store.NewPublicID() + store.NewPublicID(),
-			"expiresAt": now.Add(time.Hour).Format(time.RFC3339),
+			"token":     session.Token,
+			"expiresAt": session.ExpiresAt.Format(time.RFC3339),
 		},
 	})
+}
+
+func bearerToken(req *http.Request) string {
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(req.Header.Get("Authorization")), "Bearer "))
+}
+func requestUser(req *http.Request) (store.User, bool) {
+	u, ok := req.Context().Value(requestUserContextKey{}).(store.User)
+	return u, ok
+}
+
+func (r *Router) logout(w http.ResponseWriter, req *http.Request) {
+	_ = r.store.DeletePlatformSession(bearerToken(req))
+	writeJSON(w, http.StatusOK, map[string]any{"loggedOut": true})
+}
+func (r *Router) currentUser(w http.ResponseWriter, req *http.Request) {
+	u, ok := requestUser(req)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "authentication_required"})
+		return
+	}
+	writeJSON(w, http.StatusOK, u)
+}
+func (r *Router) updateCurrentUser(w http.ResponseWriter, req *http.Request) {
+	u, ok := requestUser(req)
+	if !ok {
+		return
+	}
+	var body struct {
+		DisplayName string  `json:"displayName"`
+		Email       string  `json:"email"`
+		TimeZone    *string `json:"timeZone"`
+	}
+	if decodeJSON(req, &body) != nil {
+		writeJSON(w, 400, map[string]any{"error": "invalid_json"})
+		return
+	}
+	if strings.TrimSpace(body.Email) == "" {
+		body.Email = u.Email
+	}
+	timeZone := u.TimeZone
+	if body.TimeZone != nil {
+		timeZone = strings.TrimSpace(*body.TimeZone)
+		if timeZone != "" {
+			if _, err := time.LoadLocation(timeZone); err != nil {
+				writeJSON(w, 400, map[string]any{"error": "invalid_time_zone", "message": "Select a valid IANA time zone."})
+				return
+			}
+		}
+	}
+	updated, _, err := r.store.UpdateUser(store.UserUpdateInput{ID: u.ID, TenantID: u.TenantID, Email: body.Email, DisplayName: body.DisplayName, Role: u.Role, Status: u.Status, TimeZone: timeZone})
+	if err != nil {
+		writeJSON(w, 409, map[string]any{"error": "user_update_failed", "message": err.Error()})
+		return
+	}
+	writeJSON(w, 200, updated)
+}
+func (r *Router) changeOwnPassword(w http.ResponseWriter, req *http.Request) {
+	u, ok := requestUser(req)
+	if !ok {
+		return
+	}
+	var body struct{ CurrentPassword, NewPassword string }
+	if decodeJSON(req, &body) != nil || !validUserPassword(body.NewPassword) {
+		writeJSON(w, 400, map[string]any{"error": "password_invalid", "message": "Password must be 8 to 128 characters."})
+		return
+	}
+	if body.CurrentPassword == body.NewPassword {
+		writeJSON(w, 400, map[string]any{"error": "password_unchanged", "message": "New password must be different from the temporary password."})
+		return
+	}
+	if _, valid, _ := r.store.AuthenticateUser(store.UserAuthInput{Email: u.Email, Password: body.CurrentPassword}); !valid {
+		writeJSON(w, 400, map[string]any{"error": "current_password_invalid", "message": "Current password is incorrect."})
+		return
+	}
+	updated, found, err := r.store.SetUserPassword(u.ID, body.NewPassword, false)
+	if err != nil || !found {
+		writeJSON(w, 500, map[string]any{"error": "password_update_failed"})
+		return
+	}
+	writeJSON(w, 200, updated)
+}
+
+func (r *Router) listUsers(w http.ResponseWriter, req *http.Request) {
+	items, err := r.store.ListUsers()
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "list_users_failed"})
+		return
+	}
+	if actor, ok := requestUser(req); ok && !actor.SystemAdmin {
+		filtered := make([]store.User, 0, len(items))
+		for _, item := range items {
+			if item.TenantID == actor.TenantID && !item.SystemAdmin {
+				filtered = append(filtered, item)
+			}
+		}
+		items = filtered
+	}
+	writeJSON(w, 200, map[string]any{"items": nonNilSlice(items)})
+}
+
+func (r *Router) listTenants(w http.ResponseWriter, req *http.Request) {
+	items, err := r.store.ListTenants()
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "list_tenants_failed"})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": nonNilSlice(items)})
+}
+func (r *Router) getTenant(w http.ResponseWriter, req *http.Request) {
+	item, found, err := r.store.GetTenant(req.PathValue("id"))
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "get_tenant_failed"})
+		return
+	}
+	if !found {
+		writeJSON(w, 404, map[string]any{"error": "tenant_not_found"})
+		return
+	}
+	writeJSON(w, 200, item)
+}
+func (r *Router) createTenant(w http.ResponseWriter, req *http.Request) {
+	var body store.TenantInput
+	if decodeJSON(req, &body) != nil || strings.TrimSpace(body.Name) == "" {
+		writeJSON(w, 400, map[string]any{"error": "tenant_name_required"})
+		return
+	}
+	item, err := r.store.CreateTenant(body)
+	if err != nil {
+		writeJSON(w, 409, map[string]any{"error": "create_tenant_failed", "message": err.Error()})
+		return
+	}
+	writeJSON(w, 201, item)
+}
+func (r *Router) updateTenant(w http.ResponseWriter, req *http.Request) {
+	var body store.TenantInput
+	if decodeJSON(req, &body) != nil || strings.TrimSpace(body.Name) == "" {
+		writeJSON(w, 400, map[string]any{"error": "tenant_name_required"})
+		return
+	}
+	item, found, err := r.store.UpdateTenant(req.PathValue("id"), body)
+	if err != nil {
+		writeJSON(w, 409, map[string]any{"error": "update_tenant_failed", "message": err.Error()})
+		return
+	}
+	if !found {
+		writeJSON(w, 404, map[string]any{"error": "tenant_not_found"})
+		return
+	}
+	writeJSON(w, 200, item)
+}
+func (r *Router) deleteTenant(w http.ResponseWriter, req *http.Request) {
+	deleted, inUse, err := r.store.DeleteTenant(req.PathValue("id"))
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "delete_tenant_failed"})
+		return
+	}
+	if inUse {
+		writeJSON(w, 409, map[string]any{"error": "tenant_in_use", "message": "Remove all users and resources from this tenant before deleting it."})
+		return
+	}
+	if !deleted {
+		writeJSON(w, 404, map[string]any{"error": "tenant_not_found"})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"deleted": true})
+}
+
+type emailSettingsRequest struct {
+	Enabled     bool   `json:"enabled"`
+	Host        string `json:"host"`
+	Port        int    `json:"port"`
+	Security    string `json:"security"`
+	Username    string `json:"username"`
+	Password    string `json:"password"`
+	SenderName  string `json:"senderName"`
+	SenderEmail string `json:"senderEmail"`
+}
+
+func (r *Router) getEmailSettings(w http.ResponseWriter, req *http.Request) {
+	item, found, err := r.store.GetEmailSettings()
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "email_settings_failed"})
+		return
+	}
+	if !found {
+		item = store.EmailSettings{Port: 587, Security: "starttls", SenderName: "HyperCDR"}
+	}
+	writeJSON(w, 200, item)
+}
+func validateEmailSettings(body emailSettingsRequest) (string, string) {
+	if body.Port < 1 || body.Port > 65535 {
+		return "invalid_port", "Port must be between 1 and 65535."
+	}
+	if body.Security != "none" && body.Security != "starttls" && body.Security != "tls" {
+		return "invalid_security", "Select TLS, STARTTLS, or None."
+	}
+	if strings.TrimSpace(body.Host) == "" || !validUserEmail(body.SenderEmail) {
+		return "email_settings_incomplete", "SMTP server and a valid sender email are required."
+	}
+	return "", ""
+}
+func (r *Router) updateEmailSettings(w http.ResponseWriter, req *http.Request) {
+	var body emailSettingsRequest
+	if decodeJSON(req, &body) != nil {
+		writeJSON(w, 400, map[string]any{"error": "invalid_json"})
+		return
+	}
+	if code, message := validateEmailSettings(body); code != "" {
+		writeJSON(w, 400, map[string]any{"error": code, "message": message})
+		return
+	}
+	current, _, _ := r.store.GetEmailSettings()
+	ciphertext := current.PasswordCiphertext
+	if body.Password != "" {
+		var err error
+		ciphertext, err = r.encryptSetting(body.Password)
+		if err != nil {
+			writeJSON(w, 500, map[string]any{"error": "email_password_encrypt_failed"})
+			return
+		}
+	}
+	actor, _ := requestUser(req)
+	item, err := r.store.UpsertEmailSettings(store.EmailSettingsInput{Enabled: true, Host: strings.TrimSpace(body.Host), Port: body.Port, Security: body.Security, Username: strings.TrimSpace(body.Username), PasswordCiphertext: ciphertext, SenderName: strings.TrimSpace(body.SenderName), SenderEmail: strings.TrimSpace(body.SenderEmail), UpdatedBy: actor.ID})
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "email_settings_update_failed"})
+		return
+	}
+	writeJSON(w, 200, item)
+}
+func (r *Router) testEmailSettings(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Recipient string `json:"recipient"`
+	}
+	if decodeJSON(req, &body) != nil || !validUserEmail(body.Recipient) {
+		writeJSON(w, 400, map[string]any{"error": "invalid_recipient"})
+		return
+	}
+	settings, found, err := r.store.GetEmailSettings()
+	if err != nil || !found {
+		writeJSON(w, 409, map[string]any{"error": "email_not_configured"})
+		return
+	}
+	if err = r.sendConfiguredEmail(settings, strings.TrimSpace(body.Recipient), "HyperCDR email test", "Your HyperCDR SMTP settings are working correctly."); err != nil {
+		r.logger.Warn("SMTP test failed", "error", err)
+		writeJSON(w, 502, map[string]any{"error": "smtp_test_failed", "message": err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"sent": true})
+}
+
+func (r *Router) encryptSetting(value string) (string, error) {
+	key := sha256.Sum256([]byte(r.cfg.SecretKey))
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err = rand.Read(nonce); err != nil {
+		return "", err
+	}
+	sealed := gcm.Seal(nonce, nonce, []byte(value), nil)
+	return base64.RawStdEncoding.EncodeToString(sealed), nil
+}
+func (r *Router) decryptSetting(value string) (string, error) {
+	raw, err := base64.RawStdEncoding.DecodeString(value)
+	if err != nil {
+		return "", err
+	}
+	key := sha256.Sum256([]byte(r.cfg.SecretKey))
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil || len(raw) < gcm.NonceSize() {
+		return "", errors.New("invalid encrypted setting")
+	}
+	plain, err := gcm.Open(nil, raw[:gcm.NonceSize()], raw[gcm.NonceSize():], nil)
+	return string(plain), err
+}
+func (r *Router) createUser(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		TenantID    string `json:"tenantId"`
+		Email       string `json:"email"`
+		DisplayName string `json:"displayName"`
+		Password    string `json:"password"`
+		Role        string `json:"role"`
+	}
+	if decodeJSON(req, &body) != nil {
+		writeJSON(w, 400, map[string]any{"error": "invalid_json"})
+		return
+	}
+	if !validUserEmail(body.Email) {
+		writeJSON(w, 400, map[string]any{"error": "email_invalid", "message": "Enter a valid email address"})
+		return
+	}
+	if !validUserPassword(body.Password) {
+		writeJSON(w, 400, map[string]any{"error": "password_invalid", "message": "Password must be 8 to 128 characters"})
+		return
+	}
+	actor, _ := requestUser(req)
+	tenantID := strings.TrimSpace(body.TenantID)
+	if !actor.SystemAdmin {
+		tenantID = actor.TenantID
+	}
+	if tenantID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "tenant_required", "message": "Select a tenant for this user."})
+		return
+	}
+	tenant, found, err := r.store.GetTenant(tenantID)
+	if err != nil || !found || tenant.Status != "active" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "tenant_invalid", "message": "Select an active tenant for this user."})
+		return
+	}
+	u, err := r.store.CreateUser(tenantID, body.Email, body.Password)
+	if err != nil {
+		writeJSON(w, 409, map[string]any{"error": "create_user_failed", "message": err.Error()})
+		return
+	}
+	role := body.Role
+	if role != "admin" {
+		role = "operator"
+	}
+	u, _, err = r.store.UpdateUser(store.UserUpdateInput{ID: u.ID, TenantID: tenantID, Email: u.Email, DisplayName: body.DisplayName, Role: role, Status: "active", TimeZone: u.TimeZone})
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "create_user_failed"})
+		return
+	}
+	writeJSON(w, 201, u)
+}
+func (r *Router) updateUser(w http.ResponseWriter, req *http.Request) {
+	current, found, err := r.store.GetUser(req.PathValue("id"))
+	if err != nil || !found {
+		writeJSON(w, 404, map[string]any{"error": "user_not_found"})
+		return
+	}
+	actor, hasActor := requestUser(req)
+	if hasActor && !actor.SystemAdmin && (current.SystemAdmin || current.TenantID != actor.TenantID) {
+		writeJSON(w, 404, map[string]any{"error": "user_not_found"})
+		return
+	}
+	var body struct {
+		TenantID    string `json:"tenantId"`
+		Email       string `json:"email"`
+		DisplayName string `json:"displayName"`
+		Role        string `json:"role"`
+		Status      string `json:"status"`
+	}
+	if decodeJSON(req, &body) != nil {
+		writeJSON(w, 400, map[string]any{"error": "invalid_json"})
+		return
+	}
+	if current.Email == store.DefaultAdminEmail {
+		body.Role = "admin"
+		body.Status = "active"
+		body.Email = store.DefaultAdminEmail
+	} else if !validUserEmail(body.Email) {
+		writeJSON(w, 400, map[string]any{"error": "email_invalid", "message": "Enter a valid email address"})
+		return
+	}
+	if body.Role != "admin" {
+		body.Role = "operator"
+	}
+	if body.Status != "disabled" {
+		body.Status = "active"
+	}
+	tenantID := current.TenantID
+	if actor.SystemAdmin && !current.SystemAdmin {
+		tenantID = strings.TrimSpace(body.TenantID)
+		if tenantID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "tenant_required", "message": "Select a tenant for this user."})
+			return
+		}
+		tenant, tenantFound, tenantErr := r.store.GetTenant(tenantID)
+		if tenantErr != nil || !tenantFound || tenant.Status != "active" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "tenant_invalid", "message": "Select an active tenant for this user."})
+			return
+		}
+	}
+	updated, _, err := r.store.UpdateUser(store.UserUpdateInput{ID: current.ID, TenantID: tenantID, Email: body.Email, DisplayName: body.DisplayName, Role: body.Role, Status: body.Status, TimeZone: current.TimeZone})
+	if err != nil {
+		writeJSON(w, 409, map[string]any{"error": "update_user_failed", "message": err.Error()})
+		return
+	}
+	writeJSON(w, 200, updated)
+}
+func (r *Router) deleteUser(w http.ResponseWriter, req *http.Request) {
+	u, found, _ := r.store.GetUser(req.PathValue("id"))
+	if !found {
+		writeJSON(w, 404, map[string]any{"error": "user_not_found"})
+		return
+	}
+	actor, hasActor := requestUser(req)
+	if hasActor && !actor.SystemAdmin && (u.SystemAdmin || u.TenantID != actor.TenantID) {
+		writeJSON(w, 404, map[string]any{"error": "user_not_found"})
+		return
+	}
+	if u.Email == store.DefaultAdminEmail {
+		writeJSON(w, 409, map[string]any{"error": "admin_user_protected", "message": "The admin user cannot be deleted."})
+		return
+	}
+	deleted, err := r.store.DeleteUser(u.ID)
+	if err != nil || !deleted {
+		if err != nil {
+			r.logger.Error("failed to delete user", "user_id", u.ID, "error", err)
+		}
+		writeJSON(w, 500, map[string]any{"error": "delete_user_failed", "message": "User could not be deleted. Please try again."})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"deleted": true})
+}
+func (r *Router) resetUserPassword(w http.ResponseWriter, req *http.Request) {
+	var body struct{ Password string }
+	if decodeJSON(req, &body) != nil || !validUserPassword(body.Password) {
+		writeJSON(w, 400, map[string]any{"error": "password_invalid"})
+		return
+	}
+	target, found, err := r.store.GetUser(req.PathValue("id"))
+	if err != nil || !found {
+		writeJSON(w, 404, map[string]any{"error": "user_not_found"})
+		return
+	}
+	actor, hasActor := requestUser(req)
+	if hasActor && !actor.SystemAdmin && (target.SystemAdmin || target.TenantID != actor.TenantID) {
+		writeJSON(w, 404, map[string]any{"error": "user_not_found"})
+		return
+	}
+	u, found, err := r.store.SetUserPassword(target.ID, body.Password, true)
+	if err != nil || !found {
+		writeJSON(w, 404, map[string]any{"error": "user_not_found"})
+		return
+	}
+	writeJSON(w, 200, u)
 }
 
 func (r *Router) consumeCaptcha(id, code string) bool {
@@ -290,6 +1330,17 @@ func (r *Router) consumeCaptcha(id, code string) bool {
 }
 
 func validUserPassword(password string) bool { return len(password) >= 8 && len(password) <= 128 }
+
+func validUserEmail(value string) bool {
+	email := strings.ToLower(strings.TrimSpace(value))
+	address, err := mail.ParseAddress(email)
+	at := strings.LastIndexByte(email, '@')
+	if err != nil || address.Address != email || at <= 0 || at == len(email)-1 || len(email) > 254 {
+		return false
+	}
+	domain := email[at+1:]
+	return strings.Contains(domain, ".") && !strings.HasPrefix(domain, ".") && !strings.HasSuffix(domain, ".")
+}
 
 func (r *Router) authConfig(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
@@ -351,7 +1402,7 @@ func (r *Router) registerUser(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "captcha_invalid", "message": "Verification code is incorrect"})
 		return
 	}
-	u, err := r.store.CreateUser(email, body.Password)
+	u, err := r.store.CreateUser(store.DefaultTenantID, email, body.Password)
 	if errors.Is(err, store.ErrUserExists) {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "user_exists", "message": "An account with this email already exists"})
 		return
@@ -372,15 +1423,27 @@ func (r *Router) forgotPassword(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
 		return
 	}
+	response := map[string]any{"message": "If the email address is registered, we will send password reset instructions."}
+	if !validUserEmail(body.Email) {
+		writeJSON(w, http.StatusOK, response)
+		return
+	}
+	mailSettings, mailConfigured := r.effectiveEmailSettings()
+	if !mailConfigured && !r.cfg.PasswordResetRevealToken {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"error":   "password_reset_unavailable",
+			"message": "Email password recovery is not configured. Contact the system administrator.",
+		})
+		return
+	}
 	token, found, err := r.store.CreatePasswordResetToken(body.Email, 15*time.Minute)
 	if err != nil {
 		r.logger.Error("failed to create reset token", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "reset_request_failed"})
 		return
 	}
-	response := map[string]any{"message": "If the account exists, password reset instructions are available."}
-	if found && strings.TrimSpace(r.cfg.SMTPHost) != "" {
-		if err := r.sendPasswordResetEmail(strings.ToLower(strings.TrimSpace(body.Email)), token); err != nil {
+	if found && mailConfigured {
+		if err := r.sendPasswordResetEmail(mailSettings, strings.ToLower(strings.TrimSpace(body.Email)), token); err != nil {
 			r.logger.Error("failed to send password reset email", "error", err)
 			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "reset_email_failed", "message": "Password reset email could not be sent. Please contact the administrator."})
 			return
@@ -393,20 +1456,78 @@ func (r *Router) forgotPassword(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-func (r *Router) sendPasswordResetEmail(recipient, token string) error {
+func (r *Router) effectiveEmailSettings() (store.EmailSettings, bool) {
+	if item, found, err := r.store.GetEmailSettings(); err == nil && found {
+		return item, strings.TrimSpace(item.Host) != "" && strings.TrimSpace(item.SenderEmail) != ""
+	}
+	if strings.TrimSpace(r.cfg.SMTPHost) == "" {
+		return store.EmailSettings{}, false
+	}
+	fromName, fromEmail := "HyperCDR", r.cfg.SMTPFrom
+	if parsed, err := mail.ParseAddress(r.cfg.SMTPFrom); err == nil {
+		fromName, fromEmail = parsed.Name, parsed.Address
+	}
+	password, _ := r.encryptSetting(r.cfg.SMTPPassword)
+	port, _ := strconv.Atoi(r.cfg.SMTPPort)
+	return store.EmailSettings{Enabled: true, Host: r.cfg.SMTPHost, Port: port, Security: "starttls", Username: r.cfg.SMTPUsername, PasswordCiphertext: password, SenderName: fromName, SenderEmail: fromEmail}, true
+}
+func (r *Router) sendPasswordResetEmail(settings store.EmailSettings, recipient, token string) error {
 	base := strings.TrimRight(r.cfg.PublicBaseURL, "/")
-	resetURL := base + "/?reset_token=" + url.QueryEscape(token)
-	fromAddress := r.cfg.SMTPFrom
-	if start := strings.LastIndex(fromAddress, "<"); start >= 0 && strings.HasSuffix(fromAddress, ">") {
-		fromAddress = fromAddress[start+1 : len(fromAddress)-1]
+	resetURL := base + "/?auth=reset&reset_token=" + url.QueryEscape(token)
+	return r.sendConfiguredEmail(settings, recipient, "Reset your HyperCDR password", "Use this link within 15 minutes to reset your HyperCDR password:\r\n"+resetURL+"\r\n\r\nIf you did not request this, you can ignore this email.")
+}
+func (r *Router) sendConfiguredEmail(settings store.EmailSettings, recipient, subject, body string) error {
+	password, err := r.decryptSetting(settings.PasswordCiphertext)
+	if err != nil && settings.PasswordConfigured {
+		return err
 	}
-	message := []byte("From: " + r.cfg.SMTPFrom + "\r\nTo: " + recipient + "\r\nSubject: Reset your HyperCDR password\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\nUse this link within 15 minutes to reset your HyperCDR password:\r\n" + resetURL + "\r\n\r\nIf you did not request this, you can ignore this email.\r\n")
-	address := r.cfg.SMTPHost + ":" + r.cfg.SMTPPort
+	fromHeader := (&mail.Address{Name: settings.SenderName, Address: settings.SenderEmail}).String()
+	message := []byte("From: " + fromHeader + "\r\nTo: " + recipient + "\r\nSubject: " + subject + "\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n" + body + "\r\n")
+	address := net.JoinHostPort(settings.Host, strconv.Itoa(settings.Port))
 	var auth smtp.Auth
-	if r.cfg.SMTPUsername != "" {
-		auth = smtp.PlainAuth("", r.cfg.SMTPUsername, r.cfg.SMTPPassword, r.cfg.SMTPHost)
+	if settings.Username != "" {
+		auth = smtp.PlainAuth("", settings.Username, password, settings.Host)
 	}
-	return smtp.SendMail(address, auth, fromAddress, []string{recipient}, message)
+	if settings.Security == "starttls" {
+		return smtp.SendMail(address, auth, settings.SenderEmail, []string{recipient}, message)
+	}
+	var conn net.Conn
+	if settings.Security == "tls" {
+		conn, err = tls.Dial("tcp", address, &tls.Config{ServerName: settings.Host, MinVersion: tls.VersionTLS12})
+	} else {
+		conn, err = net.DialTimeout("tcp", address, 15*time.Second)
+	}
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	client, err := smtp.NewClient(conn, settings.Host)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	if auth != nil {
+		if err = client.Auth(auth); err != nil {
+			return err
+		}
+	}
+	if err = client.Mail(settings.SenderEmail); err != nil {
+		return err
+	}
+	if err = client.Rcpt(recipient); err != nil {
+		return err
+	}
+	writer, err := client.Data()
+	if err != nil {
+		return err
+	}
+	if _, err = writer.Write(message); err != nil {
+		return err
+	}
+	if err = writer.Close(); err != nil {
+		return err
+	}
+	return client.Quit()
 }
 
 func (r *Router) resetPassword(w http.ResponseWriter, req *http.Request) {
@@ -491,7 +1612,16 @@ func (r *Router) googleCallback(w http.ResponseWriter, req *http.Request) {
 		http.Redirect(w, req, "/?auth_error=google_account", http.StatusFound)
 		return
 	}
-	payload, _ := json.Marshal(map[string]any{"user": u, "session": map[string]any{"token": "hcs_" + store.NewPublicID() + store.NewPublicID(), "expiresAt": time.Now().UTC().Add(time.Hour).Format(time.RFC3339)}})
+	if u.Status != "active" {
+		http.Redirect(w, req, "/?auth_error=google_account_disabled", http.StatusFound)
+		return
+	}
+	session, err := r.store.CreatePlatformSession(u.ID, time.Hour)
+	if err != nil {
+		http.Redirect(w, req, "/?auth_error=google_session", http.StatusFound)
+		return
+	}
+	payload, _ := json.Marshal(map[string]any{"user": u, "session": map[string]any{"token": session.Token, "expiresAt": session.ExpiresAt.Format(time.RFC3339)}})
 	http.Redirect(w, req, "/#google_auth="+url.QueryEscape(base64.RawURLEncoding.EncodeToString(payload)), http.StatusFound)
 }
 
@@ -524,6 +1654,179 @@ func captchaImageDataURL(code string) string {
 	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(svg))
 }
 
+func validReleaseComponent(component string) bool {
+	return component == "comm-agent" || component == "velero"
+}
+
+func (r *Router) componentTarget(ctx context.Context, component string) (store.ComponentRelease, error) {
+	if active, ok, err := r.store.GetActiveComponentRelease(component); err != nil || ok {
+		return active, err
+	}
+	image, version := strings.TrimSpace(r.cfg.AgentImage), imageVersion(r.cfg.AgentImage)
+	if component == "velero" {
+		image, version = strings.TrimSpace(r.cfg.VeleroImage), strings.TrimSpace(r.cfg.VeleroVersion)
+	}
+	if image == "" {
+		return store.ComponentRelease{}, fmt.Errorf("%s target image is not configured", component)
+	}
+	digest, err := r.resolveImageDigest(ctx, image)
+	if err != nil {
+		return store.ComponentRelease{}, err
+	}
+	item, err := r.store.UpsertComponentRelease(store.ComponentReleaseInput{Component: component, Version: version, Image: image, ImageDigest: digest, Status: "active", ReleaseNotes: "Initialized from platform deployment configuration", PublishedBy: "system"})
+	if err == nil {
+		return item, nil
+	}
+	if active, ok, getErr := r.store.GetActiveComponentRelease(component); getErr == nil && ok {
+		return active, nil
+	}
+	return store.ComponentRelease{}, err
+}
+
+func (r *Router) listComponentReleases(w http.ResponseWriter, req *http.Request) {
+	component := strings.TrimSpace(req.URL.Query().Get("component"))
+	if component != "" && !validReleaseComponent(component) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "component_invalid"})
+		return
+	}
+	components := []string{component}
+	if component == "" {
+		components = []string{"comm-agent", "velero"}
+	}
+	for _, name := range components {
+		if _, err := r.componentTarget(req.Context(), name); err != nil {
+			r.logger.Warn("failed to initialize component release", "component", name, "error", err)
+		}
+	}
+	items, err := r.store.ListComponentReleases(component)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_component_releases_failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": nonNilSlice(items)})
+}
+
+func (r *Router) createComponentRelease(w http.ResponseWriter, req *http.Request) {
+	var body struct{ Component, Version, Image, ReleaseNotes string }
+	if err := decodeJSON(req, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
+		return
+	}
+	body.Component, body.Image = strings.TrimSpace(body.Component), strings.TrimSpace(body.Image)
+	if !validReleaseComponent(body.Component) || body.Image == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "component_or_image_invalid"})
+		return
+	}
+	digest, err := r.resolveImageDigest(req.Context(), body.Image)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "image_unavailable", "message": err.Error()})
+		return
+	}
+	if strings.TrimSpace(body.Version) == "" {
+		body.Version = imageVersion(body.Image)
+	}
+	item, err := r.store.UpsertComponentRelease(store.ComponentReleaseInput{Component: body.Component, Version: strings.TrimSpace(body.Version), Image: body.Image, ImageDigest: digest, Status: "candidate", ReleaseNotes: strings.TrimSpace(body.ReleaseNotes)})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "create_component_release_failed"})
+		return
+	}
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func (r *Router) activateComponentRelease(w http.ResponseWriter, req *http.Request) {
+	id := req.PathValue("id")
+	items, err := r.store.ListComponentReleases("")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_component_releases_failed"})
+		return
+	}
+	var selected store.ComponentRelease
+	for _, item := range items {
+		if item.ID == id {
+			selected = item
+			break
+		}
+	}
+	if selected.ID == "" {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "component_release_not_found"})
+		return
+	}
+	if active, found, activeErr := r.store.GetActiveComponentRelease(selected.Component); activeErr != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "active_component_release_failed"})
+		return
+	} else if found {
+		if comparison, comparable := compareNumericVersions(selected.Version, active.Version); comparable && comparison < 0 {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "component_downgrade_not_allowed", "message": "The selected version is older than the current target version."})
+			return
+		}
+	}
+	digest, err := r.resolveImageDigest(req.Context(), selected.Image)
+	if err != nil || digest != selected.ImageDigest {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "release_image_changed", "message": "The image is unavailable or its digest no longer matches the validated candidate."})
+		return
+	}
+	item, ok, err := r.store.ActivateComponentRelease(id, "admin")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "activate_component_release_failed"})
+		return
+	}
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "component_release_not_found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (r *Router) discoverComponentReleases(w http.ResponseWriter, req *http.Request) {
+	component := strings.TrimSpace(req.URL.Query().Get("component"))
+	if !validReleaseComponent(component) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "component_invalid"})
+		return
+	}
+	image := r.cfg.AgentImage
+	if component == "velero" {
+		image = r.cfg.VeleroImage
+	}
+	registry, repository, _, ok := splitContainerImage(image)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "registry_image_invalid"})
+		return
+	}
+	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}} // nolint:gosec
+	tokenURL := fmt.Sprintf("https://%s/service/token?service=harbor-registry&scope=repository:%s:pull", registry, repository)
+	tokenResp, err := client.Get(tokenURL)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "registry_unavailable"})
+		return
+	}
+	defer tokenResp.Body.Close()
+	var tokenBody struct {
+		Token string `json:"token"`
+	}
+	if tokenResp.StatusCode >= 300 || json.NewDecoder(tokenResp.Body).Decode(&tokenBody) != nil || tokenBody.Token == "" {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "registry_token_failed"})
+		return
+	}
+	tagsReq, _ := http.NewRequestWithContext(req.Context(), http.MethodGet, fmt.Sprintf("https://%s/v2/%s/tags/list", registry, repository), nil)
+	tagsReq.Header.Set("Authorization", "Bearer "+tokenBody.Token)
+	tagsResp, err := client.Do(tagsReq)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "registry_unavailable"})
+		return
+	}
+	defer tagsResp.Body.Close()
+	var result struct {
+		Name string   `json:"name"`
+		Tags []string `json:"tags"`
+	}
+	if tagsResp.StatusCode >= 300 || json.NewDecoder(tagsResp.Body).Decode(&result) != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "registry_tags_failed"})
+		return
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(result.Tags)))
+	writeJSON(w, http.StatusOK, map[string]any{"component": component, "repository": result.Name, "registry": registry, "tags": result.Tags})
+}
+
 func (r *Router) listClusters(w http.ResponseWriter, req *http.Request) {
 	clusters, err := r.store.ListClusters()
 	if err != nil {
@@ -531,17 +1834,23 @@ func (r *Router) listClusters(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_clusters_failed"})
 		return
 	}
-	latestAgentVersion := imageVersion(r.cfg.AgentImage)
-	latestAgentImage := r.cfg.AgentImage
-	latestAgentDigest, digestErr := r.resolveImageDigest(req.Context(), latestAgentImage)
-	if digestErr != nil {
-		r.logger.Warn("failed to resolve latest agent image digest", "image", latestAgentImage, "error", digestErr)
+	visibleClusters := clusters[:0]
+	for _, item := range clusters {
+		if tenantVisible(req, item.TenantID) {
+			visibleClusters = append(visibleClusters, item)
+		}
 	}
-	latestVeleroImage := strings.TrimSpace(r.cfg.VeleroImage)
-	latestVeleroDigest, veleroDigestErr := r.resolveImageDigest(req.Context(), latestVeleroImage)
-	if veleroDigestErr != nil {
-		r.logger.Warn("failed to resolve latest velero image digest", "image", latestVeleroImage, "error", veleroDigestErr)
+	clusters = visibleClusters
+	agentTarget, agentTargetErr := r.componentTarget(req.Context(), "comm-agent")
+	if agentTargetErr != nil {
+		r.logger.Warn("failed to load comm-agent target release", "error", agentTargetErr)
 	}
+	veleroTarget, veleroTargetErr := r.componentTarget(req.Context(), "velero")
+	if veleroTargetErr != nil {
+		r.logger.Warn("failed to load velero target release", "error", veleroTargetErr)
+	}
+	latestAgentVersion, latestAgentImage, latestAgentDigest := agentTarget.Version, agentTarget.Image, agentTarget.ImageDigest
+	latestVeleroImage, latestVeleroDigest := veleroTarget.Image, veleroTarget.ImageDigest
 	upgradeTasks, taskErr := r.store.ListTasks("")
 	if taskErr != nil {
 		r.logger.Warn("failed to load agent upgrade status", "error", taskErr)
@@ -555,14 +1864,14 @@ func (r *Router) listClusters(w http.ResponseWriter, req *http.Request) {
 		clusters[i].LatestAgentVersion = latestAgentVersion
 		clusters[i].LatestAgentImage = latestAgentImage
 		clusters[i].LatestAgentImageDigest = latestAgentDigest
-		clusters[i].AgentUpgradeAvailable = clusters[i].AgentImageDigest != "" && latestAgentDigest != "" && clusters[i].AgentImageDigest != latestAgentDigest
-		clusters[i].LatestVeleroVersion = r.cfg.VeleroVersion
+		agentDigestMismatch := clusters[i].AgentImageDigest != "" && latestAgentDigest != "" && clusters[i].AgentImageDigest != latestAgentDigest
+		clusters[i].AgentUpgradeAvailable = upgradeTargetIsNewer(clusters[i].AgentVersion, latestAgentVersion, agentDigestMismatch)
+		clusters[i].LatestVeleroVersion = veleroTarget.Version
 		clusters[i].LatestVeleroImage = latestVeleroImage
 		clusters[i].LatestVeleroImageDigest = latestVeleroDigest
 		veleroRuntimeReported := clusters[i].VeleroImageDigest != "" && clusters[i].VeleroNodeAgentImageDigest != ""
 		veleroDigestMismatch := latestVeleroDigest != "" && veleroRuntimeReported && (clusters[i].VeleroImageDigest != latestVeleroDigest || clusters[i].VeleroNodeAgentImageDigest != latestVeleroDigest)
-		veleroVersionMismatch := latestVeleroDigest == "" && clusters[i].VeleroVersion != "" && clusters[i].VeleroVersion != r.cfg.VeleroVersion
-		clusters[i].VeleroUpgradeAvailable = veleroDigestMismatch || veleroVersionMismatch
+		clusters[i].VeleroUpgradeAvailable = upgradeTargetIsNewer(clusters[i].VeleroVersion, veleroTarget.Version, veleroDigestMismatch)
 		for _, task := range upgradeTasks {
 			if task.ClusterID != clusters[i].ID || isTerminalTaskStatus(task.Status) {
 				continue
@@ -586,6 +1895,56 @@ func (r *Router) listClusters(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items": nonNilSlice(clusters),
 	})
+}
+
+func upgradeTargetIsNewer(currentVersion, targetVersion string, digestMismatch bool) bool {
+	comparison, comparable := compareNumericVersions(targetVersion, currentVersion)
+	if !comparable {
+		return digestMismatch
+	}
+	return comparison > 0 || comparison == 0 && digestMismatch
+}
+
+func compareNumericVersions(left, right string) (int, bool) {
+	leftParts := numericVersionParts(left)
+	rightParts := numericVersionParts(right)
+	if len(leftParts) == 0 || len(rightParts) == 0 {
+		return 0, false
+	}
+	length := max(len(leftParts), len(rightParts))
+	for i := 0; i < length; i++ {
+		leftPart, rightPart := 0, 0
+		if i < len(leftParts) {
+			leftPart = leftParts[i]
+		}
+		if i < len(rightParts) {
+			rightPart = rightParts[i]
+		}
+		if leftPart < rightPart {
+			return -1, true
+		}
+		if leftPart > rightPart {
+			return 1, true
+		}
+	}
+	return 0, true
+}
+
+func numericVersionParts(version string) []int {
+	var parts []int
+	for index := 0; index < len(version); {
+		if version[index] < '0' || version[index] > '9' {
+			index++
+			continue
+		}
+		value := 0
+		for index < len(version) && version[index] >= '0' && version[index] <= '9' {
+			value = value*10 + int(version[index]-'0')
+			index++
+		}
+		parts = append(parts, value)
+	}
+	return parts
 }
 
 func isTerminalTaskStatus(status string) bool {
@@ -652,6 +2011,9 @@ func (r *Router) resolveImageDigest(ctx context.Context, image string) (string, 
 	image = strings.TrimSpace(image)
 	now := time.Now()
 	r.imageDigestMu.Lock()
+	if r.imageDigests == nil {
+		r.imageDigests = map[string]imageDigestCacheEntry{}
+	}
 	cached, ok := r.imageDigests[image]
 	if ok && cached.Digest != "" && cached.ExpiresAt.After(now) {
 		r.imageDigestMu.Unlock()
@@ -1024,16 +2386,13 @@ func (r *Router) forceCleanupCluster(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "cluster_not_found"})
 		return
 	}
-	ctx, cancel := context.WithTimeout(req.Context(), 10*time.Minute)
-	defer cancel()
-	cleanupResults, cleanupErr := r.cleanupClusterObjectStorage(ctx, clusterID)
-	if cleanupErr != nil {
-		r.logger.Error("failed to force cleanup cluster object storage", "cluster_id", clusterID, "error", cleanupErr)
-		writeJSON(w, http.StatusInternalServerError, map[string]any{
-			"error":   "object_storage_cleanup_failed",
-			"message": cleanupErr.Error(),
-			"prefix":  strings.TrimSuffix(storageDomainPrefix(clusterID), "/") + "/",
-		})
+	audit, err := r.auditClusterUnregister(clusterID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "force_remove_precheck_failed", "message": err.Error()})
+		return
+	}
+	if audit.TargetPlanCount > 0 {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "cluster_is_dr_target", "message": "This cluster is still used as a DR target. Change or remove those DR configurations before Force Remove.", "precheck": audit})
 		return
 	}
 	r.hub.close(clusterID)
@@ -1048,11 +2407,158 @@ func (r *Router) forceCleanupCluster(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":        "cleaned",
-		"clusterId":     clusterID,
-		"objectStorage": cleanupResults,
-		"warning":       "Cluster-side resources cannot be verified when the agent namespace has already been removed. Check the Kubernetes cluster manually for remaining cluster-scoped Velero or HyperCDR resources.",
+		"status":    "cleaned",
+		"clusterId": clusterID,
+		"warning":   "Platform records were removed. Cluster-side resources and backup objects were not deleted and may require manual cleanup.",
 	})
+}
+
+type unregisterAudit struct {
+	ClusterID            string   `json:"clusterId"`
+	AgentOnline          bool     `json:"agentOnline"`
+	DefaultCluster       bool     `json:"defaultCluster"`
+	SourcePlanCount      int      `json:"sourcePlanCount"`
+	TargetPlanCount      int      `json:"targetPlanCount"`
+	RestorePointCount    int      `json:"restorePointCount"`
+	StorageRepositoryIDs []string `json:"storageRepositoryIds"`
+	ActiveTaskCount      int      `json:"activeTaskCount"`
+	ActiveTaskTypes      []string `json:"activeTaskTypes"`
+	UnregisterActive     bool     `json:"unregisterActive"`
+	ObjectStorageNeeded  bool     `json:"objectStorageNeeded"`
+	Stage                string   `json:"stage"`
+	Allowed              bool     `json:"allowed"`
+	Blockers             []string `json:"blockers"`
+}
+
+func (r *Router) auditClusterUnregister(clusterID string) (unregisterAudit, error) {
+	audit := unregisterAudit{
+		ClusterID:            clusterID,
+		StorageRepositoryIDs: []string{},
+		ActiveTaskTypes:      []string{},
+		Blockers:             []string{},
+		Allowed:              true,
+		Stage:                "registered",
+	}
+	clusters, err := r.store.ListClusters()
+	if err != nil {
+		return audit, err
+	}
+	found := false
+	for _, cluster := range clusters {
+		if cluster.ID == clusterID {
+			found = true
+			audit.DefaultCluster = cluster.IsDefault
+			break
+		}
+	}
+	if !found {
+		return audit, errors.New("cluster not found")
+	}
+	_, audit.AgentOnline = r.hub.get(clusterID)
+	plans, err := r.store.ListProtectionPlans("")
+	if err != nil {
+		return audit, err
+	}
+	repositoryIDs := map[string]struct{}{}
+	for _, plan := range plans {
+		if plan.SourceClusterID == clusterID {
+			audit.SourcePlanCount++
+			if plan.StorageRepoID != "" {
+				repositoryIDs[plan.StorageRepoID] = struct{}{}
+			}
+		}
+		if plan.TargetClusterID == clusterID {
+			audit.TargetPlanCount++
+		}
+	}
+	repositories, err := r.store.ListStorageRepositories()
+	if err != nil {
+		return audit, err
+	}
+	for _, repository := range repositories {
+		if _, ok, bindingErr := r.store.GetClusterStorageBinding(clusterID, repository.ID, clusterID); bindingErr != nil {
+			return audit, bindingErr
+		} else if ok {
+			repositoryIDs[repository.ID] = struct{}{}
+		}
+	}
+	points, err := r.store.ListRestorePoints(store.RestorePointFilter{ClusterID: clusterID, IncludeDeleted: true})
+	if err != nil {
+		return audit, err
+	}
+	for _, point := range points {
+		if strings.EqualFold(point.Status, "deleted") {
+			continue
+		}
+		audit.RestorePointCount++
+		if point.StorageRepoID != "" {
+			repositoryIDs[point.StorageRepoID] = struct{}{}
+		}
+	}
+	for id := range repositoryIDs {
+		audit.StorageRepositoryIDs = append(audit.StorageRepositoryIDs, id)
+	}
+	sort.Strings(audit.StorageRepositoryIDs)
+	tasks, err := r.store.ListTasks(clusterID)
+	if err != nil {
+		return audit, err
+	}
+	types := map[string]struct{}{}
+	for _, task := range tasks {
+		if !isActiveTaskStatus(task.Status) {
+			continue
+		}
+		if task.Type == "unregister" {
+			audit.UnregisterActive = true
+		} else {
+			audit.ActiveTaskCount++
+			types[task.Type] = struct{}{}
+		}
+	}
+	for taskType := range types {
+		audit.ActiveTaskTypes = append(audit.ActiveTaskTypes, taskType)
+	}
+	sort.Strings(audit.ActiveTaskTypes)
+	audit.ObjectStorageNeeded = len(audit.StorageRepositoryIDs) > 0
+	switch {
+	case audit.ActiveTaskCount > 0:
+		audit.Stage = "active_tasks"
+	case audit.TargetPlanCount > 0:
+		audit.Stage = "target_in_use"
+	case audit.RestorePointCount > 0:
+		audit.Stage = "protected_with_restore_points"
+	case audit.SourcePlanCount > 0:
+		audit.Stage = "configured_without_restore_points"
+	default:
+		audit.Stage = "registered_without_dr"
+	}
+	if audit.UnregisterActive {
+		audit.Blockers = append(audit.Blockers, "An unregister task is already active for this cluster.")
+	}
+	if !audit.AgentOnline {
+		audit.Blockers = append(audit.Blockers, "The cluster agent is offline. Reconnect it for normal unregister, or use Force Remove if the cluster is permanently unavailable.")
+	}
+	if audit.ActiveTaskCount > 0 {
+		audit.Blockers = append(audit.Blockers, "Wait for active cluster tasks to finish before unregistering.")
+	}
+	if audit.TargetPlanCount > 0 {
+		audit.Blockers = append(audit.Blockers, "This cluster is used as a DR target. Change or remove those DR configurations first.")
+	}
+	audit.Allowed = len(audit.Blockers) == 0
+	return audit, nil
+}
+
+func (r *Router) precheckUnregisterCluster(w http.ResponseWriter, req *http.Request) {
+	audit, err := r.auditClusterUnregister(req.PathValue("id"))
+	if err != nil {
+		if err.Error() == "cluster not found" {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "cluster_not_found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "unregister_precheck_failed", "message": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, audit)
 }
 
 func (r *Router) unregisterCluster(w http.ResponseWriter, req *http.Request) {
@@ -1061,15 +2567,25 @@ func (r *Router) unregisterCluster(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "cluster_id_required"})
 		return
 	}
-	if !r.clusterExists(clusterID) {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": "cluster_not_found"})
+	audit, err := r.auditClusterUnregister(clusterID)
+	if err != nil {
+		if err.Error() == "cluster not found" {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "cluster_not_found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "unregister_precheck_failed", "message": err.Error()})
+		return
+	}
+	if !audit.Allowed {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "unregister_precheck_blocked", "message": strings.Join(audit.Blockers, " "), "precheck": audit})
 		return
 	}
 
 	var body struct {
-		DeleteVelero    *bool  `json:"deleteVelero"`
-		DeleteNamespace *bool  `json:"deleteNamespace"`
-		Reason          string `json:"reason"`
+		DeleteVelero     *bool  `json:"deleteVelero"`
+		DeleteNamespace  *bool  `json:"deleteNamespace"`
+		DeleteBackupData bool   `json:"deleteBackupData"`
+		Reason           string `json:"reason"`
 	}
 	if req.Body != nil {
 		if err := decodeJSON(req, &body); err != nil {
@@ -1085,6 +2601,15 @@ func (r *Router) unregisterCluster(w http.ResponseWriter, req *http.Request) {
 	if body.DeleteNamespace != nil {
 		deleteNamespace = *body.DeleteNamespace
 	}
+	if audit.RestorePointCount > 0 && !body.DeleteBackupData {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":    "backup_data_decision_required",
+			"message":  "This cluster has restore points. Confirm deletion of backup data, or remove/archive its DR configurations before unregistering.",
+			"precheck": audit,
+		})
+		return
+	}
+	cleanupObjectStorage := audit.ObjectStorageNeeded && (audit.RestorePointCount == 0 || body.DeleteBackupData)
 	namespace := r.agentNamespace()
 	commandID := store.NewPublicID()
 	task, err := r.store.CreateTask(store.TaskInput{
@@ -1093,16 +2618,26 @@ func (r *Router) unregisterCluster(w http.ResponseWriter, req *http.Request) {
 		Status:    "queued",
 		CommandID: commandID,
 		Payload: map[string]any{
-			"clusterId":       clusterID,
-			"namespace":       namespace,
-			"deleteVelero":    deleteVelero,
-			"deleteNamespace": deleteNamespace,
-			"reason":          body.Reason,
+			"requestedBy":          requestActor(req),
+			"clusterId":            clusterID,
+			"namespace":            namespace,
+			"deleteVelero":         deleteVelero,
+			"deleteNamespace":      deleteNamespace,
+			"deleteBackupData":     body.DeleteBackupData,
+			"cleanupObjectStorage": cleanupObjectStorage,
+			"storageRepositoryIds": audit.StorageRepositoryIDs,
+			"unregisterStage":      "prechecking",
+			"reason":               body.Reason,
 		},
 	})
 	if err != nil {
 		r.logger.Error("failed to create unregister task", "cluster_id", clusterID, "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "create_task_failed"})
+		return
+	}
+	if cleanupObjectStorage {
+		go r.cleanupAndDispatchUnregister(task, audit.StorageRepositoryIDs)
+		writeJSON(w, http.StatusAccepted, task)
 		return
 	}
 
@@ -1140,7 +2675,7 @@ func (r *Router) unregisterCluster(w http.ResponseWriter, req *http.Request) {
 	task, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{
 		TaskID:   task.ID,
 		Status:   "dispatched",
-		Progress: 0,
+		Progress: 20,
 	})
 	_ = r.store.AddTaskEvent(store.TaskEventInput{
 		TaskID:  task.ID,
@@ -1149,6 +2684,31 @@ func (r *Router) unregisterCluster(w http.ResponseWriter, req *http.Request) {
 		Message: "unregister task dispatched to agent",
 	})
 	writeJSON(w, http.StatusAccepted, task)
+}
+
+func (r *Router) cleanupAndDispatchUnregister(task store.Task, repositoryIDs []string) {
+	_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "running", Progress: 10})
+	_ = r.store.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "info", Reason: "cleaning_object_storage", Message: "cleaning backup data before cluster-side uninstall"})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	cleanupResults, cleanupErr := r.cleanupClusterObjectStorageRepositories(ctx, task.ClusterID, repositoryIDs)
+	cancel()
+	if cleanupErr != nil {
+		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "failed", Progress: 10, ErrorCode: "OBJECT_STORAGE_CLEANUP_FAILED", ErrorMessage: cleanupErr.Error(), MarkDone: true})
+		_ = r.store.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "error", Reason: "OBJECT_STORAGE_CLEANUP_FAILED", Message: cleanupErr.Error(), Payload: map[string]any{"cleanupResult": cleanupResults}})
+		return
+	}
+	_ = r.store.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "info", Reason: "object_storage_cleaned", Message: "backup data cleanup completed", Payload: map[string]any{"cleanupResult": cleanupResults}})
+	conn, ok := r.hub.get(task.ClusterID)
+	if !ok || conn == nil {
+		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "queued", Progress: 10, ErrorCode: "AGENT_OFFLINE", ErrorMessage: "agent disconnected after precheck; unregister will be dispatched after reconnect"})
+		return
+	}
+	if err := r.dispatchStoredTask(conn, task); err != nil {
+		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "queued", Progress: 10, ErrorCode: "DISPATCH_FAILED", ErrorMessage: err.Error()})
+		return
+	}
+	_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "dispatched", Progress: 20})
+	_ = r.store.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "info", Reason: "dispatched", Message: "unregister task dispatched to agent"})
 }
 
 func (r *Router) upgradeClusterAgent(w http.ResponseWriter, req *http.Request) {
@@ -1161,16 +2721,34 @@ func (r *Router) upgradeClusterAgent(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "cluster_not_found"})
 		return
 	}
-	targetImage := strings.TrimSpace(r.cfg.AgentImage)
-	if targetImage == "" {
+	target, targetErr := r.componentTarget(req.Context(), "comm-agent")
+	if targetErr != nil || target.Image == "" {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "agent_image_not_configured", "message": "Target agent image is not configured"})
 		return
 	}
-	targetDigest, err := r.resolveImageDigest(req.Context(), targetImage)
+	targetImage, targetDigest := target.Image, target.ImageDigest
+	clusters, err := r.store.ListClusters()
 	if err != nil {
-		r.logger.Error("failed to resolve target agent image digest", "cluster_id", clusterID, "image", targetImage, "error", err)
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "agent_image_digest_unavailable", "message": "Could not resolve target agent image digest from the registry"})
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_clusters_failed"})
 		return
+	}
+	for _, cluster := range clusters {
+		if cluster.ID == clusterID && cluster.AgentImageDigest != "" && cluster.AgentImageDigest == targetDigest {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "agent_already_current", "message": "Comm Agent already uses the target image."})
+			return
+		}
+	}
+	tasks, err := r.store.ListTasks(clusterID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_tasks_failed"})
+		return
+	}
+	blockedTypes := map[string]bool{"backup": true, "restore": true, "drill": true, "takeover": true, "failback": true, "retention-cleanup": true, "protection-cleanup": true, "agent-upgrade": true, "velero-upgrade": true}
+	for _, task := range tasks {
+		if blockedTypes[task.Type] && !isTerminalTaskStatus(task.Status) {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "cluster_task_active", "message": "Wait for active backup, restore, drill, cleanup, or upgrade tasks to finish before upgrading Comm Agent."})
+			return
+		}
 	}
 	conn, ok := r.hub.get(clusterID)
 	if !ok {
@@ -1185,10 +2763,12 @@ func (r *Router) upgradeClusterAgent(w http.ResponseWriter, req *http.Request) {
 		Status:    "queued",
 		CommandID: commandID,
 		Payload: map[string]any{
+			"requestedBy":       requestActor(req),
 			"clusterId":         clusterID,
 			"namespace":         namespace,
 			"image":             targetImage,
-			"version":           imageVersion(targetImage),
+			"version":           target.Version,
+			"releaseId":         target.ID,
 			"expectedDigest":    targetDigest,
 			"deploymentName":    "hypercdr-comm-agent",
 			"containerName":     "comm-agent",
@@ -1253,16 +2833,12 @@ func (r *Router) upgradeClusterVelero(w http.ResponseWriter, req *http.Request) 
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "velero_runtime_unreported", "message": "Upgrade the comm-agent first so it can report the Velero server and node-agent image digests."})
 		return
 	}
-	targetImage := strings.TrimSpace(r.cfg.VeleroImage)
-	if targetImage == "" {
+	target, targetErr := r.componentTarget(req.Context(), "velero")
+	if targetErr != nil || target.Image == "" {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "velero_image_not_configured"})
 		return
 	}
-	targetDigest, err := r.resolveImageDigest(req.Context(), targetImage)
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "velero_image_digest_unavailable", "message": "Could not resolve target Velero image digest from the registry"})
-		return
-	}
+	targetImage, targetDigest := target.Image, target.ImageDigest
 	if cluster.VeleroImageDigest == targetDigest && cluster.VeleroNodeAgentImageDigest == targetDigest && cluster.VeleroServerReady && cluster.VeleroNodeAgentDesired > 0 && cluster.VeleroNodeAgentReady == cluster.VeleroNodeAgentDesired {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "velero_already_current", "message": "Velero server and all node agents already use the target image."})
 		return
@@ -1285,8 +2861,10 @@ func (r *Router) upgradeClusterVelero(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 	task, err := r.store.CreateTask(store.TaskInput{ClusterID: clusterID, Type: "velero-upgrade", Status: "queued", CommandID: store.NewPublicID(), Payload: map[string]any{
-		"clusterId": clusterID, "namespace": r.agentNamespace(), "image": targetImage, "version": r.cfg.VeleroVersion,
+		"requestedBy": requestActor(req),
+		"clusterId":   clusterID, "namespace": r.agentNamespace(), "image": targetImage, "version": target.Version, "releaseId": target.ID,
 		"expectedDigest": targetDigest, "deploymentName": "velero", "daemonSetName": "node-agent",
+		"awsPluginImage": r.cfg.VeleroAWSPlugin, "azurePluginImage": r.cfg.VeleroAzurePlugin, "gcpPluginImage": r.cfg.VeleroGCPPlugin,
 	}})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "create_task_failed"})
@@ -1330,6 +2908,20 @@ func (r *Router) listApplications(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_applications_failed"})
 		return
 	}
+	clusters, _ := r.store.ListClusters()
+	allowed := map[string]bool{}
+	for _, item := range clusters {
+		if tenantVisible(req, item.TenantID) {
+			allowed[item.ID] = true
+		}
+	}
+	visibleApps := apps[:0]
+	for _, item := range apps {
+		if allowed[item.ClusterID] {
+			visibleApps = append(visibleApps, item)
+		}
+	}
+	apps = visibleApps
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items": nonNilSlice(apps),
 	})
@@ -1371,6 +2963,91 @@ func (r *Router) updateApplication(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, app)
+}
+
+func (r *Router) listTags(w http.ResponseWriter, req *http.Request) {
+	items, err := r.store.ListTags()
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "list_tags_failed"})
+		return
+	}
+	visible := items[:0]
+	for _, item := range items {
+		if tenantVisible(req, item.TenantID) {
+			visible = append(visible, item)
+		}
+	}
+	items = visible
+	writeJSON(w, 200, map[string]any{"items": nonNilSlice(items)})
+}
+func (r *Router) createTag(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if decodeJSON(req, &body) != nil || strings.TrimSpace(body.Name) == "" {
+		writeJSON(w, 400, map[string]any{"error": "tag_name_required"})
+		return
+	}
+	tenantID := store.DefaultTenantID
+	if actor, ok := requestUser(req); ok {
+		tenantID = actor.TenantID
+	}
+	tag, err := r.store.CreateTag(tenantID, body.Name)
+	if err != nil {
+		writeJSON(w, 409, map[string]any{"error": "tag_name_exists", "message": "Tag name already exists."})
+		return
+	}
+	writeJSON(w, 201, tag)
+}
+func (r *Router) updateTag(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if decodeJSON(req, &body) != nil || strings.TrimSpace(body.Name) == "" {
+		writeJSON(w, 400, map[string]any{"error": "tag_name_required"})
+		return
+	}
+	tag, ok, err := r.store.UpdateTag(req.PathValue("id"), body.Name)
+	if err != nil {
+		writeJSON(w, 409, map[string]any{"error": "tag_name_exists"})
+		return
+	}
+	if !ok {
+		writeJSON(w, 404, map[string]any{"error": "tag_not_found"})
+		return
+	}
+	writeJSON(w, 200, tag)
+}
+func (r *Router) deleteTag(w http.ResponseWriter, req *http.Request) {
+	deleted, err := r.store.DeleteTag(req.PathValue("id"))
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "delete_tag_failed"})
+		return
+	}
+	if !deleted {
+		writeJSON(w, 404, map[string]any{"error": "tag_not_found"})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"deleted": true})
+}
+func (r *Router) setApplicationTags(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		TagIDs []string `json:"tagIds"`
+	}
+	if decodeJSON(req, &body) != nil {
+		writeJSON(w, 400, map[string]any{"error": "invalid_json"})
+		return
+	}
+	app, ok, err := r.store.SetApplicationTags(req.PathValue("id"), body.TagIDs)
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "set_application_tags_failed"})
+		return
+	}
+	if !ok {
+		writeJSON(w, 404, map[string]any{"error": "application_not_found"})
+		return
+	}
+	writeJSON(w, 200, app)
 }
 
 func (r *Router) applicationDRSupportBlock(appID string, requestedStatus string) (bool, string) {
@@ -1459,7 +3136,12 @@ func (r *Router) createAgentToken(w http.ResponseWriter, req *http.Request) {
 		ttl = time.Duration(body.TTLSeconds) * time.Second
 	}
 
-	token, err := r.store.CreateAgentToken(body.Description, ttl)
+	actor, _ := requestUser(req)
+	tenantID := actor.TenantID
+	if tenantID == "" {
+		tenantID = store.DefaultTenantID
+	}
+	token, err := r.store.CreateAgentToken(tenantID, actor.ID, body.Description, ttl)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"error": "token_create_failed",
@@ -1473,16 +3155,19 @@ func (r *Router) createAgentToken(w http.ResponseWriter, req *http.Request) {
 		curlCommand = "curl -k -sSL "
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"id":                 token.ID,
-		"token":              token.Token,
-		"expiresAt":          token.ExpiresAt,
-		"prepareNodeCommand": curlCommand + baseURL + "/prepare-node.sh | bash",
+	response := map[string]any{
+		"id":        token.ID,
+		"token":     token.Token,
+		"expiresAt": token.ExpiresAt,
 		"installCommand": curlCommand + baseURL + "/install.sh | bash -s -- --token " +
 			token.Token + " --endpoint " + r.agentWSEndpoint(req) +
 			" --namespace " + r.cfg.AgentNamespace +
 			" --executor-mode kubernetes --install-registry-ca false",
-	})
+	}
+	if r.cfg.RegistryCAPath != "" {
+		response["prepareNodeCommand"] = curlCommand + baseURL + "/prepare-node.sh | bash"
+	}
+	writeJSON(w, http.StatusCreated, response)
 }
 
 func (r *Router) validateAgentToken(w http.ResponseWriter, req *http.Request) {
@@ -1512,6 +3197,10 @@ func (r *Router) validateAgentToken(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) prepareNodeScript(w http.ResponseWriter, req *http.Request) {
+	if r.cfg.RegistryCAPath == "" {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "registry_ca_not_configured"})
+		return
+	}
 	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	script := strings.ReplaceAll(prepareNodeScriptTemplate, "{{REGISTRY_HOST}}", r.registryHost())
@@ -1520,16 +3209,25 @@ func (r *Router) prepareNodeScript(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) installScript(w http.ResponseWriter, req *http.Request) {
+	agentTarget, agentErr := r.componentTarget(req.Context(), "comm-agent")
+	veleroTarget, veleroErr := r.componentTarget(req.Context(), "velero")
+	if agentErr != nil || veleroErr != nil {
+		r.logger.Error("failed to resolve active component releases for install script", "agent_error", agentErr, "velero_error", veleroErr)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "component_target_unavailable", "message": "Active cluster component versions are not available."})
+		return
+	}
 	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	script := strings.ReplaceAll(installScriptTemplate, "{{AGENT_IMAGE}}", r.cfg.AgentImage)
+	script := strings.ReplaceAll(installScriptTemplate, "{{AGENT_IMAGE}}", agentTarget.Image)
 	script = strings.ReplaceAll(script, "{{AGENT_NAMESPACE}}", r.cfg.AgentNamespace)
 	script = strings.ReplaceAll(script, "{{AGENT_WS_ENDPOINT}}", r.agentWSEndpoint(req))
 	script = strings.ReplaceAll(script, "{{TOKEN_VALIDATE_URL}}", r.publicBaseURL(req)+"/api/v1/agent-tokens/validate")
 	script = strings.ReplaceAll(script, "{{VELERO_CRDS_URL}}", r.publicBaseURL(req)+"/assets/velero/v1.17.1/crds.yaml")
 	script = strings.ReplaceAll(script, "{{REGISTRY_CA_URL}}", r.publicBaseURL(req)+"/assets/registry/ca.crt")
-	script = strings.ReplaceAll(script, "{{VELERO_IMAGE}}", r.cfg.VeleroImage)
+	script = strings.ReplaceAll(script, "{{VELERO_IMAGE}}", veleroTarget.Image)
 	script = strings.ReplaceAll(script, "{{VELERO_AWS_PLUGIN_IMAGE}}", r.cfg.VeleroAWSPlugin)
+	script = strings.ReplaceAll(script, "{{VELERO_AZURE_PLUGIN_IMAGE}}", r.cfg.VeleroAzurePlugin)
+	script = strings.ReplaceAll(script, "{{VELERO_GCP_PLUGIN_IMAGE}}", r.cfg.VeleroGCPPlugin)
 	_, _ = w.Write([]byte(script))
 }
 
@@ -1568,6 +3266,13 @@ func (r *Router) listStorageRepositories(w http.ResponseWriter, req *http.Reques
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_storage_failed"})
 		return
 	}
+	visible := items[:0]
+	for _, item := range items {
+		if tenantVisible(req, item.TenantID) {
+			visible = append(visible, item)
+		}
+	}
+	items = visible
 	writeJSON(w, http.StatusOK, map[string]any{"items": nonNilSlice(items)})
 }
 
@@ -1581,6 +3286,14 @@ func (r *Router) createStorageRepository(w http.ResponseWriter, req *http.Reques
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "name_required"})
 		return
 	}
+	if actor, ok := requestUser(req); ok {
+		input.TenantID = actor.TenantID
+	}
+	if code, message := validateCloudStorageInput(input, true); code != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": code, "message": message})
+		return
+	}
+	input.Region = normalizedStoredRegion(input.Region)
 	item, err := r.store.CreateStorageRepository(input)
 	if err != nil {
 		r.logger.Error("failed to create storage repository", "error", err)
@@ -1602,13 +3315,76 @@ func (r *Router) createStorageRepository(w http.ResponseWriter, req *http.Reques
 	writeJSON(w, http.StatusCreated, item)
 }
 
+func (r *Router) updateStorageRepository(w http.ResponseWriter, req *http.Request) {
+	var input store.StorageRepositoryInput
+	if err := decodeJSON(req, &input); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
+		return
+	}
+	if strings.TrimSpace(input.Name) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "name_required", "message": "Storage repository name is required."})
+		return
+	}
+	if code, message := validateCloudStorageInput(input, false); code != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": code, "message": message})
+		return
+	}
+	input.Region = normalizedStoredRegion(input.Region)
+	item, ok, err := r.store.UpdateStorageRepository(req.PathValue("id"), input)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "update_storage_repository_failed"})
+		return
+	}
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "storage_repository_not_found"})
+		return
+	}
+	validationStatus := "connected"
+	if _, testErr := probeStorageRepository(item, 5*time.Second); testErr != nil {
+		validationStatus = "warning"
+		r.logger.Warn("updated storage repository connection test failed", "repository_id", item.ID, "error", testErr)
+	}
+	validatedAt := time.Now().UTC()
+	validated, statusOK, statusErr := r.store.SetStorageRepositoryStatus(item.ID, validationStatus, validatedAt)
+	if statusErr != nil {
+		r.logger.Error("failed to persist updated storage repository status", "repository_id", item.ID, "error", statusErr)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "update_storage_status_failed"})
+		return
+	}
+	if statusOK {
+		item = validated
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (r *Router) deleteStorageRepository(w http.ResponseWriter, req *http.Request) {
+	deleted, inUse, err := r.store.DeleteStorageRepository(req.PathValue("id"))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "delete_storage_repository_failed"})
+		return
+	}
+	if inUse {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "storage_repository_in_use", "message": "This storage repository is used by a DR configuration and cannot be deleted."})
+		return
+	}
+	if !deleted {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "storage_repository_not_found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
 func (r *Router) testStorageRepositoryDraft(w http.ResponseWriter, req *http.Request) {
 	var input store.StorageRepositoryInput
 	if err := decodeJSON(req, &input); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
 		return
 	}
-	if input.Endpoint == "" {
+	if code, message := validateCloudStorageInput(input, true); code != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": code, "message": message})
+		return
+	}
+	if input.Endpoint == "" && !strings.EqualFold(input.Type, "Google Cloud") && !strings.EqualFold(input.Type, "GCS") {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "endpoint_required"})
 		return
 	}
@@ -1616,6 +3392,7 @@ func (r *Router) testStorageRepositoryDraft(w http.ResponseWriter, req *http.Req
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "bucket_required"})
 		return
 	}
+	input.Region = normalizedStorageRegion(input.Type, input.Region)
 	repo := store.StorageRepository{
 		Name:       input.Name,
 		Type:       input.Type,
@@ -1624,6 +3401,13 @@ func (r *Router) testStorageRepositoryDraft(w http.ResponseWriter, req *http.Req
 		Region:     input.Region,
 		TLSEnabled: input.TLSEnabled,
 		Config:     input.Config,
+		Secret: map[string]string{
+			"accessKey":         input.AccessKey,
+			"secretKey":         input.SecretKey,
+			"accountName":       input.AccountName,
+			"accountKey":        input.AccountKey,
+			"serviceAccountKey": input.ServiceAccountKey,
+		},
 	}
 	probe, testErr := probeStorageRepository(repo, 5*time.Second)
 	status := "connected"
@@ -1644,6 +3428,35 @@ func (r *Router) testStorageRepositoryDraft(w http.ResponseWriter, req *http.Req
 		body["error"] = detail
 	}
 	writeJSON(w, http.StatusOK, body)
+}
+
+func validateCloudStorageInput(input store.StorageRepositoryInput, requireCredentials bool) (string, string) {
+	switch strings.ToLower(strings.TrimSpace(input.Type)) {
+	case "azure", "azure blob":
+		if strings.TrimSpace(input.AccountName) == "" {
+			return "azure_account_name_required", "Azure storage account name is required."
+		}
+		if requireCredentials && strings.TrimSpace(input.AccountKey) == "" {
+			return "azure_account_key_required", "Azure storage account key is required."
+		}
+	case "google cloud", "gcs":
+		key := strings.TrimSpace(input.ServiceAccountKey)
+		if key == "" {
+			if requireCredentials {
+				return "gcs_service_account_required", "Google Cloud service account JSON is required."
+			}
+			return "", ""
+		}
+		var credentials struct {
+			Type        string `json:"type"`
+			ClientEmail string `json:"client_email"`
+			PrivateKey  string `json:"private_key"`
+		}
+		if json.Unmarshal([]byte(key), &credentials) != nil || credentials.Type != "service_account" || strings.TrimSpace(credentials.ClientEmail) == "" || strings.TrimSpace(credentials.PrivateKey) == "" {
+			return "gcs_service_account_invalid", "Provide a valid Google Cloud service account JSON key."
+		}
+	}
+	return "", ""
 }
 
 func (r *Router) testStorageRepository(w http.ResponseWriter, req *http.Request) {
@@ -1701,6 +3514,13 @@ func (r *Router) listPolicies(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_policies_failed"})
 		return
 	}
+	visible := items[:0]
+	for _, item := range items {
+		if tenantVisible(req, item.TenantID) {
+			visible = append(visible, item)
+		}
+	}
+	items = visible
 	writeJSON(w, http.StatusOK, map[string]any{"items": nonNilSlice(items)})
 }
 
@@ -1709,6 +3529,9 @@ func (r *Router) createPolicy(w http.ResponseWriter, req *http.Request) {
 	if err := decodeJSON(req, &input); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
 		return
+	}
+	if actor, ok := requestUser(req); ok {
+		input.TenantID = actor.TenantID
 	}
 	if input.Name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "name_required"})
@@ -1723,17 +3546,84 @@ func (r *Router) createPolicy(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusCreated, item)
 }
 
+func (r *Router) updatePolicy(w http.ResponseWriter, req *http.Request) {
+	var input store.PolicyInput
+	if err := decodeJSON(req, &input); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
+		return
+	}
+	if strings.TrimSpace(input.Name) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "name_required", "message": "Policy name is required."})
+		return
+	}
+	item, ok, err := r.store.UpdatePolicy(req.PathValue("id"), input)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "update_policy_failed"})
+		return
+	}
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "policy_not_found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (r *Router) deletePolicy(w http.ResponseWriter, req *http.Request) {
+	deleted, inUse, err := r.store.DeletePolicy(req.PathValue("id"))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "delete_policy_failed"})
+		return
+	}
+	if inUse {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "policy_in_use", "message": "This policy is used by a DR configuration and cannot be deleted."})
+		return
+	}
+	if !deleted {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "policy_not_found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
 func probeStorageRepository(repo store.StorageRepository, timeout time.Duration) (map[string]any, error) {
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-	if repo.Endpoint == "" {
+	typeName := strings.ToLower(strings.TrimSpace(repo.Type))
+	if repo.Endpoint == "" && typeName != "google cloud" && typeName != "gcs" {
 		return nil, errors.New("endpoint is empty")
 	}
 	if repo.Bucket == "" {
 		return nil, errors.New("bucket is empty")
 	}
+	if typeName == "s3" || typeName == "s3-compatible" || typeName == "s3 compatible" {
+		creds := storageCredentials(repo)
+		if creds == nil || strings.TrimSpace(creds.AccessKey) == "" || strings.TrimSpace(creds.SecretKey) == "" {
+			return nil, errors.New("S3 access key and secret key are required")
+		}
+		endpoint, secure := minioEndpoint(repo)
+		client, err := minio.New(endpoint, &minio.Options{
+			Creds:  credentials.NewStaticV4(creds.AccessKey, creds.SecretKey, ""),
+			Secure: secure,
+			Region: normalizedStorageRegion(repo.Type, repo.Region),
+		})
+		if err != nil {
+			return map[string]any{"endpoint": endpoint, "bucket": repo.Bucket}, err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		for object := range client.ListObjects(ctx, repo.Bucket, minio.ListObjectsOptions{Recursive: false}) {
+			if object.Err != nil {
+				return map[string]any{"endpoint": endpoint, "bucket": repo.Bucket}, object.Err
+			}
+			break
+		}
+		return map[string]any{"endpoint": endpoint, "bucket": repo.Bucket, "authenticated": true}, nil
+	}
 	endpoint := strings.TrimRight(strings.TrimSpace(repo.Endpoint), "/")
+	if typeName == "google cloud" || typeName == "gcs" {
+		endpoint = "storage.googleapis.com"
+	}
 	scheme := "http"
 	if repo.TLSEnabled {
 		scheme = "https"
@@ -1750,7 +3640,11 @@ func probeStorageRepository(repo store.StorageRepository, timeout time.Duration)
 		urlStyle = "path"
 	}
 	var probeURL string
-	if urlStyle == "virtual" {
+	if typeName == "azure" {
+		probeURL = scheme + "://" + endpoint + "/" + repo.Bucket + "?restype=container"
+	} else if typeName == "google cloud" || typeName == "gcs" {
+		probeURL = "https://storage.googleapis.com/" + repo.Bucket
+	} else if urlStyle == "virtual" {
 		probeURL = scheme + "://" + repo.Bucket + "." + endpoint + "/?probe=1"
 	} else {
 		probeURL = scheme + "://" + endpoint + "/" + repo.Bucket + "?probe=1"
@@ -1777,22 +3671,52 @@ type objectStorageCleanupResult struct {
 }
 
 func (r *Router) cleanupClusterObjectStorage(ctx context.Context, clusterID string) ([]objectStorageCleanupResult, error) {
+	audit, err := r.auditClusterUnregister(clusterID)
+	if err != nil {
+		return nil, err
+	}
+	if !audit.ObjectStorageNeeded {
+		return []objectStorageCleanupResult{}, nil
+	}
+	return r.cleanupClusterObjectStorageRepositories(ctx, clusterID, audit.StorageRepositoryIDs)
+}
+
+func (r *Router) cleanupClusterObjectStorageRepositories(ctx context.Context, clusterID string, repositoryIDs []string) ([]objectStorageCleanupResult, error) {
 	clusterID = strings.TrimSpace(clusterID)
 	if clusterID == "" {
 		return nil, errors.New("cluster id is required for object storage cleanup")
+	}
+	if len(repositoryIDs) == 0 {
+		return nil, errors.New("restore points exist but no storage repository is associated with them")
 	}
 	repositories, err := r.store.ListStorageRepositories()
 	if err != nil {
 		return nil, err
 	}
+	wanted := make(map[string]struct{}, len(repositoryIDs))
+	for _, id := range repositoryIDs {
+		wanted[id] = struct{}{}
+	}
 	prefix := strings.TrimSuffix(storageDomainPrefix(clusterID), "/") + "/"
-	results := make([]objectStorageCleanupResult, 0, len(repositories))
+	results := make([]objectStorageCleanupResult, 0, len(repositoryIDs))
 	for _, repo := range repositories {
+		if _, ok := wanted[repo.ID]; !ok {
+			continue
+		}
 		result, err := cleanObjectStoragePrefix(ctx, repo, prefix)
 		if err != nil {
 			return results, fmt.Errorf("cleanup repository %s prefix %s: %w", repo.Name, prefix, err)
 		}
 		results = append(results, result)
+		delete(wanted, repo.ID)
+	}
+	if len(wanted) > 0 {
+		missing := make([]string, 0, len(wanted))
+		for id := range wanted {
+			missing = append(missing, id)
+		}
+		sort.Strings(missing)
+		return results, fmt.Errorf("associated storage repositories not found: %s", strings.Join(missing, ", "))
 	}
 	return results, nil
 }
@@ -1882,6 +3806,7 @@ func (r *Router) syncStorageRepository(w http.ResponseWriter, req *http.Request)
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "storage_repository_not_found"})
 		return
 	}
+	repo.Region = normalizedStorageRegion(repo.Type, repo.Region)
 	bslName := storageDomainBSLName(repo, body.ClusterID)
 	objectPrefix := storageDomainPrefix(body.ClusterID)
 	config := storageConfigWithPrefix(repo, objectPrefix)
@@ -1908,6 +3833,7 @@ func (r *Router) syncStorageRepository(w http.ResponseWriter, req *http.Request)
 		Status:    "queued",
 		CommandID: commandID,
 		Payload: map[string]any{
+			"requestedBy":     requestActor(req),
 			"repositoryId":    repo.ID,
 			"name":            bslName,
 			"displayName":     repo.Name,
@@ -2001,10 +3927,9 @@ func storageCredentials(repo store.StorageRepository) *protocol.S3Credentials {
 		return nil
 	}
 	credentials := &protocol.S3Credentials{
-		AccessKey: repo.Secret["accessKey"],
-		SecretKey: repo.Secret["secretKey"],
+		AccessKey: repo.Secret["accessKey"], SecretKey: repo.Secret["secretKey"], AccountName: repo.Secret["accountName"], AccountKey: repo.Secret["accountKey"], ServiceAccountKey: repo.Secret["serviceAccountKey"],
 	}
-	if credentials.AccessKey == "" && credentials.SecretKey == "" {
+	if credentials.AccessKey == "" && credentials.SecretKey == "" && credentials.AccountKey == "" && credentials.ServiceAccountKey == "" {
 		return nil
 	}
 	return credentials
@@ -2078,6 +4003,25 @@ func storageConfigWithPrefix(repo store.StorageRepository, prefix string) map[st
 	return config
 }
 
+func normalizedStorageRegion(storageType, region string) string {
+	region = normalizedStoredRegion(region)
+	typeName := strings.ToLower(strings.TrimSpace(storageType))
+	if region == "" && (typeName == "s3" || typeName == "s3-compatible" || typeName == "s3 compatible") {
+		return "us-east-1"
+	}
+	return region
+}
+
+func normalizedStoredRegion(region string) string {
+	region = strings.TrimSpace(region)
+	switch strings.ToLower(region) {
+	case "n/a", "na", "-":
+		return ""
+	default:
+		return region
+	}
+}
+
 func (r *Router) dispatchStorageSyncTaskForPlanActivation(clusterID string, repositoryID string, protectionPlanID string, activationAttempt string, activationRole string, reconfigureStorage bool) (store.Task, string, error) {
 	return r.dispatchStorageSyncTaskForPlanActivationAttempt(clusterID, repositoryID, protectionPlanID, clusterID, activationAttempt, activationRole, reconfigureStorage, 1)
 }
@@ -2090,6 +4034,7 @@ func (r *Router) dispatchStorageSyncTaskForPlanActivationAttempt(clusterID strin
 	if !ok {
 		return store.Task{}, "", errors.New("storage repository not found")
 	}
+	repo.Region = normalizedStorageRegion(repo.Type, repo.Region)
 	if sourceClusterID == "" {
 		sourceClusterID = clusterID
 	}
@@ -2355,6 +4300,7 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 		if !ok {
 			return protocol.Message[protocol.TaskDispatchPayload]{}, errors.New("storage repository not found")
 		}
+		repo.Region = normalizedStorageRegion(repo.Type, repo.Region)
 		name := stringPayload(task.Payload, "name")
 		if name == "" {
 			name = storageDomainBSLName(repo, stringPayload(task.Payload, "sourceClusterId"))
@@ -2450,6 +4396,7 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 			ClusterID: task.ClusterID, Namespace: firstNonEmptyString(stringPayload(task.Payload, "namespace"), r.agentNamespace()),
 			Image: stringPayload(task.Payload, "image"), Version: stringPayload(task.Payload, "version"), ExpectedDigest: stringPayload(task.Payload, "expectedDigest"),
 			DeploymentName: stringPayload(task.Payload, "deploymentName"), DaemonSetName: stringPayload(task.Payload, "daemonSetName"),
+			AWSPluginImage: stringPayload(task.Payload, "awsPluginImage"), AzurePluginImage: stringPayload(task.Payload, "azurePluginImage"), GCPPluginImage: stringPayload(task.Payload, "gcpPluginImage"),
 		}
 		if payload.VeleroUpgrade.Image == "" {
 			return protocol.Message[protocol.TaskDispatchPayload]{}, errors.New("velero upgrade image is required")
@@ -2599,6 +4546,7 @@ func protectionCleanupCommandFromPayload(payload map[string]any) *protocol.Prote
 		StorageRepo:          stringPayload(payload, "storageRepo"),
 		CleanupObjectStorage: boolPayload(payload, "cleanupObjectStorage"),
 		RestorePoints:        retentionRestorePointsFromAny(payload["restorePoints"]),
+		RestoreNames:         stringSlicePayload(payload, "restoreNames"),
 	}
 }
 
@@ -2908,6 +4856,13 @@ func (r *Router) listProtectionPlans(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_protection_plans_failed"})
 		return
 	}
+	visible := items[:0]
+	for _, item := range items {
+		if tenantVisible(req, item.TenantID) {
+			visible = append(visible, item)
+		}
+	}
+	items = visible
 	writeJSON(w, http.StatusOK, map[string]any{"items": nonNilSlice(items)})
 }
 
@@ -2916,6 +4871,51 @@ func (r *Router) createProtectionPlan(w http.ResponseWriter, req *http.Request) 
 	if err := decodeJSON(req, &input); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
 		return
+	}
+	if actor, ok := requestUser(req); ok {
+		input.TenantID = actor.TenantID
+	}
+	if input.TenantID != "" {
+		clusters, _ := r.store.ListClusters()
+		clusterAllowed := func(id string) bool {
+			if id == "" {
+				return true
+			}
+			for _, item := range clusters {
+				if item.ID == id && item.TenantID == input.TenantID {
+					return true
+				}
+			}
+			return false
+		}
+		storageItem, storageFound, _ := r.store.GetStorageRepository(input.StorageRepoID)
+		policyAllowed := input.PolicyID == ""
+		if !policyAllowed {
+			policies, _ := r.store.ListPolicies()
+			for _, item := range policies {
+				if item.ID == input.PolicyID && item.TenantID == input.TenantID {
+					policyAllowed = true
+					break
+				}
+			}
+		}
+		appsAllowed := true
+		seenApps := map[string]bool{}
+		for _, appID := range append(append([]string{}, input.AppIDs...), input.AppID) {
+			if appID == "" || seenApps[appID] {
+				continue
+			}
+			seenApps[appID] = true
+			app, found, _ := r.store.GetApplication(appID)
+			if !found || !clusterAllowed(app.ClusterID) {
+				appsAllowed = false
+				break
+			}
+		}
+		if !clusterAllowed(input.SourceClusterID) || !clusterAllowed(input.TargetClusterID) || !storageFound || storageItem.TenantID != input.TenantID || !policyAllowed || !appsAllowed {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "resource_not_found", "message": "One or more selected resources are not available in this tenant."})
+			return
+		}
 	}
 	if input.SourceClusterID == "" || (input.AppID == "" && len(input.AppIDs) == 0) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "source_cluster_id_and_apps_required"})
@@ -3534,6 +5534,13 @@ func (r *Router) listRestorePoints(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_restore_points_failed"})
 		return
 	}
+	visible := items[:0]
+	for _, item := range items {
+		if tenantVisible(req, item.TenantID) {
+			visible = append(visible, item)
+		}
+	}
+	items = visible
 	items = enrichRestorePointStorageIncrements(items)
 	writeJSON(w, http.StatusOK, map[string]any{"items": nonNilSlice(items)})
 }
@@ -3566,6 +5573,10 @@ func (r *Router) deleteRestorePoints(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "restore_point_not_found", "restorePointId": id})
+			return
+		}
+		if !tenantVisible(req, point.TenantID) {
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "restore_point_not_found", "restorePointId": id})
 			return
 		}
@@ -3634,7 +5645,66 @@ func (r *Router) listTasks(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_tasks_failed"})
 		return
 	}
+	visible := items[:0]
+	for _, item := range items {
+		if tenantVisible(req, item.TenantID) {
+			visible = append(visible, item)
+		}
+	}
+	items = visible
+	items = r.enrichCleanupTaskRestorePointTimes(items)
 	writeJSON(w, http.StatusOK, map[string]any{"items": nonNilSlice(items)})
+}
+
+// enrichCleanupTaskRestorePointTimes keeps restore-point labels derivable for
+// historical cleanup tasks after their restore-point records stop appearing in
+// the normal active restore-point list. The UI converts this UTC instant using
+// its currently selected timezone; no persisted display label is involved.
+func (r *Router) enrichCleanupTaskRestorePointTimes(items []store.Task) []store.Task {
+	for index := range items {
+		if items[index].Type != "retention-cleanup" && items[index].Type != "protection-cleanup" {
+			continue
+		}
+		rawPoints, ok := items[index].Payload["restorePoints"].([]any)
+		if !ok || len(rawPoints) == 0 {
+			continue
+		}
+		payload := make(map[string]any, len(items[index].Payload))
+		for key, value := range items[index].Payload {
+			payload[key] = value
+		}
+		points := append([]any(nil), rawPoints...)
+		changed := false
+		for pointIndex, rawPoint := range points {
+			pointPayload, ok := rawPoint.(map[string]any)
+			if !ok {
+				continue
+			}
+			if taskCreatedAt, exists := pointPayload["taskCreatedAt"]; exists && taskCreatedAt != nil && strings.TrimSpace(fmt.Sprint(taskCreatedAt)) != "" {
+				continue
+			}
+			id := strings.TrimSpace(fmt.Sprint(pointPayload["id"]))
+			if id == "" {
+				continue
+			}
+			point, found, err := r.store.GetRestorePoint(id)
+			if err != nil || !found || point.TaskCreatedAt.IsZero() {
+				continue
+			}
+			enriched := make(map[string]any, len(pointPayload)+1)
+			for key, value := range pointPayload {
+				enriched[key] = value
+			}
+			enriched["taskCreatedAt"] = point.TaskCreatedAt
+			points[pointIndex] = enriched
+			changed = true
+		}
+		if changed {
+			payload["restorePoints"] = points
+			items[index].Payload = payload
+		}
+	}
+	return items
 }
 
 func (r *Router) listTaskEvents(w http.ResponseWriter, req *http.Request) {
@@ -3690,6 +5760,7 @@ func (r *Router) cancelTask(w http.ResponseWriter, req *http.Request) {
 		Status:           "queued",
 		CommandID:        cancelCommandID,
 		Payload: map[string]any{
+			"requestedBy":      requestActor(req),
 			"targetTaskId":     task.ID,
 			"planId":           task.ProtectionPlanID,
 			"veleroBackupName": stringPayload(task.Payload, "veleroBackupName"),
@@ -3776,6 +5847,7 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 	if body.Trigger == "" {
 		body.Trigger = "manual"
 	}
+	body.RequestedBy = requestActor(req)
 
 	// When a protection plan is provided, expand to one task per app on the plan.
 	type planApp struct {
@@ -3799,6 +5871,10 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "protection_plan_not_found"})
+			return
+		}
+		if !tenantVisible(req, plan.TenantID) {
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "protection_plan_not_found"})
 			return
 		}
@@ -3897,6 +5973,10 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		if !ok {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "protection_plan_required"})
+			return
+		}
+		if !tenantVisible(req, plan.TenantID) {
 			writeJSON(w, http.StatusConflict, map[string]any{"error": "protection_plan_required"})
 			return
 		}
@@ -4133,6 +6213,7 @@ func (r *Router) createPendingBackupTask(body backupTaskRequest, appID string) (
 			"veleroBackupName":        veleroBackupName,
 			"trigger":                 body.Trigger,
 			"scheduled":               body.Trigger == "scheduled",
+			"requestedBy":             firstNonEmptyString(body.RequestedBy, "System"),
 		},
 	})
 	if err != nil {
@@ -4282,6 +6363,12 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "cluster_id_required"})
 		return
 	}
+	if _, authenticated := requestUser(req); authenticated {
+		if !r.clusterVisible(req, body.ClusterID) {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "cluster_not_found"})
+			return
+		}
+	}
 	storageRepoID := ""
 	storageSourceClusterID := ""
 	protectionPlanID := body.ProtectionPlanID
@@ -4293,6 +6380,10 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 			return
 		}
 		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "restore_point_not_found"})
+			return
+		}
+		if !tenantVisible(req, point.TenantID) {
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "restore_point_not_found"})
 			return
 		}
@@ -4388,6 +6479,7 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 		Status:           "queued",
 		CommandID:        commandID,
 		Payload: map[string]any{
+			"requestedBy":                requestActor(req),
 			"protectionPlanId":           protectionPlanID,
 			"restorePointId":             body.RestorePointID,
 			"veleroBackupName":           body.VeleroBackupName,
@@ -5122,6 +7214,22 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 					r.reconcileRetention(point.ProtectionPlanID, point.BackupTaskID)
 				}
 			}
+			if existingTask.Type == "unregister" {
+				if err := r.finishUnregisterTask(clusterID, existingTask); err != nil {
+					_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: existingTask.ID, Status: "failed", Progress: 95, ErrorCode: "PLATFORM_CLEANUP_FAILED", ErrorMessage: err.Error(), MarkDone: true})
+					_ = r.store.AddTaskEvent(store.TaskEventInput{TaskID: existingTask.ID, Level: "error", Reason: "PLATFORM_CLEANUP_FAILED", Message: err.Error()})
+					if completed.Payload.AckRequired {
+						_ = r.writeEventError(conn, clusterID, completed.AgentID, completed.MessageID, completed.Type, completed.Payload.TaskID, completed.Payload.CommandID, "PLATFORM_CLEANUP_FAILED", err.Error(), true)
+					}
+					return
+				}
+				_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: existingTask.ID, Status: "succeeded", Progress: 100, Payload: patch, MarkDone: true})
+				_ = r.store.AddTaskEvent(store.TaskEventInput{TaskID: existingTask.ID, Level: "info", Reason: "completed", Message: "cluster unregister completed"})
+				if completed.Payload.AckRequired {
+					_ = r.writeEventAck(conn, clusterID, completed.AgentID, completed.MessageID, completed.Type, completed.Payload.TaskID, completed.Payload.CommandID)
+				}
+				return
+			}
 			task, _, err := r.store.UpdateTaskStatus(store.TaskStatusInput{
 				TaskID:   completed.Payload.TaskID,
 				Status:   "succeeded",
@@ -5164,13 +7272,6 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 			}
 			if task.Type == "protection-cleanup" {
 				r.finishProtectionCleanupTask(task, completed.Payload.Velero)
-			}
-			if task.Type == "unregister" {
-				if completed.Payload.AckRequired {
-					_ = r.writeEventAck(conn, clusterID, completed.AgentID, completed.MessageID, completed.Type, completed.Payload.TaskID, completed.Payload.CommandID)
-				}
-				r.finishUnregisterTask(clusterID, task)
-				return
 			}
 			if completed.Payload.AckRequired {
 				_ = r.writeEventAck(conn, clusterID, completed.AgentID, completed.MessageID, completed.Type, completed.Payload.TaskID, completed.Payload.CommandID)
@@ -5990,53 +8091,19 @@ func mapInventoryStorageClasses(storageClasses []protocol.StorageClassInventory)
 	return items
 }
 
-func (r *Router) finishUnregisterTask(clusterID string, task store.Task) {
+func (r *Router) finishUnregisterTask(clusterID string, task store.Task) error {
 	r.hub.close(clusterID)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-	cleanupResults, cleanupErr := r.cleanupClusterObjectStorage(ctx, clusterID)
-	if cleanupErr != nil {
-		r.logger.Error("failed to cleanup cluster object storage after unregister", "cluster_id", clusterID, "task_id", task.ID, "error", cleanupErr)
-		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{
-			TaskID:       task.ID,
-			Status:       "failed",
-			Progress:     100,
-			ErrorCode:    "OBJECT_STORAGE_CLEANUP_FAILED",
-			ErrorMessage: cleanupErr.Error(),
-			MarkDone:     true,
-		})
-		_ = r.store.AddTaskEvent(store.TaskEventInput{
-			TaskID:  task.ID,
-			Level:   "error",
-			Reason:  "OBJECT_STORAGE_CLEANUP_FAILED",
-			Message: cleanupErr.Error(),
-			Payload: map[string]any{
-				"clusterId": clusterID,
-				"prefix":    strings.TrimSuffix(storageDomainPrefix(clusterID), "/") + "/",
-			},
-		})
-		return
-	}
-	_ = r.store.AddTaskEvent(store.TaskEventInput{
-		TaskID:  task.ID,
-		Level:   "info",
-		Reason:  "object_storage_cleaned",
-		Message: "cluster object storage backup data cleaned",
-		Payload: map[string]any{
-			"clusterId":     clusterID,
-			"cleanupResult": cleanupResults,
-		},
-	})
 	ok, err := r.store.DeleteCluster(clusterID)
 	if err != nil {
 		r.logger.Error("failed to clean cluster after unregister", "cluster_id", clusterID, "task_id", task.ID, "error", err)
-		return
+		return err
 	}
 	if !ok {
 		r.logger.Warn("unregister completed for unknown cluster", "cluster_id", clusterID, "task_id", task.ID)
-		return
+		return nil
 	}
 	r.logger.Info("cluster cleaned after agent unregister", "cluster_id", clusterID, "task_id", task.ID)
+	return nil
 }
 
 func (r *Router) ingestVeleroBackupsFromInventory(clusterID string, backups []map[string]any) {
@@ -7004,6 +9071,7 @@ func (r *Router) reconcileRetention(planID string, triggerTaskID string) {
 	for _, point := range candidates {
 		restorePoints = append(restorePoints, map[string]any{
 			"id":               point.ID,
+			"taskCreatedAt":    point.TaskCreatedAt,
 			"veleroBackupName": point.VeleroBackupName,
 			"namespace":        r.agentNamespace(),
 		})
@@ -7087,6 +9155,7 @@ func (r *Router) createRestorePointDeleteTask(clusterID string, points []store.R
 		}
 		restorePoints = append(restorePoints, map[string]any{
 			"id":               point.ID,
+			"taskCreatedAt":    point.TaskCreatedAt,
 			"veleroBackupName": point.VeleroBackupName,
 			"namespace":        r.agentNamespace(),
 		})
@@ -7193,6 +9262,7 @@ func (r *Router) createProtectionCleanupTask(plan store.ProtectionPlan) (store.T
 		}
 		restorePoints = append(restorePoints, map[string]any{
 			"id":               point.ID,
+			"taskCreatedAt":    point.TaskCreatedAt,
 			"veleroBackupName": point.VeleroBackupName,
 			"namespace":        r.agentNamespace(),
 		})
@@ -7204,6 +9274,10 @@ func (r *Router) createProtectionCleanupTask(plan store.ProtectionPlan) (store.T
 				"cleanupRequestedAt":     time.Now().UTC().Format(time.RFC3339),
 			},
 		})
+	}
+	restoreNames, err := r.protectionPlanRestoreNames(plan.ID)
+	if err != nil {
+		return store.Task{}, "", err
 	}
 	sourcePayload := map[string]any{
 		"planId":                 plan.ID,
@@ -7218,6 +9292,7 @@ func (r *Router) createProtectionCleanupTask(plan store.ProtectionPlan) (store.T
 		"objectPrefix":           storageDomainPrefix(plan.SourceClusterID),
 		"cleanupObjectStorage":   true,
 		"restorePoints":          restorePoints,
+		"restoreNames":           restoreNames,
 	}
 	task, warning, err := r.createAndDispatchProtectionCleanupTask(plan, plan.SourceClusterID, sourcePayload, "source protection cleanup task dispatched to agent")
 	if err != nil {
@@ -7240,6 +9315,7 @@ func (r *Router) createProtectionCleanupTask(plan store.ProtectionPlan) (store.T
 			"objectPrefix":           storageDomainPrefix(plan.SourceClusterID),
 			"cleanupObjectStorage":   false,
 			"restorePoints":          restorePoints,
+			"restoreNames":           restoreNames,
 		}
 		_, targetWarning, err := r.createAndDispatchProtectionCleanupTask(plan, plan.TargetClusterID, targetPayload, "target protection cleanup task dispatched to agent")
 		if err != nil {
@@ -7250,6 +9326,29 @@ func (r *Router) createProtectionCleanupTask(plan store.ProtectionPlan) (store.T
 		}
 	}
 	return task, strings.Join(warnings, "; "), nil
+}
+
+func (r *Router) protectionPlanRestoreNames(planID string) ([]string, error) {
+	tasks, err := r.store.ListTasks("")
+	if err != nil {
+		return nil, err
+	}
+	names := []string{}
+	for _, task := range tasks {
+		if task.ProtectionPlanID != planID && stringPayload(task.Payload, "protectionPlanId") != planID && stringPayload(task.Payload, "planId") != planID {
+			continue
+		}
+		switch task.Type {
+		case "restore", "drill", "takeover", "failback":
+		default:
+			continue
+		}
+		name := strings.TrimSpace(stringPayload(task.Payload, "veleroBackupName"))
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	return uniqueNonEmptyStrings(names), nil
 }
 
 func (r *Router) createAndDispatchProtectionCleanupTask(plan store.ProtectionPlan, clusterID string, payload map[string]any, dispatchedMessage string) (store.Task, string, error) {
@@ -7734,6 +9833,8 @@ NAMESPACE="{{AGENT_NAMESPACE}}"
 AGENT_IMAGE="{{AGENT_IMAGE}}"
 VELERO_IMAGE="{{VELERO_IMAGE}}"
 VELERO_AWS_PLUGIN_IMAGE="{{VELERO_AWS_PLUGIN_IMAGE}}"
+VELERO_AZURE_PLUGIN_IMAGE="{{VELERO_AZURE_PLUGIN_IMAGE}}"
+VELERO_GCP_PLUGIN_IMAGE="{{VELERO_GCP_PLUGIN_IMAGE}}"
 EXECUTOR_MODE="kubernetes"
 VELERO_CRDS_URL="{{VELERO_CRDS_URL}}"
 REGISTRY_CA_URL="{{REGISTRY_CA_URL}}"
@@ -7755,6 +9856,7 @@ NODE_SSH_USER=""
 NODE_SSH_KEY=""
 NODE_SSH_PORT="22"
 INTERACTIVE="true"
+STORAGE_CLASS=""
 
 log_time() {
   date '+%H:%M:%S'
@@ -7825,6 +9927,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --velero-aws-plugin-image)
       VELERO_AWS_PLUGIN_IMAGE="${2:-}"
+      shift 2
+      ;;
+    --velero-azure-plugin-image)
+      VELERO_AZURE_PLUGIN_IMAGE="${2:-}"
+      shift 2
+      ;;
+    --velero-gcp-plugin-image)
+      VELERO_GCP_PLUGIN_IMAGE="${2:-}"
       shift 2
       ;;
     --executor-mode)
@@ -7907,6 +10017,10 @@ while [[ $# -gt 0 ]]; do
       INTERACTIVE="${2:-}"
       shift 2
       ;;
+    --storage-class)
+      STORAGE_CLASS="${2:-}"
+      shift 2
+      ;;
     *)
       fail "Unknown argument: $1" 2
       ;;
@@ -7956,6 +10070,97 @@ if ! kubectl cluster-info >/dev/null 2>&1; then
   exit 1
 fi
 log_ok "Kubernetes API is reachable"
+
+select_agent_storage_class() {
+  log_section "Storage preflight"
+  local existing_storage_class default_storage_class selection attempts index
+  local -a storage_class_names
+
+  if kubectl -n "$NAMESPACE" get pvc hypercdr-agent-state >/dev/null 2>&1; then
+    existing_storage_class="$(kubectl -n "$NAMESPACE" get pvc hypercdr-agent-state -o jsonpath='{.spec.storageClassName}' 2>/dev/null || true)"
+    if [[ -z "$existing_storage_class" ]]; then
+      if [[ -n "$STORAGE_CLASS" ]]; then
+        fail "Existing PVC hypercdr-agent-state has no StorageClass and cannot be changed to '${STORAGE_CLASS}'. Remove the old installation safely before selecting another StorageClass."
+      fi
+      log_warn "Existing agent PVC has no StorageClass; keeping its current static volume binding."
+      return 0
+    fi
+    if [[ -n "$STORAGE_CLASS" && "$STORAGE_CLASS" != "$existing_storage_class" ]]; then
+      fail "Existing PVC hypercdr-agent-state uses StorageClass '${existing_storage_class}', which cannot be changed to '${STORAGE_CLASS}'. Remove the old installation safely or rerun with --storage-class ${existing_storage_class}."
+    fi
+    STORAGE_CLASS="$existing_storage_class"
+    log_ok "Existing agent PVC uses StorageClass: ${STORAGE_CLASS}"
+    return 0
+  fi
+
+  mapfile -t storage_class_names < <(kubectl get storageclass -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sed '/^[[:space:]]*$/d' | sort -u)
+  if [[ ${#storage_class_names[@]} -eq 0 ]]; then
+    log_error "Installation stopped: no StorageClass is available in this cluster."
+    log_error "HyperCDR Agent requires a 1 GiB persistent volume for its state."
+    log_error "Recommended actions:"
+    log_error "1. Install a CSI storage provider."
+    log_error "2. Create a StorageClass."
+    log_error "3. Set it as the default, or rerun with --storage-class <name>."
+    log_error "4. Verify with: kubectl get storageclass"
+    exit 1
+  fi
+
+  if [[ -n "$STORAGE_CLASS" ]]; then
+    if ! kubectl get storageclass "$STORAGE_CLASS" >/dev/null 2>&1; then
+      log_error "StorageClass '${STORAGE_CLASS}' does not exist."
+      log_error "Available StorageClasses: ${storage_class_names[*]}"
+      exit 1
+    fi
+    log_ok "Selected StorageClass: ${STORAGE_CLASS}"
+    return 0
+  fi
+
+  default_storage_class="$(kubectl get storageclass -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")]}{.metadata.name}{"\n"}{end}' | head -n1)"
+  if [[ -z "$default_storage_class" ]]; then
+    default_storage_class="$(kubectl get storageclass -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.beta\.kubernetes\.io/is-default-class=="true")]}{.metadata.name}{"\n"}{end}' | head -n1)"
+  fi
+  if [[ -n "$default_storage_class" ]]; then
+    STORAGE_CLASS="$default_storage_class"
+    log_ok "Default StorageClass detected: ${STORAGE_CLASS}"
+    return 0
+  fi
+
+  log_warn "No default StorageClass was found."
+  if [[ "$INTERACTIVE" != "true" ]] || ! { exec 3<>/dev/tty; } 2>/dev/null; then
+    log_error "A StorageClass must be selected in this non-interactive environment."
+    log_error "Available StorageClasses: ${storage_class_names[*]}"
+    log_error "Rerun this command with: --storage-class <name>"
+    exit 1
+  fi
+  echo >&3
+  echo "Select a StorageClass for the HyperCDR Agent state volume:" >&3
+  for index in "${!storage_class_names[@]}"; do
+    local name provisioner binding_mode
+    name="${storage_class_names[$index]}"
+    provisioner="$(kubectl get storageclass "$name" -o jsonpath='{.provisioner}')"
+    binding_mode="$(kubectl get storageclass "$name" -o jsonpath='{.volumeBindingMode}')"
+    printf '%d) %s\n   Provisioner: %s\n   Binding mode: %s\n' "$((index + 1))" "$name" "${provisioner:-unknown}" "${binding_mode:-Immediate}" >&3
+  done
+  attempts=0
+  while [[ $attempts -lt 3 ]]; do
+    printf 'Enter selection [1-%d]: ' "${#storage_class_names[@]}" >&3
+    if ! IFS= read -r selection <&3; then
+      break
+    fi
+    if [[ "$selection" =~ ^[0-9]+$ ]] && (( selection >= 1 && selection <= ${#storage_class_names[@]} )); then
+      STORAGE_CLASS="${storage_class_names[$((selection - 1))]}"
+      exec 3>&-
+      log_ok "Selected StorageClass: ${STORAGE_CLASS}"
+      return 0
+    fi
+    attempts=$((attempts + 1))
+    log_warn "Invalid selection. Enter a number between 1 and ${#storage_class_names[@]}."
+  done
+  exec 3>&-
+  fail "No valid StorageClass was selected. Rerun with --storage-class <name>."
+}
+
+select_agent_storage_class
 
 image_registry_host() {
   local image="$1"
@@ -8507,6 +10712,8 @@ if [[ "$IMAGE_PULL_PREFLIGHT" == "true" ]]; then
   if [[ "$INSTALL_VELERO" == "true" ]]; then
     preflight_image_pull "hypercdr-image-check-velero" "$VELERO_IMAGE" '      command: ["/velero", "version", "--client-only"]'
     preflight_image_pull "hypercdr-image-check-velero-aws-plugin" "$VELERO_AWS_PLUGIN_IMAGE" '      command: ["/plugins/velero-plugin-for-aws"]'
+    preflight_image_pull "hypercdr-image-check-velero-azure-plugin" "$VELERO_AZURE_PLUGIN_IMAGE" '      command: ["/plugins/velero-plugin-for-microsoft-azure"]'
+    preflight_image_pull "hypercdr-image-check-velero-gcp-plugin" "$VELERO_GCP_PLUGIN_IMAGE" '      command: ["/plugins/velero-plugin-for-gcp"]'
   fi
 fi
 if [[ -n "$VELERO_CRDS_URL" ]]; then
@@ -8587,6 +10794,18 @@ ${IMAGE_PULL_SECRETS_BLOCK}
       initContainers:
         - name: velero-plugin-for-aws
           image: ${VELERO_AWS_PLUGIN_IMAGE}
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: plugins
+              mountPath: /target
+        - name: velero-plugin-for-microsoft-azure
+          image: ${VELERO_AZURE_PLUGIN_IMAGE}
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: plugins
+              mountPath: /target
+        - name: velero-plugin-for-gcp
+          image: ${VELERO_GCP_PLUGIN_IMAGE}
           imagePullPolicy: IfNotPresent
           volumeMounts:
             - name: plugins
@@ -8712,6 +10931,7 @@ metadata:
   name: hypercdr-agent-state
   namespace: ${NAMESPACE}
 spec:
+  storageClassName: ${STORAGE_CLASS}
   accessModes:
     - ReadWriteOnce
   resources:

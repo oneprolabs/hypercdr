@@ -23,6 +23,13 @@ import (
 	"hypercdr-platform/agent/comm-agent/pkg/protocol"
 
 	"github.com/gorilla/websocket"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+)
+
+const (
+	backupStorageLocationCheckTimeout = 5 * time.Second
+	backupStorageLocationRetryCount   = 3
+	backupStorageLocationRetryDelay   = time.Second
 )
 
 type Client struct {
@@ -555,6 +562,7 @@ func (c *Client) executeVeleroUpgradeTask(task protocol.TaskDispatchPayload) {
 	defer cancel()
 	if err := c.agentRuntime.UpgradeVelero(ctx, kube.VeleroUpgradeOptions{
 		Namespace: command.Namespace, Image: command.Image, DeploymentName: command.DeploymentName, DaemonSetName: command.DaemonSetName,
+		AWSPluginImage: command.AWSPluginImage, AzurePluginImage: command.AzurePluginImage, GCPPluginImage: command.GCPPluginImage,
 	}); err != nil {
 		_ = c.sendTaskFailedWithDetails(task, "VELERO_UPGRADE_FAILED", "velero rollout failed", map[string]any{"error": err.Error(), "image": command.Image})
 		return
@@ -1242,6 +1250,7 @@ func (c *Client) executeProtectionCleanupTask(task protocol.TaskDispatchPayload)
 	deletedKopiaRepositories := []string{}
 	deletedPrefixCRs := map[string][]string{}
 	deletedBackupObjects := []string{}
+	deletedRestoreObjects := []string{}
 	if cleaner != nil && task.ProtectionCleanup.StorageRepo != "" && len(task.ProtectionCleanup.SourceNamespaces) > 0 {
 		var err error
 		deletedPrefixCRs, err = cleaner.DeleteVeleroBackupArtifactsByNamePrefix(context.Background(), namespace, task.ProtectionCleanup.BackupNamePrefix)
@@ -1269,6 +1278,14 @@ func (c *Client) executeProtectionCleanupTask(task protocol.TaskDispatchPayload)
 				})
 				return
 			}
+			deletedRestoreObjects, err = cleaner.DeleteRestoreObjects(context.Background(), namespace, task.ProtectionCleanup.StorageRepo, task.ProtectionCleanup.RestoreNames)
+			if err != nil {
+				_ = c.sendTaskFailedWithDetails(task, "PROTECTION_CLEANUP_RESTORE_OBJECT_DELETE_FAILED", err.Error(), map[string]any{
+					"storageRepo":  task.ProtectionCleanup.StorageRepo,
+					"restoreNames": task.ProtectionCleanup.RestoreNames,
+				})
+				return
+			}
 			deletedKopiaRepositories, err = cleaner.DeleteKopiaRepositories(context.Background(), namespace, task.ProtectionCleanup.StorageRepo, task.ProtectionCleanup.SourceNamespaces)
 			if err != nil {
 				_ = c.sendTaskFailedWithDetails(task, "PROTECTION_CLEANUP_KOPIA_DELETE_FAILED", err.Error(), map[string]any{
@@ -1287,6 +1304,7 @@ func (c *Client) executeProtectionCleanupTask(task protocol.TaskDispatchPayload)
 		"deleted":                  deleted,
 		"deletedPrefixCRs":         deletedPrefixCRs,
 		"deletedBackupObjects":     deletedBackupObjects,
+		"deletedRestoreObjects":    deletedRestoreObjects,
 		"deletedRepositories":      deletedRepositories,
 		"deletedKopiaRepositories": deletedKopiaRepositories,
 	}, "protection resources cleaned"); err != nil {
@@ -1641,20 +1659,57 @@ func restoreTargetNamespace(task protocol.TaskDispatchPayload) string {
 }
 
 func (c *Client) requireBackupStorageLocation(ctx context.Context, name string) error {
+	return c.requireBackupStorageLocationWithRetry(ctx, name, backupStorageLocationRetryCount, backupStorageLocationRetryDelay)
+}
+
+func (c *Client) requireBackupStorageLocationWithRetry(ctx context.Context, name string, retryCount int, baseDelay time.Duration) error {
 	if name == "" {
 		return errors.New("backup storage location is required before starting this task")
 	}
 	if c.statusReader == nil {
 		return nil
 	}
-	status, err := c.statusReader.GetManifestStatus(ctx, kube.AppliedObject{
+	object := kube.AppliedObject{
 		APIVersion: "velero.io/v1",
 		Kind:       "BackupStorageLocation",
 		Namespace:  c.cfg.Namespace,
 		Name:       name,
-	})
-	if err != nil {
-		return errors.New("BackupStorageLocation " + name + " is not configured in namespace " + c.cfg.Namespace + ": " + err.Error())
+	}
+	var status kube.ManifestStatus
+	var err error
+	for attempt := 0; attempt <= retryCount; attempt++ {
+		checkCtx, cancel := context.WithTimeout(ctx, backupStorageLocationCheckTimeout)
+		status, err = c.statusReader.GetManifestStatus(checkCtx, object)
+		cancel()
+		if err == nil {
+			break
+		}
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("BackupStorageLocation %s is not configured in namespace %s", name, c.cfg.Namespace)
+		}
+		if !isTransientKubernetesReadError(err) {
+			return fmt.Errorf("BackupStorageLocation %s could not be read from namespace %s: %w", name, c.cfg.Namespace, err)
+		}
+		if attempt == retryCount {
+			return fmt.Errorf("BackupStorageLocation %s could not be verified because the Kubernetes API is temporarily unavailable after %d retries: %w", name, retryCount, err)
+		}
+		if c.logger != nil {
+			c.logger.Warn("temporary Kubernetes API error while checking backup storage location; retrying",
+				"storage_location", name,
+				"attempt", attempt+1,
+				"retry_in", baseDelay*time.Duration(attempt+1),
+				"error", err,
+			)
+		}
+		if baseDelay > 0 {
+			timer := time.NewTimer(baseDelay * time.Duration(attempt+1))
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
+		}
 	}
 	if status.Phase != "Available" {
 		if status.Message != "" {
@@ -1666,6 +1721,10 @@ func (c *Client) requireBackupStorageLocation(ctx context.Context, name string) 
 		return errors.New("BackupStorageLocation " + name + " is " + status.Phase)
 	}
 	return nil
+}
+
+func isTransientKubernetesReadError(err error) bool {
+	return err != nil && (apierrors.IsTimeout(err) || apierrors.IsServerTimeout(err) || apierrors.IsTooManyRequests(err) || isUncertainKubernetesSubmitError(err))
 }
 
 func (c *Client) waitForBackupStorageLocation(ctx context.Context, name string, timeout time.Duration) error {

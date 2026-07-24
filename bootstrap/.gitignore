@@ -13,7 +13,6 @@ tmp/
 *.key
 *.pem
 *.crt
-!charts/hypercdr-platform/files/registry-ca.crt
 
 # Editor and OS files
 .DS_Store

@@ -15,17 +15,6 @@ const DefaultAdminPassword = "admin123"
 
 const clusterConnectionStaleAfter = 10 * time.Minute
 
-func restorePointDisplayName(explicit string, taskCreatedAt, createdAt time.Time) string {
-	if value := strings.TrimSpace(explicit); value != "" {
-		return value
-	}
-	timestamp := taskCreatedAt
-	if timestamp.IsZero() {
-		timestamp = createdAt
-	}
-	return "RP-" + timestamp.In(time.Local).Format("2006-01-02 15:04:05")
-}
-
 var (
 	ErrTokenInvalid = errors.New("install token is invalid")
 	ErrTokenExpired = errors.New("install token is expired")
@@ -35,12 +24,29 @@ var (
 )
 
 type Store interface {
+	ListTenants() ([]Tenant, error)
+	GetTenant(id string) (Tenant, bool, error)
+	CreateTenant(input TenantInput) (Tenant, error)
+	UpdateTenant(id string, input TenantInput) (Tenant, bool, error)
+	DeleteTenant(id string) (bool, bool, error)
+	GetEmailSettings() (EmailSettings, bool, error)
+	UpsertEmailSettings(input EmailSettingsInput) (EmailSettings, error)
+	GetPlatformSettings() (PlatformSettings, bool, error)
+	UpsertPlatformSettings(input PlatformSettingsInput) (PlatformSettings, error)
 	AuthenticateUser(input UserAuthInput) (User, bool, error)
-	CreateUser(email string, password string) (User, error)
+	CreateUser(tenantID string, email string, password string) (User, error)
+	ListUsers() ([]User, error)
+	GetUser(id string) (User, bool, error)
+	UpdateUser(input UserUpdateInput) (User, bool, error)
+	DeleteUser(id string) (bool, error)
+	SetUserPassword(id string, password string, mustChangePassword bool) (User, bool, error)
+	CreatePlatformSession(userID string, ttl time.Duration) (PlatformSession, error)
+	AuthenticatePlatformSession(token string) (User, bool, error)
+	DeletePlatformSession(token string) error
 	CreatePasswordResetToken(email string, ttl time.Duration) (string, bool, error)
 	ResetPassword(token string, password string) (User, error)
 	FindOrCreateGoogleUser(email string) (User, error)
-	CreateAgentToken(description string, ttl time.Duration) (AgentToken, error)
+	CreateAgentToken(tenantID, createdBy, description string, ttl time.Duration) (AgentToken, error)
 	ValidateAgentToken(token string) error
 	RegisterCluster(input RegisterClusterInput) (Cluster, string, error)
 	AuthenticateAgentCredential(input AgentCredentialInput) (Cluster, bool, error)
@@ -51,9 +57,16 @@ type Store interface {
 	DeleteCluster(clusterID string) (bool, error)
 	ListApplications(clusterID string) ([]Application, error)
 	UpdateApplication(input ApplicationUpdateInput) (Application, bool, error)
+	ListTags() ([]Tag, error)
+	CreateTag(tenantID, name string) (Tag, error)
+	UpdateTag(id, name string) (Tag, bool, error)
+	DeleteTag(id string) (bool, error)
+	SetApplicationTags(applicationID string, tagIDs []string) (Application, bool, error)
 	ApplyInventory(input InventoryInput) (Cluster, bool, error)
 	UpdateHeartbeat(input HeartbeatInput) (Cluster, bool, error)
 	CreateStorageRepository(input StorageRepositoryInput) (StorageRepository, error)
+	UpdateStorageRepository(id string, input StorageRepositoryInput) (StorageRepository, bool, error)
+	DeleteStorageRepository(id string) (bool, bool, error)
 	ListStorageRepositories() ([]StorageRepository, error)
 	GetStorageRepository(id string) (StorageRepository, bool, error)
 	SetStorageRepositoryStatus(id string, status string, lastValidatedAt time.Time) (StorageRepository, bool, error)
@@ -61,6 +74,8 @@ type Store interface {
 	GetClusterStorageBinding(clusterID string, storageRepoID string, sourceClusterID string) (ClusterStorageBinding, bool, error)
 	UpdateClusterStorageBindingStatus(input ClusterStorageBindingStatusInput) (ClusterStorageBinding, bool, error)
 	CreatePolicy(input PolicyInput) (Policy, error)
+	UpdatePolicy(id string, input PolicyInput) (Policy, bool, error)
+	DeletePolicy(id string) (bool, bool, error)
 	ListPolicies() ([]Policy, error)
 	CreateProtectionPlan(input ProtectionPlanInput) (ProtectionPlan, error)
 	ListProtectionPlans(clusterID string) ([]ProtectionPlan, error)
@@ -84,6 +99,181 @@ type Store interface {
 	UpdateTaskStatus(input TaskStatusInput) (Task, bool, error)
 	AddTaskEvent(input TaskEventInput) error
 	ListTaskEvents(taskID string) ([]TaskEvent, error)
+	CreateAuditLog(input AuditLogInput) (AuditLog, error)
+	ListAuditLogs(limit, offset int) ([]AuditLog, error)
+	ListComponentReleases(component string) ([]ComponentRelease, error)
+	GetActiveComponentRelease(component string) (ComponentRelease, bool, error)
+	UpsertComponentRelease(input ComponentReleaseInput) (ComponentRelease, error)
+	ActivateComponentRelease(id string, publishedBy string) (ComponentRelease, bool, error)
+	ListPlatformReleases() ([]PlatformRelease, error)
+	UpsertPlatformRelease(input PlatformReleaseInput) (PlatformRelease, error)
+	ActivatePlatformRelease(id string, publishedBy string) (PlatformRelease, bool, error)
+	ListPlatformUpgradeJobs() ([]PlatformUpgradeJob, error)
+	CreatePlatformUpgradeJob(input PlatformUpgradeJobInput) (PlatformUpgradeJob, error)
+	UpdatePlatformUpgradeJob(input PlatformUpgradeJobUpdate) (PlatformUpgradeJob, bool, error)
+}
+
+type PlatformSettings struct {
+	TenantID       string    `json:"tenantId"`
+	ImageRegistry  string    `json:"imageRegistry"`
+	AgentNamespace string    `json:"agentNamespace"`
+	VeleroVersion  string    `json:"veleroVersion"`
+	PublicEndpoint string    `json:"publicEndpoint,omitempty"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+type PlatformSettingsInput struct {
+	ImageRegistry, AgentNamespace, VeleroVersion, PublicEndpoint string
+}
+
+type Tenant struct {
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Description  string    `json:"description"`
+	Status       string    `json:"status"`
+	UserCount    int       `json:"userCount"`
+	ClusterCount int       `json:"clusterCount"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+type TenantInput struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Status      string `json:"status"`
+}
+
+type EmailSettings struct {
+	Enabled            bool      `json:"enabled"`
+	Host               string    `json:"host"`
+	Port               int       `json:"port"`
+	Security           string    `json:"security"`
+	Username           string    `json:"username"`
+	PasswordCiphertext string    `json:"-"`
+	PasswordConfigured bool      `json:"passwordConfigured"`
+	SenderName         string    `json:"senderName"`
+	SenderEmail        string    `json:"senderEmail"`
+	UpdatedAt          time.Time `json:"updatedAt,omitempty"`
+}
+type EmailSettingsInput struct {
+	Enabled            bool
+	Host               string
+	Port               int
+	Security           string
+	Username           string
+	PasswordCiphertext string
+	SenderName         string
+	SenderEmail        string
+	UpdatedBy          string
+}
+
+type AuditLog struct {
+	ID           string         `json:"id"`
+	TenantID     string         `json:"tenantId"`
+	ActorID      string         `json:"actorId,omitempty"`
+	Actor        string         `json:"actor"`
+	Action       string         `json:"action"`
+	ResourceType string         `json:"resourceType"`
+	ResourceID   string         `json:"resourceId,omitempty"`
+	ResourceName string         `json:"resourceName,omitempty"`
+	Result       string         `json:"result"`
+	Message      string         `json:"message,omitempty"`
+	Payload      map[string]any `json:"payload,omitempty"`
+	CreatedAt    time.Time      `json:"createdAt"`
+}
+
+type AuditLogInput struct {
+	ActorID, Actor, Action, ResourceType, ResourceID, ResourceName, Result, Message string
+	Payload                                                                         map[string]any
+}
+
+type ComponentRelease struct {
+	ID           string    `json:"id"`
+	TenantID     string    `json:"tenantId"`
+	Component    string    `json:"component"`
+	Version      string    `json:"version"`
+	Image        string    `json:"image"`
+	ImageDigest  string    `json:"imageDigest"`
+	Status       string    `json:"status"`
+	ReleaseNotes string    `json:"releaseNotes,omitempty"`
+	PublishedBy  string    `json:"publishedBy,omitempty"`
+	PublishedAt  time.Time `json:"publishedAt,omitempty"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+type ComponentReleaseInput struct {
+	Component    string
+	Version      string
+	Image        string
+	ImageDigest  string
+	Status       string
+	ReleaseNotes string
+	PublishedBy  string
+}
+
+type PlatformRelease struct {
+	ID                    string    `json:"id"`
+	TenantID              string    `json:"tenantId"`
+	Version               string    `json:"version"`
+	APIImage              string    `json:"apiImage"`
+	APIImageDigest        string    `json:"apiImageDigest"`
+	FrontendImage         string    `json:"frontendImage"`
+	FrontendImageDigest   string    `json:"frontendImageDigest"`
+	DatabaseSchemaVersion string    `json:"databaseSchemaVersion"`
+	MinimumAgentVersion   string    `json:"minimumAgentVersion,omitempty"`
+	RollbackSupported     bool      `json:"rollbackSupported"`
+	ReleaseNotes          string    `json:"releaseNotes,omitempty"`
+	Status                string    `json:"status"`
+	PublishedBy           string    `json:"publishedBy,omitempty"`
+	PublishedAt           time.Time `json:"publishedAt,omitempty"`
+	CreatedAt             time.Time `json:"createdAt"`
+	UpdatedAt             time.Time `json:"updatedAt"`
+}
+
+type PlatformReleaseInput struct {
+	Version, APIImage, APIImageDigest, FrontendImage, FrontendImageDigest, DatabaseSchemaVersion, MinimumAgentVersion, ReleaseNotes, Status, PublishedBy string
+	RollbackSupported                                                                                                                                    bool
+}
+
+type PlatformUpgradeJob struct {
+	ID                    string    `json:"id"`
+	TenantID              string    `json:"tenantId"`
+	ReleaseID             string    `json:"releaseId"`
+	FromVersion           string    `json:"fromVersion"`
+	TargetVersion         string    `json:"targetVersion"`
+	Status                string    `json:"status"`
+	Step                  string    `json:"step"`
+	Progress              int       `json:"progress"`
+	APIImage              string    `json:"apiImage"`
+	APIImageDigest        string    `json:"apiImageDigest"`
+	FrontendImage         string    `json:"frontendImage"`
+	FrontendImageDigest   string    `json:"frontendImageDigest"`
+	DatabaseSchemaVersion string    `json:"databaseSchemaVersion"`
+	RollbackSupported     bool      `json:"rollbackSupported"`
+	BackupPath            string    `json:"backupPath,omitempty"`
+	PreviousAPIImage      string    `json:"previousApiImage,omitempty"`
+	PreviousFrontendImage string    `json:"previousFrontendImage,omitempty"`
+	ErrorCode             string    `json:"errorCode,omitempty"`
+	ErrorMessage          string    `json:"errorMessage,omitempty"`
+	RequestedBy           string    `json:"requestedBy,omitempty"`
+	ExecutorID            string    `json:"executorId,omitempty"`
+	ExecutorHeartbeatAt   time.Time `json:"executorHeartbeatAt,omitempty"`
+	CreatedAt             time.Time `json:"createdAt"`
+	StartedAt             time.Time `json:"startedAt,omitempty"`
+	CompletedAt           time.Time `json:"completedAt,omitempty"`
+	UpdatedAt             time.Time `json:"updatedAt"`
+}
+
+type PlatformUpgradeJobInput struct {
+	Release                                                           PlatformRelease
+	FromVersion, PreviousAPIImage, PreviousFrontendImage, RequestedBy string
+}
+type PlatformUpgradeJobUpdate struct {
+	ID, Status, Step, BackupPath, ErrorCode, ErrorMessage, ExecutorID, PreviousAPIImage, PreviousFrontendImage string
+	Progress                                                                                                   int
+	MarkStarted, MarkDone                                                                                      bool
 }
 
 type UserAuthInput struct {
@@ -92,15 +282,32 @@ type UserAuthInput struct {
 }
 
 type User struct {
-	ID       string `json:"id"`
-	TenantID string `json:"tenantId"`
-	Email    string `json:"email"`
-	Role     string `json:"role"`
-	Status   string `json:"status"`
+	ID                 string `json:"id"`
+	TenantID           string `json:"tenantId"`
+	TenantName         string `json:"tenantName"`
+	Email              string `json:"email"`
+	DisplayName        string `json:"displayName,omitempty"`
+	Role               string `json:"role"`
+	Status             string `json:"status"`
+	AuthProvider       string `json:"authProvider"`
+	TimeZone           string `json:"timeZone,omitempty"`
+	SystemAdmin        bool   `json:"systemAdmin,omitempty"`
+	MustChangePassword bool   `json:"mustChangePassword"`
+}
+
+type UserUpdateInput struct {
+	ID, TenantID, Email, DisplayName, Role, Status, TimeZone string
+}
+
+type PlatformSession struct {
+	Token, UserID string
+	ExpiresAt     time.Time
 }
 
 type AgentToken struct {
 	ID          string    `json:"id"`
+	TenantID    string    `json:"tenantId"`
+	CreatedBy   string    `json:"createdBy,omitempty"`
 	Token       string    `json:"token"`
 	Description string    `json:"description,omitempty"`
 	ExpiresAt   time.Time `json:"expiresAt"`
@@ -204,6 +411,15 @@ type Application struct {
 	ResourceSummary  map[string]any    `json:"resourceSummary,omitempty"`
 	LastCollectedAt  time.Time         `json:"lastCollectedAt"`
 	ProtectionStatus string            `json:"protectionStatus"`
+	Tags             []string          `json:"tags,omitempty"`
+}
+
+type Tag struct {
+	ID        string    `json:"id"`
+	TenantID  string    `json:"tenantId"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 type ApplicationUpdateInput struct {
@@ -280,16 +496,20 @@ type StorageRepository struct {
 }
 
 type StorageRepositoryInput struct {
-	Name       string         `json:"name"`
-	Type       string         `json:"type"`
-	Endpoint   string         `json:"endpoint"`
-	Bucket     string         `json:"bucket"`
-	Region     string         `json:"region"`
-	TLSEnabled bool           `json:"tlsEnabled"`
-	Config     map[string]any `json:"config"`
-	SecretRef  string         `json:"secretRef"`
-	AccessKey  string         `json:"accessKey"`
-	SecretKey  string         `json:"secretKey"`
+	TenantID          string         `json:"-"`
+	Name              string         `json:"name"`
+	Type              string         `json:"type"`
+	Endpoint          string         `json:"endpoint"`
+	Bucket            string         `json:"bucket"`
+	Region            string         `json:"region"`
+	TLSEnabled        bool           `json:"tlsEnabled"`
+	Config            map[string]any `json:"config"`
+	SecretRef         string         `json:"secretRef"`
+	AccessKey         string         `json:"accessKey"`
+	SecretKey         string         `json:"secretKey"`
+	AccountName       string         `json:"accountName"`
+	AccountKey        string         `json:"accountKey"`
+	ServiceAccountKey string         `json:"serviceAccountKey"`
 }
 
 type ClusterStorageBinding struct {
@@ -356,6 +576,7 @@ type Policy struct {
 }
 
 type PolicyInput struct {
+	TenantID       string `json:"-"`
 	Name           string `json:"name"`
 	Composition    string `json:"composition"`
 	ScheduleType   string `json:"scheduleType"`
@@ -395,6 +616,7 @@ type ProtectionPlan struct {
 }
 
 type ProtectionPlanInput struct {
+	TenantID             string           `json:"-"`
 	SourceClusterID      string           `json:"sourceClusterId"`
 	AppID                string           `json:"appId"`
 	AppIDs               []string         `json:"appIds"`
@@ -483,6 +705,7 @@ type RestorePoint struct {
 	LabelSelector     string         `json:"labelSelector,omitempty"`
 	BackupTaskID      string         `json:"backupTaskId,omitempty"`
 	BackupStorageName string         `json:"backupStorageName,omitempty"`
+	TaskCreatedAt     time.Time      `json:"taskCreatedAt,omitempty"`
 	Metadata          map[string]any `json:"metadata,omitempty"`
 	CreatedAt         time.Time      `json:"createdAt"`
 }
@@ -602,5 +825,24 @@ func storageSecretPayload(input StorageRepositoryInput) map[string]string {
 	if input.SecretKey != "" {
 		secret["secretKey"] = input.SecretKey
 	}
+	if input.AccountName != "" {
+		secret["accountName"] = input.AccountName
+	}
+	if input.AccountKey != "" {
+		secret["accountKey"] = input.AccountKey
+	}
+	if input.ServiceAccountKey != "" {
+		secret["serviceAccountKey"] = input.ServiceAccountKey
+	}
 	return secret
+}
+
+func normalizeStorageRegionValue(region string) string {
+	region = strings.TrimSpace(region)
+	switch strings.ToLower(region) {
+	case "n/a", "na", "-":
+		return ""
+	default:
+		return region
+	}
 }

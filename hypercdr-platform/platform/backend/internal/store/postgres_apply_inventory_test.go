@@ -32,7 +32,7 @@ func TestApplyInventoryPreservesProtectionStatus(t *testing.T) {
 	now := time.Now().UTC()
 
 	// Mint a fresh install token, then register a throwaway cluster.
-	tok, err := store.CreateAgentToken("regression-test-apply-inventory", time.Hour)
+	tok, err := store.CreateAgentToken(DefaultTenantID, "", "regression-test-apply-inventory", time.Hour)
 	if err != nil {
 		t.Fatalf("CreateAgentToken: %v", err)
 	}

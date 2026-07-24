@@ -92,3 +92,13 @@ func TestScheduleMatchesPolicyDetectsLegacyUTCTime(t *testing.T) {
 		t.Fatal("legacy UTC wall-clock schedule was not detected")
 	}
 }
+
+func TestNextPolicyFireAtUsesStoredUTCRule(t *testing.T) {
+	t.Setenv("TZ", "Asia/Shanghai")
+	policy := store.Policy{ScheduleType: "daily", Hour: 1, Minute: 0}
+	after := time.Date(2026, 7, 20, 0, 30, 0, 0, time.UTC)
+	want := time.Date(2026, 7, 20, 1, 0, 0, 0, time.UTC)
+	if got := nextPolicyFireAt(policy, after); !got.Equal(want) {
+		t.Fatalf("fixed UTC next fire = %s, want %s", got, want)
+	}
+}

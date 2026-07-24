@@ -1,23 +1,22 @@
 services:
   hypercdr-postgres:
-    image: ${HCDR_IMAGE_REGISTRY:?HCDR_IMAGE_REGISTRY is required}/postgres:16
+    image: ${POSTGRES_IMAGE:?POSTGRES_IMAGE is required}
     container_name: hypercdr-postgres
     environment:
       POSTGRES_DB: hypercdr
       POSTGRES_USER: hypercdr
-      POSTGRES_PASSWORD: hypercdr
+      POSTGRES_PASSWORD: ${HCDR_POSTGRES_PASSWORD:?HCDR_POSTGRES_PASSWORD is required}
     volumes:
-      - ${HCDR_DATA_DIR:-/data/hypercdr/deploy}/data/postgres:/var/lib/postgresql/data
-    ports:
-      - ${HCDR_POSTGRES_PORT:-15432}:5432
+      - ${HCDR_DATA_DIR:-/var/lib/hypercdr}/data/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hypercdr -d hypercdr"]
       interval: 10s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
 
   hypercdr-platform-api:
-    image: ${HCDR_IMAGE_REGISTRY:?HCDR_IMAGE_REGISTRY is required}/platform-api:${HCDR_IMAGE_TAG:-v20260714.5}
+    image: ${PLATFORM_API_IMAGE:?PLATFORM_API_IMAGE is required}
     container_name: hypercdr-platform-api
     depends_on:
       hypercdr-postgres:
@@ -26,7 +25,7 @@ services:
       HCDR_HTTP_ADDR: 0.0.0.0:18080
       HCDR_PUBLIC_BASE_URL: ${HCDR_PUBLIC_BASE_URL}
       HCDR_AGENT_WS_ENDPOINT: ${HCDR_AGENT_WS_ENDPOINT}
-      HCDR_DATABASE_URL: postgres://hypercdr:hypercdr@hypercdr-postgres:5432/hypercdr?sslmode=disable
+      HCDR_DATABASE_URL: ${HCDR_DATABASE_URL:?HCDR_DATABASE_URL is required}
       HCDR_IMAGE_REGISTRY: ${HCDR_IMAGE_REGISTRY:?HCDR_IMAGE_REGISTRY is required}
       HCDR_AGENT_IMAGE: ${HCDR_AGENT_IMAGE}
       HCDR_VELERO_IMAGE: ${HCDR_VELERO_IMAGE}
@@ -34,18 +33,23 @@ services:
       HCDR_TLS_ENABLED: "false"
       HCDR_TLS_CERT_FILE: /etc/hypercdr/tls/platform.crt
       HCDR_TLS_KEY_FILE: /etc/hypercdr/tls/platform.key
-      HCDR_REGISTRY_CA_PATH: /etc/hypercdr/registry/ca.crt
+      HCDR_REGISTRY_CA_PATH: ${HCDR_REGISTRY_CA_PATH:-}
       HCDR_SECRET_KEY: ${HCDR_SECRET_KEY}
+      HCDR_RELEASE_TOKEN: ${HCDR_RELEASE_TOKEN:?HCDR_RELEASE_TOKEN is required}
+      HCDR_DEPLOY_MODE: docker-compose
+      HCDR_DEPLOY_DIR: /deploy
+      HCDR_UPGRADER_ENDPOINT: http://hypercdr-platform-upgrader:18081
     volumes:
-      - ${HCDR_TLS_DIR:-/data/hypercdr/deploy/tls}:/etc/hypercdr/tls:ro
-      - ${HCDR_REGISTRY_CA_FILE:-./charts/hypercdr-platform/files/registry-ca.crt}:/etc/hypercdr/registry/ca.crt:ro
+      - ${HCDR_TLS_DIR:-/var/lib/hypercdr/tls}:/etc/hypercdr/tls:ro
+      - ${HCDR_REGISTRY_CA_FILE:-/dev/null}:/etc/hypercdr/registry/ca.crt:ro
+      - ${HCDR_DATA_DIR:-/var/lib/hypercdr}:/deploy
     command: ["/bin/sh", "-c", "/usr/local/bin/platform-migrate && exec /usr/local/bin/platform-api"]
     ports:
       - ${HCDR_API_PORT:-18080}:18080
     restart: unless-stopped
 
   hypercdr-platform-frontend:
-    image: ${HCDR_IMAGE_REGISTRY:?HCDR_IMAGE_REGISTRY is required}/platform-frontend:${HCDR_IMAGE_TAG:-v20260714.5}
+    image: ${PLATFORM_FRONTEND_IMAGE:?PLATFORM_FRONTEND_IMAGE is required}
     container_name: hypercdr-platform-frontend
     depends_on:
       - hypercdr-platform-api
@@ -53,4 +57,21 @@ services:
       - ${HCDR_TLS_DIR:?HCDR_TLS_DIR is required}:/etc/hypercdr/tls:ro
     ports:
       - ${HCDR_FRONTEND_PORT:-3002}:3002
+    restart: unless-stopped
+
+  hypercdr-platform-upgrader:
+    image: ${PLATFORM_UPGRADER_IMAGE:?PLATFORM_UPGRADER_IMAGE is required}
+    container_name: hypercdr-platform-upgrader
+    depends_on:
+      hypercdr-postgres:
+        condition: service_healthy
+    environment:
+      HCDR_DATABASE_URL: ${HCDR_DATABASE_URL:?HCDR_DATABASE_URL is required}
+      HCDR_DEPLOY_DIR: /deploy
+      HCDR_HOST_DEPLOY_DIR: ${HCDR_DATA_DIR:-/var/lib/hypercdr}
+      HCDR_PLATFORM_HEALTH_URL: http://hypercdr-platform-api:18080/healthz
+      HCDR_COMPOSE_PROJECT_NAME: hypercdr
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HCDR_DATA_DIR:-/var/lib/hypercdr}:/deploy
     restart: unless-stopped

@@ -13,199 +13,184 @@
           <span class="brand-mark">H</span>
           <div>
             <strong>HyperCDR</strong>
-            <small>Bootstrap distribution</small>
+            <small>Control plane installer</small>
           </div>
         </div>
-        <nav class="topnav" aria-label="Portal sections">
-          <a href="#deploy">Deploy</a>
-          <a href="#artifacts">Artifacts</a>
-          <a href="#boundary">Boundary</a>
-        </nav>
+        <span id="release-version" class="header-version">Loading</span>
       </header>
 
-      <section class="hero">
-        <div>
-          <p class="eyebrow">HyperCDR Bootstrap Portal</p>
-          <h1>Install the HyperCDR control plane</h1>
-          <p class="summary">
-            Generate deployment commands and download release artifacts for Kubernetes or standalone host deployments.
-          </p>
-          <div class="hero-actions">
-            <a class="button" href="#deploy">Configure deployment</a>
-            <a class="button secondary" href="./releases/dev/hypercdr-bootstrap.tar.gz" download>Download bootstrap package</a>
-          </div>
-        </div>
-        <div class="version-card" aria-label="Release metadata">
-          <span class="status-dot"></span>
-          <span>Release channel</span>
-          <strong id="release-version">Loading</strong>
-          <small id="release-build">Reading manifest</small>
-        </div>
-      </section>
-
-      <section class="status-strip" aria-label="Bootstrap operating model">
-        <div>
-          <span>Current host</span>
-          <strong id="current-host">Detecting</strong>
-        </div>
-        <div>
-          <span>Portal type</span>
-          <strong>Static, portable</strong>
-        </div>
-        <div>
-          <span>Runtime dependency</span>
-          <strong>None after install</strong>
-        </div>
+      <section class="install-intro">
+        <p class="eyebrow">Install</p>
+        <h1>Install the HyperCDR control plane</h1>
+        <p class="summary">Enter your environment details, then copy and run the generated command.</p>
       </section>
 
       <section id="deploy" class="deploy-layout">
-        <article class="panel panel-primary">
+        <article id="k8s-panel" class="panel panel-primary deployment-mode-panel">
           <div class="panel-heading">
             <div>
               <p class="eyebrow">Kubernetes</p>
               <h2>Helm deployment</h2>
-              <p class="panel-copy">Recommended path. Set the public address and registry, then run the generated command with kubectl and Helm access.</p>
+              <p class="panel-copy">Install on an existing Kubernetes cluster with kubectl and Helm access.</p>
             </div>
-            <span class="badge">Recommended</span>
+            <span class="badge muted">Kubernetes</span>
           </div>
 
-          <div class="mode-steps">
-            <span>1. Review values</span>
-            <span>2. Copy command</span>
-            <span>3. Run with kubectl access</span>
-          </div>
-
-          <div class="form-grid">
-            <label>
+          <div class="configuration-sections">
+            <section class="configuration-section">
+              <div class="configuration-section-heading">
+                <h3>Control Plane</h3>
+                <p>Configure how users and cluster agents reach the Container DR control plane.</p>
+              </div>
+              <div class="form-grid">
+                <label>
               Access mode
               <select id="k8s-access-mode">
                 <option value="nodeport">Node IP + NodePort</option>
                 <option value="custom">Custom URL</option>
               </select>
               <small>Use NodePort when DNS is not ready.</small>
-            </label>
-            <label class="k8s-nodeport-field">
+                </label>
+                <label class="k8s-nodeport-field">
               Cluster node IP
               <input id="k8s-node-ip" value="" placeholder="192.168.8.158" />
               <small>Reachable by users and agents.</small>
-            </label>
-            <label class="k8s-nodeport-field">
+                </label>
+                <label class="k8s-nodeport-field">
               NodePort
               <input id="k8s-node-port" value="30080" />
               <small>Exposes the platform service.</small>
-            </label>
-            <label class="k8s-custom-url-field hidden">
-              Public base URL
+                </label>
+                <label class="k8s-custom-url-field hidden">
+              Container DR control plane public URL
               <input id="k8s-public-url" value="" placeholder="https://node-ip:30080" />
-              <small>Use a LoadBalancer IP or DNS name reachable by users and agents.</small>
-            </label>
-            <label>
-              Image registry
+              <small>The URL used by users to open the control plane and by cluster agents to connect to it.</small>
+                </label>
+                <div class="derived-url">
+                  <span>Container DR control plane public URL</span>
+                  <strong id="k8s-derived-url">https://node-ip:30080</strong>
+                </div>
+              </div>
+            </section>
+
+            <section class="configuration-section">
+              <div class="configuration-section-heading">
+                <h3>Harbor Registry</h3>
+                <p>Configure the Harbor project used for platform and cluster component images.</p>
+              </div>
+              <div class="form-grid">
+                <label>
+              Harbor registry project
               <input id="k8s-registry" value="" placeholder="harbor.example.com:5000/hypercdr" />
-              <small>The platform and future agent installs use this registry by default.</small>
-            </label>
-            <div class="derived-url">
-              <span>Generated public base URL</span>
-              <strong id="k8s-derived-url">https://node-ip:30080</strong>
-            </div>
+              <small>Enter the Harbor address and project, for example harbor.example.com:5000/hypercdr.</small>
+                </label>
+                <label>
+              Certificate trust
+              <select id="k8s-registry-trust">
+                <option value="system">Publicly trusted certificate</option>
+                <option value="private-ca">Private CA certificate</option>
+              </select>
+              <small>Use the system trust store unless the registry uses a private CA.</small>
+                </label>
+                <label class="k8s-private-ca-field hidden">
+              Registry CA file on this host
+              <input id="k8s-registry-ca-file" value="" placeholder="/path/to/registry-ca.crt" />
+              <small>PEM certificate. Every Kubernetes node must also trust this CA before installation.</small>
+                </label>
+              </div>
+            </section>
           </div>
 
+          <div class="install-step">
+            <div class="install-step-heading"><span>1</span><div><strong>Install HyperCDR Platform</strong><small>Run with kubectl and Helm access.</small></div></div>
           <div class="command-window">
             <div class="command-title">
               <span></span><span></span><span></span>
               <strong>kubernetes-install.sh</strong>
             </div>
             <pre id="k8s-command" class="command" tabindex="0"></pre>
+            <button type="button" class="command-copy" data-copy-target="k8s-command">Copy</button>
           </div>
-          <div class="actions">
-            <button type="button" data-copy-target="k8s-command">Copy command</button>
-            <a id="download-installer-k8s" class="button secondary" href="./releases/dev/install-platform.sh" download>Download script</a>
           </div>
         </article>
 
-        <article class="panel panel-secondary">
+        <article id="docker-panel" class="panel panel-secondary deployment-mode-panel">
           <div class="panel-heading">
             <div>
               <p class="eyebrow">Standalone Host</p>
               <h2>Docker Compose deployment</h2>
-              <p class="panel-copy">Alternative for quick validation on a single Linux host.</p>
+              <p class="panel-copy">The simplest way to install the HyperCDR control plane on a Linux host.</p>
             </div>
-            <span class="badge muted">Preview</span>
+            <span class="badge">Recommended</span>
           </div>
 
-          <div class="mode-steps">
-            <span>1. Install Harbor CA</span>
-            <span>2. Verify Harbor</span>
-            <span>3. Install platform</span>
-          </div>
+          <div class="configuration-sections">
+            <section class="configuration-section">
+              <div class="configuration-section-heading">
+                <h3>Control Plane</h3>
+                <p>Configure how users and cluster agents reach the Container DR control plane.</p>
+              </div>
+              <div class="form-grid">
+                <label>
+              Container DR control plane public URL
+              <input id="host-public-url" value="" placeholder="https://host-ip:3002" />
+              <small>The URL used by users to open the control plane and by cluster agents to connect to it.</small>
+                </label>
+              </div>
+            </section>
 
-          <div class="form-grid">
-            <label>
-              Public base URL
-              <input id="host-public-url" value="" placeholder="http://host-ip:3002" />
-              <small>Host IP and port reachable by browsers and agents.</small>
-            </label>
-            <label>
-              Image registry
+            <section class="configuration-section">
+              <div class="configuration-section-heading">
+                <h3>Harbor Registry</h3>
+                <p>Configure the Harbor project used for platform and cluster component images.</p>
+              </div>
+              <div class="form-grid">
+                <label>
+              Harbor registry project
               <input id="host-registry" value="" placeholder="harbor.example.com:5000/hypercdr" />
-              <small>The platform and future agent installs use this registry by default.</small>
-            </label>
+              <small>Enter the Harbor address and project, for example harbor.example.com:5000/hypercdr.</small>
+                </label>
+                <label>
+              Certificate trust
+              <select id="host-registry-trust">
+                <option value="system">Publicly trusted certificate</option>
+                <option value="private-ca">Private CA certificate</option>
+              </select>
+              <small>Public certificates require no CA installation.</small>
+                </label>
+                <label class="host-private-ca-field hidden">
+              Registry CA file on this host
+              <input id="host-registry-ca-file" value="" placeholder="/path/to/registry-ca.crt" />
+              <small>PEM certificate copied into Docker and passed to the platform.</small>
+                </label>
+              </div>
+            </section>
           </div>
 
-          <div class="command-window">
-            <div class="command-title">
-              <span></span><span></span><span></span>
-              <strong>step-1-install-ca.sh</strong>
+          <div id="host-private-ca-step" class="hidden">
+            <div class="install-step-heading"><span>1</span><div><strong>Install Private Registry CA</strong><small>Skip this step when the registry uses a public certificate.</small></div></div>
+            <div class="command-window">
+              <div class="command-title">
+                <span></span><span></span><span></span>
+                <strong>step-1-install-private-ca.sh</strong>
+              </div>
+              <pre id="host-prepare-command" class="command" tabindex="0"></pre>
+              <button type="button" class="command-copy" data-copy-target="host-prepare-command">Copy</button>
             </div>
-            <pre id="host-prepare-command" class="command" tabindex="0"></pre>
-          </div>
-          <div class="actions">
-            <button type="button" data-copy-target="host-prepare-command">Copy step 1</button>
           </div>
 
+          <div class="install-step">
+          <div class="install-step-heading"><span id="host-install-number">1</span><div><strong>Install HyperCDR Platform</strong><small>Registry checks run automatically before installation.</small></div></div>
           <div class="command-window">
             <div class="command-title">
               <span></span><span></span><span></span>
-              <strong>step-2-verify-harbor.sh</strong>
-            </div>
-            <pre id="host-check-command" class="command" tabindex="0"></pre>
-          </div>
-          <div class="actions">
-            <button type="button" data-copy-target="host-check-command">Copy step 2</button>
-          </div>
-
-          <div class="command-window">
-            <div class="command-title">
-              <span></span><span></span><span></span>
-              <strong>step-3-install-platform.sh</strong>
+              <strong id="host-install-title">step-2-install-platform.sh</strong>
             </div>
             <pre id="host-install-command" class="command" tabindex="0"></pre>
+            <button type="button" class="command-copy" data-copy-target="host-install-command">Copy</button>
           </div>
-          <div class="actions">
-            <button type="button" data-copy-target="host-install-command">Copy step 3</button>
-            <a class="button secondary" href="./releases/dev/compose.yaml" download>Download compose</a>
           </div>
         </article>
-      </section>
-
-      <section id="artifacts" class="panel artifacts-panel">
-        <div class="panel-heading">
-          <div>
-            <p class="eyebrow">Artifacts</p>
-            <h2>Release downloads</h2>
-            <p class="panel-copy">Portable static assets that can be hosted here or moved under another product portal.</p>
-          </div>
-          <span class="badge muted">Portable</span>
-        </div>
-        <div id="artifact-list" class="artifact-list"></div>
-      </section>
-
-      <section id="boundary" class="notes">
-        <h2>Operational boundary</h2>
-        <p>
-          This portal is a bootstrap distribution point only. A deployed HyperCDR control plane must not depend on this
-          host at runtime unless you intentionally keep using it as an image registry or artifact mirror.
-        </p>
       </section>
     </main>
     <script src="./assets/app.js"></script>

@@ -38,10 +38,13 @@ type VeleroRuntimeStatus struct {
 }
 
 type VeleroUpgradeOptions struct {
-	Namespace      string
-	Image          string
-	DeploymentName string
-	DaemonSetName  string
+	Namespace        string
+	Image            string
+	DeploymentName   string
+	DaemonSetName    string
+	AWSPluginImage   string
+	AzurePluginImage string
+	GCPPluginImage   string
 }
 
 type AgentUpgradeOptions struct {
@@ -173,7 +176,21 @@ func (r *KubernetesAgentRuntime) UpgradeVelero(ctx context.Context, options Vele
 	if err := r.ensureDaemonSetUpgradePermission(ctx); err != nil {
 		return fmt.Errorf("ensure node-agent upgrade permission: %w", err)
 	}
-	deploymentPatch, _ := json.Marshal(map[string]any{"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"annotations": map[string]string{"hypercdr.io/velero-upgrade-at": time.Now().UTC().Format(time.RFC3339Nano)}}, "spec": map[string]any{"containers": []map[string]any{{"name": "velero", "image": options.Image}}}}}})
+	initContainers := []map[string]any{}
+	for _, plugin := range []struct{ name, image string }{
+		{"velero-plugin-for-aws", options.AWSPluginImage},
+		{"velero-plugin-for-microsoft-azure", options.AzurePluginImage},
+		{"velero-plugin-for-gcp", options.GCPPluginImage},
+	} {
+		if strings.TrimSpace(plugin.image) != "" {
+			initContainers = append(initContainers, map[string]any{"name": plugin.name, "image": plugin.image})
+		}
+	}
+	podSpec := map[string]any{"containers": []map[string]any{{"name": "velero", "image": options.Image}}}
+	if len(initContainers) > 0 {
+		podSpec["initContainers"] = initContainers
+	}
+	deploymentPatch, _ := json.Marshal(map[string]any{"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"annotations": map[string]string{"hypercdr.io/velero-upgrade-at": time.Now().UTC().Format(time.RFC3339Nano)}}, "spec": podSpec}}})
 	if _, err := r.client.AppsV1().Deployments(namespace).Patch(ctx, deploymentName, types.StrategicMergePatchType, deploymentPatch, metav1.PatchOptions{}); err != nil {
 		return fmt.Errorf("update velero deployment: %w", err)
 	}

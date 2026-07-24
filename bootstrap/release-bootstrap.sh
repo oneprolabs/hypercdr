@@ -69,7 +69,10 @@ sed -i -E "s/v[0-9]{8}\.[0-9]+/${VERSION}/g" \
   "${package_dir}/charts/hypercdr-platform/values.yaml" \
   "${PUBLISH_DIR}/assets/app.js"
 
-tar -C "${WORK_DIR}" -czf "${RELEASE_DIR}/hypercdr-bootstrap.tar.gz" hypercdr-bootstrap
+# The portal command extracts into a directory it creates first. Archive the
+# package contents at the root so extraction does not create a duplicated
+# hypercdr-bootstrap/hypercdr-bootstrap nesting level.
+tar -C "${package_dir}" -czf "${RELEASE_DIR}/hypercdr-bootstrap.tar.gz" .
 cp "${package_dir}/install-platform.sh" "${RELEASE_DIR}/install-platform.sh"
 cp "${package_dir}/uninstall-platform.sh" "${RELEASE_DIR}/uninstall-platform.sh"
 cp "${package_dir}/compose.yaml" "${RELEASE_DIR}/compose.yaml"

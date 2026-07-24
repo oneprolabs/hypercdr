@@ -1,0 +1,98 @@
+- main [ref=f2e2]:
+  - generic [ref=f2e3]:
+    - generic [ref=f2e4]:
+      - generic [ref=f2e5]: H
+      - generic [ref=f2e6]:
+        - strong [ref=f2e7]: HyperCDR
+        - generic [ref=f2e8]: Control plane installer
+    - generic [ref=f2e9]: v20260714.6
+  - generic [ref=f2e10]:
+    - paragraph [ref=f2e11]: Install
+    - heading "Install the HyperCDR control plane" [level=1] [ref=f2e12]
+    - paragraph [ref=f2e13]: Enter your environment details, then copy and run the generated command.
+  - generic [ref=f2e14]:
+    - article [ref=f2e15]:
+      - generic [ref=f2e16]:
+        - generic [ref=f2e17]:
+          - paragraph [ref=f2e18]: Standalone Host
+          - heading "Docker Compose deployment" [level=2] [ref=f2e19]
+          - paragraph [ref=f2e20]: The simplest way to install the HyperCDR control plane on a Linux host.
+        - generic [ref=f2e21]: Recommended
+      - generic [ref=f2e22]:
+        - generic [ref=f2e23]:
+          - text: Public base URL
+          - textbox "Public base URL Host IP and port reachable by browsers and agents." [ref=f2e24]:
+            - /placeholder: http://host-ip:3002
+            - text: https://192.168.8.149:3002
+          - generic [ref=f2e25]: Host IP and port reachable by browsers and agents.
+        - generic [ref=f2e26]:
+          - text: Image registry
+          - textbox "Image registry The platform and future agent installs use this registry by default." [ref=f2e27]:
+            - /placeholder: harbor.example.com:5000/hypercdr
+            - text: 192.168.8.149:5001/hypercdr
+          - generic [ref=f2e28]: The platform and future agent installs use this registry by default.
+        - generic [ref=f2e29]:
+          - text: Certificate trust
+          - combobox "Certificate trust Public certificates require no CA installation." [ref=f2e30]:
+            - option "Publicly trusted certificate" [selected]
+            - option "Private CA certificate"
+          - generic [ref=f2e31]: Public certificates require no CA installation.
+      - generic [ref=f2e32]:
+        - generic [ref=f2e33]:
+          - generic [ref=f2e34]: "1"
+          - generic [ref=f2e35]:
+            - strong [ref=f2e36]: Install HyperCDR Platform
+            - generic [ref=f2e37]: Registry checks run automatically before installation.
+        - generic [ref=f2e38]:
+          - strong [ref=f2e43]: step-1-install-platform.sh
+          - generic [ref=f2e44]: curl -fsSL http://192.168.8.149:8080/releases/dev/hypercdr-bootstrap.tar.gz -o hypercdr-bootstrap.tar.gz rm -rf hypercdr-bootstrap mkdir -p hypercdr-bootstrap tar -xzf hypercdr-bootstrap.tar.gz -C hypercdr-bootstrap cd hypercdr-bootstrap chmod +x install-platform.sh ./install-platform.sh docker \ --public-base-url https://192.168.8.149:3002 \ --data-dir /data/hypercdr/deploy \ --registry 192.168.8.149:5001/hypercdr \ --registry-trust system \ --image-tag v20260714.6 \ --execute
+          - button "Copy" [ref=f2e45] [cursor=pointer]
+    - article [ref=f2e46]:
+      - generic [ref=f2e47]:
+        - generic [ref=f2e48]:
+          - paragraph [ref=f2e49]: Kubernetes
+          - heading "Helm deployment" [level=2] [ref=f2e50]
+          - paragraph [ref=f2e51]: Install on an existing Kubernetes cluster with kubectl and Helm access.
+        - generic [ref=f2e52]: Kubernetes
+      - generic [ref=f2e53]:
+        - generic [ref=f2e54]:
+          - text: Access mode
+          - combobox "Access mode Use NodePort when DNS is not ready." [ref=f2e55]:
+            - option "Node IP + NodePort" [selected]
+            - option "Custom URL"
+          - generic [ref=f2e56]: Use NodePort when DNS is not ready.
+        - generic [ref=f2e57]:
+          - text: Cluster node IP
+          - textbox "Cluster node IP Reachable by users and agents." [ref=f2e58]:
+            - /placeholder: 192.168.8.158
+            - text: 192.168.8.149
+          - generic [ref=f2e59]: Reachable by users and agents.
+        - generic [ref=f2e60]:
+          - text: NodePort
+          - textbox "NodePort Exposes the platform service." [ref=f2e61]: "30080"
+          - generic [ref=f2e62]: Exposes the platform service.
+        - generic [ref=f2e63]:
+          - text: Image registry
+          - textbox "Image registry The platform and future agent installs use this registry by default." [ref=f2e64]:
+            - /placeholder: harbor.example.com:5000/hypercdr
+            - text: 192.168.8.149:5001/hypercdr
+          - generic [ref=f2e65]: The platform and future agent installs use this registry by default.
+        - generic [ref=f2e66]:
+          - text: Certificate trust
+          - combobox "Certificate trust Use the system trust store unless the registry uses a private CA." [ref=f2e67]:
+            - option "Publicly trusted certificate" [selected]
+            - option "Private CA certificate"
+          - generic [ref=f2e68]: Use the system trust store unless the registry uses a private CA.
+        - generic [ref=f2e69]:
+          - generic [ref=f2e70]: Generated public base URL
+          - strong [ref=f2e71]: https://192.168.8.149:30080
+      - generic [ref=f2e72]:
+        - generic [ref=f2e73]:
+          - generic [ref=f2e74]: "1"
+          - generic [ref=f2e75]:
+            - strong [ref=f2e76]: Install HyperCDR Platform
+            - generic [ref=f2e77]: Run with kubectl and Helm access.
+        - generic [ref=f2e78]:
+          - strong [ref=f2e83]: kubernetes-install.sh
+          - generic [ref=f2e84]: curl -fsSL http://192.168.8.149:8080/releases/dev/hypercdr-bootstrap.tar.gz -o hypercdr-bootstrap.tar.gz rm -rf hypercdr-bootstrap mkdir -p hypercdr-bootstrap tar -xzf hypercdr-bootstrap.tar.gz -C hypercdr-bootstrap cd hypercdr-bootstrap chmod +x install-platform.sh ./install-platform.sh k8s \ --namespace hypercdr-system \ --public-base-url https://192.168.8.149:30080 \ --registry 192.168.8.149:5001/hypercdr \ --registry-trust system \ --image-tag v20260714.6 \ --storage-class longhorn \ --node-port 30080 \ --database-mode bundled \ --execute
+          - button "Copy" [ref=f2e85] [cursor=pointer]

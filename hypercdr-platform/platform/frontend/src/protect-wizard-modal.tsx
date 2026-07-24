@@ -573,14 +573,13 @@ export function ProtectWizardModal(props: Props) {
                 <div className="hbdr-protect-section">
                   <div className="hbdr-protect-section-title">
                     <strong>Choose backup storage</strong>
-                    <span>Use local snapshots for fast rollback, or remote repositories for cross-cluster DR.</span>
+                    <span>Select a remote repository for recoverable off-cluster protection.</span>
                   </div>
                   <div className={`hbdr-protect-storage-choice ${protectConfig.storageType === 'remote' ? 'hbdr-protect-storage-choice-tabbed' : ''}`}>
-                    <button type="button" onClick={() => setProtectConfig(prev => ({ ...prev, storageType: 'local', storageId: '' }))} className={protectConfig.storageType === 'local' ? 'hbdr-protect-choice-active' : ''}>
+                    <button type="button" disabled aria-disabled="true">
                       <HardDrive size={20} />
                       <strong>Local CSI Snapshot</strong>
-                      <span>Fast in-cluster rollback. Not suitable for site-level takeover.</span>
-                      {protectConfig.storageType === 'local' && <i className="hbdr-protect-choice-check"><Check size={11} /></i>}
+                      <span>Not supported yet</span>
                     </button>
                     <button type="button" onClick={() => setProtectConfig(prev => ({ ...prev, storageType: 'remote', storageId: prev.storageId || storage[0]?.id || '' }))} className={protectConfig.storageType === 'remote' ? 'hbdr-protect-choice-active' : ''}>
                       <Cloud size={20} />
@@ -696,7 +695,12 @@ export function ProtectWizardModal(props: Props) {
               )}
 
               {step === 5 && (
-                <div className="hbdr-protect-section">
+                <div className="hbdr-protect-section hbdr-protect-hooks-unavailable">
+                  <div className="hbdr-hooks-not-supported">
+                    <strong>Execution Hooks</strong>
+                    <span>Not supported yet</span>
+                    <p>Pre- and post-backup scripts are not available in this version.</p>
+                  </div>
                   <div className="hbdr-protect-hooks-intro">
                     <strong>Execution Hooks</strong>
                     <span>Entry is executed by the platform. Dependencies are called by Entry.</span>

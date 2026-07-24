@@ -36,6 +36,26 @@ func main() {
 	}
 	defer postgresStore.Close()
 	repo := store.Store(postgresStore)
+	settings, found, err := repo.GetPlatformSettings()
+	if err != nil {
+		logger.Error("failed to load platform settings", "error", err)
+		os.Exit(1)
+	}
+	if !found {
+		settings, err = repo.UpsertPlatformSettings(store.PlatformSettingsInput{ImageRegistry: cfg.ImageRegistry, AgentNamespace: cfg.AgentNamespace, VeleroVersion: cfg.VeleroVersion, PublicEndpoint: cfg.PublicBaseURL})
+		if err != nil {
+			logger.Error("failed to initialize platform settings", "error", err)
+			os.Exit(1)
+		}
+	}
+	// Persisted settings are authoritative after first installation. Environment
+	// variables seed the row only once and cannot silently replace it on restart.
+	cfg.ImageRegistry = settings.ImageRegistry
+	cfg.AgentNamespace = settings.AgentNamespace
+	cfg.VeleroVersion = settings.VeleroVersion
+	if strings.TrimSpace(settings.PublicEndpoint) != "" {
+		cfg.PublicBaseURL = settings.PublicEndpoint
+	}
 	logger.Info("using postgres repository", "addr", cfg.HTTPAddr)
 
 	server := &http.Server{

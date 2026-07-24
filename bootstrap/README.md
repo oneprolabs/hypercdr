@@ -11,17 +11,16 @@ page can be hosted by another platform later.
 
 - `install-platform.sh`: installer for Kubernetes and Docker Compose modes.
 - `uninstall-platform.sh`: Docker Compose uninstaller for standalone host deployments.
-- `prepare-docker-registry.sh`: Docker host preflight script that installs the Harbor CA and verifies image pull access.
+- `prepare-docker-registry.sh`: optional Docker private-CA preparation script.
 - `check-harbor.sh`: validates Harbor API reachability and Docker image pull readiness.
 - `compose.yaml`: standalone host Docker Compose template.
 - `values.example.yaml`: Helm values example.
 - `charts/hypercdr-platform`: minimal Helm chart for the control plane.
-- `charts/hypercdr-platform/files/registry-ca.crt`: development registry CA used by the current test environment.
 - `portal/`: bootstrap download page installer.
 
-The committed registry CA is intentionally included so a development package can
-be built and deployed without collecting extra files. Replace it with the formal
-production CA before product release.
+The Bootstrap package does not contain a fixed registry CA. Publicly trusted
+registries use the host system trust store. A private registry CA must be supplied
+explicitly by the installer and must match the selected registry.
 
 The image registry selected during control plane installation is written to
 `HCDR_IMAGE_REGISTRY`. The platform uses that value as the default source for
@@ -38,16 +37,24 @@ Password: admin123
 
 Change this password after the first login.
 
-For Docker Compose deployments on a new host, run the registry preparation
-script before installing the control plane:
+For a publicly trusted registry, skip CA installation and verify access directly:
 
 ```bash
-./prepare-docker-registry.sh --registry <harbor-host>[:port]/hypercdr
+./check-harbor.sh --registry <registry-host>[:port]/hypercdr
 ```
 
-The script installs `charts/hypercdr-platform/files/registry-ca.crt` into
-`/etc/docker/certs.d/<harbor-host>[:port]/ca.crt`. It does not restart Docker by
-default, because restarting Docker can interrupt all containers on the host.
+For a private-CA registry, prepare Docker with the matching PEM certificate:
+
+```bash
+./prepare-docker-registry.sh \
+  --registry <registry-host>[:port]/hypercdr \
+  --registry-trust private-ca \
+  --ca-file /path/to/registry-ca.crt
+```
+
+The script installs the supplied certificate into
+`/etc/docker/certs.d/<registry-host>[:port]/ca.crt`. It does not restart Docker
+by default, because restarting Docker can interrupt all containers on the host.
 
 After preparing Docker, verify Harbor readiness:
 
@@ -79,13 +86,13 @@ cd /data/hypercdr/hypercdr-platform/deployments/release
 For Docker Compose deployments, remove the control plane containers:
 
 ```bash
-./uninstall-platform.sh --data-dir /data/hypercdr/deploy --execute
+./uninstall-platform.sh --data-dir /var/lib/hypercdr --execute
 ```
 
 For a full reinstall test, remove containers and local PostgreSQL data:
 
 ```bash
-./uninstall-platform.sh --data-dir /data/hypercdr/deploy --purge-data --execute
+./uninstall-platform.sh --data-dir /var/lib/hypercdr --purge-data --execute
 ```
 
 The uninstaller does not uninstall Harbor and does not stop the bootstrap portal.

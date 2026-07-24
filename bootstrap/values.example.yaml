@@ -18,7 +18,8 @@ platform:
   logLevel: info
   agentNamespace: hypercdr-agent
   registryCA:
-    enabled: true
+    enabled: false
+    certificate: ""
   tls:
     enabled: false
     cert: ""

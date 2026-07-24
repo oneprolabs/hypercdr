@@ -1,0 +1,160 @@
+- main [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]: H
+      - generic [ref=e6]:
+        - strong [ref=e7]: HyperCDR
+        - generic [ref=e8]: Bootstrap distribution
+    - navigation "Portal sections" [ref=e9]:
+      - link "Deploy" [ref=e10] [cursor=pointer]:
+        - /url: "#deploy"
+      - link "Artifacts" [ref=e11] [cursor=pointer]:
+        - /url: "#artifacts"
+      - link "Boundary" [ref=e12] [cursor=pointer]:
+        - /url: "#boundary"
+  - generic [ref=e13]:
+    - generic [ref=e14]:
+      - paragraph [ref=e15]: HyperCDR Bootstrap Portal
+      - heading "Install the HyperCDR control plane" [level=1] [ref=e16]
+      - paragraph [ref=e17]: Generate deployment commands and download release artifacts for Kubernetes or standalone host deployments.
+      - generic [ref=e18]:
+        - link "Configure deployment" [ref=e19] [cursor=pointer]:
+          - /url: "#deploy"
+        - link "Download bootstrap package" [ref=e20] [cursor=pointer]:
+          - /url: ./releases/dev/hypercdr-bootstrap.tar.gz
+    - generic "Release metadata" [ref=e21]:
+      - generic [ref=e23]: Release channel
+      - strong [ref=e24]: v20260714.6
+      - generic [ref=e25]: Built 2026-07-23T05:32:24Z
+  - region "Bootstrap operating model" [ref=e26]:
+    - generic [ref=e27]:
+      - generic [ref=e28]: Current host
+      - strong [ref=e29]: 192.168.8.149
+    - generic [ref=e30]:
+      - generic [ref=e31]: Portal type
+      - strong [ref=e32]: Static, portable
+    - generic [ref=e33]:
+      - generic [ref=e34]: Runtime dependency
+      - strong [ref=e35]: None after install
+  - generic [ref=e36]:
+    - article [ref=e37]:
+      - generic [ref=e38]:
+        - generic [ref=e39]:
+          - paragraph [ref=e40]: Kubernetes
+          - heading "Helm deployment" [level=2] [ref=e41]
+          - paragraph [ref=e42]: Recommended path. Set the public address and registry, then run the generated command with kubectl and Helm access.
+        - generic [ref=e43]: Recommended
+      - generic [ref=e44]:
+        - generic [ref=e45]: 1. Review values
+        - generic [ref=e46]: 2. Copy command
+        - generic [ref=e47]: 3. Run with kubectl access
+      - generic [ref=e48]:
+        - generic [ref=e49]:
+          - text: Access mode
+          - combobox "Access mode Use NodePort when DNS is not ready." [ref=e50]:
+            - option "Node IP + NodePort" [selected]
+            - option "Custom URL"
+          - generic [ref=e51]: Use NodePort when DNS is not ready.
+        - generic [ref=e52]:
+          - text: Cluster node IP
+          - textbox "Cluster node IP Reachable by users and agents." [ref=e53]:
+            - /placeholder: 192.168.8.158
+            - text: 192.168.8.149
+          - generic [ref=e54]: Reachable by users and agents.
+        - generic [ref=e55]:
+          - text: NodePort
+          - textbox "NodePort Exposes the platform service." [ref=e56]: "30080"
+          - generic [ref=e57]: Exposes the platform service.
+        - generic [ref=e58]:
+          - text: Image registry
+          - textbox "Image registry The platform and future agent installs use this registry by default." [ref=e59]:
+            - /placeholder: harbor.example.com:5000/hypercdr
+            - text: 192.168.8.149:5001/hypercdr
+          - generic [ref=e60]: The platform and future agent installs use this registry by default.
+        - generic [ref=e61]:
+          - text: Certificate trust
+          - combobox "Certificate trust Use the system trust store unless the registry uses a private CA." [ref=e62]:
+            - option "Publicly trusted certificate" [selected]
+            - option "Private CA certificate"
+          - generic [ref=e63]: Use the system trust store unless the registry uses a private CA.
+        - generic [ref=e64]:
+          - generic [ref=e65]: Generated public base URL
+          - strong [ref=e66]: https://192.168.8.149:30080
+      - generic [ref=e67]:
+        - strong [ref=e72]: kubernetes-install.sh
+        - generic [ref=e73]: curl -fsSL http://192.168.8.149:8080/releases/dev/hypercdr-bootstrap.tar.gz -o hypercdr-bootstrap.tar.gz rm -rf hypercdr-bootstrap mkdir -p hypercdr-bootstrap tar -xzf hypercdr-bootstrap.tar.gz -C hypercdr-bootstrap cd hypercdr-bootstrap chmod +x install-platform.sh ./install-platform.sh k8s \ --namespace hypercdr-system \ --public-base-url https://192.168.8.149:30080 \ --registry 192.168.8.149:5001/hypercdr \ --registry-trust system \ --image-tag v20260714.6 \ --storage-class longhorn \ --node-port 30080 \ --database-mode bundled \ --execute
+      - generic [ref=e74]:
+        - button "Copy command" [ref=e75] [cursor=pointer]
+        - link "Download script" [ref=e76] [cursor=pointer]:
+          - /url: ./releases/dev/install-platform.sh
+    - article [ref=e77]:
+      - generic [ref=e78]:
+        - generic [ref=e79]:
+          - paragraph [ref=e80]: Standalone Host
+          - heading "Docker Compose deployment" [level=2] [ref=e81]
+          - paragraph [ref=e82]: Alternative for quick validation on a single Linux host.
+        - generic [ref=e83]: Preview
+      - generic [ref=e84]:
+        - generic [ref=e85]: 1. Verify registry
+        - generic [ref=e86]: 2. Install platform
+      - generic [ref=e87]:
+        - generic [ref=e88]:
+          - text: Public base URL
+          - textbox "Public base URL Host IP and port reachable by browsers and agents." [ref=e89]:
+            - /placeholder: http://host-ip:3002
+            - text: https://192.168.8.149:3002
+          - generic [ref=e90]: Host IP and port reachable by browsers and agents.
+        - generic [ref=e91]:
+          - text: Image registry
+          - textbox "Image registry The platform and future agent installs use this registry by default." [ref=e92]:
+            - /placeholder: harbor.example.com:5000/hypercdr
+            - text: 192.168.8.149:5001/hypercdr
+          - generic [ref=e93]: The platform and future agent installs use this registry by default.
+        - generic [ref=e94]:
+          - text: Certificate trust
+          - combobox "Certificate trust Public certificates require no CA installation." [ref=e95]:
+            - option "Publicly trusted certificate" [selected]
+            - option "Private CA certificate"
+          - generic [ref=e96]: Public certificates require no CA installation.
+      - generic [ref=e97]:
+        - strong [ref=e102]: step-1-verify-registry.sh
+        - generic [ref=e103]: curl -fsSL http://192.168.8.149:8080/releases/dev/hypercdr-bootstrap.tar.gz -o hypercdr-bootstrap.tar.gz rm -rf hypercdr-bootstrap mkdir -p hypercdr-bootstrap tar -xzf hypercdr-bootstrap.tar.gz -C hypercdr-bootstrap cd hypercdr-bootstrap chmod +x check-harbor.sh ./check-harbor.sh --registry 192.168.8.149:5001/hypercdr --image-tag v20260714.6
+      - button "Copy verify command" [ref=e105] [cursor=pointer]
+      - generic [ref=e106]:
+        - strong [ref=e111]: step-2-install-platform.sh
+        - generic [ref=e112]: "test -d hypercdr-bootstrap || { echo \"Run the verify step first.\"; exit 1; } cd hypercdr-bootstrap chmod +x install-platform.sh ./install-platform.sh docker \\ --public-base-url https://192.168.8.149:3002 \\ --data-dir /data/hypercdr/deploy \\ --registry 192.168.8.149:5001/hypercdr \\ --registry-trust system \\ --image-tag v20260714.6 \\ --execute"
+      - generic [ref=e113]:
+        - button "Copy install command" [ref=e114] [cursor=pointer]
+        - link "Download compose" [ref=e115] [cursor=pointer]:
+          - /url: ./releases/dev/compose.yaml
+  - generic [ref=e116]:
+    - generic [ref=e117]:
+      - generic [ref=e118]:
+        - paragraph [ref=e119]: Artifacts
+        - heading "Release downloads" [level=2] [ref=e120]
+        - paragraph [ref=e121]: Portable static assets that can be hosted here or moved under another product portal.
+      - generic [ref=e122]: Portable
+    - generic [ref=e123]:
+      - link "Bootstrap package hypercdr-bootstrap.tar.gz Installer scripts, Docker Compose template, and Helm chart assets." [ref=e124] [cursor=pointer]:
+        - /url: ./releases/dev/hypercdr-bootstrap.tar.gz
+        - strong [ref=e125]: Bootstrap package
+        - generic [ref=e126]: hypercdr-bootstrap.tar.gz
+        - generic [ref=e127]: Installer scripts, Docker Compose template, and Helm chart assets.
+      - link "Control plane installer install-platform.sh Standalone installer for Kubernetes or Docker Compose." [ref=e128] [cursor=pointer]:
+        - /url: ./releases/dev/install-platform.sh
+        - strong [ref=e129]: Control plane installer
+        - generic [ref=e130]: install-platform.sh
+        - generic [ref=e131]: Standalone installer for Kubernetes or Docker Compose.
+      - link "Docker Compose template compose.yaml Standalone host Docker Compose template." [ref=e132] [cursor=pointer]:
+        - /url: ./releases/dev/compose.yaml
+        - strong [ref=e133]: Docker Compose template
+        - generic [ref=e134]: compose.yaml
+        - generic [ref=e135]: Standalone host Docker Compose template.
+      - link "Control plane uninstaller uninstall-platform.sh Docker Compose uninstaller for the control plane." [ref=e136] [cursor=pointer]:
+        - /url: ./releases/dev/uninstall-platform.sh
+        - strong [ref=e137]: Control plane uninstaller
+        - generic [ref=e138]: uninstall-platform.sh
+        - generic [ref=e139]: Docker Compose uninstaller for the control plane.
+  - generic [ref=e140]:
+    - heading "Operational boundary" [level=2] [ref=e141]
+    - paragraph [ref=e142]: This portal is a bootstrap distribution point only. A deployed HyperCDR control plane must not depend on this host at runtime unless you intentionally keep using it as an image registry or artifact mirror.

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,26 @@ type PostgresStore struct {
 }
 
 func NewPostgresStore(ctx context.Context, databaseURL string) (*PostgresStore, error) {
+	return newPostgresStore(ctx, databaseURL, true)
+}
+
+// NewPostgresStoreWithoutMigrations is for auxiliary processes such as the
+// external upgrader. The platform API owns schema migration so two containers
+// can never race while applying DDL during first startup.
+func NewPostgresStoreWithoutMigrations(ctx context.Context, databaseURL string) (*PostgresStore, error) {
+	return newPostgresStore(ctx, databaseURL, false)
+}
+
+func newPostgresStore(ctx context.Context, databaseURL string, initialize bool) (*PostgresStore, error) {
+	// The platform persists instants as UTC and emits UTC over the API. User-local
+	// presentation is handled exclusively by the frontend My Time Zone setting.
+	time.Local = time.UTC
+	if parsed, err := url.Parse(databaseURL); err == nil && (parsed.Scheme == "postgres" || parsed.Scheme == "postgresql") {
+		query := parsed.Query()
+		query.Set("timezone", "UTC")
+		parsed.RawQuery = query.Encode()
+		databaseURL = parsed.String()
+	}
 	db, err := sql.Open("pgx", databaseURL)
 	if err != nil {
 		return nil, err
@@ -32,17 +53,19 @@ func NewPostgresStore(ctx context.Context, databaseURL string) (*PostgresStore, 
 	}
 
 	store := &PostgresStore{db: db}
-	if err := migrations.Run(ctx, db); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	if err := store.ensureDefaultTenant(ctx); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	if err := store.ensureDefaultAdmin(ctx); err != nil {
-		_ = db.Close()
-		return nil, err
+	if initialize {
+		if err := migrations.Run(ctx, db); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+		if err := store.ensureDefaultTenant(ctx); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+		if err := store.ensureDefaultAdmin(ctx); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
 	}
 	return store, nil
 }
@@ -51,10 +74,278 @@ func (s *PostgresStore) Close() error {
 	return s.db.Close()
 }
 
+func (s *PostgresStore) GetEmailSettings() (EmailSettings, bool, error) {
+	var item EmailSettings
+	err := s.db.QueryRow(`select enabled,host,port,security,username,password_ciphertext,sender_name,sender_email,updated_at from email_settings where id=true`).Scan(&item.Enabled, &item.Host, &item.Port, &item.Security, &item.Username, &item.PasswordCiphertext, &item.SenderName, &item.SenderEmail, &item.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return EmailSettings{}, false, nil
+	}
+	item.PasswordConfigured = item.PasswordCiphertext != ""
+	return item, err == nil, err
+}
+func (s *PostgresStore) UpsertEmailSettings(input EmailSettingsInput) (EmailSettings, error) {
+	_, err := s.db.Exec(`insert into email_settings(id,enabled,host,port,security,username,password_ciphertext,sender_name,sender_email,updated_by) values(true,$1,$2,$3,$4,$5,$6,$7,$8,nullif($9,'')::uuid) on conflict(id) do update set enabled=excluded.enabled,host=excluded.host,port=excluded.port,security=excluded.security,username=excluded.username,password_ciphertext=excluded.password_ciphertext,sender_name=excluded.sender_name,sender_email=excluded.sender_email,updated_by=excluded.updated_by,updated_at=now()`, input.Enabled, input.Host, input.Port, input.Security, input.Username, input.PasswordCiphertext, input.SenderName, input.SenderEmail, input.UpdatedBy)
+	if err != nil {
+		return EmailSettings{}, err
+	}
+	item, _, err := s.GetEmailSettings()
+	return item, err
+}
+
+func (s *PostgresStore) ListTenants() ([]Tenant, error) {
+	rows, err := s.db.Query(`
+		select t.id,t.name,coalesce(t.description,''),t.status,t.created_at,t.updated_at,
+		       count(distinct u.id),count(distinct c.id)
+		from tenants t
+		left join users u on u.tenant_id=t.id
+		left join clusters c on c.tenant_id=t.id
+		group by t.id,t.name,t.description,t.status,t.created_at,t.updated_at
+		order by lower(t.name),t.created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Tenant
+	for rows.Next() {
+		var item Tenant
+		if err := rows.Scan(&item.ID, &item.Name, &item.Description, &item.Status, &item.CreatedAt, &item.UpdatedAt, &item.UserCount, &item.ClusterCount); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *PostgresStore) GetTenant(id string) (Tenant, bool, error) {
+	var item Tenant
+	err := s.db.QueryRow(`select t.id,t.name,coalesce(t.description,''),t.status,t.created_at,t.updated_at,(select count(*) from users u where u.tenant_id=t.id),(select count(*) from clusters c where c.tenant_id=t.id) from tenants t where t.id=$1`, id).Scan(&item.ID, &item.Name, &item.Description, &item.Status, &item.CreatedAt, &item.UpdatedAt, &item.UserCount, &item.ClusterCount)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Tenant{}, false, nil
+	}
+	return item, err == nil, err
+}
+
+func (s *PostgresStore) CreateTenant(input TenantInput) (Tenant, error) {
+	if len(strings.TrimSpace(input.Description)) > 500 {
+		return Tenant{}, errors.New("tenant description must not exceed 500 characters")
+	}
+	status := input.Status
+	if status != "disabled" {
+		status = "active"
+	}
+	var item Tenant
+	err := s.db.QueryRow(`insert into tenants(id,name,description,status) values($1,$2,nullif($3,''),$4) returning id,name,coalesce(description,''),status,created_at,updated_at`, newID(), strings.TrimSpace(input.Name), strings.TrimSpace(input.Description), status).Scan(&item.ID, &item.Name, &item.Description, &item.Status, &item.CreatedAt, &item.UpdatedAt)
+	return item, err
+}
+
+func (s *PostgresStore) UpdateTenant(id string, input TenantInput) (Tenant, bool, error) {
+	if len(strings.TrimSpace(input.Description)) > 500 {
+		return Tenant{}, false, errors.New("tenant description must not exceed 500 characters")
+	}
+	status := input.Status
+	if status != "disabled" {
+		status = "active"
+	}
+	var item Tenant
+	err := s.db.QueryRow(`update tenants set name=$2,description=nullif($3,''),status=$4,updated_at=now() where id=$1 returning id,name,coalesce(description,''),status,created_at,updated_at`, id, strings.TrimSpace(input.Name), strings.TrimSpace(input.Description), status).Scan(&item.ID, &item.Name, &item.Description, &item.Status, &item.CreatedAt, &item.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Tenant{}, false, nil
+	}
+	return item, err == nil, err
+}
+
+func (s *PostgresStore) DeleteTenant(id string) (bool, bool, error) {
+	if id == DefaultTenantID {
+		return false, true, nil
+	}
+	var inUse bool
+	err := s.db.QueryRow(`select exists(select 1 from users where tenant_id=$1) or exists(select 1 from clusters where tenant_id=$1) or exists(select 1 from storage_repositories where tenant_id=$1) or exists(select 1 from policies where tenant_id=$1) or exists(select 1 from protection_plans where tenant_id=$1)`, id).Scan(&inUse)
+	if err != nil || inUse {
+		return false, inUse, err
+	}
+	result, err := s.db.Exec(`delete from tenants where id=$1`, id)
+	if err != nil {
+		return false, false, err
+	}
+	n, _ := result.RowsAffected()
+	return n > 0, false, nil
+}
+
+func (s *PostgresStore) GetPlatformSettings() (PlatformSettings, bool, error) {
+	var item PlatformSettings
+	err := s.db.QueryRow(`select tenant_id,image_registry,agent_namespace,velero_version,coalesce(public_endpoint,''),created_at,updated_at from platform_settings where tenant_id=$1`, DefaultTenantID).Scan(&item.TenantID, &item.ImageRegistry, &item.AgentNamespace, &item.VeleroVersion, &item.PublicEndpoint, &item.CreatedAt, &item.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PlatformSettings{}, false, nil
+	}
+	return item, err == nil, err
+}
+
+func (s *PostgresStore) UpsertPlatformSettings(input PlatformSettingsInput) (PlatformSettings, error) {
+	var item PlatformSettings
+	err := s.db.QueryRow(`insert into platform_settings(tenant_id,image_registry,agent_namespace,velero_version,public_endpoint) values($1,$2,$3,$4,nullif($5,'')) on conflict(tenant_id) do update set image_registry=excluded.image_registry,agent_namespace=excluded.agent_namespace,velero_version=excluded.velero_version,public_endpoint=excluded.public_endpoint,updated_at=now() returning tenant_id,image_registry,agent_namespace,velero_version,coalesce(public_endpoint,''),created_at,updated_at`, DefaultTenantID, strings.TrimRight(strings.TrimSpace(input.ImageRegistry), "/"), input.AgentNamespace, input.VeleroVersion, strings.TrimRight(strings.TrimSpace(input.PublicEndpoint), "/")).Scan(&item.TenantID, &item.ImageRegistry, &item.AgentNamespace, &item.VeleroVersion, &item.PublicEndpoint, &item.CreatedAt, &item.UpdatedAt)
+	return item, err
+}
+
+func (s *PostgresStore) CreateAuditLog(input AuditLogInput) (AuditLog, error) {
+	payload := input.Payload
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	payload["actor"] = input.Actor
+	payload["resourceName"] = input.ResourceName
+	payload["result"] = input.Result
+	payload["message"] = input.Message
+	payloadRaw, err := json.Marshal(payload)
+	if err != nil {
+		return AuditLog{}, err
+	}
+	tenantID := DefaultTenantID
+	if strings.TrimSpace(input.ActorID) != "" {
+		_ = s.db.QueryRow(`select tenant_id from users where id=$1`, input.ActorID).Scan(&tenantID)
+	}
+	item := AuditLog{ID: newID(), TenantID: tenantID, ActorID: input.ActorID, Actor: input.Actor, Action: input.Action, ResourceType: input.ResourceType, ResourceID: input.ResourceID, ResourceName: input.ResourceName, Result: input.Result, Message: input.Message, Payload: payload}
+	var actorID any
+	if strings.TrimSpace(input.ActorID) != "" {
+		actorID = input.ActorID
+	}
+	var resourceID any
+	if strings.TrimSpace(input.ResourceID) != "" {
+		resourceID = input.ResourceID
+	}
+	err = s.db.QueryRow(`insert into audit_logs(id,tenant_id,actor_id,action,resource_type,resource_id,payload) values($1,$2,$3,$4,$5,$6,$7) returning created_at`, item.ID, item.TenantID, actorID, item.Action, item.ResourceType, resourceID, payloadRaw).Scan(&item.CreatedAt)
+	return item, err
+}
+
+func (s *PostgresStore) ListAuditLogs(limit, offset int) ([]AuditLog, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 500
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	rows, err := s.db.Query(`select a.id,a.tenant_id,coalesce(a.actor_id::text,''),coalesce(u.email,''),a.action,a.resource_type,coalesce(a.resource_id::text,''),a.payload,a.created_at from audit_logs a left join users u on u.id=a.actor_id where a.actor_id is not null and a.action not in ('Create Cluster Registration Token','Start Cluster Registration') order by a.created_at desc limit $1 offset $2`, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AuditLog{}
+	for rows.Next() {
+		var item AuditLog
+		var actorEmail string
+		var payloadRaw []byte
+		if err := rows.Scan(&item.ID, &item.TenantID, &item.ActorID, &actorEmail, &item.Action, &item.ResourceType, &item.ResourceID, &payloadRaw, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(payloadRaw, &item.Payload)
+		item.Actor = firstString(item.Payload, "actor", actorEmail)
+		item.ResourceName = firstString(item.Payload, "resourceName", "")
+		item.Result = firstString(item.Payload, "result", "Success")
+		item.Message = firstString(item.Payload, "message", "")
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func firstString(values map[string]any, key, fallback string) string {
+	if value, ok := values[key].(string); ok && strings.TrimSpace(value) != "" {
+		return value
+	}
+	return fallback
+}
+
+func (s *PostgresStore) ListComponentReleases(component string) ([]ComponentRelease, error) {
+	query := `select id, tenant_id, component, version, image, image_digest, status,
+	                 coalesce(release_notes, ''), coalesce(published_by, ''),
+	                 coalesce(published_at, '0001-01-01'::timestamptz), created_at, updated_at
+	            from component_releases where tenant_id = $1`
+	args := []any{DefaultTenantID}
+	if component != "" {
+		query += ` and component = $2`
+		args = append(args, component)
+	}
+	query += ` order by created_at desc`
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ComponentRelease{}
+	for rows.Next() {
+		var item ComponentRelease
+		if err := rows.Scan(&item.ID, &item.TenantID, &item.Component, &item.Version, &item.Image, &item.ImageDigest, &item.Status, &item.ReleaseNotes, &item.PublishedBy, &item.PublishedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *PostgresStore) GetActiveComponentRelease(component string) (ComponentRelease, bool, error) {
+	var item ComponentRelease
+	err := s.db.QueryRow(`select id, tenant_id, component, version, image, image_digest, status,
+	                            coalesce(release_notes, ''), coalesce(published_by, ''),
+	                            coalesce(published_at, '0001-01-01'::timestamptz), created_at, updated_at
+	                       from component_releases
+	                      where tenant_id = $1 and component = $2 and status = 'active'`, DefaultTenantID, component).Scan(
+		&item.ID, &item.TenantID, &item.Component, &item.Version, &item.Image, &item.ImageDigest, &item.Status, &item.ReleaseNotes, &item.PublishedBy, &item.PublishedAt, &item.CreatedAt, &item.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ComponentRelease{}, false, nil
+	}
+	return item, err == nil, err
+}
+
+func (s *PostgresStore) UpsertComponentRelease(input ComponentReleaseInput) (ComponentRelease, error) {
+	now := time.Now().UTC()
+	status := input.Status
+	if status == "" {
+		status = "candidate"
+	}
+	var item ComponentRelease
+	err := s.db.QueryRow(`insert into component_releases
+		(id, tenant_id, component, version, image, image_digest, status, release_notes, published_by, published_at, created_at, updated_at)
+		values ($1,$2,$3,$4,$5,$6,$7,nullif($8,''),nullif($9,''),case when $7::text='active' then $10::timestamptz else null::timestamptz end,$10::timestamptz,$10::timestamptz)
+		on conflict (tenant_id, component, image_digest) do update
+		set version=excluded.version, image=excluded.image, release_notes=excluded.release_notes, updated_at=excluded.updated_at
+		returning id, tenant_id, component, version, image, image_digest, status,
+		          coalesce(release_notes,''), coalesce(published_by,''), coalesce(published_at,'0001-01-01'::timestamptz), created_at, updated_at`,
+		newID(), DefaultTenantID, input.Component, input.Version, input.Image, input.ImageDigest, status, input.ReleaseNotes, input.PublishedBy, now).Scan(
+		&item.ID, &item.TenantID, &item.Component, &item.Version, &item.Image, &item.ImageDigest, &item.Status, &item.ReleaseNotes, &item.PublishedBy, &item.PublishedAt, &item.CreatedAt, &item.UpdatedAt)
+	return item, err
+}
+
+func (s *PostgresStore) ActivateComponentRelease(id string, publishedBy string) (ComponentRelease, bool, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return ComponentRelease{}, false, err
+	}
+	defer tx.Rollback()
+	var component string
+	if err := tx.QueryRow(`select component from component_releases where id=$1 and tenant_id=$2 for update`, id, DefaultTenantID).Scan(&component); errors.Is(err, sql.ErrNoRows) {
+		return ComponentRelease{}, false, nil
+	} else if err != nil {
+		return ComponentRelease{}, false, err
+	}
+	now := time.Now().UTC()
+	if _, err := tx.Exec(`update component_releases set status='retired', updated_at=$3 where tenant_id=$1 and component=$2 and status='active' and id<>$4`, DefaultTenantID, component, now, id); err != nil {
+		return ComponentRelease{}, false, err
+	}
+	var item ComponentRelease
+	err = tx.QueryRow(`update component_releases set status='active', published_by=nullif($2,''), published_at=$3, updated_at=$3 where id=$1
+		returning id, tenant_id, component, version, image, image_digest, status, coalesce(release_notes,''), coalesce(published_by,''), coalesce(published_at,'0001-01-01'::timestamptz), created_at, updated_at`, id, publishedBy, now).Scan(
+		&item.ID, &item.TenantID, &item.Component, &item.Version, &item.Image, &item.ImageDigest, &item.Status, &item.ReleaseNotes, &item.PublishedBy, &item.PublishedAt, &item.CreatedAt, &item.UpdatedAt)
+	if err != nil {
+		return ComponentRelease{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ComponentRelease{}, false, err
+	}
+	return item, true, nil
+}
+
 func (s *PostgresStore) ensureDefaultTenant(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `
 		insert into tenants (id, name, status)
-		values ($1, 'Default Tenant', 'active')
+		values ($1, 'Admin', 'active')
 		on conflict (id) do nothing
 	`, DefaultTenantID)
 	return err
@@ -66,8 +357,8 @@ func (s *PostgresStore) ensureDefaultAdmin(ctx context.Context) error {
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `
-		insert into users (id, tenant_id, email, password_hash, role, status, created_at, updated_at)
-		values ($1, $2, $3, $4, 'admin', 'active', $5, $5)
+		insert into users (id, tenant_id, email, password_hash, role, status, is_system_admin, must_change_password, created_at, updated_at)
+		values ($1, $2, $3, $4, 'admin', 'active', true, true, $5, $5)
 		on conflict (tenant_id, email) do nothing
 	`, newID(), DefaultTenantID, DefaultAdminEmail, string(passwordHash), time.Now().UTC())
 	return err
@@ -79,13 +370,13 @@ func (s *PostgresStore) AuthenticateUser(input UserAuthInput) (User, bool, error
 		return User{}, false, nil
 	}
 	row := s.db.QueryRow(`
-		select id, tenant_id, email, password_hash, role, status
-		from users
-		where tenant_id = $1 and email = $2 and status = 'active'
-	`, DefaultTenantID, email)
+		select u.id,u.tenant_id,t.name,u.email,coalesce(u.display_name,''),u.password_hash,u.role,u.status,u.auth_provider,coalesce(u.time_zone,''),u.is_system_admin,u.must_change_password
+		from users u join tenants t on t.id=u.tenant_id
+		where lower(u.email)=$1 and u.status='active' and (u.is_system_admin or t.status='active')
+	`, email)
 	var user User
 	var passwordHash string
-	if err := row.Scan(&user.ID, &user.TenantID, &user.Email, &passwordHash, &user.Role, &user.Status); err != nil {
+	if err := row.Scan(&user.ID, &user.TenantID, &user.TenantName, &user.Email, &user.DisplayName, &passwordHash, &user.Role, &user.Status, &user.AuthProvider, &user.TimeZone, &user.SystemAdmin, &user.MustChangePassword); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, false, nil
 		}
@@ -97,14 +388,14 @@ func (s *PostgresStore) AuthenticateUser(input UserAuthInput) (User, bool, error
 	return user, true, nil
 }
 
-func (s *PostgresStore) CreateUser(email, password string) (User, error) {
+func (s *PostgresStore) CreateUser(tenantID, email, password string) (User, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return User{}, err
 	}
-	u := User{ID: newID(), TenantID: DefaultTenantID, Email: email, Role: "member", Status: "active"}
-	_, err = s.db.Exec(`insert into users (id, tenant_id, email, password_hash, role, status) values ($1,$2,$3,$4,$5,$6)`, u.ID, u.TenantID, u.Email, string(hash), u.Role, u.Status)
+	u := User{ID: newID(), TenantID: tenantID, Email: email, Role: "operator", Status: "active", AuthProvider: "password"}
+	_, err = s.db.Exec(`insert into users (id, tenant_id, email, password_hash, role, status, auth_provider, must_change_password) values ($1,$2,$3,$4,$5,$6,$7,true)`, u.ID, u.TenantID, u.Email, string(hash), u.Role, u.Status, u.AuthProvider)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return User{}, ErrUserExists
@@ -114,10 +405,109 @@ func (s *PostgresStore) CreateUser(email, password string) (User, error) {
 	return u, nil
 }
 
+func (s *PostgresStore) ListUsers() ([]User, error) {
+	rows, err := s.db.Query(`select u.id,u.tenant_id,t.name,u.email,coalesce(u.display_name,''),u.role,u.status,u.auth_provider,coalesce(u.time_zone,''),u.is_system_admin,u.must_change_password from users u join tenants t on t.id=u.tenant_id order by case when u.is_system_admin then 0 else 1 end, u.email`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var users []User
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(&u.ID, &u.TenantID, &u.TenantName, &u.Email, &u.DisplayName, &u.Role, &u.Status, &u.AuthProvider, &u.TimeZone, &u.SystemAdmin, &u.MustChangePassword); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
+func (s *PostgresStore) GetUser(id string) (User, bool, error) {
+	var u User
+	err := s.db.QueryRow(`select u.id,u.tenant_id,t.name,u.email,coalesce(u.display_name,''),u.role,u.status,u.auth_provider,coalesce(u.time_zone,''),u.is_system_admin,u.must_change_password from users u join tenants t on t.id=u.tenant_id where u.id=$1`, id).Scan(&u.ID, &u.TenantID, &u.TenantName, &u.Email, &u.DisplayName, &u.Role, &u.Status, &u.AuthProvider, &u.TimeZone, &u.SystemAdmin, &u.MustChangePassword)
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, false, nil
+	}
+	return u, err == nil, err
+}
+
+func (s *PostgresStore) UpdateUser(input UserUpdateInput) (User, bool, error) {
+	result, err := s.db.Exec(`update users set tenant_id=case when is_system_admin then tenant_id else $2 end,email=case when is_system_admin then email else $3 end,display_name=nullif($4,''),role=case when is_system_admin then role else $5 end,status=case when is_system_admin then status else $6 end,time_zone=nullif($7,''),updated_at=now() where id=$1`, input.ID, input.TenantID, strings.ToLower(strings.TrimSpace(input.Email)), strings.TrimSpace(input.DisplayName), input.Role, input.Status, strings.TrimSpace(input.TimeZone))
+	if err != nil {
+		return User{}, false, err
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return User{}, false, nil
+	}
+	return s.GetUser(input.ID)
+}
+
+func (s *PostgresStore) DeleteUser(id string) (bool, error) {
+	result, err := s.db.Exec(`delete from users where id=$1 and not is_system_admin`, id)
+	if err != nil {
+		return false, err
+	}
+	n, _ := result.RowsAffected()
+	return n > 0, nil
+}
+
+func (s *PostgresStore) SetUserPassword(id, password string, mustChangePassword bool) (User, bool, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return User{}, false, err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return User{}, false, err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(`update users set password_hash=$2,must_change_password=$3,updated_at=now() where id=$1`, id, string(hash), mustChangePassword)
+	if err != nil {
+		return User{}, false, err
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return User{}, false, nil
+	}
+	if _, err = tx.Exec(`delete from platform_sessions where user_id=$1`, id); err != nil {
+		return User{}, false, err
+	}
+	if err = tx.Commit(); err != nil {
+		return User{}, false, err
+	}
+	return s.GetUser(id)
+}
+
+func (s *PostgresStore) CreatePlatformSession(userID string, ttl time.Duration) (PlatformSession, error) {
+	token := "hcs_" + newID() + newID()
+	expires := time.Now().UTC().Add(ttl)
+	_, err := s.db.Exec(`insert into platform_sessions(id,user_id,token_hash,expires_at) values($1,$2,$3,$4)`, newID(), userID, resetTokenDigest(token), expires)
+	return PlatformSession{Token: token, UserID: userID, ExpiresAt: expires}, err
+}
+
+func (s *PostgresStore) AuthenticatePlatformSession(token string) (User, bool, error) {
+	var u User
+	err := s.db.QueryRow(`select u.id,u.tenant_id,t.name,u.email,coalesce(u.display_name,''),u.role,u.status,u.auth_provider,coalesce(u.time_zone,''),u.is_system_admin,u.must_change_password from platform_sessions s join users u on u.id=s.user_id join tenants t on t.id=u.tenant_id where s.token_hash=$1 and s.expires_at>now() and u.status='active' and (u.is_system_admin or t.status='active')`, resetTokenDigest(token)).Scan(&u.ID, &u.TenantID, &u.TenantName, &u.Email, &u.DisplayName, &u.Role, &u.Status, &u.AuthProvider, &u.TimeZone, &u.SystemAdmin, &u.MustChangePassword)
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, false, nil
+	}
+	if err != nil {
+		return User{}, false, err
+	}
+	_, _ = s.db.Exec(`update platform_sessions set last_seen_at=now() where token_hash=$1`, resetTokenDigest(token))
+	return u, true, nil
+}
+
+func (s *PostgresStore) DeletePlatformSession(token string) error {
+	_, err := s.db.Exec(`delete from platform_sessions where token_hash=$1`, resetTokenDigest(token))
+	return err
+}
+
 func (s *PostgresStore) CreatePasswordResetToken(email string, ttl time.Duration) (string, bool, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	token := "hpr_" + newID() + newID()
-	result, err := s.db.Exec(`insert into password_reset_tokens (id,user_id,token_hash,expires_at) select $1,id,$2,$3 from users where tenant_id=$4 and email=$5 and status='active'`, newID(), resetTokenDigest(token), time.Now().UTC().Add(ttl), DefaultTenantID, email)
+	result, err := s.db.Exec(`insert into password_reset_tokens (id,user_id,token_hash,expires_at) select $1,u.id,$2,$3 from users u join tenants t on t.id=u.tenant_id where lower(u.email)=$4 and u.status='active' and not u.is_system_admin and t.status='active'`, newID(), resetTokenDigest(token), time.Now().UTC().Add(ttl), email)
 	if err != nil {
 		return "", false, err
 	}
@@ -137,7 +527,7 @@ func (s *PostgresStore) ResetPassword(token, password string) (User, error) {
 	defer tx.Rollback()
 	var u User
 	digest := resetTokenDigest(token)
-	err = tx.QueryRow(`update users u set password_hash=$1,updated_at=now() from password_reset_tokens t where t.user_id=u.id and t.token_hash=$2 and t.used_at is null and t.expires_at>now() returning u.id,u.tenant_id,u.email,u.role,u.status`, string(hash), digest).Scan(&u.ID, &u.TenantID, &u.Email, &u.Role, &u.Status)
+	err = tx.QueryRow(`update users u set password_hash=$1,must_change_password=false,updated_at=now() from password_reset_tokens t where t.user_id=u.id and t.token_hash=$2 and t.used_at is null and t.expires_at>now() returning u.id,u.tenant_id,u.email,u.role,u.status`, string(hash), digest).Scan(&u.ID, &u.TenantID, &u.Email, &u.Role, &u.Status)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrResetInvalid
 	}
@@ -158,7 +548,7 @@ func resetTokenDigest(token string) string { return fmt.Sprintf("%x", sha256.Sum
 func (s *PostgresStore) FindOrCreateGoogleUser(email string) (User, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	var u User
-	err := s.db.QueryRow(`select id,tenant_id,email,role,status from users where tenant_id=$1 and email=$2`, DefaultTenantID, email).Scan(&u.ID, &u.TenantID, &u.Email, &u.Role, &u.Status)
+	err := s.db.QueryRow(`select id,tenant_id,email,role,status,coalesce(time_zone,'') from users where tenant_id=$1 and email=$2`, DefaultTenantID, email).Scan(&u.ID, &u.TenantID, &u.Email, &u.Role, &u.Status, &u.TimeZone)
 	if err == nil {
 		return u, nil
 	}
@@ -166,22 +556,43 @@ func (s *PostgresStore) FindOrCreateGoogleUser(email string) (User, error) {
 		return User{}, err
 	}
 	randomPassword := "google:" + newID() + newID()
-	return s.CreateUser(email, randomPassword)
+	u, err = s.CreateUser(DefaultTenantID, email, randomPassword)
+	if err != nil {
+		return User{}, err
+	}
+	_, err = s.db.Exec(`update users set auth_provider='google',role='operator' where id=$1`, u.ID)
+	if err != nil {
+		return User{}, err
+	}
+	return s.GetUserValue(u.ID)
 }
 
-func (s *PostgresStore) CreateAgentToken(description string, ttl time.Duration) (AgentToken, error) {
+func (s *PostgresStore) GetUserValue(id string) (User, error) {
+	u, ok, err := s.GetUser(id)
+	if err != nil {
+		return User{}, err
+	}
+	if !ok {
+		return User{}, sql.ErrNoRows
+	}
+	return u, nil
+}
+
+func (s *PostgresStore) CreateAgentToken(tenantID, createdBy, description string, ttl time.Duration) (AgentToken, error) {
 	now := time.Now().UTC()
 	token := AgentToken{
 		ID:          newID(),
+		TenantID:    tenantID,
+		CreatedBy:   createdBy,
 		Token:       "hcdr_" + newID() + newID(),
 		Description: description,
 		ExpiresAt:   now.Add(ttl),
 	}
 
 	_, err := s.db.Exec(`
-		insert into agent_tokens (id, tenant_id, token_hash, description, expires_at, created_at)
-		values ($1, $2, $3, $4, $5, $6)
-	`, token.ID, DefaultTenantID, token.Token, token.Description, token.ExpiresAt, now)
+		insert into agent_tokens (id, tenant_id, token_hash, description, expires_at, created_by, created_at)
+		values ($1, $2, $3, $4, $5, nullif($6,'')::uuid, $7)
+	`, token.ID, token.TenantID, token.Token, token.Description, token.ExpiresAt, token.CreatedBy, now)
 	return token, err
 }
 
@@ -219,11 +630,11 @@ func (s *PostgresStore) RegisterCluster(input RegisterClusterInput) (Cluster, st
 	var token AgentToken
 	var usedAt sql.NullTime
 	err = tx.QueryRow(`
-		select id, token_hash, coalesce(description, ''), expires_at, used_at
+		select id, tenant_id, token_hash, coalesce(description, ''), expires_at, used_at
 		from agent_tokens
 		where token_hash = $1 and revoked_at is null
 		for update
-	`, input.Token).Scan(&token.ID, &token.Token, &token.Description, &token.ExpiresAt, &usedAt)
+	`, input.Token).Scan(&token.ID, &token.TenantID, &token.Token, &token.Description, &token.ExpiresAt, &usedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Cluster{}, "", ErrTokenInvalid
 	}
@@ -243,14 +654,14 @@ func (s *PostgresStore) RegisterCluster(input RegisterClusterInput) (Cluster, st
 	}
 
 	var clusterCount int
-	if err := tx.QueryRow(`select count(*) from clusters where tenant_id = $1`, DefaultTenantID).Scan(&clusterCount); err != nil {
+	if err := tx.QueryRow(`select count(*) from clusters where tenant_id = $1`, token.TenantID).Scan(&clusterCount); err != nil {
 		return Cluster{}, "", err
 	}
 	isFirstCluster := clusterCount == 0
 
 	cluster := Cluster{
 		ID:               newID(),
-		TenantID:         DefaultTenantID,
+		TenantID:         token.TenantID,
 		Name:             clusterName,
 		KubeVersion:      input.KubeVersion,
 		Status:           "healthy",
@@ -289,7 +700,7 @@ func (s *PostgresStore) RegisterCluster(input RegisterClusterInput) (Cluster, st
 	_, err = tx.Exec(`
 		insert into agent_credentials (id, tenant_id, cluster_id, credential_hash, status, created_at)
 		values ($1, $2, $3, $4, 'active', $5)
-	`, newID(), DefaultTenantID, cluster.ID, credential, now)
+	`, newID(), token.TenantID, cluster.ID, credential, now)
 	if err != nil {
 		return Cluster{}, "", err
 	}
@@ -373,11 +784,17 @@ func (s *PostgresStore) UpdateCluster(input ClusterUpdateInput) (Cluster, bool, 
 		return Cluster{}, false, err
 	}
 	defer tx.Rollback()
+	var tenantID string
+	if err := tx.QueryRow(`select tenant_id from clusters where id=$1`, input.ID).Scan(&tenantID); errors.Is(err, sql.ErrNoRows) {
+		return Cluster{}, false, nil
+	} else if err != nil {
+		return Cluster{}, false, err
+	}
 
 	if input.IsDefault != nil && *input.IsDefault {
 		if _, err := tx.Exec(`
 			update clusters set is_default = false, updated_at = $2 where tenant_id = $1
-		`, DefaultTenantID, now); err != nil {
+		`, tenantID, now); err != nil {
 			return Cluster{}, false, err
 		}
 	}
@@ -483,7 +900,8 @@ func (s *PostgresStore) DeleteCluster(clusterID string) (bool, error) {
 	defer tx.Rollback()
 
 	var exists, wasDefault bool
-	if err := tx.QueryRow(`select true, is_default from clusters where id = $1`, clusterID).Scan(&exists, &wasDefault); errors.Is(err, sql.ErrNoRows) {
+	var tenantID string
+	if err := tx.QueryRow(`select true, is_default, tenant_id from clusters where id = $1`, clusterID).Scan(&exists, &wasDefault, &tenantID); errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	} else if err != nil {
 		return false, err
@@ -576,7 +994,7 @@ func (s *PostgresStore) DeleteCluster(clusterID string) (bool, error) {
 				order by registered_at asc, id asc
 				limit 1
 			)
-		`, DefaultTenantID); err != nil {
+		`, tenantID); err != nil {
 			return false, err
 		}
 	}
@@ -647,7 +1065,8 @@ func (s *PostgresStore) ListApplications(clusterID string) ([]Application, error
 	query := `
 		select id, cluster_id, namespace, name, status, labels,
 		       workload_count, service_count, ingress_count, configmap_count, secret_count,
-		       pvc_count, pv_capacity_bytes, resource_summary, coalesce(last_collected_at, created_at), protection_status
+		       pvc_count, pv_capacity_bytes, resource_summary, coalesce(last_collected_at, created_at), protection_status,
+		       coalesce((select jsonb_agg(at.tag_id::text) from application_tags at where at.application_id=applications.id),'[]'::jsonb)
 		from applications
 	`
 	args := []any{}
@@ -668,10 +1087,11 @@ func (s *PostgresStore) ListApplications(clusterID string) ([]Application, error
 		var app Application
 		var labelsRaw []byte
 		var resourceSummaryRaw []byte
+		var tagsRaw []byte
 		if err := rows.Scan(
 			&app.ID, &app.ClusterID, &app.Namespace, &app.Name, &app.Status, &labelsRaw,
 			&app.WorkloadCount, &app.ServiceCount, &app.IngressCount, &app.ConfigMapCount, &app.SecretCount,
-			&app.PVCCount, &app.PVCapacityBytes, &resourceSummaryRaw, &app.LastCollectedAt, &app.ProtectionStatus,
+			&app.PVCCount, &app.PVCapacityBytes, &resourceSummaryRaw, &app.LastCollectedAt, &app.ProtectionStatus, &tagsRaw,
 		); err != nil {
 			return nil, err
 		}
@@ -681,9 +1101,86 @@ func (s *PostgresStore) ListApplications(clusterID string) ([]Application, error
 		if len(resourceSummaryRaw) > 0 {
 			_ = json.Unmarshal(resourceSummaryRaw, &app.ResourceSummary)
 		}
+		_ = json.Unmarshal(tagsRaw, &app.Tags)
 		apps = append(apps, app)
 	}
 	return apps, rows.Err()
+}
+
+func (s *PostgresStore) ListTags() ([]Tag, error) {
+	rows, err := s.db.Query(`select id,tenant_id,name,created_at,updated_at from tags order by name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Tag
+	for rows.Next() {
+		var tag Tag
+		if err := rows.Scan(&tag.ID, &tag.TenantID, &tag.Name, &tag.CreatedAt, &tag.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, tag)
+	}
+	return items, rows.Err()
+}
+func (s *PostgresStore) CreateTag(tenantID, name string) (Tag, error) {
+	var tag Tag
+	now := time.Now().UTC()
+	if tenantID == "" {
+		tenantID = DefaultTenantID
+	}
+	err := s.db.QueryRow(`insert into tags(id,tenant_id,name,created_at,updated_at) values($1,$2,$3,$4,$4) returning id,tenant_id,name,created_at,updated_at`, newID(), tenantID, strings.TrimSpace(name), now).Scan(&tag.ID, &tag.TenantID, &tag.Name, &tag.CreatedAt, &tag.UpdatedAt)
+	return tag, err
+}
+func (s *PostgresStore) UpdateTag(id, name string) (Tag, bool, error) {
+	var tag Tag
+	err := s.db.QueryRow(`update tags set name=$2,updated_at=now() where id=$1 returning id,tenant_id,name,created_at,updated_at`, id, strings.TrimSpace(name)).Scan(&tag.ID, &tag.TenantID, &tag.Name, &tag.CreatedAt, &tag.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Tag{}, false, nil
+	}
+	return tag, err == nil, err
+}
+func (s *PostgresStore) DeleteTag(id string) (bool, error) {
+	result, err := s.db.Exec(`delete from tags where id=$1`, id)
+	if err != nil {
+		return false, err
+	}
+	n, _ := result.RowsAffected()
+	return n > 0, nil
+}
+func (s *PostgresStore) SetApplicationTags(applicationID string, tagIDs []string) (Application, bool, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Application{}, false, err
+	}
+	defer tx.Rollback()
+	var tenantID string
+	if err = tx.QueryRow(`select tenant_id from applications where id=$1`, applicationID).Scan(&tenantID); errors.Is(err, sql.ErrNoRows) {
+		return Application{}, false, nil
+	} else if err != nil {
+		return Application{}, false, err
+	}
+	if _, err = tx.Exec(`delete from application_tags where application_id=$1`, applicationID); err != nil {
+		return Application{}, false, err
+	}
+	for _, tagID := range tagIDs {
+		if _, err = tx.Exec(`insert into application_tags(application_id,tag_id) select $1,id from tags where id=$2 and tenant_id=$3 on conflict do nothing`, applicationID, tagID, tenantID); err != nil {
+			return Application{}, false, err
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return Application{}, false, err
+	}
+	apps, err := s.ListApplications("")
+	if err != nil {
+		return Application{}, false, err
+	}
+	for _, app := range apps {
+		if app.ID == applicationID {
+			return app, true, nil
+		}
+	}
+	return Application{}, false, nil
 }
 
 func (s *PostgresStore) ApplyInventory(input InventoryInput) (Cluster, bool, error) {
@@ -693,6 +1190,12 @@ func (s *PostgresStore) ApplyInventory(input InventoryInput) (Cluster, bool, err
 		return Cluster{}, false, err
 	}
 	defer tx.Rollback()
+	var clusterTenantID string
+	if err := tx.QueryRow(`select tenant_id from clusters where id=$1`, input.ClusterID).Scan(&clusterTenantID); errors.Is(err, sql.ErrNoRows) {
+		return Cluster{}, false, nil
+	} else if err != nil {
+		return Cluster{}, false, err
+	}
 
 	result, err := tx.Exec(`
 		update clusters
@@ -752,6 +1255,7 @@ func (s *PostgresStore) ApplyInventory(input InventoryInput) (Cluster, bool, err
 			)
 			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16, $17, $17)
 			on conflict (cluster_id, namespace) do update set
+				tenant_id = excluded.tenant_id,
 				name = excluded.name,
 				status = excluded.status,
 				workload_count = excluded.workload_count,
@@ -765,7 +1269,7 @@ func (s *PostgresStore) ApplyInventory(input InventoryInput) (Cluster, bool, err
 				resource_summary = excluded.resource_summary,
 				last_collected_at = excluded.last_collected_at,
 				updated_at = excluded.updated_at
-		`, appID, DefaultTenantID, input.ClusterID, app.Namespace, name, app.Status, app.WorkloadCount,
+		`, appID, clusterTenantID, input.ClusterID, app.Namespace, name, app.Status, app.WorkloadCount,
 			app.ServiceCount, app.IngressCount, app.ConfigMapCount, app.SecretCount, app.PVCCount,
 			app.PVCapacityBytes, labels, string(resourceSummary), input.CollectedAt, now)
 		if err != nil {
@@ -882,6 +1386,10 @@ func (s *PostgresStore) getCluster(clusterID string) (Cluster, bool, error) {
 }
 
 func (s *PostgresStore) CreateStorageRepository(input StorageRepositoryInput) (StorageRepository, error) {
+	if input.TenantID == "" {
+		input.TenantID = DefaultTenantID
+	}
+	input.Region = normalizeStorageRegionValue(input.Region)
 	now := time.Now().UTC()
 	if input.Type == "" {
 		input.Type = "S3"
@@ -903,7 +1411,7 @@ func (s *PostgresStore) CreateStorageRepository(input StorageRepositoryInput) (S
 	}
 	repo := StorageRepository{
 		ID:         repoID,
-		TenantID:   DefaultTenantID,
+		TenantID:   input.TenantID,
 		Name:       input.Name,
 		Type:       input.Type,
 		Endpoint:   input.Endpoint,
@@ -958,6 +1466,63 @@ func (s *PostgresStore) ListStorageRepositories() ([]StorageRepository, error) {
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+func (s *PostgresStore) UpdateStorageRepository(id string, input StorageRepositoryInput) (StorageRepository, bool, error) {
+	input.Region = normalizeStorageRegionValue(input.Region)
+	current, ok, err := s.GetStorageRepository(id)
+	if err != nil || !ok {
+		return StorageRepository{}, ok, err
+	}
+	secret := current.Secret
+	if next := storageSecretPayload(input); len(next) > 0 {
+		if secret == nil {
+			secret = map[string]string{}
+		}
+		for key, value := range next {
+			secret[key] = value
+		}
+	}
+	config := input.Config
+	if config == nil {
+		config = map[string]any{}
+	}
+	configRaw, err := json.Marshal(config)
+	if err != nil {
+		return StorageRepository{}, false, err
+	}
+	secretRaw, err := json.Marshal(secret)
+	if err != nil {
+		return StorageRepository{}, false, err
+	}
+	result, err := s.db.Exec(`update storage_repositories set name=$2,type=$3,endpoint=nullif($4,''),bucket=nullif($5,''),region=nullif($6,''),tls_enabled=$7,config=$8,secret_payload=$9,status='unknown',last_validated_at=null,updated_at=now() where id=$1 and tenant_id=$10`, id, input.Name, input.Type, input.Endpoint, input.Bucket, input.Region, input.TLSEnabled, configRaw, secretRaw, current.TenantID)
+	if err != nil {
+		return StorageRepository{}, false, err
+	}
+	if affected, err := result.RowsAffected(); err != nil || affected == 0 {
+		return StorageRepository{}, false, err
+	}
+	return s.GetStorageRepository(id)
+}
+
+func (s *PostgresStore) DeleteStorageRepository(id string) (bool, bool, error) {
+	current, found, err := s.GetStorageRepository(id)
+	if err != nil || !found {
+		return false, false, err
+	}
+	var inUse bool
+	if err := s.db.QueryRow(`select exists(select 1 from protection_plans where tenant_id=$1 and storage_repo_id=$2)`, current.TenantID, id).Scan(&inUse); err != nil {
+		return false, false, err
+	}
+	if inUse {
+		return false, true, nil
+	}
+	result, err := s.db.Exec(`delete from storage_repositories where id=$1 and tenant_id=$2`, id, current.TenantID)
+	if err != nil {
+		return false, false, err
+	}
+	count, err := result.RowsAffected()
+	return count > 0, false, err
 }
 
 func (s *PostgresStore) SetStorageRepositoryStatus(id string, status string, lastValidatedAt time.Time) (StorageRepository, bool, error) {
@@ -1043,6 +1608,10 @@ func (s *PostgresStore) UpsertClusterStorageBinding(input ClusterStorageBindingI
 		bslName = "default"
 	}
 	id := newID()
+	var tenantID string
+	if err := s.db.QueryRow(`select c.tenant_id from clusters c join storage_repositories r on r.id=$2 and r.tenant_id=c.tenant_id where c.id=$1`, input.ClusterID, input.StorageRepoID).Scan(&tenantID); err != nil {
+		return ClusterStorageBinding{}, fmt.Errorf("cluster and storage repository must belong to the same tenant: %w", err)
+	}
 	row := s.db.QueryRow(`
 		insert into cluster_storage_bindings (
 			id, tenant_id, cluster_id, storage_repo_id, source_cluster_id, bsl_name, object_prefix, status, retry_count,
@@ -1061,7 +1630,7 @@ func (s *PostgresStore) UpsertClusterStorageBinding(input ClusterStorageBindingI
 		          coalesce(last_success_at, '0001-01-01'::timestamptz),
 		          coalesce(last_error_code, ''), coalesce(last_error_message, ''),
 		          coalesce(repo_updated_at, '0001-01-01'::timestamptz), created_at, updated_at
-	`, id, DefaultTenantID, input.ClusterID, input.StorageRepoID, sourceClusterID, bslName, input.ObjectPrefix, status, input.RetryCount, input.RepoUpdatedAt, now)
+	`, id, tenantID, input.ClusterID, input.StorageRepoID, sourceClusterID, bslName, input.ObjectPrefix, status, input.RetryCount, input.RepoUpdatedAt, now)
 	return scanClusterStorageBinding(row)
 }
 
@@ -1138,6 +1707,9 @@ func scanClusterStorageBinding(row clusterStorageBindingScanner) (ClusterStorage
 }
 
 func (s *PostgresStore) CreatePolicy(input PolicyInput) (Policy, error) {
+	if input.TenantID == "" {
+		input.TenantID = DefaultTenantID
+	}
 	now := time.Now().UTC()
 	if input.Composition == "" {
 		input.Composition = "manual"
@@ -1150,7 +1722,7 @@ func (s *PostgresStore) CreatePolicy(input PolicyInput) (Policy, error) {
 	}
 	policy := Policy{
 		ID:             newID(),
-		TenantID:       DefaultTenantID,
+		TenantID:       input.TenantID,
 		Name:           input.Name,
 		Composition:    input.Composition,
 		ScheduleType:   input.ScheduleType,
@@ -1222,7 +1794,53 @@ func (s *PostgresStore) ListPolicies() ([]Policy, error) {
 	return items, rows.Err()
 }
 
+func (s *PostgresStore) UpdatePolicy(id string, input PolicyInput) (Policy, bool, error) {
+	result, err := s.db.Exec(`update policies set name=$2,composition=$3,schedule_type=$4,interval_value=$5,interval_unit=nullif($6,''),hour=$7,minute=$8,week_day=$9,month_day=$10,retention_count=$11,retention_days=$12,status=$13,updated_at=now() where id=$1`, id, input.Name, input.Composition, input.ScheduleType, input.IntervalValue, input.IntervalUnit, input.Hour, input.Minute, input.WeekDay, input.MonthDay, input.RetentionCount, input.RetentionDays, input.Status)
+	if err != nil {
+		return Policy{}, false, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil || count == 0 {
+		return Policy{}, false, err
+	}
+	items, err := s.ListPolicies()
+	if err != nil {
+		return Policy{}, false, err
+	}
+	for _, item := range items {
+		if item.ID == id {
+			return item, true, nil
+		}
+	}
+	return Policy{}, false, nil
+}
+
+func (s *PostgresStore) DeletePolicy(id string) (bool, bool, error) {
+	var tenantID string
+	if err := s.db.QueryRow(`select tenant_id from policies where id=$1`, id).Scan(&tenantID); errors.Is(err, sql.ErrNoRows) {
+		return false, false, nil
+	} else if err != nil {
+		return false, false, err
+	}
+	var inUse bool
+	if err := s.db.QueryRow(`select exists(select 1 from protection_plans where tenant_id=$1 and policy_id=$2)`, tenantID, id).Scan(&inUse); err != nil {
+		return false, false, err
+	}
+	if inUse {
+		return false, true, nil
+	}
+	result, err := s.db.Exec(`delete from policies where id=$1 and tenant_id=$2`, id, tenantID)
+	if err != nil {
+		return false, false, err
+	}
+	count, err := result.RowsAffected()
+	return count > 0, false, err
+}
+
 func (s *PostgresStore) CreateProtectionPlan(input ProtectionPlanInput) (ProtectionPlan, error) {
+	if input.TenantID == "" {
+		input.TenantID = DefaultTenantID
+	}
 	now := time.Now().UTC()
 	if input.ScopeType == "" {
 		input.ScopeType = "all"
@@ -1261,7 +1879,7 @@ func (s *PostgresStore) CreateProtectionPlan(input ProtectionPlanInput) (Protect
 	}
 	plan := ProtectionPlan{
 		ID:                   newID(),
-		TenantID:             DefaultTenantID,
+		TenantID:             input.TenantID,
 		SourceClusterID:      input.SourceClusterID,
 		AppID:                primary,
 		AppIDs:               appIDs,
@@ -1377,12 +1995,12 @@ func (s *PostgresStore) UpsertProtectionPlanSchedule(input ProtectionPlanSchedul
 func (s *PostgresStore) GetProtectionPlanSchedule(planID string) (ProtectionPlanSchedule, bool, error) {
 	var item ProtectionPlanSchedule
 	err := s.db.QueryRow(`
-		select protection_plan_id::text,
-		       coalesce(last_fired_at, '0001-01-01'::timestamptz),
-		       coalesce(next_fire_at, '0001-01-01'::timestamptz),
-		       enabled, created_at, updated_at
-		from protection_plan_schedules
-		where protection_plan_id = $1
+		select pps.protection_plan_id::text,
+		       coalesce(pps.last_fired_at, '0001-01-01'::timestamptz),
+		       coalesce(pps.next_fire_at, '0001-01-01'::timestamptz),
+		       pps.enabled, pps.created_at, pps.updated_at
+		from protection_plan_schedules pps
+		where pps.protection_plan_id = $1
 	`, planID).Scan(&item.ProtectionPlanID, &item.LastFiredAt, &item.NextFireAt, &item.Enabled, &item.CreatedAt, &item.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ProtectionPlanSchedule{}, false, nil
@@ -1395,15 +2013,17 @@ func (s *PostgresStore) GetProtectionPlanSchedule(planID string) (ProtectionPlan
 
 func (s *PostgresStore) ListDueProtectionPlanSchedules(now time.Time) ([]ProtectionPlanSchedule, error) {
 	rows, err := s.db.Query(`
-		select protection_plan_id::text,
-		       coalesce(last_fired_at, '0001-01-01'::timestamptz),
-		       coalesce(next_fire_at, '0001-01-01'::timestamptz),
-		       enabled, created_at, updated_at
-		from protection_plan_schedules
-		where enabled = true
-		  and next_fire_at is not null
-		  and next_fire_at <= $1
-		order by next_fire_at asc
+		select pps.protection_plan_id::text,
+		       coalesce(pps.last_fired_at, '0001-01-01'::timestamptz),
+		       coalesce(pps.next_fire_at, '0001-01-01'::timestamptz),
+		       pps.enabled, pps.created_at, pps.updated_at
+		from protection_plan_schedules pps
+		join protection_plans pp on pp.id=pps.protection_plan_id
+		join tenants t on t.id=pp.tenant_id and t.status='active'
+		where pps.enabled = true
+		  and pps.next_fire_at is not null
+		  and pps.next_fire_at <= $1
+		order by pps.next_fire_at asc
 	`, now)
 	if err != nil {
 		return nil, err
@@ -1749,7 +2369,6 @@ func dedupNonEmpty(in []string) []string {
 
 func (s *PostgresStore) CreateRestorePoint(input RestorePointInput) (RestorePoint, error) {
 	now := time.Now().UTC()
-	displayName := restorePointDisplayName(input.DisplayName, input.TaskCreatedAt, now)
 	if input.PointType == "" {
 		input.PointType = "backup"
 	}
@@ -1776,14 +2395,16 @@ func (s *PostgresStore) CreateRestorePoint(input RestorePointInput) (RestorePoin
 	if err != nil {
 		return RestorePoint{}, err
 	}
+	tenantID := DefaultTenantID
+	_ = s.db.QueryRow(`select tenant_id from clusters where id=$1`, input.SourceClusterID).Scan(&tenantID)
 	point := RestorePoint{
 		ID:                newID(),
-		TenantID:          DefaultTenantID,
+		TenantID:          tenantID,
 		ProtectionPlanID:  input.ProtectionPlanID,
 		SourceClusterID:   input.SourceClusterID,
 		AppID:             input.AppID,
 		StorageRepoID:     input.StorageRepoID,
-		DisplayName:       displayName,
+		DisplayName:       "",
 		VeleroBackupName:  input.VeleroBackupName,
 		PointType:         input.PointType,
 		Status:            input.Status,
@@ -1795,31 +2416,36 @@ func (s *PostgresStore) CreateRestorePoint(input RestorePointInput) (RestorePoin
 		LabelSelector:     input.LabelSelector,
 		BackupTaskID:      input.BackupTaskID,
 		BackupStorageName: input.BackupStorageName,
+		TaskCreatedAt:     input.TaskCreatedAt,
 		Metadata:          metadata,
 		CreatedAt:         now,
+	}
+	if point.TaskCreatedAt.IsZero() {
+		point.TaskCreatedAt = now
 	}
 
 	_, err = s.db.Exec(`
 		insert into restore_points (
 			id, tenant_id, protection_plan_id, source_cluster_id, app_id, storage_repo_id,
 			display_name, velero_backup_name, point_type, status, size_bytes, started_at, completed_at,
-			expires_at, metadata, created_at
+			expires_at, metadata, created_at, task_created_at
 		)
 		values ($1, $2, nullif($3, '')::uuid, $4, nullif($5, '')::uuid, nullif($6, '')::uuid,
 			$7, $8, $9, $10, nullif($11, 0), nullif($12, '0001-01-01'::timestamptz),
-			nullif($13, '0001-01-01'::timestamptz), nullif($14, '0001-01-01'::timestamptz), $15, $16)
+			nullif($13, '0001-01-01'::timestamptz), nullif($14, '0001-01-01'::timestamptz), $15, $16, $17)
 		on conflict (source_cluster_id, velero_backup_name) do update
-		   set display_name = coalesce(nullif(restore_points.display_name, ''), excluded.display_name),
+		   set display_name = '',
 		       size_bytes = coalesce(excluded.size_bytes, restore_points.size_bytes),
 		       completed_at = coalesce(excluded.completed_at, restore_points.completed_at),
 		       app_id = coalesce(restore_points.app_id, excluded.app_id),
 		       storage_repo_id = coalesce(restore_points.storage_repo_id, excluded.storage_repo_id),
+		       task_created_at = coalesce(restore_points.task_created_at, excluded.task_created_at),
 		       metadata = coalesce(restore_points.metadata, '{}'::jsonb)
 		           || (coalesce(excluded.metadata, '{}'::jsonb)
 		               - array['velero', 'size', 'restorePointSize', 'planStorageSize', 'sizeStatus', 'sizeWarnings'])
 	`, point.ID, point.TenantID, point.ProtectionPlanID, point.SourceClusterID, point.AppID,
 		point.StorageRepoID, point.DisplayName, point.VeleroBackupName, point.PointType, point.Status, point.SizeBytes,
-		point.StartedAt, point.CompletedAt, point.ExpiresAt, metadataRaw, now)
+		point.StartedAt, point.CompletedAt, point.ExpiresAt, metadataRaw, now, point.TaskCreatedAt)
 	if err != nil {
 		return RestorePoint{}, err
 	}
@@ -1843,7 +2469,7 @@ func (s *PostgresStore) ListRestorePoints(filter RestorePointFilter) ([]RestoreP
 		       coalesce(started_at, '0001-01-01'::timestamptz),
 		       coalesce(completed_at, '0001-01-01'::timestamptz),
 		       coalesce(expires_at, '0001-01-01'::timestamptz),
-		       metadata, created_at
+		       coalesce(task_created_at, created_at), metadata, created_at
 		from restore_points
 	`
 	args := []any{}
@@ -1884,7 +2510,7 @@ func (s *PostgresStore) ListRestorePoints(filter RestorePointFilter) ([]RestoreP
 		var metadataRaw []byte
 		if err := rows.Scan(&item.ID, &item.TenantID, &item.ProtectionPlanID, &item.SourceClusterID,
 			&item.AppID, &item.StorageRepoID, &item.DisplayName, &item.VeleroBackupName, &item.PointType, &item.Status,
-			&item.SizeBytes, &item.StartedAt, &item.CompletedAt, &item.ExpiresAt, &metadataRaw, &item.CreatedAt); err != nil {
+			&item.SizeBytes, &item.StartedAt, &item.CompletedAt, &item.ExpiresAt, &item.TaskCreatedAt, &metadataRaw, &item.CreatedAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(metadataRaw, &item.Metadata)
@@ -1914,12 +2540,12 @@ func (s *PostgresStore) GetRestorePoint(id string) (RestorePoint, bool, error) {
 		       coalesce(started_at, '0001-01-01'::timestamptz),
 		       coalesce(completed_at, '0001-01-01'::timestamptz),
 		       coalesce(expires_at, '0001-01-01'::timestamptz),
-		       metadata, created_at
+		       coalesce(task_created_at, created_at), metadata, created_at
 		from restore_points
 		where id = $1
 	`, id).Scan(&item.ID, &item.TenantID, &item.ProtectionPlanID, &item.SourceClusterID,
 		&item.AppID, &item.StorageRepoID, &item.DisplayName, &item.VeleroBackupName, &item.PointType, &item.Status,
-		&item.SizeBytes, &item.StartedAt, &item.CompletedAt, &item.ExpiresAt, &metadataRaw, &item.CreatedAt)
+		&item.SizeBytes, &item.StartedAt, &item.CompletedAt, &item.ExpiresAt, &item.TaskCreatedAt, &metadataRaw, &item.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RestorePoint{}, false, nil
 	}
@@ -1956,11 +2582,11 @@ func (s *PostgresStore) UpdateRestorePointState(input RestorePointStateInput) (R
 		       coalesce(started_at, '0001-01-01'::timestamptz),
 		       coalesce(completed_at, '0001-01-01'::timestamptz),
 		       coalesce(expires_at, '0001-01-01'::timestamptz),
-		       metadata, created_at
+		       coalesce(task_created_at, created_at), metadata, created_at
 	`, input.ID, status, metadataRaw).Scan(
 		&item.ID, &item.TenantID, &item.ProtectionPlanID, &item.SourceClusterID,
 		&item.AppID, &item.StorageRepoID, &item.DisplayName, &item.VeleroBackupName, &item.PointType, &item.Status,
-		&item.SizeBytes, &item.StartedAt, &item.CompletedAt, &item.ExpiresAt, &metadataRawOut, &item.CreatedAt,
+		&item.SizeBytes, &item.StartedAt, &item.CompletedAt, &item.ExpiresAt, &item.TaskCreatedAt, &metadataRawOut, &item.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RestorePoint{}, false, nil
@@ -1985,9 +2611,11 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 	if err != nil {
 		return Task{}, err
 	}
+	tenantID := DefaultTenantID
+	_ = s.db.QueryRow(`select tenant_id from clusters where id=$1`, input.ClusterID).Scan(&tenantID)
 	task := Task{
 		ID:               newID(),
-		TenantID:         DefaultTenantID,
+		TenantID:         tenantID,
 		ClusterID:        input.ClusterID,
 		AppID:            input.AppID,
 		ProtectionPlanID: input.ProtectionPlanID,

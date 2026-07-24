@@ -32,11 +32,36 @@ export default defineConfig({
     https,
     hmr: process.env.DISABLE_HMR !== "true",
     watch: process.env.DISABLE_HMR === "true" ? null : {},
+    warmup: {
+      clientFiles: [
+        "./src/main.tsx",
+        "./src/App.tsx",
+        "./src/styles.css",
+        "./src/protect-wizard-modal.tsx"
+      ]
+    },
     proxy: {
       "/api": proxyTarget,
       "/install.sh": proxyTarget,
       "/prepare-node.sh": proxyTarget,
-      "/assets": proxyTarget,
+      "/assets/registry": proxyTarget,
+      "/assets/velero": proxyTarget,
+      "/healthz": proxyTarget,
+      "/readyz": proxyTarget,
+      "/ws": proxyTarget
+    }
+  },
+  preview: {
+    host: "0.0.0.0",
+    port: 3002,
+    strictPort: true,
+    https,
+    proxy: {
+      "/api": proxyTarget,
+      "/install.sh": proxyTarget,
+      "/prepare-node.sh": proxyTarget,
+      "/assets/registry": proxyTarget,
+      "/assets/velero": proxyTarget,
       "/healthz": proxyTarget,
       "/readyz": proxyTarget,
       "/ws": proxyTarget

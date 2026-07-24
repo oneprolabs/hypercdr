@@ -36,6 +36,7 @@ type VeleroProtectionCleaner interface {
 	DeleteVeleroBackupArtifactsByNamePrefix(ctx context.Context, agentNamespace string, backupNamePrefix string) (map[string][]string, error)
 	DeleteBackupRepositories(ctx context.Context, agentNamespace string, storageLocation string, namespaces []string) ([]string, error)
 	DeleteBackupObjectsByNamePrefix(ctx context.Context, agentNamespace string, storageLocation string, backupNamePrefix string) ([]string, error)
+	DeleteRestoreObjects(ctx context.Context, agentNamespace string, storageLocation string, restoreNames []string) ([]string, error)
 	DeleteKopiaRepositories(ctx context.Context, agentNamespace string, storageLocation string, namespaces []string) ([]string, error)
 }
 
