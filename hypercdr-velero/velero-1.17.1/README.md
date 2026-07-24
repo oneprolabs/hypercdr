@@ -7,6 +7,8 @@
 
 Velero (formerly Heptio Ark) gives you tools to back up and restore your Kubernetes cluster resources and persistent volumes. You can run Velero with a public cloud platform or on-premises. 
 
+This source tree is maintained as part of the HyperCDR integration and release workflow.
+
 Velero lets you:
 
 * Take backups of your cluster and restore in case of loss.
