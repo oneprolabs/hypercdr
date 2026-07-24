@@ -99,6 +99,8 @@ type Store interface {
 	UpdateTaskStatus(input TaskStatusInput) (Task, bool, error)
 	AddTaskEvent(input TaskEventInput) error
 	ListTaskEvents(taskID string) ([]TaskEvent, error)
+	CreateDiagnosticLog(input DiagnosticLogInput) (DiagnosticLog, error)
+	ListDiagnosticLogs(filter DiagnosticLogFilter) ([]DiagnosticLog, error)
 	CreateAuditLog(input AuditLogInput) (AuditLog, error)
 	ListAuditLogs(limit, offset int) ([]AuditLog, error)
 	ListComponentReleases(component string) ([]ComponentRelease, error)
@@ -784,6 +786,38 @@ type TaskEvent struct {
 	Message   string         `json:"message"`
 	Payload   map[string]any `json:"payload,omitempty"`
 	CreatedAt time.Time      `json:"createdAt"`
+}
+
+type DiagnosticLog struct {
+	ID         string         `json:"id"`
+	TenantID   string         `json:"tenantId,omitempty"`
+	Scope      string         `json:"scope"`
+	Level      string         `json:"level"`
+	Component  string         `json:"component"`
+	Operation  string         `json:"operation,omitempty"`
+	Message    string         `json:"message"`
+	ClusterID  string         `json:"clusterId,omitempty"`
+	TaskID     string         `json:"taskId,omitempty"`
+	CommandID  string         `json:"commandId,omitempty"`
+	RequestID  string         `json:"requestId,omitempty"`
+	ErrorCode  string         `json:"errorCode,omitempty"`
+	Status     string         `json:"status,omitempty"`
+	DurationMS int64          `json:"durationMs,omitempty"`
+	Details    map[string]any `json:"details,omitempty"`
+	CreatedAt  time.Time      `json:"createdAt"`
+}
+
+type DiagnosticLogInput struct {
+	TenantID, Scope, Level, Component, Operation, Message      string
+	ClusterID, TaskID, CommandID, RequestID, ErrorCode, Status string
+	DurationMS                                                 int64
+	Details                                                    map[string]any
+}
+
+type DiagnosticLogFilter struct {
+	TenantID, Scope, Level, Component, ClusterID, TaskID, Query string
+	From, To                                                    time.Time
+	Limit, Offset                                               int
 }
 
 func NewPublicID() string {

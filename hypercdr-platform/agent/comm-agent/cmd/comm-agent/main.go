@@ -19,7 +19,8 @@ import (
 func main() {
 	cfg := config.Load()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: cfg.LogLevel,
+		Level:       cfg.LogLevel,
+		ReplaceAttr: utcLogTime,
 	}))
 
 	logger.Info("comm-agent starting",
@@ -119,6 +120,13 @@ func main() {
 		}
 		return
 	}
+}
+
+func utcLogTime(_ []string, attr slog.Attr) slog.Attr {
+	if attr.Key == slog.TimeKey {
+		attr.Value = slog.TimeValue(attr.Value.Time().UTC())
+	}
+	return attr
 }
 
 func waitForRetry(ctx context.Context, logger *slog.Logger) bool {

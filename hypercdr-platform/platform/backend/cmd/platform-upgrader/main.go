@@ -17,7 +17,7 @@ import (
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{ReplaceAttr: utcLogTime}))
 	db := os.Getenv("HCDR_DATABASE_URL")
 	deployDir := env("HCDR_DEPLOY_DIR", "/deploy")
 	hostDeployDir := env("HCDR_HOST_DEPLOY_DIR", "/var/lib/hypercdr")
@@ -33,6 +33,7 @@ func main() {
 		logger.Error("connect database", "error", err)
 		os.Exit(1)
 	}
+	logger = slog.New(store.NewDiagnosticSlogHandler(logger.Handler(), repo, "platform-upgrader"))
 	defer repo.Close()
 	executorID := env("HOSTNAME", "platform-upgrader")
 	for {
@@ -49,6 +50,13 @@ func main() {
 		}
 		time.Sleep(3 * time.Second)
 	}
+}
+
+func utcLogTime(_ []string, attr slog.Attr) slog.Attr {
+	if attr.Key == slog.TimeKey {
+		attr.Value = slog.TimeValue(attr.Value.Time().UTC())
+	}
+	return attr
 }
 
 func run(repo store.Store, job store.PlatformUpgradeJob, deployDir, hostDeployDir, healthURL, executorID string, logger *slog.Logger) {

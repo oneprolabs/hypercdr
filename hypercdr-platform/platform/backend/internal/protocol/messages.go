@@ -19,12 +19,14 @@ const (
 	MessageAgentTaskCompleted   = "agent.task.completed"
 	MessageAgentTaskFailed      = "agent.task.failed"
 	MessageAgentVeleroEvent     = "agent.velero.event"
+	MessageAgentLogReport       = "agent.log.report"
 
 	MessagePlatformRegisterAccepted = "platform.register.accepted"
 	MessagePlatformRegisterRejected = "platform.register.rejected"
 	MessagePlatformTaskDispatch     = "platform.task.dispatch"
 	MessagePlatformTaskCancel       = "platform.task.cancel"
 	MessagePlatformInventoryRequest = "platform.inventory.request"
+	MessagePlatformLogRequest       = "platform.log.request"
 	MessagePlatformEventAck         = "platform.event.ack"
 	MessagePlatformEventError       = "platform.event.error"
 	MessageAgentMessageError        = "agent.message.error"
@@ -243,6 +245,29 @@ type InventoryRequestPayload struct {
 	IncludeDetails             bool   `json:"includeDetails,omitempty"`
 	Reason                     string `json:"reason,omitempty"`
 	IncludeRecentVeleroObjects bool   `json:"includeRecentVeleroObjects,omitempty"`
+}
+
+type LogRequestPayload struct {
+	RequestID string    `json:"requestId"`
+	Component string    `json:"component"`
+	Since     time.Time `json:"since"`
+	TailLines int64     `json:"tailLines"`
+}
+type LogEntry struct {
+	Timestamp time.Time `json:"timestamp"`
+	Level     string    `json:"level"`
+	Component string    `json:"component"`
+	Pod       string    `json:"pod,omitempty"`
+	Node      string    `json:"node,omitempty"`
+	Message   string    `json:"message"`
+}
+type LogReportPayload struct {
+	RequestID string     `json:"requestId"`
+	Component string     `json:"component"`
+	Entries   []LogEntry `json:"entries"`
+	Truncated bool       `json:"truncated,omitempty"`
+	ErrorCode string     `json:"errorCode,omitempty"`
+	Message   string     `json:"message,omitempty"`
 }
 
 type TaskCancelPayload struct {

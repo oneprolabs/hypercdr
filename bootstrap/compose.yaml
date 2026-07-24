@@ -14,6 +14,9 @@ services:
       timeout: 5s
       retries: 10
     restart: unless-stopped
+    logging:
+      driver: local
+      options: { max-size: "50m", max-file: "5" }
 
   hypercdr-platform-api:
     image: ${PLATFORM_API_IMAGE:?PLATFORM_API_IMAGE is required}
@@ -47,6 +50,9 @@ services:
     ports:
       - ${HCDR_API_PORT:-18080}:18080
     restart: unless-stopped
+    logging:
+      driver: local
+      options: { max-size: "50m", max-file: "5" }
 
   hypercdr-platform-frontend:
     image: ${PLATFORM_FRONTEND_IMAGE:?PLATFORM_FRONTEND_IMAGE is required}
@@ -58,6 +64,9 @@ services:
     ports:
       - ${HCDR_FRONTEND_PORT:-3002}:3002
     restart: unless-stopped
+    logging:
+      driver: local
+      options: { max-size: "50m", max-file: "5" }
 
   hypercdr-platform-upgrader:
     image: ${PLATFORM_UPGRADER_IMAGE:?PLATFORM_UPGRADER_IMAGE is required}
@@ -75,3 +84,6 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${HCDR_DATA_DIR:-/var/lib/hypercdr}:/deploy
     restart: unless-stopped
+    logging:
+      driver: local
+      options: { max-size: "50m", max-file: "5" }

@@ -131,6 +131,9 @@ services:
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
     restart: unless-stopped
+    logging:
+      driver: local
+      options: { max-size: "50m", max-file: "5" }
 
   hypercdr-platform-api:
     image: ${PLATFORM_API_IMAGE}
@@ -161,6 +164,9 @@ services:
     volumes:
       - /data/harbor/cert/hypercdr-ca.crt:/etc/hypercdr/registry-ca.crt:ro
     restart: unless-stopped
+    logging:
+      driver: local
+      options: { max-size: "50m", max-file: "5" }
 
   hypercdr-platform-frontend:
     image: ${PLATFORM_FRONTEND_IMAGE}
@@ -170,6 +176,9 @@ services:
     ports:
       - "3002:3002"
     restart: unless-stopped
+    logging:
+      driver: local
+      options: { max-size: "50m", max-file: "5" }
 
   hypercdr-platform-upgrader:
     image: ${PLATFORM_UPGRADER_IMAGE}
@@ -185,6 +194,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./:/deploy
     restart: unless-stopped
+    logging:
+      driver: local
+      options: { max-size: "50m", max-file: "5" }
 EOF
 
 cat <<EOF

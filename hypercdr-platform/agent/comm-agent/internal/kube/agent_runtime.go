@@ -1,13 +1,16 @@
 package kube
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -25,6 +28,14 @@ type AgentUpgrader interface {
 type VeleroRuntimeManager interface {
 	VeleroRuntimeStatus(ctx context.Context, namespace string) (VeleroRuntimeStatus, error)
 	UpgradeVelero(ctx context.Context, options VeleroUpgradeOptions) error
+}
+
+type ComponentLogEntry struct {
+	Timestamp          time.Time
+	Pod, Node, Message string
+}
+type ComponentLogCollector interface {
+	CollectComponentLogs(ctx context.Context, namespace, component string, since time.Time, tailLines int64) ([]ComponentLogEntry, bool, error)
 }
 
 type VeleroRuntimeStatus struct {
@@ -86,6 +97,89 @@ func (r *KubernetesAgentRuntime) PodImageStatus(ctx context.Context, namespace s
 	image := containerImage(pod, containerName)
 	imageID := containerImageID(pod, containerName)
 	return image, imageID, digestFromImageID(imageID), nil
+}
+
+func (r *KubernetesAgentRuntime) CollectComponentLogs(ctx context.Context, namespace, component string, since time.Time, tailLines int64) ([]ComponentLogEntry, bool, error) {
+	if err := r.ensureLogCollectionPermission(ctx); err != nil {
+		return nil, false, fmt.Errorf("ensure log collection permission: %w", err)
+	}
+	containers := map[string]string{"comm-agent": "comm-agent", "velero": "velero", "node-agent": "node-agent"}
+	container, ok := containers[component]
+	if !ok {
+		return nil, false, fmt.Errorf("unsupported log component %q", component)
+	}
+	if tailLines <= 0 || tailLines > 2000 {
+		tailLines = 1000
+	}
+	pods, err := r.client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, false, err
+	}
+	result := make([]ComponentLogEntry, 0)
+	truncated := false
+	for _, pod := range pods.Items {
+		found := false
+		for _, candidate := range pod.Spec.Containers {
+			if candidate.Name == container {
+				found = true
+				break
+			}
+		}
+		if !found {
+			continue
+		}
+		options := &corev1.PodLogOptions{Container: container, Timestamps: true, TailLines: &tailLines}
+		if !since.IsZero() {
+			value := metav1.NewTime(since)
+			options.SinceTime = &value
+		}
+		stream, err := r.client.CoreV1().Pods(namespace).GetLogs(pod.Name, options).Stream(ctx)
+		if err != nil {
+			return nil, false, fmt.Errorf("read %s logs from %s: %w", component, pod.Name, err)
+		}
+		scanner := bufio.NewScanner(io.LimitReader(stream, 10<<20))
+		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+		count := int64(0)
+		for scanner.Scan() {
+			count++
+			line := scanner.Text()
+			timestamp, message := splitKubernetesLogLine(line)
+			result = append(result, ComponentLogEntry{Timestamp: timestamp, Pod: pod.Name, Node: pod.Spec.NodeName, Message: message})
+		}
+		_ = stream.Close()
+		if err := scanner.Err(); err != nil {
+			return nil, false, err
+		}
+		if count >= tailLines {
+			truncated = true
+		}
+	}
+	return result, truncated, nil
+}
+
+func (r *KubernetesAgentRuntime) ensureLogCollectionPermission(ctx context.Context) error {
+	role, err := r.client.RbacV1().ClusterRoles().Get(ctx, "hypercdr-agent", metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	for _, rule := range role.Rules {
+		if containsString(rule.APIGroups, "") && containsString(rule.Resources, "pods/log") && containsString(rule.Verbs, "get") {
+			return nil
+		}
+	}
+	role.Rules = append(role.Rules, rbacv1.PolicyRule{APIGroups: []string{""}, Resources: []string{"pods/log"}, Verbs: []string{"get"}})
+	_, err = r.client.RbacV1().ClusterRoles().Update(ctx, role, metav1.UpdateOptions{})
+	return err
+}
+
+func splitKubernetesLogLine(line string) (time.Time, string) {
+	parts := strings.SplitN(line, " ", 2)
+	if len(parts) == 2 {
+		if value, err := time.Parse(time.RFC3339Nano, parts[0]); err == nil {
+			return value.UTC(), parts[1]
+		}
+	}
+	return time.Now().UTC(), line
 }
 
 func (r *KubernetesAgentRuntime) UpgradeAgent(ctx context.Context, options AgentUpgradeOptions) error {

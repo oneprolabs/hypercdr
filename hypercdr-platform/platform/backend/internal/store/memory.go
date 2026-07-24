@@ -23,6 +23,7 @@ type MemoryStore struct {
 	restorePoints       map[string]RestorePoint
 	tasks               map[string]Task
 	taskEvents          []TaskEvent
+	diagnosticLogs      []DiagnosticLog
 	auditLogs           []AuditLog
 	users               map[string]memoryUser
 	resetTokens         map[string]memoryResetToken
@@ -1904,7 +1905,31 @@ func (s *MemoryStore) AddTaskEvent(input TaskEventInput) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.taskEvents = append(s.taskEvents, event)
+	if task, ok := s.tasks[input.TaskID]; ok {
+		s.diagnosticLogs = append(s.diagnosticLogs, DiagnosticLog{ID: newID(), TenantID: task.TenantID, Scope: "tenant", Level: normalizeDiagnosticLevel(input.Level), Component: "task", Operation: task.Type, Message: input.Message, ClusterID: task.ClusterID, TaskID: task.ID, CommandID: task.CommandID, ErrorCode: input.Reason, Status: task.Status, Details: redactDiagnosticDetails(input.Payload), CreatedAt: event.CreatedAt})
+	}
 	return nil
+}
+
+func (s *MemoryStore) CreateDiagnosticLog(input DiagnosticLogInput) (DiagnosticLog, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item := diagnosticLogFromInput(input, time.Now().UTC())
+	s.diagnosticLogs = append(s.diagnosticLogs, item)
+	return item, nil
+}
+
+func (s *MemoryStore) ListDiagnosticLogs(filter DiagnosticLogFilter) ([]DiagnosticLog, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	items := make([]DiagnosticLog, 0)
+	for i := len(s.diagnosticLogs) - 1; i >= 0; i-- {
+		item := s.diagnosticLogs[i]
+		if diagnosticLogMatches(item, filter) {
+			items = append(items, item)
+		}
+	}
+	return paginateDiagnosticLogs(items, filter), nil
 }
 
 func (s *MemoryStore) ListTaskEvents(taskID string) ([]TaskEvent, error) {

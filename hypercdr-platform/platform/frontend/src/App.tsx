@@ -72,6 +72,7 @@ type View =
   | 'policies'
   | 'restore_points'
   | 'operations'
+  | 'logs'
   | 'tags'
   | 'users'
   | 'tenants'
@@ -187,6 +188,7 @@ const locales: Record<LocaleCode, {
       policies: ['Policies', 'Maintain application protection plans and recovery targets'],
       restore_points: ['Restore Points', 'View, drill, and take over restore points'],
       operations: ['History', 'Review user operations and their results'],
+      logs: ['Logs', 'Search platform and cluster diagnostic logs'],
       tags: ['Tag Management', 'Create and maintain reusable application tags'],
       users: ['User Management', 'Create and maintain platform users'],
       tenants: ['Tenant Management', 'Create and maintain isolated tenants'],
@@ -456,6 +458,7 @@ function listItems<T>(response: ApiList<T>): T[] {
 
 type ApiCluster = {
   id: string;
+  tenantId: string;
   name: string;
   kubeVersion: string;
   status: string;
@@ -719,6 +722,7 @@ type ApiPlatformVersion = { version: string; gitCommit: string; buildTime: strin
 type ApiPlatformRelease = { id: string; version: string; apiImage: string; apiImageDigest: string; frontendImage: string; frontendImageDigest: string; databaseSchemaVersion: string; minimumAgentVersion?: string; rollbackSupported: boolean; releaseNotes?: string; status: 'candidate'|'active'|'retired'; publishedBy?: string; publishedAt?: string; createdAt: string };
 type ApiPlatformUpgrade = { id:string; releaseId:string; fromVersion:string; targetVersion:string; status:string; step:string; progress:number; errorMessage?:string; backupPath?:string; createdAt:string; completedAt?:string };
 type ApiPlatformPrecheck = { passed:boolean; currentVersion:string; checks:Array<{id:string;label:string;passed:boolean;detail?:unknown}> };
+type ApiDiagnosticLog = { id:string; tenantId?:string; scope:'tenant'|'system'; level:'debug'|'info'|'warning'|'error'; component:string; operation?:string; message:string; clusterId?:string; taskId?:string; commandId?:string; requestId?:string; errorCode?:string; status?:string; durationMs?:number; details?:Record<string,unknown>; createdAt:string };
 
 type ClusterTaskLog = {
   task: ApiTask;
@@ -763,6 +767,7 @@ const RESTORABLE_VIEWS = new Set<View>([
   'tags',
   'users',
   'profile',
+  'logs',
   'upgrades',
 ]);
 
@@ -842,39 +847,42 @@ async function readApiError(response: Response): Promise<Error> {
   }
 }
 
-async function ensureApiResponse(response: Response, path: string): Promise<Response> {
+async function ensureApiResponse(response: Response, path: string, requestToken = ''): Promise<Response> {
   if (response.ok) return response;
   const publicAuthRequest = path === '/api/v1/auth/login' || path === '/api/v1/auth/captcha' || path === '/api/v1/auth/forgot-password' || path === '/api/v1/auth/reset-password';
-  if (response.status === 401 && !publicAuthRequest) {
+  const currentToken = readStoredAuthSession()?.session.token || '';
+  if (response.status === 401 && !publicAuthRequest && requestToken !== '' && requestToken === currentToken) {
     window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
   }
   throw await readApiError(response);
 }
 
-function apiHeaders(json = false): Record<string, string> {
+function apiHeaders(json = false, token = readStoredAuthSession()?.session.token || ''): Record<string, string> {
   const headers: Record<string, string> = {};
   if (json) headers['Content-Type'] = 'application/json';
-  const token = readStoredAuthSession()?.session.token;
   if (token) headers.Authorization = `Bearer ${token}`;
   return headers;
 }
 
 async function apiGet<T>(path: string): Promise<T> {
-  const response = await ensureApiResponse(await fetch(path, { cache: 'no-store', headers: apiHeaders() }), path);
+  const token = readStoredAuthSession()?.session.token || '';
+  const response = await ensureApiResponse(await fetch(path, { cache: 'no-store', headers: apiHeaders(false, token) }), path, token);
   return response.json() as Promise<T>;
 }
 
 async function apiPost<T>(path: string, body: unknown): Promise<T> {
+  const token = readStoredAuthSession()?.session.token || '';
   const response = await ensureApiResponse(await fetch(path, {
     method: 'POST',
-    headers: apiHeaders(true),
+    headers: apiHeaders(true, token),
     body: JSON.stringify(body),
-  }), path);
+  }), path, token);
   return response.json() as Promise<T>;
 }
 
 async function apiPut<T>(path: string, body: unknown): Promise<T> {
-  const response = await ensureApiResponse(await fetch(path, { method: 'PUT', headers: apiHeaders(true), body: JSON.stringify(body) }), path);
+  const token = readStoredAuthSession()?.session.token || '';
+  const response = await ensureApiResponse(await fetch(path, { method: 'PUT', headers: apiHeaders(true, token), body: JSON.stringify(body) }), path, token);
   return response.json() as Promise<T>;
 }
 
@@ -885,16 +893,18 @@ function isAgentTokenUsable(token: ApiAgentToken | null) {
 }
 
 async function apiPatch<T>(path: string, body: unknown): Promise<T> {
+  const token = readStoredAuthSession()?.session.token || '';
   const response = await ensureApiResponse(await fetch(path, {
     method: 'PATCH',
-    headers: apiHeaders(true),
+    headers: apiHeaders(true, token),
     body: JSON.stringify(body),
-  }), path);
+  }), path, token);
   return response.json() as Promise<T>;
 }
 
 async function apiDelete<T>(path: string): Promise<T> {
-  const response = await ensureApiResponse(await fetch(path, { method: 'DELETE', headers: apiHeaders() }), path);
+  const token = readStoredAuthSession()?.session.token || '';
+  const response = await ensureApiResponse(await fetch(path, { method: 'DELETE', headers: apiHeaders(false, token) }), path, token);
   return response.json() as Promise<T>;
 }
 
@@ -2730,7 +2740,7 @@ const topNav: Array<{ key: TopModule; view: View }> = [
   { key: 'overview', view: 'dashboard' },
   { key: 'dr', view: 'applications' },
   { key: 'config', view: 'clusters' },
-  { key: 'ops', view: 'upgrades' },
+  { key: 'ops', view: 'logs' },
   { key: 'settings', view: 'profile' },
 ];
 
@@ -2738,7 +2748,7 @@ function moduleForView(view: View): TopModule {
   if (view === 'dashboard') return 'overview';
   if (view === 'applications' || view === 'restore_points' || view === 'dr_tasks' || view === 'failback') return 'dr';
   if (view === 'clusters' || view === 'storage' || view === 'policies' || view === 'tags') return 'config';
-  if (view === 'operations' || view === 'upgrades') return 'ops';
+  if (view === 'operations' || view === 'logs' || view === 'upgrades') return 'ops';
   return 'settings';
 }
 
@@ -3176,6 +3186,10 @@ export default function App() {
   const prefetchedAgentTokenRef = useRef<ApiAgentToken | null>(null);
   const prefetchingAgentTokenRef = useRef<Promise<ApiAgentToken | null> | null>(null);
   const agentTokenOwnerRef = useRef('');
+  const refreshInFlightRef = useRef<Promise<Cluster[]> | null>(null);
+  const refreshLastStartedAtRef = useRef(0);
+  const refreshLastResultRef = useRef<Cluster[]>([]);
+  const resourceSessionOwnerRef = useRef(authSession?.session.token || '');
 
   const [appStage, setAppStage] = useState<'select' | 'config' | 'run'>('select');
   const [search, setSearch] = useState('');
@@ -3329,26 +3343,6 @@ export default function App() {
     void refreshLoginCaptcha();
   }, [authSession, refreshLoginCaptcha, view]);
 
-  const enterAfterLogin = useCallback(() => {
-    const liveList = liveClusters ?? clusters;
-    const hasLive = liveClusters !== null;
-    const needsOnboarding = hasLive && (liveList.length === 0 || !liveList.some(cluster => cluster.isDefault));
-    if (needsOnboarding) {
-      writeStoredView('clusters');
-      setView('clusters');
-    } else {
-      const target = liveList.find(cluster => cluster.isDefault) || liveList[0] || clusters[0] || null;
-      setSelectedCluster(target);
-      try {
-        if (target?.id) localStorage.setItem(SELECTED_CLUSTER_KEY, target.id);
-      } catch {
-        // localStorage can be blocked in embedded browsers.
-      }
-      writeStoredView('dashboard');
-      setView('dashboard');
-    }
-  }, [clusters, liveClusters]);
-
   useEffect(() => {
     if (!authSession) return;
     const expiresAt = Date.parse(authSession.session.expiresAt);
@@ -3395,14 +3389,17 @@ export default function App() {
       setAuthSession(nextSession);
       writeStoredAuthSession(nextSession);
       clearStoredView();
-      if (!nextSession.user.mustChangePassword) enterAfterLogin();
+      if (!nextSession.user.mustChangePassword) {
+        writeStoredView('dashboard');
+        setView('dashboard');
+      }
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : 'Login failed');
       await refreshLoginCaptcha(false);
     } finally {
       setLoginSubmitting(false);
     }
-  }, [enterAfterLogin, loginCaptcha?.id, loginCaptchaCode, loginEmail, loginPassword, loginSubmitting, refreshLoginCaptcha]);
+  }, [loginCaptcha?.id, loginCaptchaCode, loginEmail, loginPassword, loginSubmitting, refreshLoginCaptcha]);
 
   const applyAuthFlow = useCallback((next: AuthFlow) => {
     setAuthFlow(next); setLoginError(''); setAuthMessage(''); setPasswordResetCompleted(false); setLoginPassword(''); setConfirmPassword(''); setLoginCaptchaCode('');
@@ -3476,9 +3473,48 @@ export default function App() {
     finally { setLoginSubmitting(false); }
   }, [confirmPassword, loginPassword, resetToken, switchAuthFlow]);
 
+  const clearTenantResourceState = useCallback(() => {
+    refreshInFlightRef.current = null;
+    refreshLastStartedAtRef.current = 0;
+    refreshLastResultRef.current = [];
+    prefetchedAgentTokenRef.current = null;
+    prefetchingAgentTokenRef.current = null;
+    agentTokenOwnerRef.current = '';
+    setClusters([]);
+    setLiveClusters(null);
+    setStorage([]);
+    setLiveStorage(null);
+    setPolicies([]);
+    setLivePolicies(null);
+    setTags([]);
+    setRestorePointCount(0);
+    setLiveRestorePoints([]);
+    setLiveApiClusters([]);
+    setLiveApiStorageRepos([]);
+    setLiveApiTasks([]);
+    setLiveApiRestorePointViews([]);
+    setLiveApiRestorePoints([]);
+    setLiveApiPolicies([]);
+    setLiveApiPlans([]);
+    setLiveApiApps([]);
+    setLiveAppTasks({});
+    setLiveRecoveryTasks({});
+    setSelectedCluster(null);
+    setDefaultClusterId(null);
+  }, []);
+
+  useEffect(() => {
+    const owner = authSession?.session.token || '';
+    if (resourceSessionOwnerRef.current === owner) return;
+    resourceSessionOwnerRef.current = owner;
+    clearTenantResourceState();
+  }, [authSession?.session.token, clearTenantResourceState]);
+
   const signOut = useCallback(() => {
     void apiPost('/api/v1/auth/logout', {}).catch(() => undefined);
     setAccountMenuOpen(false);
+    resourceSessionOwnerRef.current = '';
+    clearTenantResourceState();
     setAuthSession(null);
     clearStoredAuthSession();
     clearStoredView();
@@ -3486,12 +3522,14 @@ export default function App() {
     setLoginCaptchaCode('');
     setLoginError('');
     setView('login');
-  }, []);
+  }, [clearTenantResourceState]);
 
   useEffect(() => {
     const expireSession = () => {
       clearStoredAuthSession();
       setAccountMenuOpen(false);
+      resourceSessionOwnerRef.current = '';
+      clearTenantResourceState();
       setAuthSession(null);
       setLoginPassword('');
       setLoginCaptchaCode('');
@@ -3500,15 +3538,12 @@ export default function App() {
     };
     window.addEventListener(AUTH_EXPIRED_EVENT, expireSession);
     return () => window.removeEventListener(AUTH_EXPIRED_EVENT, expireSession);
-  }, []);
+  }, [clearTenantResourceState]);
 
   const [clusterTaskLogs, setClusterTaskLogs] = useState<Record<string, ClusterTaskLog[]>>({});
   const [activeClusterTaskIds, setActiveClusterTaskIds] = useState<Set<string>>(new Set());
   const clusterTaskLogsRef = useRef(clusterTaskLogs);
   clusterTaskLogsRef.current = clusterTaskLogs;
-  const refreshInFlightRef = useRef<Promise<Cluster[]> | null>(null);
-  const refreshLastStartedAtRef = useRef(0);
-  const refreshLastResultRef = useRef<Cluster[]>([]);
 
   useEffect(() => {
     if (!authSession || view === 'login') {
@@ -3593,6 +3628,8 @@ export default function App() {
   }, [activeClusterTaskIds, authSession, view]);
 
   const refreshPlatformData = useCallback(() => {
+    const owner = authSession?.session.token || '';
+    if (!owner || resourceSessionOwnerRef.current !== owner) return Promise.resolve([]);
     const now = Date.now();
     if (refreshInFlightRef.current) return refreshInFlightRef.current;
     if (refreshLastResultRef.current.length > 0 && now - refreshLastStartedAtRef.current < 1200) {
@@ -3610,6 +3647,7 @@ export default function App() {
         apiGet<ApiList<TagItem>>('/api/v1/tags'),
       ]);
       const restorePointRes = await apiGet<ApiList<ApiRestorePoint>>('/api/v1/restore-points');
+      if (resourceSessionOwnerRef.current !== owner) return [];
       const apiClusters = listItems(clusterRes);
       const apiApps = listItems(appRes);
       const apiStorage = listItems(storageRes);
@@ -3675,11 +3713,11 @@ export default function App() {
       }
       return nextClusters;
     })().finally(() => {
-      refreshInFlightRef.current = null;
+      if (refreshInFlightRef.current === request) refreshInFlightRef.current = null;
     });
     refreshInFlightRef.current = request;
     return request;
-  }, []);
+  }, [authSession?.session.token]);
 
   useEffect(() => {
     if (!authSession || view === 'login') return;
@@ -3768,6 +3806,7 @@ export default function App() {
       return {
         title: 'Operations',
         items: [
+          { label: 'Logs', desc: 'Search and export diagnostic logs', view: 'logs' as View, icon: Terminal },
           ...(authSession?.user.systemAdmin ? [{ label: 'Upgrade', desc: 'Check and upgrade platform and cluster components', view: 'upgrades' as View, icon: Upload }] : []),
         ],
       };
@@ -4381,6 +4420,7 @@ export default function App() {
               />
             ))}
             {view === 'operations' && (onboarding !== 'ready' ? onboardingGate : <RealOperationsPage />)}
+            {view === 'logs' && authSession && <DiagnosticLogsPage currentUser={authSession.user} clusters={liveApiClusters} toast={setToast} />}
             {view === 'tags' && (onboarding !== 'ready' ? onboardingGate : <TagManagementPage tags={tags} setTags={setTags} clusters={clusters} setClusters={setClusters} toast={setToast} />)}
             {view === 'users' && authSession?.user.role === 'admin' && <UserManagementPage currentUser={authSession.user} toast={setToast} />}
             {view === 'tenants' && authSession?.user.systemAdmin && <TenantPage toast={setToast} />}
@@ -12832,6 +12872,47 @@ function FailbackPage({ toast }: { toast: (msg: string) => void }) {
       </div>
     </motion.div>
   );
+}
+
+function DiagnosticLogsPage({ currentUser, clusters, toast }: { currentUser: ApiLoginResponse['user']; clusters: ApiCluster[]; toast: (message:string)=>void }) {
+  const [logs,setLogs]=useState<ApiDiagnosticLog[]>([]); const [tenants,setTenants]=useState<ApiTenant[]>([]); const [loading,setLoading]=useState(false); const [selected,setSelected]=useState<ApiDiagnosticLog|null>(null);
+  const [logClusters,setLogClusters]=useState<Array<{id:string;tenantId:string;name:string;connectionStatus:string}>>(clusters.map(item=>({id:item.id,tenantId:item.tenantId,name:item.name,connectionStatus:item.connectionStatus})));
+  const [scope,setScope]=useState(currentUser.systemAdmin?'':'tenant'); const [tenantId,setTenantId]=useState(''); const [clusterId,setClusterId]=useState(''); const [level,setLevel]=useState(''); const [component,setComponent]=useState(''); const [query,setQuery]=useState('');
+  const initialFrom=()=>{const value=new Date(Date.now()-60*60*1000);return new Date(value.getTime()-value.getTimezoneOffset()*60000).toISOString().slice(0,16)}; const [from,setFrom]=useState(initialFrom); const [to,setTo]=useState('');
+  const visibleClusters=logClusters.filter(cluster=>!currentUser.systemAdmin||!tenantId||cluster.tenantId===tenantId);
+  const tenantName=(id?:string)=>tenants.find(item=>item.id===id)?.name||id?.slice(0,8)||'System';
+  const params=useCallback((exporting=false)=>{const values=new URLSearchParams(); if(scope)values.set('scope',scope);if(tenantId)values.set('tenantId',tenantId);if(clusterId)values.set('clusterId',clusterId);if(level)values.set('level',level);if(component)values.set('component',component);if(query.trim())values.set('q',query.trim());if(from)values.set('from',new Date(from).toISOString());if(to)values.set('to',new Date(to).toISOString());values.set('limit',exporting?'5000':'500');return values},[scope,tenantId,clusterId,level,component,query,from,to]);
+  const load=useCallback(async()=>{setLoading(true);try{const response=await apiGet<ApiList<ApiDiagnosticLog>>(`/api/v1/diagnostic-logs?${params()}`);setLogs(listItems(response))}catch(error){toast(error instanceof Error?error.message:'Logs could not be loaded')}finally{setLoading(false)}},[params,toast]);
+  const collectClusterLogs=async()=>{if(!clusterId||!['comm-agent','velero','node-agent'].includes(component))return;setLoading(true);try{await apiPost(`/api/v1/clusters/${clusterId}/logs/collect`,{component,since:from?new Date(from).toISOString():new Date(Date.now()-30*60*1000).toISOString(),tailLines:1000});toast('Cluster log collection started');window.setTimeout(()=>void load(),1500)}catch(error){setLoading(false);toast(error instanceof Error?error.message:'Cluster logs could not be collected')}};
+  useEffect(()=>{apiGet<ApiList<{id:string;tenantId:string;name:string;connectionStatus:string}>>('/api/v1/diagnostic-log-sources').then(response=>setLogClusters(listItems(response))).catch(()=>{});if(currentUser.systemAdmin){apiGet<ApiList<ApiTenant>>('/api/v1/tenants').then(response=>setTenants(listItems(response))).catch(()=>setTenants([]))}},[currentUser.systemAdmin]);
+  useEffect(()=>{void load()},[load]);
+  const exportLogs=async()=>{try{const token=readStoredAuthSession()?.session.token||'';const response=await ensureApiResponse(await fetch(`/api/v1/diagnostic-logs/export?${params(true)}`,{headers:apiHeaders(false,token)}),'/api/v1/diagnostic-logs/export',token);const blob=await response.blob();const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download=`hypercdr-diagnostic-logs-${new Date().toISOString().slice(0,10)}.jsonl`;anchor.click();URL.revokeObjectURL(url);toast('Diagnostic log export is ready')}catch(error){toast(error instanceof Error?error.message:'Log export failed')}};
+  const columns:HyperTableColumn<ApiDiagnosticLog>[]=[
+    {id:'createdAt',header:'Time',accessorFn:row=>row.createdAt,size:180,minSize:170,cell:info=><span className="text-xs font-semibold text-slate-500">{formatLocalDateTime(info.row.original.createdAt)}</span>,meta:{title:row=>formatLocalDateTime(row.createdAt)}},
+    {id:'level',header:'Level',accessorFn:row=>row.level,size:90,minSize:80,cell:info=><span className={`rounded px-2 py-1 text-[10px] font-bold ${info.row.original.level==='error'?'bg-rose-50 text-rose-700':info.row.original.level==='warning'?'bg-amber-50 text-amber-700':'bg-slate-100 text-slate-600'}`}>{info.row.original.level.toUpperCase()}</span>},
+    {id:'component',header:'Component',accessorFn:row=>row.component,size:140,minSize:120,cell:info=><span className="text-xs font-bold text-slate-700">{info.row.original.component}</span>},
+    ...(currentUser.systemAdmin?[{id:'tenant',header:'Tenant',accessorFn:(row:ApiDiagnosticLog)=>tenantName(row.tenantId),size:150,minSize:120,cell:(info:any)=><span className="text-xs text-slate-500">{tenantName(info.row.original.tenantId)}</span>} as HyperTableColumn<ApiDiagnosticLog>]:[]),
+    {id:'message',header:'Message',accessorFn:row=>row.message,size:460,minSize:260,cell:info=><div className="min-w-0"><p className="truncate text-xs font-semibold text-slate-800">{info.row.original.message}</p><p className="mt-1 truncate text-[10px] text-slate-400">{info.row.original.operation||info.row.original.errorCode||info.row.original.taskId||''}</p></div>,meta:{title:row=>row.message}},
+    {id:'taskId',header:'Task / Request',accessorFn:row=>row.taskId||row.requestId||'',size:170,minSize:140,cell:info=><span className="font-mono text-[10px] text-slate-500">{(info.row.original.taskId||info.row.original.requestId||'-').slice(0,13)}</span>},
+  ];
+  return <motion.div key="logs" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="space-y-5">
+    <SearchBar title="Logs" desc="Trace platform requests, tasks, and cluster operations." action={loading?'Refreshing...':'Refresh'} onAction={()=>void load()} />
+    <section className="hbdr-section-card overflow-hidden">
+      <div className="grid gap-3 border-b border-slate-100 bg-slate-50/60 p-4 md:grid-cols-3 xl:grid-cols-6">
+        {currentUser.systemAdmin&&<label className="text-[10px] font-bold text-slate-500">Scope<select value={scope} onChange={event=>{setScope(event.target.value);if(event.target.value==='system'){setTenantId('');setClusterId('')}}} className="mt-1 w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"><option value="">All logs</option><option value="tenant">Tenant logs</option><option value="system">System logs</option></select></label>}
+        {currentUser.systemAdmin&&scope!=='system'&&<label className="text-[10px] font-bold text-slate-500">Tenant<select value={tenantId} onChange={event=>{setTenantId(event.target.value);setClusterId('')}} className="mt-1 w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs"><option value="">All tenants</option>{tenants.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
+        {scope!=='system'&&<label className="text-[10px] font-bold text-slate-500">Cluster<select value={clusterId} onChange={event=>setClusterId(event.target.value)} className="mt-1 w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs"><option value="">All clusters</option>{visibleClusters.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
+        <label className="text-[10px] font-bold text-slate-500">Level<select value={level} onChange={event=>setLevel(event.target.value)} className="mt-1 w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs"><option value="">All levels</option><option value="info">Info</option><option value="warning">Warning</option><option value="error">Error</option><option value="debug">Debug</option></select></label>
+        <label className="text-[10px] font-bold text-slate-500">Component<select value={component} onChange={event=>setComponent(event.target.value)} className="mt-1 w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs"><option value="">All components</option><option value="platform-api">Platform API</option><option value="task">Task</option><option value="comm-agent">comm-agent</option><option value="velero">Velero</option><option value="node-agent">node-agent</option></select></label>
+        <label className="text-[10px] font-bold text-slate-500">From<input type="datetime-local" value={from} onChange={event=>setFrom(event.target.value)} className="mt-1 w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs" /></label>
+        <label className="text-[10px] font-bold text-slate-500">To<input type="datetime-local" value={to} onChange={event=>setTo(event.target.value)} className="mt-1 w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs" /></label>
+      </div>
+      <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 px-4 py-3"><div className="relative min-w-[260px] flex-1"><Search size={15} className="absolute left-3 top-2.5 text-slate-400"/><input value={query} onChange={event=>setQuery(event.target.value)} onKeyDown={event=>{if(event.key==='Enter')void load()}} placeholder="Search message, Task ID, Request ID..." className="w-full rounded border border-slate-200 py-2 pl-9 pr-3 text-xs outline-none focus:border-blue-400"/></div>{clusterId&&['comm-agent','velero','node-agent'].includes(component)&&<button type="button" disabled={loading} onClick={()=>void collectClusterLogs()} className="rounded border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100 disabled:opacity-50">Collect cluster logs</button>}<button type="button" onClick={()=>void load()} className="rounded bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-700">Search</button><button type="button" onClick={()=>void exportLogs()} className="rounded border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"><Upload size={13} className="mr-1 inline"/>Export</button></div>
+      <HyperTable variant="page" density="comfortable" columns={columns} data={logs} getRowId={row=>row.id} onRowClick={row=>setSelected(row)} emptyMessage={loading?'Loading diagnostic logs...':'No logs match the selected filters.'}/>
+      <div className="border-t border-slate-100 px-4 py-3 text-[11px] text-slate-400">Showing {logs.length} records · Times use {userTimeZoneLabel(userTimeZone)}</div>
+    </section>
+    <AnimatePresence>{selected&&<ModalFrame title="Log Details" subtitle={`${selected.component} · ${formatLocalDateTime(selected.createdAt)}`} icon={<Terminal size={18}/>} onClose={()=>setSelected(null)} maxWidthClass="max-w-3xl"><div className="space-y-4"><div className="grid gap-3 rounded border border-slate-100 bg-slate-50 p-4 md:grid-cols-2">{[['Level',selected.level],['Tenant',tenantName(selected.tenantId)],['Operation',selected.operation||'-'],['Status',selected.status||'-'],['Task ID',selected.taskId||'-'],['Command ID',selected.commandId||'-'],['Request ID',selected.requestId||'-'],['Error Code',selected.errorCode||'-']].map(([label,value])=><div key={label}><span className="block text-[10px] font-bold text-slate-400">{label}</span><strong className="mt-1 block break-all text-xs text-slate-700">{value}</strong></div>)}</div><div><h4 className="text-xs font-bold text-slate-700">Message</h4><p className="mt-2 rounded border border-slate-100 bg-white p-3 text-sm leading-6 text-slate-700">{selected.message}</p></div>{selected.details&&<div><h4 className="text-xs font-bold text-slate-700">Diagnostic context</h4><pre className="mt-2 max-h-72 overflow-auto rounded bg-slate-950 p-4 text-[11px] leading-5 text-slate-200">{JSON.stringify(selected.details,null,2)}</pre></div>}</div></ModalFrame>}</AnimatePresence>
+  </motion.div>
 }
 
 function RealOperationsPage() {

@@ -85,3 +85,29 @@ func TestAgentRegistrationUsesTokenTenant(t *testing.T) {
 		t.Fatalf("cluster tenant=%s want %s", cluster.TenantID, tenant.ID)
 	}
 }
+
+func TestRecoveryRejectsCrossTenantProtectionPlan(t *testing.T) {
+	repo := store.NewMemoryStore()
+	tenantA, _ := repo.CreateTenant(store.TenantInput{Name: "Recovery Tenant A", Status: "active"})
+	tenantB, _ := repo.CreateTenant(store.TenantInput{Name: "Recovery Tenant B", Status: "active"})
+	tokenB, _ := repo.CreateAgentToken(tenantB.ID, "user-b", "registration", 60_000_000_000)
+	clusterB, _, err := repo.RegisterCluster(store.RegisterClusterInput{Token: tokenB.Token, ClusterName: "tenant-b-cluster"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	planA, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{
+		TenantID: tenantA.ID, SourceClusterID: "tenant-a-cluster", AppID: "tenant-a-app", StorageRepoID: "tenant-a-storage",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &Router{cfg: config.Config{}, logger: slog.New(slog.NewTextHandler(io.Discard, nil)), store: repo}
+	userB := store.User{ID: "user-b", TenantID: tenantB.ID, Role: "operator", Status: "active"}
+	body := bytes.NewBufferString(`{"clusterId":"` + clusterB.ID + `","protectionPlanId":"` + planA.ID + `","veleroBackupName":"foreign-backup","sourceNamespace":"demo","targetNamespace":"demo-copy"}`)
+	req := tenantRequest(httptest.NewRequest(http.MethodPost, "/api/v1/tasks/drill", body), userB)
+	res := httptest.NewRecorder()
+	r.createRecoveryTask(res, req, "drill")
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("cross-tenant recovery returned %d, want 404: %s", res.Code, res.Body.String())
+	}
+}

@@ -2732,11 +2732,72 @@ func (s *PostgresStore) AddTaskEvent(input TaskEventInput) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(`
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC()
+	_, err = tx.Exec(`
 		insert into task_events (id, task_id, level, reason, message, payload, created_at)
 		values ($1, $2, $3, $4, $5, $6, $7)
-	`, newID(), input.TaskID, input.Level, input.Reason, input.Message, payloadRaw, time.Now().UTC())
-	return err
+	`, newID(), input.TaskID, input.Level, input.Reason, input.Message, payloadRaw, now)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(`insert into diagnostic_logs(id,tenant_id,scope,level,component,operation,message,cluster_id,task_id,command_id,error_code,status,details,created_at)
+		select $1,t.tenant_id,'tenant',$2,'task',t.type,$3,t.cluster_id,t.id,t.command_id,nullif($4,''),t.status,$5,$6 from tasks t where t.id=$7`, newID(), normalizeDiagnosticLevel(input.Level), input.Message, input.Reason, payloadRaw, now, input.TaskID)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *PostgresStore) CreateDiagnosticLog(input DiagnosticLogInput) (DiagnosticLog, error) {
+	item := diagnosticLogFromInput(input, time.Now().UTC())
+	detailsRaw, err := json.Marshal(item.Details)
+	if err != nil {
+		return DiagnosticLog{}, err
+	}
+	err = s.db.QueryRow(`insert into diagnostic_logs(id,tenant_id,scope,level,component,operation,message,cluster_id,task_id,command_id,request_id,error_code,status,duration_ms,details,created_at)
+		values($1,nullif($2,'')::uuid,$3,$4,$5,$6,$7,nullif($8,'')::uuid,nullif($9,'')::uuid,nullif($10,'')::uuid,nullif($11,'')::uuid,nullif($12,''),nullif($13,''),nullif($14,0),$15,$16) returning created_at`, item.ID, item.TenantID, item.Scope, item.Level, item.Component, item.Operation, item.Message, item.ClusterID, item.TaskID, item.CommandID, item.RequestID, item.ErrorCode, item.Status, item.DurationMS, detailsRaw, item.CreatedAt).Scan(&item.CreatedAt)
+	return item, err
+}
+
+func (s *PostgresStore) ListDiagnosticLogs(filter DiagnosticLogFilter) ([]DiagnosticLog, error) {
+	_, _ = s.db.Exec(`delete from diagnostic_logs where created_at < now() - interval '14 days'`)
+	limit := filter.Limit
+	if limit <= 0 || limit > 5000 {
+		limit = 200
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	rows, err := s.db.Query(`select id,coalesce(tenant_id::text,''),scope,level,component,operation,message,coalesce(cluster_id::text,''),coalesce(task_id::text,''),coalesce(command_id::text,''),coalesce(request_id::text,''),coalesce(error_code,''),coalesce(status,''),coalesce(duration_ms,0),details,created_at
+		from diagnostic_logs where ($1='' or tenant_id=nullif($1,'')::uuid) and ($2='' or scope=$2) and ($3='' or level=$3) and ($4='' or component=$4) and ($5='' or cluster_id=nullif($5,'')::uuid) and ($6='' or task_id=nullif($6,'')::uuid) and ($7::timestamptz is null or created_at >= $7) and ($8::timestamptz is null or created_at <= $8) and ($9='' or message ilike '%%'||$9||'%%' or operation ilike '%%'||$9||'%%' or coalesce(error_code,'') ilike '%%'||$9||'%%' or coalesce(task_id::text,'') ilike '%%'||$9||'%%') order by created_at desc limit $10 offset $11`, filter.TenantID, filter.Scope, filter.Level, filter.Component, filter.ClusterID, filter.TaskID, nullableTime(filter.From), nullableTime(filter.To), filter.Query, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DiagnosticLog{}
+	for rows.Next() {
+		var item DiagnosticLog
+		var raw []byte
+		if err := rows.Scan(&item.ID, &item.TenantID, &item.Scope, &item.Level, &item.Component, &item.Operation, &item.Message, &item.ClusterID, &item.TaskID, &item.CommandID, &item.RequestID, &item.ErrorCode, &item.Status, &item.DurationMS, &raw, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(raw, &item.Details)
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func nullableTime(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+	return value
 }
 
 func (s *PostgresStore) ListTaskEvents(taskID string) ([]TaskEvent, error) {

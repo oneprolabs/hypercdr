@@ -56,6 +56,7 @@ type Client struct {
 		kube.AgentRuntimeReader
 		kube.AgentUpgrader
 		kube.VeleroRuntimeManager
+		kube.ComponentLogCollector
 	}
 	lastInventory     inventory.Snapshot
 	backupSamples     map[string][]volumeProgressSample
@@ -108,6 +109,7 @@ func NewWithRuntimeDependencies(cfg config.Config, logger *slog.Logger, applier 
 		kube.AgentRuntimeReader
 		kube.AgentUpgrader
 		kube.VeleroRuntimeManager
+		kube.ComponentLogCollector
 	}
 	if runtime, err := kube.NewKubernetesAgentRuntime(cfg.KubeconfigPath); err == nil {
 		agentRuntime = runtime
@@ -325,6 +327,12 @@ func (c *Client) readMessages() error {
 				return err
 			}
 			go c.handleInventoryRequest(request)
+		case protocol.MessagePlatformLogRequest:
+			var request protocol.Message[protocol.LogRequestPayload]
+			if err := json.Unmarshal(data, &request); err != nil {
+				return err
+			}
+			go c.handleLogRequest(request)
 		case protocol.MessagePlatformTaskCancel:
 			var request protocol.Message[protocol.TaskCancelPayload]
 			if err := json.Unmarshal(data, &request); err != nil {
@@ -354,6 +362,45 @@ func (c *Client) readMessages() error {
 			c.logger.Info("platform message ignored", "type", meta.Type)
 		}
 	}
+}
+
+func (c *Client) handleLogRequest(request protocol.Message[protocol.LogRequestPayload]) {
+	report := protocol.LogReportPayload{RequestID: request.Payload.RequestID, Component: request.Payload.Component, Entries: []protocol.LogEntry{}}
+	if c.agentRuntime == nil {
+		report.ErrorCode = "LOG_COLLECTION_UNAVAILABLE"
+		report.Message = "Kubernetes log collector is unavailable"
+	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		entries, truncated, err := c.agentRuntime.CollectComponentLogs(ctx, c.cfg.Namespace, request.Payload.Component, request.Payload.Since, request.Payload.TailLines)
+		if err != nil {
+			report.ErrorCode = "LOG_COLLECTION_FAILED"
+			report.Message = err.Error()
+		} else {
+			report.Truncated = truncated
+			for _, entry := range entries {
+				report.Entries = append(report.Entries, protocol.LogEntry{Timestamp: entry.Timestamp, Level: inferLogLevel(entry.Message), Component: request.Payload.Component, Pod: entry.Pod, Node: entry.Node, Message: entry.Message})
+			}
+		}
+	}
+	message := protocol.NewMessage(protocol.MessageKindResponse, protocol.MessageAgentLogReport, c.cfg.ClusterID, c.cfg.AgentID, report)
+	if err := c.writeJSON(message); err != nil {
+		c.logger.Warn("failed to send component log report", "request_id", request.Payload.RequestID, "component", request.Payload.Component, "error", err)
+	}
+}
+
+func inferLogLevel(message string) string {
+	lower := strings.ToLower(message)
+	if strings.Contains(lower, `"level":"error"`) || strings.Contains(lower, " error ") {
+		return "error"
+	}
+	if strings.Contains(lower, `"level":"warn"`) || strings.Contains(lower, " warning ") {
+		return "warning"
+	}
+	if strings.Contains(lower, `"level":"debug"`) {
+		return "debug"
+	}
+	return "info"
 }
 
 func (c *Client) handleInventoryRequest(request protocol.Message[protocol.InventoryRequestPayload]) {

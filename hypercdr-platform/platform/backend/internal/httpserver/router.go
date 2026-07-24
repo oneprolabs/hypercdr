@@ -55,10 +55,13 @@ type Router struct {
 	inventory     map[string]inventoryRequestStatus
 	imageDigestMu sync.Mutex
 	imageDigests  map[string]imageDigestCacheEntry
+	logRequestMu  sync.Mutex
+	logRequests   map[string]chan protocol.LogReportPayload
 	schedulerOnce sync.Once
 }
 
 type requestUserContextKey struct{}
+type requestIDContextKey struct{}
 
 const (
 	agentPongWait   = 90 * time.Second
@@ -102,10 +105,11 @@ func NewRouter(cfg config.Config, logger *slog.Logger, repo store.Store) http.Ha
 		oauthStates:  map[string]time.Time{},
 		inventory:    map[string]inventoryRequestStatus{},
 		imageDigests: map[string]imageDigestCacheEntry{},
+		logRequests:  map[string]chan protocol.LogReportPayload{},
 	}
 	router.routes()
 	router.startScheduler()
-	return router.withAccessLog(router.withPlatformAuth(router.withAuditLog(router.mux)))
+	return router.withPlatformAuth(router.withAccessLog(router.withAuditLog(router.mux)))
 }
 
 func (r *Router) withPlatformAuth(next http.Handler) http.Handler {
@@ -313,6 +317,10 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("POST /api/v1/auth/logout", r.logout)
 	r.mux.HandleFunc("GET /api/v1/auth/me", r.currentUser)
 	r.mux.HandleFunc("GET /api/v1/audit-logs", r.listAuditLogs)
+	r.mux.HandleFunc("GET /api/v1/diagnostic-logs", r.listDiagnosticLogs)
+	r.mux.HandleFunc("GET /api/v1/diagnostic-logs/export", r.exportDiagnosticLogs)
+	r.mux.HandleFunc("GET /api/v1/diagnostic-log-sources", r.diagnosticLogSources)
+	r.mux.HandleFunc("POST /api/v1/clusters/{id}/logs/collect", r.tenantGuard("cluster", r.collectClusterLogs))
 	r.mux.HandleFunc("PATCH /api/v1/auth/me", r.updateCurrentUser)
 	r.mux.HandleFunc("POST /api/v1/auth/change-password", r.changeOwnPassword)
 	r.mux.HandleFunc("GET /api/v1/users", r.listUsers)
@@ -524,7 +532,13 @@ func validAuditUUID(value string) string {
 func (r *Router) listAuditLogs(w http.ResponseWriter, req *http.Request) {
 	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(req.URL.Query().Get("offset"))
-	items, err := r.store.ListAuditLogs(limit, offset)
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	items, err := r.store.ListAuditLogs(1000, 0)
 	if err != nil {
 		r.logger.Error("list audit logs failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_audit_logs_failed"})
@@ -537,6 +551,15 @@ func (r *Router) listAuditLogs(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 	items = visible
+	if offset >= len(items) {
+		items = items[:0]
+	} else {
+		end := offset + limit
+		if end > len(items) {
+			end = len(items)
+		}
+		items = items[offset:end]
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": nonNilSlice(items)})
 }
 
@@ -6372,6 +6395,18 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 	storageRepoID := ""
 	storageSourceClusterID := ""
 	protectionPlanID := body.ProtectionPlanID
+	if protectionPlanID != "" {
+		plan, found, err := r.store.GetProtectionPlan(protectionPlanID)
+		if err != nil {
+			r.logger.Error("failed to get protection plan for recovery", "protection_plan_id", protectionPlanID, "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "get_protection_plan_failed"})
+			return
+		}
+		if !found || !tenantVisible(req, plan.TenantID) {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "protection_plan_not_found"})
+			return
+		}
+	}
 	if body.RestorePointID != "" {
 		point, ok, err := r.store.GetRestorePoint(body.RestorePointID)
 		if err != nil {
@@ -7025,6 +7060,44 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 			)
 			if messageError.Payload.AckType == protocol.MessagePlatformInventoryRequest {
 				r.failInventoryRequest(clusterID, messageError.Payload)
+			}
+		case protocol.MessageAgentLogReport:
+			var report protocol.Message[protocol.LogReportPayload]
+			if err := json.Unmarshal(data, &report); err != nil {
+				r.logger.Warn("failed to decode agent log report", "cluster_id", clusterID, "error", err)
+				continue
+			}
+			r.logRequestMu.Lock()
+			waiter := r.logRequests[report.Payload.RequestID]
+			r.logRequestMu.Unlock()
+			if waiter != nil {
+				select {
+				case waiter <- report.Payload:
+				default:
+				}
+			}
+			clusters, _ := r.store.ListClusters()
+			tenantID := ""
+			for _, cluster := range clusters {
+				if cluster.ID == clusterID {
+					tenantID = cluster.TenantID
+					break
+				}
+			}
+			if tenantID == "" {
+				r.logger.Warn("log report for unknown cluster", "cluster_id", clusterID)
+				continue
+			}
+			if report.Payload.ErrorCode != "" {
+				_, _ = r.store.CreateDiagnosticLog(store.DiagnosticLogInput{TenantID: tenantID, Scope: "tenant", Level: "error", Component: report.Payload.Component, Operation: "collect_logs", Message: report.Payload.Message, ClusterID: clusterID, RequestID: report.Payload.RequestID, ErrorCode: report.Payload.ErrorCode})
+				continue
+			}
+			for _, entry := range report.Payload.Entries {
+				_, err := r.store.CreateDiagnosticLog(store.DiagnosticLogInput{TenantID: tenantID, Scope: "tenant", Level: entry.Level, Component: entry.Component, Operation: "container_log", Message: sanitizeDiagnosticMessage(entry.Message), ClusterID: clusterID, RequestID: report.Payload.RequestID, Details: map[string]any{"pod": entry.Pod, "node": entry.Node, "sourceTimestamp": entry.Timestamp}})
+				if err != nil {
+					r.logger.Error("persist agent log entry failed", "cluster_id", clusterID, "request_id", report.Payload.RequestID, "error", err)
+					break
+				}
 			}
 		case protocol.MessageAgentTaskAccepted:
 			var accepted protocol.Message[protocol.TaskAcceptedPayload]
@@ -9606,13 +9679,234 @@ func newRejectedMessage(reason string, message string) protocol.Message[protocol
 func (r *Router) withAccessLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		started := time.Now()
-		next.ServeHTTP(w, req)
+		requestID := store.NewPublicID()
+		w.Header().Set("X-Request-ID", requestID)
+		if !strings.HasPrefix(req.URL.Path, "/api/v1/") {
+			next.ServeHTTP(w, req.WithContext(context.WithValue(req.Context(), requestIDContextKey{}, requestID)))
+			r.logger.Info("http request", "method", req.Method, "path", req.URL.Path, "request_id", requestID, "duration_ms", time.Since(started).Milliseconds())
+			return
+		}
+		recorder := &diagnosticResponseWriter{ResponseWriter: w}
+		req = req.WithContext(context.WithValue(req.Context(), requestIDContextKey{}, requestID))
+		next.ServeHTTP(recorder, req)
+		status := recorder.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		duration := time.Since(started).Milliseconds()
 		r.logger.Info("http request",
 			"method", req.Method,
 			"path", req.URL.Path,
-			"duration_ms", time.Since(started).Milliseconds(),
+			"status", status,
+			"request_id", requestID,
+			"duration_ms", duration,
 		)
+		if strings.HasPrefix(req.URL.Path, "/api/v1/") && !strings.HasPrefix(req.URL.Path, "/api/v1/diagnostic-logs") && (status >= 400 || req.Method != http.MethodGet) {
+			input := store.DiagnosticLogInput{Scope: "system", Level: "info", Component: "platform-api", Operation: req.Method + " " + req.URL.Path, Message: "API request completed", RequestID: requestID, Status: strconv.Itoa(status), DurationMS: duration, Details: map[string]any{"method": req.Method, "path": req.URL.Path, "httpStatus": status}}
+			if status >= 400 {
+				input.Level = "error"
+				input.Message = "API request failed"
+				input.ErrorCode = http.StatusText(status)
+			}
+			if user, ok := requestUser(req); ok && user.TenantID != "" {
+				input.Scope = "tenant"
+				input.TenantID = user.TenantID
+				input.Details["userId"] = user.ID
+			}
+			if _, err := r.store.CreateDiagnosticLog(input); err != nil {
+				r.logger.Error("write diagnostic access log failed", "request_id", requestID, "error", err)
+			}
+		}
 	})
+}
+
+type diagnosticResponseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *diagnosticResponseWriter) WriteHeader(status int) {
+	if w.status == 0 {
+		w.status = status
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+func (w *diagnosticResponseWriter) Write(body []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(body)
+}
+
+func (r *Router) diagnosticLogFilter(req *http.Request) (store.DiagnosticLogFilter, error) {
+	q := req.URL.Query()
+	user, ok := requestUser(req)
+	filter := store.DiagnosticLogFilter{TenantID: q.Get("tenantId"), Scope: q.Get("scope"), Level: q.Get("level"), Component: q.Get("component"), ClusterID: q.Get("clusterId"), TaskID: q.Get("taskId"), Query: strings.TrimSpace(q.Get("q"))}
+	filter.Limit, _ = strconv.Atoi(q.Get("limit"))
+	filter.Offset, _ = strconv.Atoi(q.Get("offset"))
+	if filter.Limit <= 0 || filter.Limit > 5000 {
+		filter.Limit = 200
+	}
+	if value := q.Get("from"); value != "" {
+		filter.From, _ = time.Parse(time.RFC3339, value)
+	}
+	if value := q.Get("to"); value != "" {
+		filter.To, _ = time.Parse(time.RFC3339, value)
+	}
+	if ok && !user.SystemAdmin {
+		filter.TenantID = user.TenantID
+		filter.Scope = "tenant"
+	}
+	if filter.Scope == "system" && (!ok || !user.SystemAdmin) {
+		return filter, errors.New("system administrator permission is required")
+	}
+	if filter.ClusterID != "" {
+		clusters, err := r.store.ListClusters()
+		if err != nil {
+			return filter, err
+		}
+		found := false
+		for _, cluster := range clusters {
+			if cluster.ID == filter.ClusterID && (user.SystemAdmin || cluster.TenantID == user.TenantID) && (filter.TenantID == "" || cluster.TenantID == filter.TenantID) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return filter, errors.New("cluster not found")
+		}
+	}
+	return filter, nil
+}
+
+func (r *Router) listDiagnosticLogs(w http.ResponseWriter, req *http.Request) {
+	filter, err := r.diagnosticLogFilter(req)
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "diagnostic_log_scope_forbidden", "message": err.Error()})
+		return
+	}
+	items, err := r.store.ListDiagnosticLogs(filter)
+	if err != nil {
+		r.logger.Error("list diagnostic logs failed", "error", err)
+		writeJSON(w, 500, map[string]any{"error": "list_diagnostic_logs_failed"})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": nonNilSlice(items), "limit": filter.Limit, "offset": filter.Offset})
+}
+
+func (r *Router) exportDiagnosticLogs(w http.ResponseWriter, req *http.Request) {
+	filter, err := r.diagnosticLogFilter(req)
+	if err != nil {
+		writeJSON(w, 403, map[string]any{"error": "diagnostic_log_scope_forbidden", "message": err.Error()})
+		return
+	}
+	filter.Limit = 5000
+	filter.Offset = 0
+	items, err := r.store.ListDiagnosticLogs(filter)
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "export_diagnostic_logs_failed"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.Header().Set("Content-Disposition", `attachment; filename="hypercdr-diagnostic-logs.jsonl"`)
+	encoder := json.NewEncoder(w)
+	for _, item := range items {
+		_ = encoder.Encode(item)
+	}
+}
+
+func (r *Router) diagnosticLogSources(w http.ResponseWriter, req *http.Request) {
+	user, ok := requestUser(req)
+	if !ok {
+		writeJSON(w, 401, map[string]any{"error": "authentication_required"})
+		return
+	}
+	clusters, err := r.store.ListClusters()
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "list_log_sources_failed"})
+		return
+	}
+	items := []map[string]any{}
+	for _, cluster := range clusters {
+		if user.SystemAdmin || cluster.TenantID == user.TenantID {
+			items = append(items, map[string]any{"id": cluster.ID, "tenantId": cluster.TenantID, "name": cluster.Name, "connectionStatus": cluster.ConnectionStatus})
+		}
+	}
+	writeJSON(w, 200, map[string]any{"items": items})
+}
+
+func (r *Router) collectClusterLogs(w http.ResponseWriter, req *http.Request) {
+	clusterID := req.PathValue("id")
+	var body struct {
+		Component string    `json:"component"`
+		Since     time.Time `json:"since"`
+		TailLines int64     `json:"tailLines"`
+	}
+	if err := decodeJSON(req, &body); err != nil {
+		writeJSON(w, 400, map[string]any{"error": "invalid_json"})
+		return
+	}
+	allowed := map[string]bool{"comm-agent": true, "velero": true, "node-agent": true}
+	if !allowed[body.Component] {
+		writeJSON(w, 400, map[string]any{"error": "unsupported_log_component", "message": "Component must be comm-agent, velero, or node-agent."})
+		return
+	}
+	if body.Since.IsZero() {
+		body.Since = time.Now().UTC().Add(-30 * time.Minute)
+	}
+	if body.Since.Before(time.Now().UTC().Add(-24 * time.Hour)) {
+		writeJSON(w, 400, map[string]any{"error": "log_range_too_large", "message": "Cluster log collection is limited to the last 24 hours."})
+		return
+	}
+	if body.TailLines <= 0 || body.TailLines > 2000 {
+		body.TailLines = 1000
+	}
+	conn, ok := r.hub.get(clusterID)
+	if !ok {
+		writeJSON(w, 409, map[string]any{"error": "agent_offline", "message": "Cluster is offline. Logs cannot be collected in real time."})
+		return
+	}
+	requestID := store.NewPublicID()
+	waiter := make(chan protocol.LogReportPayload, 1)
+	r.logRequestMu.Lock()
+	r.logRequests[requestID] = waiter
+	r.logRequestMu.Unlock()
+	defer func() { r.logRequestMu.Lock(); delete(r.logRequests, requestID); r.logRequestMu.Unlock() }()
+	message := protocol.Message[protocol.LogRequestPayload]{Version: protocol.Version, MessageID: store.NewPublicID(), MessageKind: protocol.MessageKindRequest, Type: protocol.MessagePlatformLogRequest, ClusterID: clusterID, Timestamp: time.Now().UTC(), Payload: protocol.LogRequestPayload{RequestID: requestID, Component: body.Component, Since: body.Since, TailLines: body.TailLines}}
+	if err := conn.WriteJSON(message); err != nil {
+		writeJSON(w, 502, map[string]any{"error": "log_request_send_failed", "message": err.Error()})
+		return
+	}
+	select {
+	case report := <-waiter:
+		if report.ErrorCode != "" {
+			writeJSON(w, 502, map[string]any{"error": strings.ToLower(report.ErrorCode), "message": report.Message, "requestId": requestID})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"requestId": requestID, "status": "completed", "count": len(report.Entries), "truncated": report.Truncated, "message": "Cluster logs collected."})
+	case <-time.After(25 * time.Second):
+		writeJSON(w, 504, map[string]any{"error": "log_collection_timeout", "message": "The cluster agent did not respond. Upgrade comm-agent before using remote log collection.", "requestId": requestID})
+	}
+}
+
+func sanitizeDiagnosticMessage(message string) string {
+	message = strings.TrimSpace(message)
+	var object map[string]any
+	if json.Unmarshal([]byte(message), &object) == nil {
+		for key := range object {
+			normalized := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(key, "_", ""), "-", ""))
+			if strings.Contains(normalized, "password") || strings.Contains(normalized, "token") || strings.Contains(normalized, "secret") || strings.Contains(normalized, "credential") || strings.Contains(normalized, "accesskey") {
+				object[key] = "[REDACTED]"
+			}
+		}
+		if value, err := json.Marshal(object); err == nil {
+			return string(value)
+		}
+	}
+	if index := strings.Index(strings.ToLower(message), "bearer "); index >= 0 {
+		return message[:index] + "Bearer [REDACTED]"
+	}
+	return message
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -10958,6 +11252,9 @@ rules:
   - apiGroups: [""]
     resources: ["namespaces", "nodes", "pods", "services", "configmaps", "serviceaccounts", "persistentvolumeclaims", "persistentvolumes", "resourcequotas", "limitranges"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["create", "delete"]

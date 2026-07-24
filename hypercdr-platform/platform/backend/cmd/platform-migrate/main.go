@@ -16,7 +16,8 @@ import (
 func main() {
 	cfg := config.Load()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: cfg.LogLevel,
+		Level:       cfg.LogLevel,
+		ReplaceAttr: utcLogTime,
 	}))
 	if cfg.DatabaseURL == "" {
 		logger.Error("HCDR_DATABASE_URL is required")
@@ -42,4 +43,11 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("migrations applied")
+}
+
+func utcLogTime(_ []string, attr slog.Attr) slog.Attr {
+	if attr.Key == slog.TimeKey {
+		attr.Value = slog.TimeValue(attr.Value.Time().UTC())
+	}
+	return attr
 }

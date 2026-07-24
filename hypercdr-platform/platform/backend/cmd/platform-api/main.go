@@ -19,7 +19,8 @@ import (
 func main() {
 	cfg := config.Load()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: cfg.LogLevel,
+		Level:       cfg.LogLevel,
+		ReplaceAttr: utcLogTime,
 	}))
 
 	if strings.TrimSpace(cfg.DatabaseURL) == "" {
@@ -36,6 +37,7 @@ func main() {
 	}
 	defer postgresStore.Close()
 	repo := store.Store(postgresStore)
+	logger = slog.New(store.NewDiagnosticSlogHandler(logger.Handler(), repo, "platform-api"))
 	settings, found, err := repo.GetPlatformSettings()
 	if err != nil {
 		logger.Error("failed to load platform settings", "error", err)
@@ -99,4 +101,11 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("platform backend stopped")
+}
+
+func utcLogTime(_ []string, attr slog.Attr) slog.Attr {
+	if attr.Key == slog.TimeKey {
+		attr.Value = slog.TimeValue(attr.Value.Time().UTC())
+	}
+	return attr
 }
