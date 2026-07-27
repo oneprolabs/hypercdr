@@ -37,7 +37,7 @@ mirror_image "${POSTGRES_SOURCE}" "${REGISTRY}/postgres:16"
 VELERO_TARGET="${REGISTRY}/velero:${VELERO_TAG}"
 if [[ "${FORCE_VELERO_BUILD}" == "true" ]] || ! docker manifest inspect "${VELERO_TARGET}" >/dev/null 2>&1; then
   log "Building pinned HyperCDR Velero image from third_party/velero"
-  "${ROOT_DIR}/third_party/velero/deployments/build-velero-image.sh" \
+  "${SCRIPT_DIR}/build-velero.sh" \
     --registry "${REGISTRY}" --tag "${VELERO_TAG}" --push
 else
   log "Velero image already published: ${VELERO_TARGET}"

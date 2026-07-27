@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-REGISTRY="${HCDR_IMAGE_REGISTRY:-192.168.8.149:5001/hypercdr}"
+REGISTRY="${HCDR_IMAGE_REGISTRY:-}"
 IMAGE_TAG="${HCDR_VELERO_IMAGE_TAG:-v1.17.1-hcdr.1-20260716}"
 VELERO_VERSION="${HCDR_VELERO_VERSION:-v1.17.1-hcdr.1}"
 UPSTREAM_COMMIT="${HCDR_VELERO_UPSTREAM_COMMIT:-94f64639cee09c5caaa65b65ab5f42175f41c101}"
@@ -52,6 +52,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 command -v docker >/dev/null 2>&1 || die "docker is required"
+[[ -n "${REGISTRY}" ]] || die "--registry is required"
 docker buildx version >/dev/null 2>&1 || die "docker buildx is required"
 [[ -f "${ROOT_DIR}/Dockerfile" ]] || die "upstream Dockerfile not found"
 [[ -f "${ROOT_DIR}/UPSTREAM_BASELINE" ]] || die "UPSTREAM_BASELINE not found"

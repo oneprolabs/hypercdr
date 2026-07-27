@@ -15,6 +15,7 @@ CLI_REGISTRY=""
 CLI_SKIP_TESTS=""
 SKIP_REGISTER="false"
 DRY_RUN="false"
+RESUME="false"
 PLATFORM_URL="${HCDR_PLATFORM_URL:-https://${DEFAULT_HOST}:3002}"
 RELEASE_TOKEN_FILE="${HCDR_RELEASE_TOKEN_FILE:-/var/lib/hypercdr/release-token}"
 
@@ -39,6 +40,7 @@ Options:
                       Release token file, default /var/lib/hypercdr/release-token.
   --skip-register     Build/push only when no platform exists yet.
   --dry-run           Resolve configuration and print the plan without changes.
+  --resume            Continue a failed release after verifying all core images exist remotely.
   -h, --help          Show help.
 
 Required config:
@@ -67,6 +69,7 @@ while [[ $# -gt 0 ]]; do
     --release-token-file) RELEASE_TOKEN_FILE="${2:?missing value for --release-token-file}"; shift 2 ;;
     --skip-register) SKIP_REGISTER="true"; shift ;;
     --dry-run) DRY_RUN="true"; shift ;;
+    --resume) RESUME="true"; shift ;;
     -h|--help) usage; exit 0 ;;
     *)
       if [[ -z "${VERSION}" ]]; then VERSION="$1"; shift; else die "unknown argument: $1"; fi
@@ -170,11 +173,20 @@ fi
 
 login_registry
 
-log "Building release images"
-"${SCRIPT_DIR}/build-release.sh" "${build_args[@]}"
+if [[ "${RESUME}" == "true" ]]; then
+  log "Resume mode: verifying previously pushed core images"
+  for name in platform-api platform-frontend platform-upgrader comm-agent; do
+    image="${REGISTRY}/${name}:${VERSION}"
+    docker manifest inspect "${image}" >/dev/null 2>&1 || die "cannot resume: core image is unavailable: ${image}"
+    log "Resume prerequisite OK: ${image}"
+  done
+else
+  log "Building release images"
+  "${SCRIPT_DIR}/build-release.sh" "${build_args[@]}"
 
-log "Pushing release images"
-"${SCRIPT_DIR}/push-release.sh" "${VERSION}" --registry "${REGISTRY}"
+  log "Pushing release images"
+  "${SCRIPT_DIR}/push-release.sh" "${VERSION}" --registry "${REGISTRY}"
+fi
 
 log "Publishing required runtime images"
 "${SCRIPT_DIR}/publish-runtime-images.sh" --registry "${REGISTRY}"

@@ -30,6 +30,20 @@ PostgreSQL, pinned customized Velero, and three object-storage plugins; verifies
 pulls; and optionally registers the release. Use `--skip-register` for the
 initial release.
 
+The customized Velero image has its own source-based standard entry point,
+which is also called by the full release:
+
+```bash
+./scripts/release/build-velero.sh --push
+```
+
+If an external transfer fails after all four core images were pushed, resume
+without rebuilding or overwriting the immutable version tag:
+
+```bash
+./scripts/release/release-all.sh vYYYYMMDD.N --skip-register --resume
+```
+
 ## CI release
 
 Pushing a `vYYYYMMDD.N` tag runs `.github/workflows/release.yml`. Configure
