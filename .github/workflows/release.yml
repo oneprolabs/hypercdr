@@ -46,12 +46,8 @@ jobs:
         env:
           HCDR_GO_BIN: go
           HCDR_RUNTIME_ROOT: /tmp/hypercdr-runtime
-        run: ./scripts/release/release-all.sh "${{ steps.release.outputs.version }}" --registry-profile "${{ steps.release.outputs.profile }}" --skip-register
-      - name: Build installer package
-        env:
-          HCDR_BOOTSTRAP_BUILD_ROOT: /tmp/hypercdr-runtime/build/bootstrap
           HCDR_BOOTSTRAP_PUBLISH_DIR: /tmp/hypercdr-installer
-        run: ./bootstrap/release-bootstrap.sh "${{ steps.release.outputs.version }}"
+        run: ./scripts/release/release-all.sh "${{ steps.release.outputs.version }}" --registry-profile "${{ steps.release.outputs.profile }}" --skip-register
       - uses: actions/upload-artifact@v4
         with:
           name: hypercdr-installer-${{ steps.release.outputs.version }}

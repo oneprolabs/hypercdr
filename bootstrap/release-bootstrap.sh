@@ -39,7 +39,7 @@ if [[ ! "${VERSION}" =~ ^v[0-9]{8}\.[0-9]+$ ]]; then
   exit 2
 fi
 
-for required in sed tar date; do
+for required in sed tar date sha256sum; do
   command -v "${required}" >/dev/null 2>&1 || { echo "missing required command: ${required}" >&2; exit 1; }
 done
 
@@ -78,17 +78,23 @@ sed -i -E "s/v[0-9]{8}\.[0-9]+/${VERSION}/g" \
 # package contents at the root so extraction does not create a duplicated
 # hypercdr-bootstrap/hypercdr-bootstrap nesting level.
 tar -C "${package_dir}" -czf "${RELEASE_DIR}/hypercdr-bootstrap.tar.gz" .
+cp "${RELEASE_DIR}/hypercdr-bootstrap.tar.gz" "${RELEASE_DIR}/hypercdr-installer-${VERSION}.tar.gz"
 cp "${package_dir}/install-platform.sh" "${RELEASE_DIR}/install-platform.sh"
 cp "${package_dir}/uninstall-platform.sh" "${RELEASE_DIR}/uninstall-platform.sh"
 cp "${package_dir}/compose.yaml" "${RELEASE_DIR}/compose.yaml"
 chmod +x "${RELEASE_DIR}/install-platform.sh" "${RELEASE_DIR}/uninstall-platform.sh"
+(
+  cd "${RELEASE_DIR}"
+  sha256sum "hypercdr-installer-${VERSION}.tar.gz" > "hypercdr-installer-${VERSION}.sha256"
+)
 
 cat > "${RELEASE_DIR}/manifest.json" <<EOF
 {
   "version": "${VERSION}",
   "buildTime": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "artifacts": [
-    {"name":"Bootstrap package","file":"hypercdr-bootstrap.tar.gz","description":"Installer scripts, Docker Compose template, and Helm chart assets."},
+    {"name":"Installer package","file":"hypercdr-installer-${VERSION}.tar.gz","checksum":"hypercdr-installer-${VERSION}.sha256","description":"Versioned installer scripts, Docker Compose template, and Helm chart assets."},
+    {"name":"Bootstrap compatibility package","file":"hypercdr-bootstrap.tar.gz","description":"Compatibility alias used by the development download portal."},
     {"name":"Control plane installer","file":"install-platform.sh","description":"Standalone installer for Kubernetes or Docker Compose."},
     {"name":"Docker Compose template","file":"compose.yaml","description":"Standalone host Docker Compose template."},
     {"name":"Control plane uninstaller","file":"uninstall-platform.sh","description":"Docker Compose uninstaller for the control plane."}

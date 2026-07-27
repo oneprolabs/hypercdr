@@ -199,6 +199,9 @@ for image in \
   log "Pull OK: ${image}"
 done
 
+log "Generating versioned installer package"
+"${ROOT_DIR}/bootstrap/release-bootstrap.sh" "${VERSION}"
+
 if [[ "${SKIP_REGISTER}" == "true" ]]; then
   log "Skipping platform release registration"
 else
@@ -233,6 +236,8 @@ cat <<EOF
 SUCCESS: HyperCDR release ${VERSION} completed.
 Registry:
   ${REGISTRY}
+Installer:
+  ${HCDR_BOOTSTRAP_PUBLISH_DIR:-${RUNTIME_ROOT}/bootstrap-portal-source}/releases/dev/hypercdr-installer-${VERSION}.tar.gz
 
 Next:
   Install or upgrade the control plane from the bootstrap page or platform UI.
