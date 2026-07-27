@@ -74,7 +74,13 @@ elif [[ -n "${HCDR_REGISTRY_PASSWORD:-}" ]]; then
 elif [[ -n "${USERNAME}" ]]; then
   docker login "${HCDR_REGISTRY_SERVER}" --username "${USERNAME}"
 else
-  docker login "${HCDR_REGISTRY_SERVER}"
+  read -r -p "Registry username only (do not include the server address): " USERNAME
+  [[ -n "${USERNAME}" ]] || { echo "error: registry username is required" >&2; exit 2; }
+  if [[ "${USERNAME}" == *[[:space:]]* || "${USERNAME}" == *"${HCDR_REGISTRY_SERVER}"* ]]; then
+    echo "error: enter only the Registry username, without spaces or the server address" >&2
+    exit 2
+  fi
+  docker login "${HCDR_REGISTRY_SERVER}" --username "${USERNAME}"
 fi
 
 echo "SUCCESS: Docker credentials are ready for profile ${HCDR_SELECTED_REGISTRY}."
