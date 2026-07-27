@@ -64,6 +64,7 @@ The release scripts build outside the source tree and publish a single platform
 version across the API, frontend, upgrader, and comm-agent images.
 
 ```bash
+./scripts/registry-login.sh
 cp scripts/release/release.conf.example scripts/release/release.conf
 ./scripts/release/release-all.sh vYYYYMMDD.N
 ```

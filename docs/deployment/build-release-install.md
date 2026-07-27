@@ -10,6 +10,15 @@ stored there. `HCDR_ACTIVE_REGISTRY` selects the default. Override it for one
 command with `--registry-profile harbor_149`. Authenticate separately with
 `docker login`, or inject credentials from CI secrets.
 
+Use the repository script instead of remembering the Registry hostname:
+
+```bash
+./scripts/registry-login.sh
+```
+
+It logs in to the active profile and lets Docker prompt securely. The login is
+normally required only once per build host and operating-system user.
+
 ## Local release
 
 ```bash
