@@ -23,6 +23,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -610,22 +611,7 @@ func (r *Router) registryTags(ctx context.Context, image string) (string, string
 		return "", "", nil, fmt.Errorf("invalid image")
 	}
 	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
-	tokenURL := fmt.Sprintf("https://%s/service/token?service=harbor-registry&scope=repository:%s:pull", registry, repository)
-	tokenReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, tokenURL, nil)
-	tokenResp, err := client.Do(tokenReq)
-	if err != nil {
-		return "", "", nil, err
-	}
-	defer tokenResp.Body.Close()
-	var tokenBody struct {
-		Token string `json:"token"`
-	}
-	if tokenResp.StatusCode >= 300 || json.NewDecoder(tokenResp.Body).Decode(&tokenBody) != nil || tokenBody.Token == "" {
-		return "", "", nil, fmt.Errorf("registry token failed")
-	}
-	tagsReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("https://%s/v2/%s/tags/list", registry, repository), nil)
-	tagsReq.Header.Set("Authorization", "Bearer "+tokenBody.Token)
-	tagsResp, err := client.Do(tagsReq)
+	tagsResp, err := registryRequest(ctx, client, http.MethodGet, fmt.Sprintf("https://%s/v2/%s/tags/list", registry, repository), repository, "")
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -709,7 +695,11 @@ func (r *Router) createPlatformRelease(w http.ResponseWriter, req *http.Request)
 	if schema == "" {
 		schema = buildinfo.SchemaVersion
 	}
-	item, err := r.store.UpsertPlatformRelease(store.PlatformReleaseInput{Version: body.Version, APIImage: apiImage, APIImageDigest: apiDigest, FrontendImage: frontendImage, FrontendImageDigest: frontendDigest, DatabaseSchemaVersion: schema, MinimumAgentVersion: body.MinimumAgentVersion, RollbackSupported: body.RollbackSupported, ReleaseNotes: body.ReleaseNotes, Status: "candidate"})
+	status, publishedBy := "candidate", ""
+	if releases, listErr := r.store.ListPlatformReleases(); listErr == nil && len(releases) == 0 {
+		status, publishedBy = "active", "system"
+	}
+	item, err := r.store.UpsertPlatformRelease(store.PlatformReleaseInput{Version: body.Version, APIImage: apiImage, APIImageDigest: apiDigest, FrontendImage: frontendImage, FrontendImageDigest: frontendDigest, DatabaseSchemaVersion: schema, MinimumAgentVersion: body.MinimumAgentVersion, RollbackSupported: body.RollbackSupported, ReleaseNotes: body.ReleaseNotes, Status: status, PublishedBy: publishedBy})
 	if err != nil {
 		writeJSON(w, 500, map[string]any{"error": "create_platform_release_failed"})
 		return
@@ -1823,23 +1813,7 @@ func (r *Router) discoverComponentReleases(w http.ResponseWriter, req *http.Requ
 		return
 	}
 	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}} // nolint:gosec
-	tokenURL := fmt.Sprintf("https://%s/service/token?service=harbor-registry&scope=repository:%s:pull", registry, repository)
-	tokenResp, err := client.Get(tokenURL)
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "registry_unavailable"})
-		return
-	}
-	defer tokenResp.Body.Close()
-	var tokenBody struct {
-		Token string `json:"token"`
-	}
-	if tokenResp.StatusCode >= 300 || json.NewDecoder(tokenResp.Body).Decode(&tokenBody) != nil || tokenBody.Token == "" {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "registry_token_failed"})
-		return
-	}
-	tagsReq, _ := http.NewRequestWithContext(req.Context(), http.MethodGet, fmt.Sprintf("https://%s/v2/%s/tags/list", registry, repository), nil)
-	tagsReq.Header.Set("Authorization", "Bearer "+tokenBody.Token)
-	tagsResp, err := client.Do(tagsReq)
+	tagsResp, err := registryRequest(req.Context(), client, http.MethodGet, fmt.Sprintf("https://%s/v2/%s/tags/list", registry, repository), repository, "")
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "registry_unavailable"})
 		return
@@ -2059,36 +2033,9 @@ func (r *Router) resolveImageDigest(ctx context.Context, image string) (string, 
 		Timeout:   5 * time.Second,
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}, // nolint:gosec -- lab Harbor commonly uses an internal CA.
 	}
-	tokenURL := fmt.Sprintf("https://%s/service/token?service=harbor-registry&scope=repository:%s:pull", registry, repository)
-	tokenReq, err := http.NewRequestWithContext(ctx, http.MethodGet, tokenURL, nil)
-	if err != nil {
-		return "", err
-	}
-	tokenResp, err := client.Do(tokenReq)
-	if err != nil {
-		return "", err
-	}
-	defer tokenResp.Body.Close()
-	if tokenResp.StatusCode >= 300 {
-		return "", fmt.Errorf("registry token request failed: %s", tokenResp.Status)
-	}
-	var tokenBody struct {
-		Token string `json:"token"`
-	}
-	if err := json.NewDecoder(tokenResp.Body).Decode(&tokenBody); err != nil {
-		return "", err
-	}
-	if tokenBody.Token == "" {
-		return "", errors.New("registry token is empty")
-	}
 	manifestURL := fmt.Sprintf("https://%s/v2/%s/manifests/%s", registry, repository, reference)
-	manifestReq, err := http.NewRequestWithContext(ctx, http.MethodHead, manifestURL, nil)
-	if err != nil {
-		return "", err
-	}
-	manifestReq.Header.Set("Authorization", "Bearer "+tokenBody.Token)
-	manifestReq.Header.Set("Accept", "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.index.v1+json")
-	manifestResp, err := client.Do(manifestReq)
+	accept := "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.index.v1+json"
+	manifestResp, err := registryRequest(ctx, client, http.MethodHead, manifestURL, repository, accept)
 	if err != nil {
 		return "", err
 	}
@@ -2104,6 +2051,83 @@ func (r *Router) resolveImageDigest(ctx context.Context, image string) (string, 
 	r.imageDigests[image] = imageDigestCacheEntry{Digest: digest, ExpiresAt: now.Add(imageDigestTTL)}
 	r.imageDigestMu.Unlock()
 	return digest, nil
+}
+
+var registryAuthParameterPattern = regexp.MustCompile(`([A-Za-z][A-Za-z0-9_-]*)="([^"]*)"`)
+
+func registryRequest(ctx context.Context, client *http.Client, method, targetURL, repository, accept string) (*http.Response, error) {
+	request := func(token string) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, method, targetURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		if accept != "" {
+			req.Header.Set("Accept", accept)
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		return client.Do(req)
+	}
+
+	resp, err := request("")
+	if err != nil || resp.StatusCode != http.StatusUnauthorized {
+		return resp, err
+	}
+	challenge := strings.TrimSpace(resp.Header.Get("WWW-Authenticate"))
+	_ = resp.Body.Close()
+	if !strings.HasPrefix(strings.ToLower(challenge), "bearer ") {
+		return nil, fmt.Errorf("registry authentication challenge is unsupported")
+	}
+	params := map[string]string{}
+	for _, match := range registryAuthParameterPattern.FindAllStringSubmatch(challenge, -1) {
+		params[strings.ToLower(match[1])] = match[2]
+	}
+	realm := strings.TrimSpace(params["realm"])
+	if realm == "" {
+		return nil, errors.New("registry authentication realm is missing")
+	}
+	tokenURL, err := url.Parse(realm)
+	if err != nil {
+		return nil, fmt.Errorf("invalid registry authentication realm: %w", err)
+	}
+	query := tokenURL.Query()
+	if service := strings.TrimSpace(params["service"]); service != "" {
+		query.Set("service", service)
+	}
+	scope := strings.TrimSpace(params["scope"])
+	if scope == "" {
+		scope = "repository:" + repository + ":pull"
+	}
+	query.Set("scope", scope)
+	tokenURL.RawQuery = query.Encode()
+	tokenReq, err := http.NewRequestWithContext(ctx, http.MethodGet, tokenURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	tokenResp, err := client.Do(tokenReq)
+	if err != nil {
+		return nil, err
+	}
+	defer tokenResp.Body.Close()
+	if tokenResp.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("registry token request failed: %s", tokenResp.Status)
+	}
+	var tokenBody struct {
+		Token       string `json:"token"`
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.NewDecoder(tokenResp.Body).Decode(&tokenBody); err != nil {
+		return nil, err
+	}
+	token := strings.TrimSpace(tokenBody.Token)
+	if token == "" {
+		token = strings.TrimSpace(tokenBody.AccessToken)
+	}
+	if token == "" {
+		return nil, errors.New("registry token is empty")
+	}
+	return request(token)
 }
 
 func splitContainerImage(image string) (registry string, repository string, reference string, ok bool) {

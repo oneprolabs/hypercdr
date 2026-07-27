@@ -510,7 +510,8 @@ run_docker() {
    3. Prepare persistent configuration
    4. Prepare platform TLS
    5. Write runtime settings
-   6. Start and verify control plane
+   6. Start control plane
+   7. Initialize and verify release catalog
 
  Dry-run only. Add --execute to start installation.
 EOF
@@ -524,12 +525,12 @@ EOF
     printf ' Release          %s\n' "${image_tag}"
     printf ' Data directory   %s\n' "${data_dir}"
 
-    install_step 1 6 "Validate host and registry"
+    install_step 1 7 "Validate host and registry"
     run_logged "Frontend port ${http_port} is available" preflight_host_port "${http_port}" hypercdr-platform-frontend
     run_logged "API port ${api_port} is available" preflight_host_port "${api_port}" hypercdr-platform-api
     run_logged "Registry connection is trusted" preflight_registry
 
-    install_step 2 6 "Verify required images"
+    install_step 2 7 "Verify required images"
     for required_image in \
       "${registry}/platform-api:${image_tag}" \
       "${registry}/platform-frontend:${image_tag}" \
@@ -542,7 +543,7 @@ EOF
     done
     install_ok "All required images are available"
 
-    install_step 3 6 "Prepare persistent configuration"
+    install_step 3 7 "Prepare persistent configuration"
     mkdir -p "${data_dir}/certs"
     printf '%s\n' "${release_token}" > "${data_dir}/release-token"
     chmod 600 "${data_dir}/release-token"
@@ -553,7 +554,7 @@ EOF
     fi
     install_ok "Configuration files are prepared"
 
-    install_step 4 6 "Prepare platform TLS"
+    install_step 4 7 "Prepare platform TLS"
     if [[ "${tls_enabled}" == "true" ]]; then
       require_command openssl
       mkdir -p "${tls_dir}"
@@ -576,7 +577,7 @@ EOF
     fi
     install_ok "Platform TLS is ready"
 
-    install_step 5 6 "Write runtime settings"
+    install_step 5 7 "Write runtime settings"
     cat > "${data_dir}/.env" <<EOF
 HCDR_PUBLIC_BASE_URL=${public_base_url}
 HCDR_AGENT_WS_ENDPOINT=${agent_ws_endpoint}
@@ -606,7 +607,7 @@ EOF
     chmod 600 "${data_dir}/.env"
     install_ok "Runtime settings saved"
 
-    install_step 6 6 "Start and verify control plane"
+    install_step 6 7 "Start control plane"
     run_logged "Containers started" bash -c 'cd "$1" && docker compose --project-name hypercdr -f "$2" up -d' _ "${data_dir}" "${target_compose_file}"
     local ready="false"
     local attempt
@@ -624,6 +625,17 @@ EOF
       exit 1
     fi
     install_ok "Control plane is ready"
+
+    install_step 7 7 "Initialize and verify release catalog"
+    local release_payload
+    release_payload="$(printf '{\"version\":\"%s\",\"databaseSchemaVersion\":\"current\",\"minimumAgentVersion\":\"%s\",\"rollbackSupported\":true,\"releaseNotes\":\"Initialized by the control plane installer\"}' "${image_tag}" "${image_tag}")"
+    run_logged "Platform release is registered" curl -kfsS --connect-timeout 5 --max-time 30 \
+      -H "Content-Type: application/json" \
+      -H "X-HyperCDR-Release-Token: ${release_token}" \
+      -d "${release_payload}" \
+      "${public_base_url%/}/api/v1/platform/releases"
+    run_logged "Cluster component releases are initialized" curl -kfsS --connect-timeout 5 --max-time 30 \
+      "${public_base_url%/}/install.sh"
     cat <<EOF
 
 ============================================================
