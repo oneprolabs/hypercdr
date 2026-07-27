@@ -63,6 +63,25 @@ async function loadManifest() {
   }
 }
 
+async function copyText(text) {
+  if (window.isSecureContext && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+  const copied = document.execCommand('copy');
+  textarea.remove();
+  if (!copied) throw new Error('Clipboard copy is unavailable');
+}
+
 document.getElementById('host-public-url').value = `https://${portalHost}:3002`;
 document.getElementById('k8s-node-ip').value = portalHost;
 for (const id of ['host-public-url', 'k8s-node-ip', 'k8s-node-port', 'k8s-storage-class']) {
@@ -71,8 +90,12 @@ for (const id of ['host-public-url', 'k8s-node-ip', 'k8s-node-port', 'k8s-storag
 for (const button of document.querySelectorAll('[data-copy-target]')) {
   button.addEventListener('click', async () => {
     const target = document.getElementById(button.dataset.copyTarget);
-    await navigator.clipboard.writeText(target.textContent);
-    button.textContent = 'Copied';
+    try {
+      await copyText(target.textContent);
+      button.textContent = 'Copied';
+    } catch (_) {
+      button.textContent = 'Copy failed';
+    }
     setTimeout(() => { button.textContent = 'Copy'; }, 1200);
   });
 }
