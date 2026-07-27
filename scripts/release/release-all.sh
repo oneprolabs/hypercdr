@@ -166,6 +166,9 @@ Images:
   ${REGISTRY}/comm-agent:${VERSION}
   ${REGISTRY}/postgres:16
   ${REGISTRY}/velero:${HCDR_VELERO_IMAGE_TAG:-v1.17.1-hcdr.1-20260716}
+  ${REGISTRY}/velero-plugin-for-aws:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}
+  ${REGISTRY}/velero-plugin-for-microsoft-azure:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}
+  ${REGISTRY}/velero-plugin-for-gcp:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}
 Dry-run complete; no login, build, push, or registration was performed.
 EOF
   exit 0
@@ -204,6 +207,8 @@ for image in \
   "${REGISTRY}/platform-frontend:${VERSION}" \
   "${REGISTRY}/platform-upgrader:${VERSION}" \
   "${REGISTRY}/comm-agent:${VERSION}" \
+  "${REGISTRY}/postgres:16" \
+  "${REGISTRY}/velero:${HCDR_VELERO_IMAGE_TAG:-v1.17.1-hcdr.1-20260716}" \
   "${REGISTRY}/velero-plugin-for-aws:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}" \
   "${REGISTRY}/velero-plugin-for-microsoft-azure:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}" \
   "${REGISTRY}/velero-plugin-for-gcp:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}"; do
