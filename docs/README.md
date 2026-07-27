@@ -8,6 +8,7 @@
 4. [Platform-agent messages](protocols/platform-agent-messages.md)
 5. [DR task state machine](protocols/dr-task-state-machine.md)
 6. [Deployment guide](deployment/deployment-guide.zh.md)
+7. [Build, release, and installation flow](deployment/build-release-install.md)
 
 ## Sections
 

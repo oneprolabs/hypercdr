@@ -48,6 +48,8 @@ jobs:
         run: find scripts bootstrap -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
       - name: Test Bootstrap registry trust flow
         run: bash bootstrap/tests/registry-ca-flow.sh
+      - name: Test registry profile selection
+        run: bash scripts/tests/registry-config.sh
       - name: Reject generated artifacts
         run: |
           test ! -e frontend/node_modules

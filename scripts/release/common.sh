@@ -39,7 +39,10 @@ require_registry() {
 
 go_bin() {
   local go="${HCDR_GO_BIN:-${DEFAULT_GO}}"
-  [[ -x "${go}" ]] || die "Go binary not found or not executable: ${go}"
+  if [[ "${go}" != */* ]]; then
+    go="$(command -v "${go}" || true)"
+  fi
+  [[ -n "${go}" && -x "${go}" ]] || die "Go binary not found or not executable: ${HCDR_GO_BIN:-${DEFAULT_GO}}"
   echo "${go}"
 }
 

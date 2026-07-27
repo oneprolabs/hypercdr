@@ -6,6 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
 REGISTRY="${HCDR_IMAGE_REGISTRY:-}"
+REGISTRY_CONFIG_FILE="${HCDR_REGISTRY_CONFIG:-${ROOT_DIR}/config/registries.conf}"
+REGISTRY_PROFILE="${HCDR_REGISTRY_PROFILE:-}"
 HOST="${HCDR_PLATFORM_HOST:-${DEFAULT_HOST}}"
 DEPLOY_DIR="${HCDR_DEPLOY_DIR:-/var/lib/hypercdr}"
 VERSION=""
@@ -25,6 +27,8 @@ Usage:
 
 Options:
   --registry REGISTRY     Image registry prefix. Required unless HCDR_IMAGE_REGISTRY is set.
+  --registry-config PATH  Registry profiles file, default config/registries.conf.
+  --registry-profile NAME Override the active Registry profile.
   --host HOST             Public platform host, default 192.168.8.149.
   --deploy-dir DIR        Deploy directory, default /var/lib/hypercdr.
   --velero-image IMAGE    Velero image to expose through install.sh.
@@ -36,6 +40,8 @@ USAGE
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --registry) REGISTRY="${2:?missing value for --registry}"; shift 2 ;;
+    --registry-config) REGISTRY_CONFIG_FILE="${2:?missing value for --registry-config}"; shift 2 ;;
+    --registry-profile) REGISTRY_PROFILE="${2:?missing value for --registry-profile}"; shift 2 ;;
     --host) HOST="${2:?missing value for --host}"; shift 2 ;;
     --deploy-dir) DEPLOY_DIR="${2:?missing value for --deploy-dir}"; shift 2 ;;
     --velero-image) VELERO_IMAGE="${2:?missing value for --velero-image}"; shift 2 ;;
@@ -48,8 +54,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 require_version "${VERSION}"
+if [[ -z "${REGISTRY}" ]]; then
+  # shellcheck source=../lib/registry-config.sh
+  source "${ROOT_DIR}/scripts/lib/registry-config.sh"
+  load_registry_profile "${REGISTRY_CONFIG_FILE}" "${REGISTRY_PROFILE}"
+  REGISTRY="${HCDR_IMAGE_REGISTRY}"
+fi
 require_registry "${REGISTRY}"
 REGISTRY="${REGISTRY%/}"
+REGISTRY_TRUST="${HCDR_REGISTRY_TRUST:-system}"
+REGISTRY_CA_SOURCE="${HCDR_REGISTRY_CA_FILE:-/dev/null}"
 if [[ -z "${VELERO_IMAGE}" ]]; then
   VELERO_IMAGE="${REGISTRY}/velero:v1.17.1-hcdr.1-20260716"
 fi
@@ -99,6 +113,9 @@ HCDR_HTTP_ADDR=0.0.0.0:18080
 HCDR_PUBLIC_BASE_URL=http://${HOST}:3002
 HCDR_AGENT_WS_ENDPOINT=ws://${HOST}:3002/ws/agent
 HCDR_IMAGE_REGISTRY=${REGISTRY}
+HCDR_REGISTRY_PROFILE=${HCDR_SELECTED_REGISTRY:-custom}
+HCDR_REGISTRY_TRUST=${REGISTRY_TRUST}
+HCDR_REGISTRY_CA_FILE=${REGISTRY_CA_SOURCE}
 HCDR_AGENT_IMAGE=${COMM_AGENT_IMAGE}
 HCDR_VELERO_IMAGE=${VELERO_IMAGE}
 HCDR_VELERO_AWS_PLUGIN_IMAGE=${VELERO_AWS_PLUGIN_IMAGE}
@@ -162,7 +179,7 @@ services:
     ports:
       - "18080:18080"
     volumes:
-      - /data/harbor/cert/hypercdr-ca.crt:/etc/hypercdr/registry-ca.crt:ro
+      - ${HCDR_REGISTRY_CA_FILE:-/dev/null}:/etc/hypercdr/registry-ca.crt:ro
     restart: unless-stopped
     logging:
       driver: local

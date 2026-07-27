@@ -1,0 +1,59 @@
+name: Build and Publish Release
+on:
+  push:
+    tags: ['v[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].[0-9]*']
+  workflow_dispatch:
+    inputs:
+      version: {description: 'Release version in vYYYYMMDD.N format', required: true}
+      registry_profile: {description: 'Profile from config/registries.conf', required: true, default: aliyun_acr}
+concurrency: {group: hypercdr-release, cancel-in-progress: false}
+permissions: {contents: read}
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache-dependency-path: |
+            backend/go.sum
+            agent/comm-agent/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: docker/setup-buildx-action@v3
+      - name: Resolve release and registry
+        id: release
+        shell: bash
+        run: |
+          version="${{ inputs.version }}"
+          profile="${{ inputs.registry_profile }}"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then version="${GITHUB_REF_NAME}"; profile="aliyun_acr"; fi
+          source scripts/lib/registry-config.sh
+          load_registry_profile config/registries.conf "${profile}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "profile=${profile}" >> "${GITHUB_OUTPUT}"
+          echo "server=${HCDR_REGISTRY_SERVER}" >> "${GITHUB_OUTPUT}"
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ steps.release.outputs.server }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+      - name: Build, test, and publish
+        env:
+          HCDR_GO_BIN: go
+          HCDR_RUNTIME_ROOT: /tmp/hypercdr-runtime
+        run: ./scripts/release/release-all.sh "${{ steps.release.outputs.version }}" --registry-profile "${{ steps.release.outputs.profile }}" --skip-register
+      - name: Build installer package
+        env:
+          HCDR_BOOTSTRAP_BUILD_ROOT: /tmp/hypercdr-runtime/build/bootstrap
+          HCDR_BOOTSTRAP_PUBLISH_DIR: /tmp/hypercdr-installer
+        run: ./bootstrap/release-bootstrap.sh "${{ steps.release.outputs.version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hypercdr-installer-${{ steps.release.outputs.version }}
+          path: /tmp/hypercdr-installer/releases/dev/*
+          if-no-files-found: error

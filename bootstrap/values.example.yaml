@@ -1,7 +1,7 @@
 global:
   publicBaseURL: https://127.0.0.1:30080
   agentWebSocketURL: wss://127.0.0.1:30080/ws/agent
-  imageRegistry: 192.168.8.149:5001/hypercdr
+  imageRegistry: registry.example.com/namespace
 
 platform:
   replicaCount: 1
@@ -28,7 +28,7 @@ platform:
 postgresql:
   mode: bundled
   image:
-    repository: 192.168.8.149:5001/hypercdr/postgres
+    repository: registry.example.com/namespace/postgres
     tag: "16"
     pullPolicy: IfNotPresent
   database: hypercdr

@@ -6,12 +6,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
 CONFIG_FILE="${SCRIPT_DIR}/release.conf"
+REGISTRY_CONFIG_FILE="${HCDR_REGISTRY_CONFIG:-${ROOT_DIR}/config/registries.conf}"
+REGISTRY_PROFILE="${HCDR_REGISTRY_PROFILE:-}"
 VERSION=""
 SKIP_TESTS="${HCDR_RELEASE_SKIP_TESTS:-false}"
 LOGIN="true"
 CLI_REGISTRY=""
 CLI_SKIP_TESTS=""
 SKIP_REGISTER="false"
+DRY_RUN="false"
 PLATFORM_URL="${HCDR_PLATFORM_URL:-https://${DEFAULT_HOST}:3002}"
 RELEASE_TOKEN_FILE="${HCDR_RELEASE_TOKEN_FILE:-/var/lib/hypercdr/release-token}"
 
@@ -24,6 +27,10 @@ Usage:
 
 Options:
   --config PATH       Release config file, default ./release.conf.
+  --registry-config PATH
+                      Registry profiles file, default config/registries.conf.
+  --registry-profile NAME
+                      Override HCDR_ACTIVE_REGISTRY for this release.
   --registry PREFIX   Override HCDR_IMAGE_REGISTRY.
   --skip-tests        Skip Go tests during build.
   --no-login          Skip docker login.
@@ -31,6 +38,7 @@ Options:
   --release-token-file PATH
                       Release token file, default /var/lib/hypercdr/release-token.
   --skip-register     Build/push only when no platform exists yet.
+  --dry-run           Resolve configuration and print the plan without changes.
   -h, --help          Show help.
 
 Required config:
@@ -50,12 +58,15 @@ USAGE
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --config) CONFIG_FILE="${2:?missing value for --config}"; shift 2 ;;
+    --registry-config) REGISTRY_CONFIG_FILE="${2:?missing value for --registry-config}"; shift 2 ;;
+    --registry-profile) REGISTRY_PROFILE="${2:?missing value for --registry-profile}"; shift 2 ;;
     --registry) CLI_REGISTRY="${2:?missing value for --registry}"; shift 2 ;;
     --skip-tests) CLI_SKIP_TESTS="true"; shift ;;
     --no-login) LOGIN="false"; shift ;;
     --platform-url) PLATFORM_URL="${2:?missing value for --platform-url}"; shift 2 ;;
     --release-token-file) RELEASE_TOKEN_FILE="${2:?missing value for --release-token-file}"; shift 2 ;;
     --skip-register) SKIP_REGISTER="true"; shift ;;
+    --dry-run) DRY_RUN="true"; shift ;;
     -h|--help) usage; exit 0 ;;
     *)
       if [[ -z "${VERSION}" ]]; then VERSION="$1"; shift; else die "unknown argument: $1"; fi
@@ -70,9 +81,14 @@ elif [[ "${CONFIG_FILE}" != "${SCRIPT_DIR}/release.conf" ]]; then
   die "config file not found: ${CONFIG_FILE}"
 fi
 
+# shellcheck source=../lib/registry-config.sh
+source "${ROOT_DIR}/scripts/lib/registry-config.sh"
+load_registry_profile "${REGISTRY_CONFIG_FILE}" "${REGISTRY_PROFILE}"
+
 SKIP_TESTS="${HCDR_RELEASE_SKIP_TESTS:-${SKIP_TESTS}}"
 if [[ -n "${CLI_REGISTRY}" ]]; then
   HCDR_IMAGE_REGISTRY="${CLI_REGISTRY}"
+  HCDR_REGISTRY_SERVER="${CLI_REGISTRY%%/*}"
 fi
 if [[ -n "${CLI_SKIP_TESTS}" ]]; then
   SKIP_TESTS="${CLI_SKIP_TESTS}"
@@ -133,9 +149,24 @@ HyperCDR release plan
 
 Version:        ${VERSION}
 Registry:       ${REGISTRY}
+Profile:        ${HCDR_SELECTED_REGISTRY:-command-line}
 Registry server: ${REGISTRY_SERVER}
 Skip tests:     ${SKIP_TESTS}
 EOF
+
+if [[ "${DRY_RUN}" == "true" ]]; then
+  cat <<EOF
+Images:
+  ${REGISTRY}/platform-api:${VERSION}
+  ${REGISTRY}/platform-frontend:${VERSION}
+  ${REGISTRY}/platform-upgrader:${VERSION}
+  ${REGISTRY}/comm-agent:${VERSION}
+  ${REGISTRY}/postgres:16
+  ${REGISTRY}/velero:${HCDR_VELERO_IMAGE_TAG:-v1.17.1-hcdr.1-20260716}
+Dry-run complete; no login, build, push, or registration was performed.
+EOF
+  exit 0
+fi
 
 login_registry
 
@@ -144,6 +175,9 @@ log "Building release images"
 
 log "Pushing release images"
 "${SCRIPT_DIR}/push-release.sh" "${VERSION}" --registry "${REGISTRY}"
+
+log "Publishing required runtime images"
+"${SCRIPT_DIR}/publish-runtime-images.sh" --registry "${REGISTRY}"
 
 log "Mirroring Velero object-storage plugins"
 plugin_sync_args=(--registry "${REGISTRY}" --version "${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}")

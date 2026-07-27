@@ -2,6 +2,14 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -r "${SCRIPT_DIR}/scripts/lib/registry-config.sh" ]]; then
+  REGISTRY_HELPER="${SCRIPT_DIR}/scripts/lib/registry-config.sh"
+  DEFAULT_REGISTRY_CONFIG="${SCRIPT_DIR}/config/registries.conf"
+else
+  SOURCE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+  REGISTRY_HELPER="${SOURCE_ROOT}/scripts/lib/registry-config.sh"
+  DEFAULT_REGISTRY_CONFIG="${SOURCE_ROOT}/config/registries.conf"
+fi
 if [[ -d "${SCRIPT_DIR}/charts/hypercdr-platform" ]]; then
   CHART_DIR="${SCRIPT_DIR}/charts/hypercdr-platform"
   COMPOSE_TEMPLATE="${SCRIPT_DIR}/compose.yaml"
@@ -58,7 +66,9 @@ Kubernetes options:
   --kubeconfig PATH            Optional kubeconfig path for kubectl and helm
   --namespace NAME             Namespace for the control plane, default: hypercdr-system
   --public-base-url URL        Container DR control plane URL used by users and agents
-  --registry REGISTRY          Harbor registry and project, required. Example: 192.168.8.149:5001/hypercdr
+  --registry REGISTRY          Optional OCI Registry prefix override.
+  --registry-profile NAME      Registry profile; defaults to HCDR_ACTIVE_REGISTRY.
+  --registry-config PATH       Registry profiles file.
   --registry-trust MODE        system (default) or private-ca
   --registry-ca-file PATH      PEM CA certificate, required for private-ca
   --image-tag TAG              Platform/agent image tag, default v20260714.5.
@@ -72,7 +82,9 @@ Kubernetes options:
 Docker options:
   --public-base-url URL        Container DR control plane URL used by users and agents
   --data-dir PATH              Persistent data directory, default: /var/lib/hypercdr
-  --registry REGISTRY          Harbor registry and project, required. Example: 192.168.8.149:5001/hypercdr
+  --registry REGISTRY          Optional OCI Registry prefix override.
+  --registry-profile NAME      Registry profile; defaults to HCDR_ACTIVE_REGISTRY.
+  --registry-config PATH       Registry profiles file.
   --registry-trust MODE        system (default) or private-ca
   --registry-ca-file PATH      PEM CA certificate, required for private-ca
   --image-tag TAG              Platform/agent image tag, default v20260714.5.
@@ -103,6 +115,8 @@ namespace="hypercdr-system"
 kubeconfig=""
 public_base_url=""
 registry=""
+registry_profile=""
+registry_config="${HCDR_REGISTRY_CONFIG:-${DEFAULT_REGISTRY_CONFIG}}"
 registry_trust="system"
 registry_ca_file=""
 storage_class="longhorn"
@@ -126,6 +140,8 @@ while [[ $# -gt 0 ]]; do
     --namespace) namespace="${2:?missing value for --namespace}"; shift 2 ;;
     --public-base-url) public_base_url="${2:?missing value for --public-base-url}"; shift 2 ;;
     --registry) registry="${2:?missing value for --registry}"; shift 2 ;;
+    --registry-profile) registry_profile="${2:?missing value for --registry-profile}"; shift 2 ;;
+    --registry-config) registry_config="${2:?missing value for --registry-config}"; shift 2 ;;
     --registry-trust) registry_trust="${2:?missing value for --registry-trust}"; shift 2 ;;
     --registry-ca-file) registry_ca_file="${2:?missing value for --registry-ca-file}"; shift 2 ;;
     --image-tag) image_tag="${2:?missing value for --image-tag}"; shift 2 ;;
@@ -153,8 +169,12 @@ if [[ -z "$public_base_url" ]]; then
 fi
 
 if [[ -z "$registry" ]]; then
-  echo "--registry is required" >&2
-  exit 2
+  # shellcheck disable=SC1090
+  source "${REGISTRY_HELPER}"
+  load_registry_profile "${registry_config}" "${registry_profile}"
+  registry="${HCDR_IMAGE_REGISTRY}"
+  registry_trust="${HCDR_REGISTRY_TRUST:-system}"
+  [[ -n "${registry_ca_file}" ]] || registry_ca_file="${HCDR_REGISTRY_CA_FILE:-}"
 fi
 
 case "${registry_trust}" in
@@ -547,6 +567,7 @@ EOF
 HCDR_PUBLIC_BASE_URL=${public_base_url}
 HCDR_AGENT_WS_ENDPOINT=${agent_ws_endpoint}
 HCDR_IMAGE_REGISTRY=${registry}
+HCDR_REGISTRY_PROFILE=${HCDR_SELECTED_REGISTRY:-custom}
 HCDR_IMAGE_TAG=${image_tag}
 RELEASE_VERSION=${image_tag}
 PLATFORM_API_IMAGE=${registry}/platform-api:${image_tag}

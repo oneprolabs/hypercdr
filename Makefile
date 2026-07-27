@@ -30,6 +30,7 @@ test-frontend:
 
 test-bootstrap:
 	bash bootstrap/tests/registry-ca-flow.sh
+	bash scripts/tests/registry-config.sh
 
 build-frontend:
 	cd frontend && npm run build
