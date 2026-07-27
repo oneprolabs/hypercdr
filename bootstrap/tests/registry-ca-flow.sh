@@ -7,6 +7,7 @@ trap 'rm -rf "${TEST_ROOT}"' EXIT
 
 mkdir -p "${TEST_ROOT}/bin"
 cp /bin/true "${TEST_ROOT}/bin/docker"
+cp /bin/true "${TEST_ROOT}/bin/ss"
 cat > "${TEST_ROOT}/bin/curl" <<'EOF'
 #!/usr/bin/env bash
 printf '200'

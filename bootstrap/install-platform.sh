@@ -239,6 +239,18 @@ preflight_registry() {
   esac
 }
 
+preflight_host_port() {
+  local port="$1"
+  local expected_container="$2"
+  if docker ps --filter "name=^/${expected_container}$" --format '{{.Names}}' | grep -qx "${expected_container}"; then
+    return 0
+  fi
+  if command -v ss >/dev/null 2>&1 && ss -H -ltn "sport = :${port}" | grep -q .; then
+    echo "Host port ${port} is already in use. Stop the conflicting service or select another port." >&2
+    return 1
+  fi
+}
+
 print_common() {
   cat <<EOF
 HyperCDR control plane deployment plan
@@ -513,6 +525,8 @@ EOF
     printf ' Data directory   %s\n' "${data_dir}"
 
     install_step 1 6 "Validate host and registry"
+    run_logged "Frontend port ${http_port} is available" preflight_host_port "${http_port}" hypercdr-platform-frontend
+    run_logged "API port ${api_port} is available" preflight_host_port "${api_port}" hypercdr-platform-api
     run_logged "Registry connection is trusted" preflight_registry
 
     install_step 2 6 "Verify required images"
