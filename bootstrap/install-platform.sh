@@ -2,7 +2,14 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CHART_DIR="${SCRIPT_DIR}/charts/hypercdr-platform"
+if [[ -d "${SCRIPT_DIR}/charts/hypercdr-platform" ]]; then
+  CHART_DIR="${SCRIPT_DIR}/charts/hypercdr-platform"
+  COMPOSE_TEMPLATE="${SCRIPT_DIR}/compose.yaml"
+else
+  SOURCE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+  CHART_DIR="${SOURCE_ROOT}/charts/hypercdr-platform"
+  COMPOSE_TEMPLATE="${SOURCE_ROOT}/docker-compose.yml"
+fi
 RELEASE_NAME="${RELEASE_NAME:-hypercdr}"
 
 install_header() {
@@ -505,7 +512,7 @@ EOF
     mkdir -p "${data_dir}/certs"
     printf '%s\n' "${release_token}" > "${data_dir}/release-token"
     chmod 600 "${data_dir}/release-token"
-    cp "${SCRIPT_DIR}/compose.yaml" "${target_compose_file}"
+    cp "${COMPOSE_TEMPLATE}" "${target_compose_file}"
     if [[ "${registry_trust}" == "private-ca" ]]; then
       cp "${registry_ca_file}" "${installed_registry_ca_file}"
       chmod 644 "${installed_registry_ca_file}"

@@ -13,7 +13,8 @@ page can be hosted by another platform later.
 - `uninstall-platform.sh`: Docker Compose uninstaller for standalone host deployments.
 - `prepare-docker-registry.sh`: optional Docker private-CA preparation script.
 - `check-harbor.sh`: validates Harbor API reachability and Docker image pull readiness.
-- `compose.yaml`: standalone host Docker Compose template.
+- `../docker-compose.yml`: canonical standalone host Docker Compose template;
+  release packages expose it as `compose.yaml`.
 - `values.example.yaml`: Helm values example.
 - `charts/hypercdr-platform`: minimal Helm chart for the control plane.
 - `portal/`: bootstrap download page installer.
@@ -77,7 +78,7 @@ systemctl restart docker
 Build and push platform and agent images with the standard release script:
 
 ```bash
-cd /data/hypercdr/hypercdr-platform/deployments/release
+cd /data/hypercdr/scripts/release
 ./release-all.sh v20260714.5 --config ./release.conf
 ```
 
@@ -102,7 +103,7 @@ The uninstaller does not uninstall Harbor and does not stop the bootstrap portal
 ### 1. Build and Push Release Images
 
 ```bash
-cd /data/hypercdr/hypercdr-platform/deployments/release
+cd /data/hypercdr/scripts/release
 ./release-all.sh v20260714.5 --config ./release.conf
 ```
 
@@ -114,7 +115,7 @@ project before pushing release images.
 Create the project:
 
 ```bash
-/data/hypercdr/hypercdr-platform/deployments/harbor/init-project.sh \
+/data/hypercdr/scripts/harbor/init-project.sh \
   --harbor-url https://<harbor-host>:5001 \
   --project hypercdr \
   --username admin \
@@ -131,8 +132,8 @@ cd /data/hypercdr/bootstrap
 ./release-bootstrap.sh v20260714.5
 ```
 
-This creates an external portal source at `/data/hypercdr/bootstrap-publish`
-and uses `/data/hypercdr/.build/bootstrap` for temporary files. The Bootstrap
+This creates an external portal source at `/data/hypercdr-runtime/bootstrap-portal-source`
+and uses `/data/hypercdr-runtime/build/bootstrap` for temporary files. The Bootstrap
 source directory is not modified. It does not start the portal or install the
 control plane.
 
@@ -140,8 +141,8 @@ Start or refresh the bootstrap portal:
 
 ```bash
 ./portal/install-bootstrap-portal.sh \
-  --source-dir /data/hypercdr/bootstrap-publish \
-  --data-dir /opt/hypercdr-bootstrap \
+  --source-dir /data/hypercdr-runtime/bootstrap-portal-source \
+  --data-dir /data/hypercdr-runtime/bootstrap-portal \
   --port 8080 \
   --execute
 ```

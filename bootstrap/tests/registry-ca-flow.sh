@@ -15,7 +15,10 @@ chmod +x "${TEST_ROOT}/bin/curl" "${TEST_ROOT}/bin/docker"
 
 PRIVATE_DATA="${TEST_ROOT}/private"
 PRIVATE_CA="${TEST_ROOT}/customer-registry-ca.crt"
-cp /data/harbor/cert/hypercdr-ca.crt "${PRIVATE_CA}"
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+  -subj '/CN=registry.example.test' \
+  -keyout "${TEST_ROOT}/customer-registry-ca.key" \
+  -out "${PRIVATE_CA}" >/dev/null 2>&1
 PATH="${TEST_ROOT}/bin:${PATH}" "${SCRIPT_DIR}/install-platform.sh" docker \
   --public-base-url https://platform.example.test:3002 \
   --data-dir "${PRIVATE_DATA}" \

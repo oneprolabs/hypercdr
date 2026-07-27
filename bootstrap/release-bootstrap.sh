@@ -2,10 +2,12 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+RUNTIME_ROOT="${HCDR_RUNTIME_ROOT:-$(cd "${ROOT_DIR}/.." && pwd)/hypercdr-runtime}"
 SITE_SOURCE_DIR="${SCRIPT_DIR}/site"
 VERSION="${1:-}"
-BUILD_ROOT="${HCDR_BOOTSTRAP_BUILD_ROOT:-/data/hypercdr/.build/bootstrap}"
-PUBLISH_DIR="${HCDR_BOOTSTRAP_PUBLISH_DIR:-/data/hypercdr/bootstrap-publish}"
+BUILD_ROOT="${HCDR_BOOTSTRAP_BUILD_ROOT:-${RUNTIME_ROOT}/build/bootstrap}"
+PUBLISH_DIR="${HCDR_BOOTSTRAP_PUBLISH_DIR:-${RUNTIME_ROOT}/bootstrap-portal-source}"
 WORK_DIR="${BUILD_ROOT}/${VERSION:-unknown}"
 RELEASE_DIR="${PUBLISH_DIR}/releases/dev"
 
@@ -17,8 +19,8 @@ Usage:
   ./release-bootstrap.sh <version>
 
 Environment:
-  HCDR_BOOTSTRAP_BUILD_ROOT   External work root, default /data/hypercdr/.build/bootstrap.
-  HCDR_BOOTSTRAP_PUBLISH_DIR  External portal source, default /data/hypercdr/bootstrap-publish.
+  HCDR_BOOTSTRAP_BUILD_ROOT   External work root, default /data/hypercdr-runtime/build/bootstrap.
+  HCDR_BOOTSTRAP_PUBLISH_DIR  External portal source, default /data/hypercdr-runtime/bootstrap-portal-source.
 
 The source directory is not modified. The script updates version references in
 the external package and portal copy only. It does not start the portal or
@@ -58,8 +60,8 @@ cp "${SCRIPT_DIR}/install-platform.sh" "${package_dir}/install-platform.sh"
 cp "${SCRIPT_DIR}/uninstall-platform.sh" "${package_dir}/uninstall-platform.sh"
 cp "${SCRIPT_DIR}/prepare-docker-registry.sh" "${package_dir}/prepare-docker-registry.sh"
 cp "${SCRIPT_DIR}/check-harbor.sh" "${package_dir}/check-harbor.sh"
-cp "${SCRIPT_DIR}/compose.yaml" "${package_dir}/compose.yaml"
-cp -R "${SCRIPT_DIR}/charts" "${package_dir}/charts"
+cp "${ROOT_DIR}/docker-compose.yml" "${package_dir}/compose.yaml"
+cp -R "${ROOT_DIR}/charts" "${package_dir}/charts"
 chmod +x "${package_dir}"/*.sh
 
 sed -i -E "s/v[0-9]{8}\.[0-9]+/${VERSION}/g" \
@@ -99,5 +101,5 @@ Portal source:
   ${PUBLISH_DIR}
 
 Deploy the portal with:
-  ${SCRIPT_DIR}/portal/install-bootstrap-portal.sh --source-dir ${PUBLISH_DIR} --data-dir /data/hypercdr/bootstrap-portal --port 8080 --execute
+  ${SCRIPT_DIR}/portal/install-bootstrap-portal.sh --source-dir ${PUBLISH_DIR} --data-dir /data/hypercdr-runtime/bootstrap-portal --port 8080 --execute
 EOF

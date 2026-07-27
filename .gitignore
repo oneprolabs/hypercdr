@@ -1,13 +1,67 @@
-# Ignore everything by default
-*
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+!env.example
+*.key
+*.pem
+*.crt
+kubeconfig*
+kubeconfigs/
 
-# Keep repository-level ignore rules
-!.gitignore
+# Runtime state and local deployment data
+.local/
+.dev/
+.build/
+.cache/
+deploy/
+logs/
+backups/
+certs/
+*.log
+*.pid
 
-# Include the two source projects
-!hypercdr-platform/
-!hypercdr-platform/**
-!bootstrap/
-!bootstrap/**
-!hypercdr-velero/
-!hypercdr-velero/**
+# Go build and module caches
+.gocache/
+.gocache-test/
+.gomodcache/
+bin/
+*.test
+*.exe
+
+# Frontend dependencies and build output
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/visual-diffs/
+frontend/test-results/
+frontend/playwright-report/
+frontend/coverage/
+
+# Browser automation artifacts
+.playwright-cli/
+output/
+
+# Release output and archives
+dist/
+release/
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.bak
+*.bak-*
+
+# Local databases
+*.dump
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE and operating-system files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
