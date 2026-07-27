@@ -34,13 +34,16 @@ Options:
   -h, --help          Show help.
 
 Required config:
-  HCDR_IMAGE_REGISTRY=HOST:PORT/hypercdr
+  HCDR_IMAGE_REGISTRY=REGISTRY_HOST/NAMESPACE_OR_PROJECT
 
-Optional Harbor login config:
-  HCDR_HARBOR_SERVER=HOST:PORT
-  HCDR_HARBOR_USERNAME=admin
-  HCDR_HARBOR_PASSWORD_FILE=/path/to/password
-  # or HCDR_HARBOR_PASSWORD=<password>
+Optional registry login config:
+  HCDR_REGISTRY_SERVER=registry.example.com
+  HCDR_REGISTRY_USERNAME=<username>
+  HCDR_REGISTRY_PASSWORD_FILE=/secure/path/to/password
+  # or HCDR_REGISTRY_PASSWORD=<password>
+
+If no username is configured, the script uses credentials already stored by
+`docker login`. Legacy HCDR_HARBOR_* names remain supported.
 USAGE
 }
 
@@ -82,33 +85,36 @@ require_cmd curl
 
 REGISTRY="${HCDR_IMAGE_REGISTRY%/}"
 REGISTRY_HOST="${REGISTRY%%/*}"
-HARBOR_SERVER="${HCDR_HARBOR_SERVER:-${REGISTRY_HOST}}"
+REGISTRY_SERVER="${HCDR_REGISTRY_SERVER:-${HCDR_HARBOR_SERVER:-${REGISTRY_HOST}}}"
+REGISTRY_USERNAME="${HCDR_REGISTRY_USERNAME:-${HCDR_HARBOR_USERNAME:-}}"
+REGISTRY_PASSWORD_FILE="${HCDR_REGISTRY_PASSWORD_FILE:-${HCDR_HARBOR_PASSWORD_FILE:-}}"
+REGISTRY_PASSWORD="${HCDR_REGISTRY_PASSWORD:-${HCDR_HARBOR_PASSWORD:-}}"
 
-login_harbor() {
+login_registry() {
   if [[ "${LOGIN}" != "true" ]]; then
     log "Skipping docker login"
     return
   fi
 
-  if [[ -z "${HCDR_HARBOR_USERNAME:-}" ]]; then
-    log "Skipping docker login: HCDR_HARBOR_USERNAME is not set"
+  if [[ -z "${REGISTRY_USERNAME}" ]]; then
+    log "Using existing Docker credentials for ${REGISTRY_SERVER}"
     return
   fi
 
-  if [[ -n "${HCDR_HARBOR_PASSWORD_FILE:-}" ]]; then
-    [[ -r "${HCDR_HARBOR_PASSWORD_FILE}" ]] || die "password file is not readable: ${HCDR_HARBOR_PASSWORD_FILE}"
-    log "Logging in to Harbor ${HARBOR_SERVER} as ${HCDR_HARBOR_USERNAME}"
-    docker login "${HARBOR_SERVER}" -u "${HCDR_HARBOR_USERNAME}" --password-stdin < "${HCDR_HARBOR_PASSWORD_FILE}"
+  if [[ -n "${REGISTRY_PASSWORD_FILE}" ]]; then
+    [[ -r "${REGISTRY_PASSWORD_FILE}" ]] || die "password file is not readable: ${REGISTRY_PASSWORD_FILE}"
+    log "Logging in to ${REGISTRY_SERVER} as ${REGISTRY_USERNAME}"
+    docker login "${REGISTRY_SERVER}" -u "${REGISTRY_USERNAME}" --password-stdin < "${REGISTRY_PASSWORD_FILE}"
     return
   fi
 
-  if [[ -n "${HCDR_HARBOR_PASSWORD:-}" ]]; then
-    log "Logging in to Harbor ${HARBOR_SERVER} as ${HCDR_HARBOR_USERNAME}"
-    printf '%s' "${HCDR_HARBOR_PASSWORD}" | docker login "${HARBOR_SERVER}" -u "${HCDR_HARBOR_USERNAME}" --password-stdin
+  if [[ -n "${REGISTRY_PASSWORD}" ]]; then
+    log "Logging in to ${REGISTRY_SERVER} as ${REGISTRY_USERNAME}"
+    printf '%s' "${REGISTRY_PASSWORD}" | docker login "${REGISTRY_SERVER}" -u "${REGISTRY_USERNAME}" --password-stdin
     return
   fi
 
-  log "Skipping docker login: no Harbor password source configured"
+  die "registry username is configured but no password source is available"
 }
 
 build_args=("${VERSION}" --registry "${REGISTRY}")
@@ -127,11 +133,11 @@ HyperCDR release plan
 
 Version:        ${VERSION}
 Registry:       ${REGISTRY}
-Harbor server:  ${HARBOR_SERVER}
+Registry server: ${REGISTRY_SERVER}
 Skip tests:     ${SKIP_TESTS}
 EOF
 
-login_harbor
+login_registry
 
 log "Building release images"
 "${SCRIPT_DIR}/build-release.sh" "${build_args[@]}"

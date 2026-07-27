@@ -44,7 +44,7 @@ output/
 
 # Release output and archives
 dist/
-release/
+/release/
 *.zip
 *.tar
 *.tar.gz
