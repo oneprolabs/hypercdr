@@ -11,10 +11,8 @@ build images, run a registry, or install the HyperCDR control plane.
 Serve the repository bootstrap portal:
 
 ```bash
-/data/hypercdr/bootstrap/portal/install-bootstrap-portal.sh \
-  --source-dir /data/hypercdr/bootstrap-publish \
-  --data-dir /data/hypercdr/bootstrap-portal \
-  --port 8080 \
+/data/hypercdr-main/bootstrap/deploy-bootstrap.sh \
+  --source-dir /data/hypercdr-runtime/bootstrap-portal-source \
   --execute
 ```
 

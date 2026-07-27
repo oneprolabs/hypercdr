@@ -110,5 +110,5 @@ Portal source:
   ${PUBLISH_DIR}
 
 Deploy the portal with:
-  ${SCRIPT_DIR}/portal/install-bootstrap-portal.sh --source-dir ${PUBLISH_DIR} --data-dir /data/hypercdr-runtime/bootstrap-portal --port 8080 --execute
+  ${SCRIPT_DIR}/deploy-bootstrap.sh --source-dir ${PUBLISH_DIR} --execute
 EOF
