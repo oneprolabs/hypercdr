@@ -11,27 +11,6 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-func TestEnsureLogCollectionPermission(t *testing.T) {
-	client := fake.NewSimpleClientset(&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "hypercdr-agent"}})
-	runtime := &KubernetesAgentRuntime{client: client}
-	if err := runtime.ensureLogCollectionPermission(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	role, err := client.RbacV1().ClusterRoles().Get(context.Background(), "hypercdr-agent", metav1.GetOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, rule := range role.Rules {
-		if containsString(rule.Resources, "pods/log") && containsString(rule.Verbs, "get") {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("pods/log permission was not added: %#v", role.Rules)
-	}
-}
-
 func TestVeleroRuntimeStatusRequiresEveryNodeAgentDigest(t *testing.T) {
 	labels := map[string]string{"app": "velero"}
 	nodeLabels := map[string]string{"app": "node-agent"}

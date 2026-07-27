@@ -722,7 +722,7 @@ type ApiPlatformVersion = { version: string; gitCommit: string; buildTime: strin
 type ApiPlatformRelease = { id: string; version: string; apiImage: string; apiImageDigest: string; frontendImage: string; frontendImageDigest: string; databaseSchemaVersion: string; minimumAgentVersion?: string; rollbackSupported: boolean; releaseNotes?: string; status: 'candidate'|'active'|'retired'; publishedBy?: string; publishedAt?: string; createdAt: string };
 type ApiPlatformUpgrade = { id:string; releaseId:string; fromVersion:string; targetVersion:string; status:string; step:string; progress:number; errorMessage?:string; backupPath?:string; createdAt:string; completedAt?:string };
 type ApiPlatformPrecheck = { passed:boolean; currentVersion:string; checks:Array<{id:string;label:string;passed:boolean;detail?:unknown}> };
-type ApiDiagnosticLog = { id:string; tenantId?:string; scope:'tenant'|'system'; level:'debug'|'info'|'warning'|'error'; component:string; operation?:string; message:string; clusterId?:string; taskId?:string; commandId?:string; requestId?:string; errorCode?:string; status?:string; durationMs?:number; details?:Record<string,unknown>; createdAt:string };
+type ApiDiagnosticLog = { id:string; tenantId?:string; scope:'tenant'|'system'; level:'debug'|'info'|'warning'|'error'; component:string; operation?:string; message:string; clusterId?:string; taskId?:string; commandId?:string; requestId?:string; errorCode?:string; status?:string; durationMs?:number; details?:Record<string,unknown>; eventAt:string; createdAt:string };
 
 type ClusterTaskLog = {
   task: ApiTask;
@@ -4426,7 +4426,7 @@ export default function App() {
             {view === 'tenants' && authSession?.user.systemAdmin && <TenantPage toast={setToast} />}
             {view === 'email_settings' && authSession?.user.systemAdmin && <EmailSettingsPage currentUser={authSession.user} toast={setToast} />}
             {view === 'profile' && authSession && <ProfilePage session={authSession} setSession={next => { setAuthSession(next); writeStoredAuthSession(next); }} toast={setToast} />}
-            {view === 'upgrades' && authSession?.user.systemAdmin && <UpgradeManagementPage clusters={liveApiClusters} isAdmin toast={setToast} refreshPlatformData={refreshPlatformData} />}
+            {view === 'upgrades' && authSession?.user.systemAdmin && <UpgradeManagementPage isAdmin toast={setToast} refreshPlatformData={refreshPlatformData} />}
           </AnimatePresence>
         </section>
       </main>
@@ -8911,13 +8911,16 @@ function ClusterPage(props: {
                 <div className="cluster-components-cell">
                   <div className="cluster-component-row">
                     <span>Comm-agent</span>
-                    <p>{cluster.agentVersion}</p>
+                    <p className="cluster-component-version" title={cluster.agentUpgradeAvailable && cluster.latestAgentVersion ? `${cluster.agentVersion} → ${cluster.latestAgentVersion}` : `Current version: ${cluster.agentVersion}`}>
+                      {cluster.agentVersion}{cluster.agentUpgradeAvailable && cluster.latestAgentVersion ? ` → ${cluster.latestAgentVersion}` : ''}
+                    </p>
                   {canUpgrade && cluster.agentUpgradeAvailable && cluster.agentUpgradeStatus !== 'upgrading' && cluster.connectionStatus === 'online' && (
                     <button
                       type="button"
                       onClick={(event) => openUpgrade(cluster, event)}
                       className="cluster-component-update"
                       title={`Update available: ${cluster.latestAgentVersion || ''}@${shortDigest(cluster.latestAgentImageDigest)}`}
+                      aria-label={`Update Comm-agent to ${cluster.latestAgentVersion || 'the latest version'}`}
                     >
                       Update
                     </button>
@@ -8925,20 +8928,42 @@ function ClusterPage(props: {
                   {cluster.agentUpgradeStatus === 'upgrading' && (
                     <span className="cluster-component-progress">Upgrading</span>
                   )}
+                  {cluster.agentUpgradeStatus !== 'upgrading' && !cluster.agentUpgradeAvailable && cluster.agentVersion !== 'pending' && cluster.agentVersion !== 'unknown' && (
+                    <span className="cluster-component-state is-current">Up to date</span>
+                  )}
+                  {cluster.agentUpgradeStatus !== 'upgrading' && !cluster.agentUpgradeAvailable && (cluster.agentVersion === 'pending' || cluster.agentVersion === 'unknown') && (
+                    <span className="cluster-component-state is-unknown">Not detected</span>
+                  )}
+                  {(!canUpgrade || cluster.connectionStatus !== 'online') && cluster.agentUpgradeStatus !== 'upgrading' && cluster.agentUpgradeAvailable && (
+                    <span className="cluster-component-state is-available">Update available</span>
+                  )}
                   </div>
                   <div className="cluster-component-row">
                     <span>Velero-agent</span>
-                    <p>{cluster.veleroVersion || 'unknown'}</p>
+                    <p className="cluster-component-version" title={cluster.veleroUpgradeAvailable && cluster.latestVeleroVersion ? `${cluster.veleroVersion || 'unknown'} → ${cluster.latestVeleroVersion}` : `Current version: ${cluster.veleroVersion || 'unknown'}`}>
+                      {cluster.veleroVersion || 'unknown'}{cluster.veleroUpgradeAvailable && cluster.latestVeleroVersion ? ` → ${cluster.latestVeleroVersion}` : ''}
+                    </p>
                   {canUpgrade && cluster.veleroUpgradeAvailable && cluster.veleroUpgradeStatus !== 'upgrading' && cluster.connectionStatus === 'online' && (
-                    <button type="button" onClick={(event) => openVeleroUpgrade(cluster, event)} className="cluster-component-update" title={`Update available: ${cluster.latestVeleroVersion || ''}@${shortDigest(cluster.latestVeleroImageDigest)}`}>
+                    <button type="button" onClick={(event) => openVeleroUpgrade(cluster, event)} className="cluster-component-update" title={`Update available: ${cluster.latestVeleroVersion || ''}@${shortDigest(cluster.latestVeleroImageDigest)}`} aria-label={`Update Velero-agent to ${cluster.latestVeleroVersion || 'the latest version'}`}>
                       Update
                     </button>
                   )}
                   {cluster.veleroUpgradeStatus === 'upgrading' && <span className="cluster-component-progress">{formatPercent(cluster.veleroUpgradeProgress || 0)}%</span>}
+                  {cluster.veleroUpgradeStatus !== 'upgrading' && !cluster.veleroUpgradeAvailable && cluster.veleroVersion && cluster.veleroVersion !== 'unknown' && (
+                    <span className="cluster-component-state is-current">Up to date</span>
+                  )}
+                  {cluster.veleroUpgradeStatus !== 'upgrading' && !cluster.veleroUpgradeAvailable && (!cluster.veleroVersion || cluster.veleroVersion === 'unknown') && (
+                    <span className="cluster-component-state is-unknown">Not detected</span>
+                  )}
+                  {(!canUpgrade || cluster.connectionStatus !== 'online') && cluster.veleroUpgradeStatus !== 'upgrading' && cluster.veleroUpgradeAvailable && (
+                    <span className="cluster-component-state is-available">Update available</span>
+                  )}
                   </div>
                 </div>
-                <div><span className="block text-[9px] font-semibold uppercase tracking-wider text-slate-400">Status</span><p className={`truncate text-[11px] font-semibold leading-tight ${readiness.className}`}>{readiness.label}</p></div>
-                <div><span className="block text-[9px] font-semibold uppercase tracking-wider text-slate-400">Last Seen</span><p className="text-[11px] font-semibold leading-tight text-slate-700">{formatLastSeen(cluster.lastSeenAt)}</p></div>
+                <div className="cluster-runtime-cell">
+                  <div><span>Status</span><p className={readiness.className}>{readiness.label}</p></div>
+                  <div><span>Last Seen</span><p>{formatLastSeen(cluster.lastSeenAt)}</p></div>
+                </div>
               </div>
               {cluster.agentUpgradeStatus === 'upgrading' && (
                 <div className="mb-2 rounded-md border border-blue-100 bg-blue-50/70 px-2.5 py-2">
@@ -12876,19 +12901,21 @@ function FailbackPage({ toast }: { toast: (msg: string) => void }) {
 
 function DiagnosticLogsPage({ currentUser, clusters, toast }: { currentUser: ApiLoginResponse['user']; clusters: ApiCluster[]; toast: (message:string)=>void }) {
   const [logs,setLogs]=useState<ApiDiagnosticLog[]>([]); const [tenants,setTenants]=useState<ApiTenant[]>([]); const [loading,setLoading]=useState(false); const [selected,setSelected]=useState<ApiDiagnosticLog|null>(null);
+  const [collectionStatus,setCollectionStatus]=useState<{state:'idle'|'collecting'|'completed'|'partial'|'failed';message:string}>({state:'idle',message:''});
   const [logClusters,setLogClusters]=useState<Array<{id:string;tenantId:string;name:string;connectionStatus:string}>>(clusters.map(item=>({id:item.id,tenantId:item.tenantId,name:item.name,connectionStatus:item.connectionStatus})));
-  const [scope,setScope]=useState(currentUser.systemAdmin?'':'tenant'); const [tenantId,setTenantId]=useState(''); const [clusterId,setClusterId]=useState(''); const [level,setLevel]=useState(''); const [component,setComponent]=useState(''); const [query,setQuery]=useState('');
+  const [source,setSource]=useState<'platform'|'cluster'>('platform'); const [scope,setScope]=useState(currentUser.systemAdmin?'':'tenant'); const [tenantId,setTenantId]=useState(''); const [clusterId,setClusterId]=useState(''); const [level,setLevel]=useState(''); const [platformComponent,setPlatformComponent]=useState(''); const [clusterComponent,setClusterComponent]=useState(''); const [query,setQuery]=useState('');
+  const component=source==='platform'?platformComponent:clusterComponent; const selectedCluster=logClusters.find(item=>item.id===clusterId)||null;
   const initialFrom=()=>{const value=new Date(Date.now()-60*60*1000);return new Date(value.getTime()-value.getTimezoneOffset()*60000).toISOString().slice(0,16)}; const [from,setFrom]=useState(initialFrom); const [to,setTo]=useState('');
   const visibleClusters=logClusters.filter(cluster=>!currentUser.systemAdmin||!tenantId||cluster.tenantId===tenantId);
   const tenantName=(id?:string)=>tenants.find(item=>item.id===id)?.name||id?.slice(0,8)||'System';
-  const params=useCallback((exporting=false)=>{const values=new URLSearchParams(); if(scope)values.set('scope',scope);if(tenantId)values.set('tenantId',tenantId);if(clusterId)values.set('clusterId',clusterId);if(level)values.set('level',level);if(component)values.set('component',component);if(query.trim())values.set('q',query.trim());if(from)values.set('from',new Date(from).toISOString());if(to)values.set('to',new Date(to).toISOString());values.set('limit',exporting?'5000':'500');return values},[scope,tenantId,clusterId,level,component,query,from,to]);
+  const params=useCallback((exporting=false)=>{const values=new URLSearchParams();values.set('source',source);if(source==='platform'&&scope)values.set('scope',scope);if(tenantId)values.set('tenantId',tenantId);if(source==='cluster'&&clusterId)values.set('clusterId',clusterId);if(level)values.set('level',level);if(component)values.set('component',component);if(query.trim())values.set('q',query.trim());if(from)values.set('from',new Date(from).toISOString());if(to)values.set('to',new Date(to).toISOString());if(exporting)values.set('timezone',userTimeZone);values.set('limit',exporting?'5000':'500');return values},[source,scope,tenantId,clusterId,level,component,query,from,to,userTimeZone]);
   const load=useCallback(async()=>{setLoading(true);try{const response=await apiGet<ApiList<ApiDiagnosticLog>>(`/api/v1/diagnostic-logs?${params()}`);setLogs(listItems(response))}catch(error){toast(error instanceof Error?error.message:'Logs could not be loaded')}finally{setLoading(false)}},[params,toast]);
-  const collectClusterLogs=async()=>{if(!clusterId||!['comm-agent','velero','node-agent'].includes(component))return;setLoading(true);try{await apiPost(`/api/v1/clusters/${clusterId}/logs/collect`,{component,since:from?new Date(from).toISOString():new Date(Date.now()-30*60*1000).toISOString(),tailLines:1000});toast('Cluster log collection started');window.setTimeout(()=>void load(),1500)}catch(error){setLoading(false);toast(error instanceof Error?error.message:'Cluster logs could not be collected')}};
+  const searchLogs=async()=>{if(source==='platform'){await load();return}if(!clusterId||!['comm-agent','velero','node-agent'].includes(component)){toast('Select a cluster and component before searching');return}setLoading(true);setCollectionStatus({state:'collecting',message:'Checking stored coverage and automatically collecting any missing logs...'});try{const result=await apiPost<{collected:boolean;count?:number;coverageComplete:boolean;message?:string;coverage?:{coveredFrom:string;coveredTo:string}}>(`/api/v1/clusters/${clusterId}/logs/search`,{component,from:from?new Date(from).toISOString():new Date(Date.now()-60*60*1000).toISOString(),to:to?new Date(to).toISOString():new Date().toISOString()});const coverage=result.coverage?`${formatLocalDateTime(result.coverage.coveredFrom)} – ${formatLocalDateTime(result.coverage.coveredTo)}`:'';setCollectionStatus(result.coverageComplete?{state:'completed',message:result.collected?`Missing logs were collected and saved${typeof result.count==='number'?` · ${result.count} received`:''}. Available coverage: ${coverage}`:`Using stored platform logs. Available coverage: ${coverage}`}:{state:'partial',message:`${result.message||'Only part of the requested range is available.'}${coverage?` Available coverage: ${coverage}`:''}`});await load()}catch(error){const message=error instanceof Error?error.message:'Logs could not be prepared';setCollectionStatus({state:'failed',message});setLoading(false);toast(message)}};
   useEffect(()=>{apiGet<ApiList<{id:string;tenantId:string;name:string;connectionStatus:string}>>('/api/v1/diagnostic-log-sources').then(response=>setLogClusters(listItems(response))).catch(()=>{});if(currentUser.systemAdmin){apiGet<ApiList<ApiTenant>>('/api/v1/tenants').then(response=>setTenants(listItems(response))).catch(()=>setTenants([]))}},[currentUser.systemAdmin]);
   useEffect(()=>{void load()},[load]);
-  const exportLogs=async()=>{try{const token=readStoredAuthSession()?.session.token||'';const response=await ensureApiResponse(await fetch(`/api/v1/diagnostic-logs/export?${params(true)}`,{headers:apiHeaders(false,token)}),'/api/v1/diagnostic-logs/export',token);const blob=await response.blob();const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download=`hypercdr-diagnostic-logs-${new Date().toISOString().slice(0,10)}.jsonl`;anchor.click();URL.revokeObjectURL(url);toast('Diagnostic log export is ready')}catch(error){toast(error instanceof Error?error.message:'Log export failed')}};
+  const exportLogs=async()=>{try{const token=readStoredAuthSession()?.session.token||'';const response=await ensureApiResponse(await fetch(`/api/v1/diagnostic-logs/export?${params(true)}`,{headers:apiHeaders(false,token)}),'/api/v1/diagnostic-logs/export',token);const blob=await response.blob();const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download=`hypercdr-${source}-logs-${new Date().toISOString().slice(0,10)}.log`;anchor.click();URL.revokeObjectURL(url);toast(`${source==='platform'?'Platform':'Cluster'} log export is ready`)}catch(error){toast(error instanceof Error?error.message:'Log export failed')}};
   const columns:HyperTableColumn<ApiDiagnosticLog>[]=[
-    {id:'createdAt',header:'Time',accessorFn:row=>row.createdAt,size:180,minSize:170,cell:info=><span className="text-xs font-semibold text-slate-500">{formatLocalDateTime(info.row.original.createdAt)}</span>,meta:{title:row=>formatLocalDateTime(row.createdAt)}},
+    {id:'eventAt',header:'Time',accessorFn:row=>row.eventAt,size:180,minSize:170,cell:info=><span className="text-xs font-semibold text-slate-500">{formatLocalDateTime(info.row.original.eventAt)}</span>,meta:{title:row=>formatLocalDateTime(row.eventAt)}},
     {id:'level',header:'Level',accessorFn:row=>row.level,size:90,minSize:80,cell:info=><span className={`rounded px-2 py-1 text-[10px] font-bold ${info.row.original.level==='error'?'bg-rose-50 text-rose-700':info.row.original.level==='warning'?'bg-amber-50 text-amber-700':'bg-slate-100 text-slate-600'}`}>{info.row.original.level.toUpperCase()}</span>},
     {id:'component',header:'Component',accessorFn:row=>row.component,size:140,minSize:120,cell:info=><span className="text-xs font-bold text-slate-700">{info.row.original.component}</span>},
     ...(currentUser.systemAdmin?[{id:'tenant',header:'Tenant',accessorFn:(row:ApiDiagnosticLog)=>tenantName(row.tenantId),size:150,minSize:120,cell:(info:any)=><span className="text-xs text-slate-500">{tenantName(info.row.original.tenantId)}</span>} as HyperTableColumn<ApiDiagnosticLog>]:[]),
@@ -12896,22 +12923,30 @@ function DiagnosticLogsPage({ currentUser, clusters, toast }: { currentUser: Api
     {id:'taskId',header:'Task / Request',accessorFn:row=>row.taskId||row.requestId||'',size:170,minSize:140,cell:info=><span className="font-mono text-[10px] text-slate-500">{(info.row.original.taskId||info.row.original.requestId||'-').slice(0,13)}</span>},
   ];
   return <motion.div key="logs" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="space-y-5">
-    <SearchBar title="Logs" desc="Trace platform requests, tasks, and cluster operations." action={loading?'Refreshing...':'Refresh'} onAction={()=>void load()} />
+    <SearchBar title="Logs" desc={source==='platform'?'Trace platform requests, task stages, failures, and system errors. Logs are retained for 180 days.':'Cluster logs are archived daily, retained for 180 days, and automatically brought up to date when searched.'} action={loading?'Refreshing...':'Refresh'} onAction={()=>void (source==='cluster'?searchLogs():load())} />
     <section className="hbdr-section-card overflow-hidden">
+      <div className="flex border-b border-slate-200 bg-white px-4 pt-3" role="tablist" aria-label="Log source">
+        <button type="button" role="tab" aria-selected={source==='platform'} onClick={()=>{setSource('platform');setSelected(null)}} className={`border-b-2 px-5 py-3 text-xs font-bold transition-colors ${source==='platform'?'border-blue-600 text-blue-700':'border-transparent text-slate-500 hover:text-slate-700'}`}><Server size={15} className="mr-2 inline"/>Platform Logs</button>
+        <button type="button" role="tab" aria-selected={source==='cluster'} onClick={()=>{setSource('cluster');setSelected(null)}} className={`border-b-2 px-5 py-3 text-xs font-bold transition-colors ${source==='cluster'?'border-blue-600 text-blue-700':'border-transparent text-slate-500 hover:text-slate-700'}`}><Boxes size={15} className="mr-2 inline"/>Cluster Logs</button>
+      </div>
+      <div className={`border-b px-4 py-3 text-xs ${source==='platform'?'border-blue-100 bg-blue-50/60 text-blue-800':'border-slate-100 bg-slate-50 text-slate-600'}`}>
+        {source==='platform'?'Platform logs include API failures, task lifecycle events, scheduler activity, and system warnings. Use Task ID or Request ID to reconstruct the events around a failure.':selectedCluster?`${selectedCluster.name} · ${selectedCluster.connectionStatus==='online'?'Agent online':'Agent offline'} · Archived logs are reused and any current gap is filled automatically.`:'Select a cluster, component, and time range. Daily archives and automatic gap filling are handled by the platform.'}
+      </div>
+      {source==='cluster'&&collectionStatus.state!=='idle'&&<div role="status" className={`border-b px-4 py-3 text-xs font-semibold ${collectionStatus.state==='failed'?'border-rose-100 bg-rose-50 text-rose-700':collectionStatus.state==='partial'?'border-amber-100 bg-amber-50 text-amber-700':collectionStatus.state==='completed'?'border-emerald-100 bg-emerald-50 text-emerald-700':'border-blue-100 bg-blue-50 text-blue-700'}`}>{collectionStatus.state==='collecting'?'Preparing logs':collectionStatus.state==='completed'?'Logs ready':collectionStatus.state==='partial'?'Partial coverage':'Search failed'} · {collectionStatus.message}</div>}
       <div className="grid gap-3 border-b border-slate-100 bg-slate-50/60 p-4 md:grid-cols-3 xl:grid-cols-6">
-        {currentUser.systemAdmin&&<label className="text-[10px] font-bold text-slate-500">Scope<select value={scope} onChange={event=>{setScope(event.target.value);if(event.target.value==='system'){setTenantId('');setClusterId('')}}} className="mt-1 w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"><option value="">All logs</option><option value="tenant">Tenant logs</option><option value="system">System logs</option></select></label>}
-        {currentUser.systemAdmin&&scope!=='system'&&<label className="text-[10px] font-bold text-slate-500">Tenant<select value={tenantId} onChange={event=>{setTenantId(event.target.value);setClusterId('')}} className="mt-1 w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs"><option value="">All tenants</option>{tenants.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
-        {scope!=='system'&&<label className="text-[10px] font-bold text-slate-500">Cluster<select value={clusterId} onChange={event=>setClusterId(event.target.value)} className="mt-1 w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs"><option value="">All clusters</option>{visibleClusters.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
+        {source==='platform'&&currentUser.systemAdmin&&<label className="text-[10px] font-bold text-slate-500">Log Scope<select value={scope} onChange={event=>{setScope(event.target.value);if(event.target.value==='system')setTenantId('')}} className="mt-1 w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"><option value="">Tenant and system</option><option value="tenant">Tenant logs</option><option value="system">System logs</option></select></label>}
+        {currentUser.systemAdmin&&(source==='cluster'||scope!=='system')&&<label className="text-[10px] font-bold text-slate-500">Tenant<select value={tenantId} onChange={event=>{setTenantId(event.target.value);setClusterId('')}} className="mt-1 w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs"><option value="">All tenants</option>{tenants.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
+        {source==='cluster'&&<label className="text-[10px] font-bold text-slate-500">Cluster<select value={clusterId} onChange={event=>{setClusterId(event.target.value);setCollectionStatus({state:'idle',message:''})}} className="mt-1 w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs"><option value="">Select a cluster</option>{visibleClusters.map(item=><option key={item.id} value={item.id}>{item.name} · {item.connectionStatus==='online'?'Online':'Offline'}</option>)}</select></label>}
         <label className="text-[10px] font-bold text-slate-500">Level<select value={level} onChange={event=>setLevel(event.target.value)} className="mt-1 w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs"><option value="">All levels</option><option value="info">Info</option><option value="warning">Warning</option><option value="error">Error</option><option value="debug">Debug</option></select></label>
-        <label className="text-[10px] font-bold text-slate-500">Component<select value={component} onChange={event=>setComponent(event.target.value)} className="mt-1 w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs"><option value="">All components</option><option value="platform-api">Platform API</option><option value="task">Task</option><option value="comm-agent">comm-agent</option><option value="velero">Velero</option><option value="node-agent">node-agent</option></select></label>
+        <label className="text-[10px] font-bold text-slate-500">Component<select value={component} onChange={event=>{if(source==='platform')setPlatformComponent(event.target.value);else{setClusterComponent(event.target.value);setCollectionStatus({state:'idle',message:''})}}} className="mt-1 w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs"><option value="">{source==='platform'?'All platform components':'Select a component'}</option>{source==='platform'?<><option value="platform-api">Platform API</option><option value="platform-upgrader">Platform Upgrader</option><option value="task">Task Lifecycle</option></>:<><option value="comm-agent">comm-agent</option><option value="velero">Velero</option><option value="node-agent">node-agent</option></>}</select></label>
         <label className="text-[10px] font-bold text-slate-500">From<input type="datetime-local" value={from} onChange={event=>setFrom(event.target.value)} className="mt-1 w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs" /></label>
         <label className="text-[10px] font-bold text-slate-500">To<input type="datetime-local" value={to} onChange={event=>setTo(event.target.value)} className="mt-1 w-full rounded border border-slate-200 bg-white px-3 py-2 text-xs" /></label>
       </div>
-      <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 px-4 py-3"><div className="relative min-w-[260px] flex-1"><Search size={15} className="absolute left-3 top-2.5 text-slate-400"/><input value={query} onChange={event=>setQuery(event.target.value)} onKeyDown={event=>{if(event.key==='Enter')void load()}} placeholder="Search message, Task ID, Request ID..." className="w-full rounded border border-slate-200 py-2 pl-9 pr-3 text-xs outline-none focus:border-blue-400"/></div>{clusterId&&['comm-agent','velero','node-agent'].includes(component)&&<button type="button" disabled={loading} onClick={()=>void collectClusterLogs()} className="rounded border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100 disabled:opacity-50">Collect cluster logs</button>}<button type="button" onClick={()=>void load()} className="rounded bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-700">Search</button><button type="button" onClick={()=>void exportLogs()} className="rounded border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"><Upload size={13} className="mr-1 inline"/>Export</button></div>
-      <HyperTable variant="page" density="comfortable" columns={columns} data={logs} getRowId={row=>row.id} onRowClick={row=>setSelected(row)} emptyMessage={loading?'Loading diagnostic logs...':'No logs match the selected filters.'}/>
+      <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 px-4 py-3"><div className="relative min-w-[260px] flex-1"><Search size={15} className="absolute left-3 top-2.5 text-slate-400"/><input value={query} onChange={event=>setQuery(event.target.value)} onKeyDown={event=>{if(event.key==='Enter')void searchLogs()}} placeholder={source==='platform'?'Search error, Task ID, Request ID, operation...':'Search component message, Pod, Node...'} className="w-full rounded border border-slate-200 py-2 pl-9 pr-3 text-xs outline-none focus:border-blue-400"/></div><button type="button" disabled={loading||(source==='cluster'&&(!clusterId||!component))} onClick={()=>void searchLogs()} className="rounded bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">{source==='cluster'&&collectionStatus.state==='collecting'?'Preparing...':'Search'}</button><button type="button" onClick={()=>void exportLogs()} className="rounded border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"><Upload size={13} className="mr-1 inline"/>Export {source==='platform'?'Platform':'Cluster'} Logs</button></div>
+      <HyperTable variant="page" density="comfortable" columns={columns} data={logs} getRowId={row=>row.id} onRowClick={row=>setSelected(row)} emptyMessage={loading?'Loading logs...':source==='platform'?'No platform logs match the selected filters.':'No collected cluster logs match the selected filters.'}/>
       <div className="border-t border-slate-100 px-4 py-3 text-[11px] text-slate-400">Showing {logs.length} records · Times use {userTimeZoneLabel(userTimeZone)}</div>
     </section>
-    <AnimatePresence>{selected&&<ModalFrame title="Log Details" subtitle={`${selected.component} · ${formatLocalDateTime(selected.createdAt)}`} icon={<Terminal size={18}/>} onClose={()=>setSelected(null)} maxWidthClass="max-w-3xl"><div className="space-y-4"><div className="grid gap-3 rounded border border-slate-100 bg-slate-50 p-4 md:grid-cols-2">{[['Level',selected.level],['Tenant',tenantName(selected.tenantId)],['Operation',selected.operation||'-'],['Status',selected.status||'-'],['Task ID',selected.taskId||'-'],['Command ID',selected.commandId||'-'],['Request ID',selected.requestId||'-'],['Error Code',selected.errorCode||'-']].map(([label,value])=><div key={label}><span className="block text-[10px] font-bold text-slate-400">{label}</span><strong className="mt-1 block break-all text-xs text-slate-700">{value}</strong></div>)}</div><div><h4 className="text-xs font-bold text-slate-700">Message</h4><p className="mt-2 rounded border border-slate-100 bg-white p-3 text-sm leading-6 text-slate-700">{selected.message}</p></div>{selected.details&&<div><h4 className="text-xs font-bold text-slate-700">Diagnostic context</h4><pre className="mt-2 max-h-72 overflow-auto rounded bg-slate-950 p-4 text-[11px] leading-5 text-slate-200">{JSON.stringify(selected.details,null,2)}</pre></div>}</div></ModalFrame>}</AnimatePresence>
+    <AnimatePresence>{selected&&<ModalFrame title="Log Details" subtitle={`${selected.component} · ${formatLocalDateTime(selected.eventAt)}`} icon={<Terminal size={18}/>} onClose={()=>setSelected(null)} maxWidthClass="max-w-3xl"><div className="space-y-4"><div className="grid gap-3 rounded border border-slate-100 bg-slate-50 p-4 md:grid-cols-2">{[['Level',selected.level],['Tenant',tenantName(selected.tenantId)],['Operation',selected.operation||'-'],['Status',selected.status||'-'],['Task ID',selected.taskId||'-'],['Command ID',selected.commandId||'-'],['Request ID',selected.requestId||'-'],['Error Code',selected.errorCode||'-']].map(([label,value])=><div key={label}><span className="block text-[10px] font-bold text-slate-400">{label}</span><strong className="mt-1 block break-all text-xs text-slate-700">{value}</strong></div>)}</div><div><h4 className="text-xs font-bold text-slate-700">Message</h4><p className="mt-2 rounded border border-slate-100 bg-white p-3 text-sm leading-6 text-slate-700">{selected.message}</p></div>{selected.details&&<div><h4 className="text-xs font-bold text-slate-700">Diagnostic context</h4><pre className="mt-2 max-h-72 overflow-auto rounded bg-slate-950 p-4 text-[11px] leading-5 text-slate-200">{JSON.stringify(selected.details,null,2)}</pre></div>}</div></ModalFrame>}</AnimatePresence>
   </motion.div>
 }
 
@@ -14619,7 +14654,7 @@ function SettingsPage() {
   );
 }
 
-function UpgradeManagementPage({ clusters, isAdmin, toast, refreshPlatformData }: { clusters: ApiCluster[]; isAdmin: boolean; toast: (message: string) => void; refreshPlatformData: () => Promise<unknown> }) {
+function UpgradeManagementPage({ isAdmin, toast, refreshPlatformData }: { isAdmin: boolean; toast: (message: string) => void; refreshPlatformData: () => Promise<unknown> }) {
   const [releases, setReleases] = useState<ApiComponentRelease[]>([]);
   const [discovery, setDiscovery] = useState<Partial<Record<'comm-agent' | 'velero', ApiComponentDiscovery>>>({});
   const [loading, setLoading] = useState(true);
@@ -14727,21 +14762,26 @@ function UpgradeManagementPage({ clusters, isAdmin, toast, refreshPlatformData }
   const componentPanel = (component: 'comm-agent' | 'velero', title: string) => {
     const items = releases.filter(item => item.component === component);
     const active = items.find(item => item.status === 'active');
-    const upToDate = active ? clusters.filter(cluster => component === 'comm-agent'
-      ? cluster.agentImageDigest === active.imageDigest
-      : cluster.veleroImageDigest === active.imageDigest && cluster.veleroNodeAgentImageDigest === active.imageDigest).length : 0;
-    const unknown = component === 'velero' ? clusters.filter(cluster => !cluster.veleroImageDigest || !cluster.veleroNodeAgentImageDigest).length : clusters.filter(cluster => !cluster.agentImageDigest).length;
-    const affected = Math.max(0, clusters.length - upToDate - unknown);
     const tags = discovery[component]?.tags || [];
-    const reportedVersions = Array.from(new Set(clusters.map(cluster => component === 'comm-agent' ? cluster.agentVersion : cluster.veleroVersion).filter(Boolean)));
-    const currentVersion = reportedVersions.length === 0 ? 'Unknown' : reportedVersions.length === 1 ? reportedVersions[0] : 'Mixed versions';
+    // The summary uses validated product versions from component releases.
+    // Raw Harbor tags may contain build/source suffixes and are only discovery inputs.
+    const availableVersions = Array.from(new Set(items.map(item => item.version).filter(Boolean))).sort((left, right) => compareReleaseVersions(right, left));
+    const latestVersion = availableVersions[0] || active?.version || '';
+    const newerAvailable = Boolean(active && latestVersion && compareReleaseVersions(latestVersion, active.version) > 0);
+    const latestCandidate = newerAvailable ? items.find(item => item.version === latestVersion && item.status === 'candidate') : undefined;
     return (
       <div className="border-b border-slate-100 last:border-b-0">
         <div className="grid items-center gap-3 px-5 py-4 md:grid-cols-[minmax(180px,1.2fr)_minmax(150px,1fr)_minmax(150px,1fr)_120px]">
           <strong className="text-sm text-slate-900">{title}</strong>
-          <div><span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Current version</span><span className="mt-1 block text-sm font-semibold text-slate-700">{currentVersion}</span></div>
-          <div><span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Latest version</span><span className="mt-1 block text-sm font-bold text-slate-900">{active?.version || 'Not configured'}</span></div>
-          <span className={`justify-self-start rounded-full px-2.5 py-1 text-[10px] font-black md:justify-self-end ${affected > 0 ? 'bg-blue-50 text-blue-700' : unknown > 0 ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>{affected > 0 ? `${affected} to update` : unknown > 0 ? `${unknown} unknown` : 'Up to date'}</span>
+          <div><span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Published version</span><span className="mt-1 block text-sm font-semibold text-slate-700">{active?.version || 'Not published'}</span></div>
+          <div><span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Latest available</span><span className="mt-1 block text-sm font-bold text-slate-900">{latestVersion || 'Not available'}</span></div>
+          {!active
+            ? <span className="justify-self-start rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-black text-amber-700 md:justify-self-end">Not published</span>
+            : newerAvailable && latestCandidate
+              ? <button type="button" onClick={() => setPublishTarget(latestCandidate)} className="justify-self-start rounded bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-700 md:justify-self-end">Publish</button>
+              : newerAvailable
+                ? <span className="justify-self-start rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-black text-blue-700 md:justify-self-end">Available</span>
+                : <span className="justify-self-start rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-black text-emerald-700 md:justify-self-end">Up to date</span>}
         </div>
         {advancedOpen && <><div className="border-t border-slate-100 px-5 py-4">
           <div className="rounded-lg border border-slate-200 bg-white p-4"><div className="flex items-center justify-between"><h4 className="text-xs font-black text-slate-800">Available versions</h4><button type="button" onClick={() => openCandidate(component)} className="text-[10px] font-bold text-blue-600"><Plus size={12} className="mr-1 inline" />Register version</button></div>

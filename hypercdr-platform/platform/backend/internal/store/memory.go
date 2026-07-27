@@ -24,6 +24,7 @@ type MemoryStore struct {
 	tasks               map[string]Task
 	taskEvents          []TaskEvent
 	diagnosticLogs      []DiagnosticLog
+	logCoverage         map[string]ClusterLogCoverage
 	auditLogs           []AuditLog
 	users               map[string]memoryUser
 	resetTokens         map[string]memoryResetToken
@@ -98,6 +99,7 @@ func NewMemoryStore() *MemoryStore {
 		restorePoints:       map[string]RestorePoint{},
 		tasks:               map[string]Task{},
 		taskEvents:          []TaskEvent{},
+		logCoverage:         map[string]ClusterLogCoverage{},
 		auditLogs:           []AuditLog{},
 		tenants:             map[string]Tenant{DefaultTenantID: {ID: DefaultTenantID, Name: "Admin", Status: "active", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}},
 		users:               map[string]memoryUser{DefaultAdminEmail: {User: User{ID: "00000000-0000-0000-0000-00000000a001", TenantID: DefaultTenantID, Email: DefaultAdminEmail, Role: "admin", Status: "active", AuthProvider: "password", SystemAdmin: true, MustChangePassword: true}, Password: DefaultAdminPassword}},
@@ -1906,7 +1908,7 @@ func (s *MemoryStore) AddTaskEvent(input TaskEventInput) error {
 	defer s.mu.Unlock()
 	s.taskEvents = append(s.taskEvents, event)
 	if task, ok := s.tasks[input.TaskID]; ok {
-		s.diagnosticLogs = append(s.diagnosticLogs, DiagnosticLog{ID: newID(), TenantID: task.TenantID, Scope: "tenant", Level: normalizeDiagnosticLevel(input.Level), Component: "task", Operation: task.Type, Message: input.Message, ClusterID: task.ClusterID, TaskID: task.ID, CommandID: task.CommandID, ErrorCode: input.Reason, Status: task.Status, Details: redactDiagnosticDetails(input.Payload), CreatedAt: event.CreatedAt})
+		s.diagnosticLogs = append(s.diagnosticLogs, DiagnosticLog{ID: newID(), TenantID: task.TenantID, Scope: "tenant", Level: normalizeDiagnosticLevel(input.Level), Component: "task", Operation: task.Type, Message: input.Message, ClusterID: task.ClusterID, TaskID: task.ID, CommandID: task.CommandID, ErrorCode: input.Reason, Status: task.Status, Details: redactDiagnosticDetails(input.Payload), EventAt: event.CreatedAt, CreatedAt: event.CreatedAt})
 	}
 	return nil
 }
@@ -1915,6 +1917,13 @@ func (s *MemoryStore) CreateDiagnosticLog(input DiagnosticLogInput) (DiagnosticL
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	item := diagnosticLogFromInput(input, time.Now().UTC())
+	if item.Fingerprint != "" {
+		for _, existing := range s.diagnosticLogs {
+			if existing.Fingerprint == item.Fingerprint {
+				return existing, nil
+			}
+		}
+	}
 	s.diagnosticLogs = append(s.diagnosticLogs, item)
 	return item, nil
 }
@@ -1930,6 +1939,65 @@ func (s *MemoryStore) ListDiagnosticLogs(filter DiagnosticLogFilter) ([]Diagnost
 		}
 	}
 	return paginateDiagnosticLogs(items, filter), nil
+}
+
+func (s *MemoryStore) PurgeDiagnosticLogs(before time.Time) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := make([]DiagnosticLog, 0, len(s.diagnosticLogs))
+	var removed int64
+	for _, item := range s.diagnosticLogs {
+		if item.EventAt.Before(before) {
+			removed++
+			continue
+		}
+		kept = append(kept, item)
+	}
+	s.diagnosticLogs = kept
+	for key, coverage := range s.logCoverage {
+		if coverage.CoveredTo.Before(before) {
+			delete(s.logCoverage, key)
+			continue
+		}
+		if coverage.CoveredFrom.Before(before) {
+			coverage.CoveredFrom = before.UTC()
+			coverage.UpdatedAt = time.Now().UTC()
+			s.logCoverage[key] = coverage
+		}
+	}
+	return removed, nil
+}
+
+func logCoverageKey(clusterID, component string) string { return clusterID + "::" + component }
+
+func (s *MemoryStore) GetClusterLogCoverage(clusterID string, component string) (ClusterLogCoverage, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := s.logCoverage[logCoverageKey(clusterID, component)]
+	return item, ok, nil
+}
+
+func (s *MemoryStore) UpsertClusterLogCoverage(input ClusterLogCoverageInput) (ClusterLogCoverage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := logCoverageKey(input.ClusterID, input.Component)
+	now := time.Now().UTC()
+	item := ClusterLogCoverage{ClusterID: input.ClusterID, TenantID: input.TenantID, Component: input.Component, CoveredFrom: input.CoveredFrom.UTC(), CoveredTo: input.CoveredTo.UTC(), LastCollectedAt: input.CollectedAt.UTC(), LastRequestID: input.RequestID, LastEntryCount: input.EntryCount, Truncated: input.Truncated, UpdatedAt: now}
+	if existing, ok := s.logCoverage[key]; ok {
+		// Merge only overlapping/adjacent ranges. A long offline gap must not be
+		// represented as continuously covered.
+		if !item.CoveredFrom.After(existing.CoveredTo.Add(5 * time.Minute)) {
+			if existing.CoveredFrom.Before(item.CoveredFrom) {
+				item.CoveredFrom = existing.CoveredFrom
+			}
+			if existing.CoveredTo.After(item.CoveredTo) {
+				item.CoveredTo = existing.CoveredTo
+			}
+			item.Truncated = existing.Truncated || item.Truncated
+		}
+	}
+	s.logCoverage[key] = item
+	return item, nil
 }
 
 func (s *MemoryStore) ListTaskEvents(taskID string) ([]TaskEvent, error) {

@@ -2759,13 +2759,14 @@ func (s *PostgresStore) CreateDiagnosticLog(input DiagnosticLogInput) (Diagnosti
 	if err != nil {
 		return DiagnosticLog{}, err
 	}
-	err = s.db.QueryRow(`insert into diagnostic_logs(id,tenant_id,scope,level,component,operation,message,cluster_id,task_id,command_id,request_id,error_code,status,duration_ms,details,created_at)
-		values($1,nullif($2,'')::uuid,$3,$4,$5,$6,$7,nullif($8,'')::uuid,nullif($9,'')::uuid,nullif($10,'')::uuid,nullif($11,'')::uuid,nullif($12,''),nullif($13,''),nullif($14,0),$15,$16) returning created_at`, item.ID, item.TenantID, item.Scope, item.Level, item.Component, item.Operation, item.Message, item.ClusterID, item.TaskID, item.CommandID, item.RequestID, item.ErrorCode, item.Status, item.DurationMS, detailsRaw, item.CreatedAt).Scan(&item.CreatedAt)
+	err = s.db.QueryRow(`insert into diagnostic_logs(id,tenant_id,scope,level,component,operation,message,cluster_id,task_id,command_id,request_id,error_code,status,duration_ms,details,event_at,created_at,fingerprint)
+		values($1,nullif($2,'')::uuid,$3,$4,$5,$6,$7,nullif($8,'')::uuid,nullif($9,'')::uuid,nullif($10,'')::uuid,nullif($11,'')::uuid,nullif($12,''),nullif($13,''),nullif($14,0),$15,$16,$17,nullif($18,''))
+		on conflict (fingerprint) where fingerprint is not null do update set fingerprint=excluded.fingerprint
+		returning event_at,created_at`, item.ID, item.TenantID, item.Scope, item.Level, item.Component, item.Operation, item.Message, item.ClusterID, item.TaskID, item.CommandID, item.RequestID, item.ErrorCode, item.Status, item.DurationMS, detailsRaw, item.EventAt, item.CreatedAt, item.Fingerprint).Scan(&item.EventAt, &item.CreatedAt)
 	return item, err
 }
 
 func (s *PostgresStore) ListDiagnosticLogs(filter DiagnosticLogFilter) ([]DiagnosticLog, error) {
-	_, _ = s.db.Exec(`delete from diagnostic_logs where created_at < now() - interval '14 days'`)
 	limit := filter.Limit
 	if limit <= 0 || limit > 5000 {
 		limit = 200
@@ -2774,8 +2775,8 @@ func (s *PostgresStore) ListDiagnosticLogs(filter DiagnosticLogFilter) ([]Diagno
 	if offset < 0 {
 		offset = 0
 	}
-	rows, err := s.db.Query(`select id,coalesce(tenant_id::text,''),scope,level,component,operation,message,coalesce(cluster_id::text,''),coalesce(task_id::text,''),coalesce(command_id::text,''),coalesce(request_id::text,''),coalesce(error_code,''),coalesce(status,''),coalesce(duration_ms,0),details,created_at
-		from diagnostic_logs where ($1='' or tenant_id=nullif($1,'')::uuid) and ($2='' or scope=$2) and ($3='' or level=$3) and ($4='' or component=$4) and ($5='' or cluster_id=nullif($5,'')::uuid) and ($6='' or task_id=nullif($6,'')::uuid) and ($7::timestamptz is null or created_at >= $7) and ($8::timestamptz is null or created_at <= $8) and ($9='' or message ilike '%%'||$9||'%%' or operation ilike '%%'||$9||'%%' or coalesce(error_code,'') ilike '%%'||$9||'%%' or coalesce(task_id::text,'') ilike '%%'||$9||'%%') order by created_at desc limit $10 offset $11`, filter.TenantID, filter.Scope, filter.Level, filter.Component, filter.ClusterID, filter.TaskID, nullableTime(filter.From), nullableTime(filter.To), filter.Query, limit, offset)
+	rows, err := s.db.Query(`select id,coalesce(tenant_id::text,''),scope,level,component,operation,message,coalesce(cluster_id::text,''),coalesce(task_id::text,''),coalesce(command_id::text,''),coalesce(request_id::text,''),coalesce(error_code,''),coalesce(status,''),coalesce(duration_ms,0),details,event_at,created_at
+		from diagnostic_logs where ($1='' or tenant_id=nullif($1,'')::uuid) and ($2='' or scope=$2) and ($3='' or level=$3) and ($4='' or component=$4) and ($5='' or cluster_id=nullif($5,'')::uuid) and ($6='' or task_id=nullif($6,'')::uuid) and ($7::timestamptz is null or event_at >= $7) and ($8::timestamptz is null or event_at <= $8) and ($9='' or message ilike '%%'||$9||'%%' or operation ilike '%%'||$9||'%%' or coalesce(error_code,'') ilike '%%'||$9||'%%' or coalesce(task_id::text,'') ilike '%%'||$9||'%%') and ($10='' or ($10='cluster' and component in ('comm-agent','velero','node-agent')) or ($10='platform' and component not in ('comm-agent','velero','node-agent'))) order by event_at desc limit $11 offset $12`, filter.TenantID, filter.Scope, filter.Level, filter.Component, filter.ClusterID, filter.TaskID, nullableTime(filter.From), nullableTime(filter.To), filter.Query, filter.Source, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -2784,13 +2785,59 @@ func (s *PostgresStore) ListDiagnosticLogs(filter DiagnosticLogFilter) ([]Diagno
 	for rows.Next() {
 		var item DiagnosticLog
 		var raw []byte
-		if err := rows.Scan(&item.ID, &item.TenantID, &item.Scope, &item.Level, &item.Component, &item.Operation, &item.Message, &item.ClusterID, &item.TaskID, &item.CommandID, &item.RequestID, &item.ErrorCode, &item.Status, &item.DurationMS, &raw, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.TenantID, &item.Scope, &item.Level, &item.Component, &item.Operation, &item.Message, &item.ClusterID, &item.TaskID, &item.CommandID, &item.RequestID, &item.ErrorCode, &item.Status, &item.DurationMS, &raw, &item.EventAt, &item.CreatedAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(raw, &item.Details)
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+func (s *PostgresStore) PurgeDiagnosticLogs(before time.Time) (int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(`with expired as (
+		select ctid from diagnostic_logs where event_at < $1 order by event_at limit 10000
+	) delete from diagnostic_logs where ctid in (select ctid from expired)`, before.UTC())
+	if err != nil {
+		return 0, err
+	}
+	if _, err = tx.Exec(`delete from cluster_log_coverage where covered_to < $1`, before.UTC()); err != nil {
+		return 0, err
+	}
+	if _, err = tx.Exec(`update cluster_log_coverage set covered_from=$1,updated_at=now() where covered_from < $1`, before.UTC()); err != nil {
+		return 0, err
+	}
+	if err = tx.Commit(); err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+func (s *PostgresStore) GetClusterLogCoverage(clusterID string, component string) (ClusterLogCoverage, bool, error) {
+	var item ClusterLogCoverage
+	err := s.db.QueryRow(`select cluster_id::text,tenant_id::text,component,covered_from,covered_to,last_collected_at,coalesce(last_request_id::text,''),last_entry_count,truncated,updated_at from cluster_log_coverage where cluster_id=$1 and component=$2`, clusterID, component).Scan(&item.ClusterID, &item.TenantID, &item.Component, &item.CoveredFrom, &item.CoveredTo, &item.LastCollectedAt, &item.LastRequestID, &item.LastEntryCount, &item.Truncated, &item.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ClusterLogCoverage{}, false, nil
+	}
+	return item, err == nil, err
+}
+
+func (s *PostgresStore) UpsertClusterLogCoverage(input ClusterLogCoverageInput) (ClusterLogCoverage, error) {
+	var item ClusterLogCoverage
+	err := s.db.QueryRow(`insert into cluster_log_coverage(cluster_id,tenant_id,component,covered_from,covered_to,last_collected_at,last_request_id,last_entry_count,truncated,updated_at)
+		values($1,$2,$3,$4,$5,$6,nullif($7,'')::uuid,$8,$9,now())
+		on conflict(cluster_id,component) do update set tenant_id=excluded.tenant_id,
+			covered_from=case when excluded.covered_from <= cluster_log_coverage.covered_to + interval '5 minutes' then least(cluster_log_coverage.covered_from,excluded.covered_from) else excluded.covered_from end,
+			covered_to=case when excluded.covered_from <= cluster_log_coverage.covered_to + interval '5 minutes' then greatest(cluster_log_coverage.covered_to,excluded.covered_to) else excluded.covered_to end,
+			last_collected_at=excluded.last_collected_at,last_request_id=excluded.last_request_id,last_entry_count=excluded.last_entry_count,
+			truncated=case when excluded.covered_from <= cluster_log_coverage.covered_to + interval '5 minutes' then cluster_log_coverage.truncated or excluded.truncated else excluded.truncated end,updated_at=now()
+		returning cluster_id::text,tenant_id::text,component,covered_from,covered_to,last_collected_at,coalesce(last_request_id::text,''),last_entry_count,truncated,updated_at`, input.ClusterID, input.TenantID, input.Component, input.CoveredFrom, input.CoveredTo, input.CollectedAt, input.RequestID, input.EntryCount, input.Truncated).Scan(&item.ClusterID, &item.TenantID, &item.Component, &item.CoveredFrom, &item.CoveredTo, &item.LastCollectedAt, &item.LastRequestID, &item.LastEntryCount, &item.Truncated, &item.UpdatedAt)
+	return item, err
 }
 
 func nullableTime(value time.Time) any {

@@ -12570,7 +12570,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 /* Velero version and user-triggered upgrade. */
 .premium-app .hbdr-cluster-card-grid .cluster-agent-panel {
   min-height: 78px !important;
-  grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr) minmax(0, 1fr) !important;
+  grid-template-columns: minmax(0, 2fr) minmax(96px, 1fr) !important;
 }
 
 .premium-app .hbdr-cluster-card-grid .cluster-components-cell {
@@ -12582,9 +12582,49 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 .premium-app .hbdr-cluster-card-grid .cluster-component-row {
   display: grid;
   min-width: 0;
-  grid-template-columns: 78px minmax(0, 1fr) auto;
+  grid-template-columns: 68px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-runtime-cell {
+  display: grid;
+  align-content: center;
+  gap: 8px;
+  min-width: 0;
+  padding-left: 8px;
+  border-left: 1px solid #e5eaf0;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-runtime-cell > div {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-runtime-cell span {
+  color: #94a3b8;
+  font-size: 9px;
+  font-weight: 650;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-runtime-cell p {
+  min-width: 0;
+  overflow: hidden;
+  margin: 0;
+  font-size: 10px;
+  font-weight: 680;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-runtime-cell > div:last-child p {
+  color: #334155;
 }
 
 .premium-app .hbdr-cluster-card-grid .cluster-component-row > span:first-child {
@@ -12599,13 +12639,13 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   white-space: nowrap;
 }
 
-.premium-app .hbdr-cluster-card-grid .cluster-component-row > p {
+.premium-app .hbdr-cluster-card-grid .cluster-component-row > p.cluster-component-version {
   min-width: 0;
   overflow: hidden;
   margin: 0;
   color: #33475b !important;
   font-family: "JetBrains Mono", monospace;
-  font-size: 11px !important;
+  font-size: 10px !important;
   font-weight: 680;
   line-height: 1.2;
   text-overflow: ellipsis;
@@ -12613,7 +12653,8 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 }
 
 .premium-app .hbdr-cluster-card-grid .cluster-component-update,
-.premium-app .hbdr-cluster-card-grid .cluster-component-progress {
+.premium-app .hbdr-cluster-card-grid .cluster-component-progress,
+.premium-app .hbdr-cluster-card-grid .cluster-component-state {
   margin: 0 !important;
   color: #2f72ad !important;
   font-family: inherit;
@@ -12623,6 +12664,18 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   line-height: 1.2;
   text-transform: none;
   white-space: nowrap;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-component-state.is-current {
+  color: #35806a !important;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-component-state.is-unknown {
+  color: #94a3b8 !important;
+}
+
+.premium-app .hbdr-cluster-card-grid .cluster-component-state.is-available {
+  color: #2f72ad !important;
 }
 
 .premium-app .hbdr-cluster-card-grid .cluster-component-update:hover {

@@ -48,14 +48,22 @@ func diagnosticLogFromInput(input DiagnosticLogInput, now time.Time) DiagnosticL
 	if scope != "system" {
 		scope = "tenant"
 	}
-	return DiagnosticLog{ID: newID(), TenantID: input.TenantID, Scope: scope, Level: normalizeDiagnosticLevel(input.Level), Component: strings.TrimSpace(input.Component), Operation: strings.TrimSpace(input.Operation), Message: strings.TrimSpace(input.Message), ClusterID: input.ClusterID, TaskID: input.TaskID, CommandID: input.CommandID, RequestID: input.RequestID, ErrorCode: input.ErrorCode, Status: input.Status, DurationMS: input.DurationMS, Details: redactDiagnosticDetails(input.Details), CreatedAt: now}
+	eventAt := input.EventAt
+	if eventAt.IsZero() {
+		eventAt = now
+	}
+	return DiagnosticLog{ID: newID(), TenantID: input.TenantID, Scope: scope, Level: normalizeDiagnosticLevel(input.Level), Component: strings.TrimSpace(input.Component), Operation: strings.TrimSpace(input.Operation), Message: strings.TrimSpace(input.Message), ClusterID: input.ClusterID, TaskID: input.TaskID, CommandID: input.CommandID, RequestID: input.RequestID, ErrorCode: input.ErrorCode, Status: input.Status, DurationMS: input.DurationMS, Details: redactDiagnosticDetails(input.Details), EventAt: eventAt.UTC(), CreatedAt: now, Fingerprint: strings.TrimSpace(input.Fingerprint)}
 }
 
 func diagnosticLogMatches(item DiagnosticLog, f DiagnosticLogFilter) bool {
+	clusterComponent := item.Component == "comm-agent" || item.Component == "velero" || item.Component == "node-agent"
+	if (f.Source == "platform" && clusterComponent) || (f.Source == "cluster" && !clusterComponent) {
+		return false
+	}
 	if f.Scope != "" && item.Scope != f.Scope || f.TenantID != "" && item.TenantID != f.TenantID || f.Level != "" && item.Level != f.Level || f.Component != "" && item.Component != f.Component || f.ClusterID != "" && item.ClusterID != f.ClusterID || f.TaskID != "" && item.TaskID != f.TaskID {
 		return false
 	}
-	if !f.From.IsZero() && item.CreatedAt.Before(f.From) || !f.To.IsZero() && item.CreatedAt.After(f.To) {
+	if !f.From.IsZero() && item.EventAt.Before(f.From) || !f.To.IsZero() && item.EventAt.After(f.To) {
 		return false
 	}
 	q := strings.ToLower(strings.TrimSpace(f.Query))

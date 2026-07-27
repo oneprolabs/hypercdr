@@ -101,6 +101,9 @@ type Store interface {
 	ListTaskEvents(taskID string) ([]TaskEvent, error)
 	CreateDiagnosticLog(input DiagnosticLogInput) (DiagnosticLog, error)
 	ListDiagnosticLogs(filter DiagnosticLogFilter) ([]DiagnosticLog, error)
+	PurgeDiagnosticLogs(before time.Time) (int64, error)
+	GetClusterLogCoverage(clusterID string, component string) (ClusterLogCoverage, bool, error)
+	UpsertClusterLogCoverage(input ClusterLogCoverageInput) (ClusterLogCoverage, error)
 	CreateAuditLog(input AuditLogInput) (AuditLog, error)
 	ListAuditLogs(limit, offset int) ([]AuditLog, error)
 	ListComponentReleases(component string) ([]ComponentRelease, error)
@@ -789,22 +792,24 @@ type TaskEvent struct {
 }
 
 type DiagnosticLog struct {
-	ID         string         `json:"id"`
-	TenantID   string         `json:"tenantId,omitempty"`
-	Scope      string         `json:"scope"`
-	Level      string         `json:"level"`
-	Component  string         `json:"component"`
-	Operation  string         `json:"operation,omitempty"`
-	Message    string         `json:"message"`
-	ClusterID  string         `json:"clusterId,omitempty"`
-	TaskID     string         `json:"taskId,omitempty"`
-	CommandID  string         `json:"commandId,omitempty"`
-	RequestID  string         `json:"requestId,omitempty"`
-	ErrorCode  string         `json:"errorCode,omitempty"`
-	Status     string         `json:"status,omitempty"`
-	DurationMS int64          `json:"durationMs,omitempty"`
-	Details    map[string]any `json:"details,omitempty"`
-	CreatedAt  time.Time      `json:"createdAt"`
+	ID          string         `json:"id"`
+	TenantID    string         `json:"tenantId,omitempty"`
+	Scope       string         `json:"scope"`
+	Level       string         `json:"level"`
+	Component   string         `json:"component"`
+	Operation   string         `json:"operation,omitempty"`
+	Message     string         `json:"message"`
+	ClusterID   string         `json:"clusterId,omitempty"`
+	TaskID      string         `json:"taskId,omitempty"`
+	CommandID   string         `json:"commandId,omitempty"`
+	RequestID   string         `json:"requestId,omitempty"`
+	ErrorCode   string         `json:"errorCode,omitempty"`
+	Status      string         `json:"status,omitempty"`
+	DurationMS  int64          `json:"durationMs,omitempty"`
+	Details     map[string]any `json:"details,omitempty"`
+	EventAt     time.Time      `json:"eventAt"`
+	CreatedAt   time.Time      `json:"createdAt"`
+	Fingerprint string         `json:"-"`
 }
 
 type DiagnosticLogInput struct {
@@ -812,12 +817,34 @@ type DiagnosticLogInput struct {
 	ClusterID, TaskID, CommandID, RequestID, ErrorCode, Status string
 	DurationMS                                                 int64
 	Details                                                    map[string]any
+	EventAt                                                    time.Time
+	Fingerprint                                                string
 }
 
 type DiagnosticLogFilter struct {
-	TenantID, Scope, Level, Component, ClusterID, TaskID, Query string
-	From, To                                                    time.Time
-	Limit, Offset                                               int
+	TenantID, Scope, Source, Level, Component, ClusterID, TaskID, Query string
+	From, To                                                            time.Time
+	Limit, Offset                                                       int
+}
+
+type ClusterLogCoverage struct {
+	ClusterID       string    `json:"clusterId"`
+	TenantID        string    `json:"tenantId"`
+	Component       string    `json:"component"`
+	CoveredFrom     time.Time `json:"coveredFrom"`
+	CoveredTo       time.Time `json:"coveredTo"`
+	LastCollectedAt time.Time `json:"lastCollectedAt"`
+	LastRequestID   string    `json:"lastRequestId,omitempty"`
+	LastEntryCount  int       `json:"lastEntryCount"`
+	Truncated       bool      `json:"truncated"`
+	UpdatedAt       time.Time `json:"updatedAt"`
+}
+
+type ClusterLogCoverageInput struct {
+	ClusterID, TenantID, Component, RequestID string
+	CoveredFrom, CoveredTo, CollectedAt       time.Time
+	EntryCount                                int
+	Truncated                                 bool
 }
 
 func NewPublicID() string {

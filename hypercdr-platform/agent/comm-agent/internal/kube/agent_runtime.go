@@ -10,7 +10,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -100,9 +99,6 @@ func (r *KubernetesAgentRuntime) PodImageStatus(ctx context.Context, namespace s
 }
 
 func (r *KubernetesAgentRuntime) CollectComponentLogs(ctx context.Context, namespace, component string, since time.Time, tailLines int64) ([]ComponentLogEntry, bool, error) {
-	if err := r.ensureLogCollectionPermission(ctx); err != nil {
-		return nil, false, fmt.Errorf("ensure log collection permission: %w", err)
-	}
 	containers := map[string]string{"comm-agent": "comm-agent", "velero": "velero", "node-agent": "node-agent"}
 	container, ok := containers[component]
 	if !ok {
@@ -155,21 +151,6 @@ func (r *KubernetesAgentRuntime) CollectComponentLogs(ctx context.Context, names
 		}
 	}
 	return result, truncated, nil
-}
-
-func (r *KubernetesAgentRuntime) ensureLogCollectionPermission(ctx context.Context) error {
-	role, err := r.client.RbacV1().ClusterRoles().Get(ctx, "hypercdr-agent", metav1.GetOptions{})
-	if err != nil {
-		return err
-	}
-	for _, rule := range role.Rules {
-		if containsString(rule.APIGroups, "") && containsString(rule.Resources, "pods/log") && containsString(rule.Verbs, "get") {
-			return nil
-		}
-	}
-	role.Rules = append(role.Rules, rbacv1.PolicyRule{APIGroups: []string{""}, Resources: []string{"pods/log"}, Verbs: []string{"get"}})
-	_, err = r.client.RbacV1().ClusterRoles().Update(ctx, role, metav1.UpdateOptions{})
-	return err
 }
 
 func splitKubernetesLogLine(line string) (time.Time, string) {

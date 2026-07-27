@@ -24,6 +24,7 @@ func (r *Router) schedulerLoop() {
 }
 
 func (r *Router) runSchedulerTick(now time.Time) {
+	r.scheduleLogMaintenance(now)
 	if jobs, err := r.store.ListPlatformUpgradeJobs(); err == nil {
 		for _, job := range jobs {
 			if !isTerminalPlatformUpgradeStatus(job.Status) {
