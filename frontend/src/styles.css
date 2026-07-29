@@ -7783,8 +7783,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 
 .hbdr-dr-scope,
 .hbdr-dr-policy,
-.hbdr-dr-storage,
-.hbdr-dr-target {
+.hbdr-dr-storage {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -7794,14 +7793,22 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 }
 
 .hbdr-dr-policy svg,
-.hbdr-dr-storage svg,
-.hbdr-dr-target svg {
+.hbdr-dr-storage svg {
   color: #337ab7;
 }
 
-.hbdr-dr-target-empty {
-  color: #94a3b8 !important;
+.hbdr-dr-pair {
+  display: inline-flex;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  color: inherit;
+  text-align: left;
 }
+.hbdr-dr-pair-route { display: flex; min-width: 0; align-items: center; gap: 5px; color: #334a5f; }
+.hbdr-dr-pair-route strong { overflow: hidden; max-width: 94px; font-size: 12px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+.hbdr-dr-pair-route svg { flex: 0 0 auto; color: #7f9bb3; }
+.hbdr-dr-pair-empty .hbdr-dr-pair-route { color: #94a3b8; }
 
 .premium-app.hbdr-workspace .premium-content .hbdr-dr-scope {
   justify-self: start !important;

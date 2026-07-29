@@ -76,6 +76,8 @@ func (r *KubernetesClusterReader) ReadCluster(ctx context.Context) (ClusterState
 		return ClusterState{}, err
 	}
 	state.KubeVersion = version.GitVersion
+	state.APIResources = r.readAPIResources()
+	state.Capabilities, state.CapabilitiesComplete = r.readNamedCapabilities(ctx)
 
 	nodes, err := r.clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -111,6 +113,172 @@ func (r *KubernetesClusterReader) ReadCluster(ctx context.Context) (ClusterState
 	}
 	state.Velero = r.readVeleroState(ctx)
 	return state, nil
+}
+
+func (r *KubernetesClusterReader) readNamedCapabilities(ctx context.Context) ([]NamedCapability, bool) {
+	items := make([]NamedCapability, 0)
+	complete := true
+	if drivers, err := r.clientset.StorageV1().CSIDrivers().List(ctx, metav1.ListOptions{}); err == nil {
+		for _, item := range drivers.Items {
+			items = append(items, NamedCapability{Type: "CSIDriver", Name: item.Name})
+		}
+	} else {
+		complete = false
+	}
+	if classes, err := r.clientset.NetworkingV1().IngressClasses().List(ctx, metav1.ListOptions{}); err == nil {
+		for _, item := range classes.Items {
+			items = append(items, NamedCapability{Type: "IngressClass", Name: item.Name, Driver: item.Spec.Controller})
+		}
+	} else {
+		complete = false
+	}
+	if classes, err := r.clientset.NodeV1().RuntimeClasses().List(ctx, metav1.ListOptions{}); err == nil {
+		for _, item := range classes.Items {
+			items = append(items, NamedCapability{Type: "RuntimeClass", Name: item.Name, Driver: item.Handler})
+		}
+	} else {
+		complete = false
+	}
+	if classes, err := r.clientset.SchedulingV1().PriorityClasses().List(ctx, metav1.ListOptions{}); err == nil {
+		for _, item := range classes.Items {
+			items = append(items, NamedCapability{Type: "PriorityClass", Name: item.Name, Fields: map[string]string{"value": strconv.FormatInt(int64(item.Value), 10)}})
+		}
+	} else {
+		complete = false
+	}
+	items = append(items, r.readDynamicNamedCapabilities(ctx, schema.GroupVersionResource{Group: "snapshot.storage.k8s.io", Version: "v1", Resource: "volumesnapshotclasses"}, "VolumeSnapshotClass", "driver")...)
+	items = append(items, r.readDynamicNamedCapabilities(ctx, schema.GroupVersionResource{Group: "cert-manager.io", Version: "v1", Resource: "clusterissuers"}, "ClusterIssuer", "")...)
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Type != items[j].Type {
+			return items[i].Type < items[j].Type
+		}
+		return items[i].Name < items[j].Name
+	})
+	return items, complete
+}
+
+func (r *KubernetesClusterReader) readDynamicNamedCapabilities(ctx context.Context, gvr schema.GroupVersionResource, capabilityType, driverField string) []NamedCapability {
+	if r.dynamic == nil {
+		return nil
+	}
+	list, err := r.dynamic.Resource(gvr).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil
+	}
+	items := make([]NamedCapability, 0, len(list.Items))
+	for _, item := range list.Items {
+		driver := ""
+		if driverField != "" {
+			driver, _, _ = unstructured.NestedString(item.Object, driverField)
+		}
+		items = append(items, NamedCapability{Type: capabilityType, Name: item.GetName(), Driver: driver})
+	}
+	return items
+}
+
+func (r *KubernetesClusterReader) readAPIResources() []APIResource {
+	if r.discovery == nil {
+		return nil
+	}
+	lists, err := r.discovery.ServerPreferredResources()
+	if err != nil && len(lists) == 0 {
+		return nil
+	}
+	items := make([]APIResource, 0)
+	seen := map[string]bool{}
+	for _, list := range lists {
+		gv, parseErr := schema.ParseGroupVersion(list.GroupVersion)
+		if parseErr != nil {
+			continue
+		}
+		for _, resource := range list.APIResources {
+			// Subresources such as pods/log are not independently restorable.
+			if strings.Contains(resource.Name, "/") {
+				continue
+			}
+			key := gv.Group + "\x00" + gv.Version + "\x00" + resource.Name
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			items = append(items, APIResource{
+				Group: gv.Group, Version: gv.Version, Resource: resource.Name,
+				Kind: resource.Kind, Namespaced: resource.Namespaced,
+			})
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Group != items[j].Group {
+			return items[i].Group < items[j].Group
+		}
+		if items[i].Version != items[j].Version {
+			return items[i].Version < items[j].Version
+		}
+		return items[i].Resource < items[j].Resource
+	})
+	return items
+}
+
+// ReadNamespaceAPIs enumerates only custom resources defined by CRDs and only
+// in the requested namespace. This is used by an explicit DR capability scan,
+// never by the periodic summary upload.
+func (r *KubernetesClusterReader) ReadNamespaceAPIs(ctx context.Context, namespace string) ([]NamespaceAPI, error) {
+	if r.dynamic == nil || namespace == "" {
+		return nil, nil
+	}
+	crds, err := r.dynamic.Resource(schema.GroupVersionResource{
+		Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions",
+	}).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]NamespaceAPI, 0)
+	for _, crd := range crds.Items {
+		scope, _, _ := unstructured.NestedString(crd.Object, "spec", "scope")
+		if scope != "Namespaced" {
+			continue
+		}
+		group, _, _ := unstructured.NestedString(crd.Object, "spec", "group")
+		resource, _, _ := unstructured.NestedString(crd.Object, "spec", "names", "plural")
+		kind, _, _ := unstructured.NestedString(crd.Object, "spec", "names", "kind")
+		versions, _, _ := unstructured.NestedSlice(crd.Object, "spec", "versions")
+		selectedVersion := ""
+		for _, rawVersion := range versions {
+			versionMap, _ := rawVersion.(map[string]any)
+			served, _ := versionMap["served"].(bool)
+			version, _ := versionMap["name"].(string)
+			storage, _ := versionMap["storage"].(bool)
+			if served && version != "" && selectedVersion == "" {
+				selectedVersion = version
+			}
+			if served && storage && version != "" {
+				selectedVersion = version
+				break
+			}
+		}
+		if group == "" || selectedVersion == "" || resource == "" {
+			continue
+		}
+		list, listErr := r.dynamic.Resource(schema.GroupVersionResource{Group: group, Version: selectedVersion, Resource: resource}).Namespace(namespace).List(ctx, metav1.ListOptions{})
+		if listErr != nil {
+			// A version can be served but unavailable through a broken webhook.
+			// API availability is reported separately; do not invent a count.
+			continue
+		}
+		if len(list.Items) > 0 {
+			items = append(items, NamespaceAPI{Namespace: namespace, Group: group, Version: selectedVersion, Resource: resource, Kind: kind, Count: len(list.Items)})
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Group != items[j].Group {
+			return items[i].Group < items[j].Group
+		}
+		if items[i].Version != items[j].Version {
+			return items[i].Version < items[j].Version
+		}
+		return items[i].Resource < items[j].Resource
+	})
+	return items, nil
 }
 
 func (r *KubernetesClusterReader) readNamespacedResources(ctx context.Context, state *ClusterState) error {

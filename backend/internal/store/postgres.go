@@ -1026,6 +1026,11 @@ func applyClusterMetadata(cluster *Cluster, metadataRaw []byte) {
 	var metadata struct {
 		Nodes                      []ClusterNode         `json:"nodes"`
 		StorageClasses             []ClusterStorageClass `json:"storageClasses"`
+		APIResources               []ClusterAPIResource  `json:"apiResources"`
+		NamespaceAPIs              []ClusterNamespaceAPI `json:"namespaceAPIs"`
+		Capabilities               []ClusterCapability   `json:"capabilities"`
+		CapabilitiesCollectedAt    time.Time             `json:"capabilitiesCollectedAt"`
+		CapabilitiesComplete       bool                  `json:"capabilitiesComplete"`
 		AgentImage                 string                `json:"agentImage"`
 		AgentImageID               string                `json:"agentImageId"`
 		AgentImageDigest           string                `json:"agentImageDigest"`
@@ -1045,6 +1050,11 @@ func applyClusterMetadata(cluster *Cluster, metadataRaw []byte) {
 	}
 	cluster.Nodes = metadata.Nodes
 	cluster.StorageClasses = metadata.StorageClasses
+	cluster.APIResources = metadata.APIResources
+	cluster.NamespaceAPIs = metadata.NamespaceAPIs
+	cluster.Capabilities = metadata.Capabilities
+	cluster.CapabilitiesCollectedAt = metadata.CapabilitiesCollectedAt
+	cluster.CapabilitiesComplete = metadata.CapabilitiesComplete
 	cluster.AgentImage = metadata.AgentImage
 	cluster.AgentImageID = metadata.AgentImageID
 	cluster.AgentImageDigest = metadata.AgentImageDigest
@@ -1058,7 +1068,6 @@ func applyClusterMetadata(cluster *Cluster, metadataRaw []byte) {
 	cluster.VeleroNodeAgentReady = metadata.VeleroNodeAgentReady
 	cluster.VeleroNodeAgentImageDigest = metadata.VeleroNodeAgentImageDigest
 	cluster.AgentUpgradeStatus = metadata.AgentUpgradeStatus
-	cluster.AgentUpgradeAvailable = metadata.AgentImageDigest != "" && metadata.LatestAgentImageDigest != "" && metadata.AgentImageDigest != metadata.LatestAgentImageDigest
 }
 
 func (s *PostgresStore) ListApplications(clusterID string) ([]Application, error) {
@@ -1206,16 +1215,19 @@ func (s *PostgresStore) ApplyInventory(input InventoryInput) (Cluster, bool, err
 		    application_count = $6,
 		    connection_status = 'online',
 		    last_seen_at = $7,
-		    metadata = jsonb_set(
-		      jsonb_set(
-		        jsonb_set(coalesce(metadata, '{}'::jsonb), '{inventoryHash}', to_jsonb($8::text), true),
-		        '{nodes}', $9::jsonb, true
-		      ),
-		      '{storageClasses}', $10::jsonb, true
+		    metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object(
+		      'inventoryHash', $8::text,
+		      'nodes', $9::jsonb,
+		      'storageClasses', $10::jsonb,
+		      'apiResources', case when $15 then $11::jsonb else coalesce(metadata->'apiResources', '[]'::jsonb) end,
+		      'namespaceAPIs', case when $15 then $12::jsonb else coalesce(metadata->'namespaceAPIs', '[]'::jsonb) end,
+		      'capabilities', case when $15 then $13::jsonb else coalesce(metadata->'capabilities', '[]'::jsonb) end,
+		      'capabilitiesCollectedAt', case when $15 then to_jsonb($14::timestamptz) else coalesce(metadata->'capabilitiesCollectedAt', 'null'::jsonb) end,
+		      'capabilitiesComplete', case when $15 then to_jsonb($16::boolean) else coalesce(metadata->'capabilitiesComplete', 'false'::jsonb) end
 		    ),
 		    updated_at = $7
 		where id = $1
-	`, input.ClusterID, input.KubeVersion, input.VeleroStatus, input.NodeCount, input.NamespaceCount, len(input.Apps), now, input.Hash, mustJSON(input.Nodes), mustJSON(input.StorageClasses))
+	`, input.ClusterID, input.KubeVersion, input.VeleroStatus, input.NodeCount, input.NamespaceCount, len(input.Apps), now, input.Hash, mustJSON(input.Nodes), mustJSON(input.StorageClasses), mustJSON(input.APIResources), mustJSON(input.NamespaceAPIs), mustJSON(input.Capabilities), input.CollectedAt, input.CapabilityScan, input.CapabilitiesComplete)
 	if err != nil {
 		return Cluster{}, false, err
 	}

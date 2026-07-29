@@ -8,6 +8,7 @@ import (
 )
 
 const schedulerTickInterval = 30 * time.Second
+const componentUpgradeVerificationTimeout = 10 * time.Minute
 
 func (r *Router) startScheduler() {
 	r.schedulerOnce.Do(func() {
@@ -25,6 +26,7 @@ func (r *Router) schedulerLoop() {
 
 func (r *Router) runSchedulerTick(now time.Time) {
 	r.scheduleLogMaintenance(now)
+	r.reconcileComponentUpgradeTimeouts(now)
 	if jobs, err := r.store.ListPlatformUpgradeJobs(); err == nil {
 		for _, job := range jobs {
 			if !isTerminalPlatformUpgradeStatus(job.Status) {
@@ -41,6 +43,51 @@ func (r *Router) runSchedulerTick(now time.Time) {
 	for _, schedule := range due {
 		r.fireProtectionPlanSchedule(schedule, now)
 	}
+}
+
+func (r *Router) reconcileComponentUpgradeTimeouts(now time.Time) {
+	tasks, err := r.store.ListTasks("")
+	if err != nil {
+		r.logger.Warn("failed to reconcile component upgrade timeouts", "error", err)
+		return
+	}
+	for _, task := range tasks {
+		if !componentUpgradeTimedOut(task, now) {
+			continue
+		}
+		component := "Comm Agent"
+		if task.Type == "velero-upgrade" {
+			component = "Velero"
+		}
+		message := component + " did not report the expected running image and version within 10 minutes. Check the workload rollout and image pull status in the managed cluster."
+		if _, _, err := r.store.UpdateTaskStatus(store.TaskStatusInput{
+			TaskID: task.ID, Status: "failed", Progress: task.Progress, MarkDone: true,
+			ErrorCode: "UPGRADE_VERIFICATION_TIMEOUT", ErrorMessage: message,
+		}); err != nil {
+			r.logger.Warn("failed to expire component upgrade task", "task_id", task.ID, "error", err)
+			continue
+		}
+		_ = r.addTaskEventIfChanged(store.TaskEventInput{
+			TaskID: task.ID, Level: "error", Reason: "verification_timeout", Message: message,
+		})
+	}
+}
+
+func componentUpgradeTimedOut(task store.Task, now time.Time) bool {
+	if (task.Type != "agent-upgrade" && task.Type != "velero-upgrade") || !isActiveTaskStatus(task.Status) {
+		return false
+	}
+	started := task.StartedAt
+	if started.IsZero() {
+		started = task.AcceptedAt
+	}
+	if started.IsZero() {
+		started = task.DispatchedAt
+	}
+	if started.IsZero() {
+		started = task.CreatedAt
+	}
+	return !started.IsZero() && !now.Before(started.Add(componentUpgradeVerificationTimeout))
 }
 
 func isTerminalPlatformUpgradeStatus(status string) bool {

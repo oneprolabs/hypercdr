@@ -10,6 +10,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -164,6 +165,9 @@ func splitKubernetesLogLine(line string) (time.Time, string) {
 }
 
 func (r *KubernetesAgentRuntime) UpgradeAgent(ctx context.Context, options AgentUpgradeOptions) error {
+	if err := r.ensureReadinessCollectionPermissions(ctx); err != nil {
+		return fmt.Errorf("update readiness collection permissions: %w", err)
+	}
 	namespace := strings.TrimSpace(options.Namespace)
 	if namespace == "" {
 		namespace = "hypercdr-agent"
@@ -208,6 +212,24 @@ func (r *KubernetesAgentRuntime) UpgradeAgent(ctx context.Context, options Agent
 		return err
 	}
 	_, err = r.client.AppsV1().Deployments(namespace).Patch(ctx, deploymentName, types.StrategicMergePatchType, raw, metav1.PatchOptions{})
+	return err
+}
+
+func (r *KubernetesAgentRuntime) ensureReadinessCollectionPermissions(ctx context.Context) error {
+	role, err := r.client.RbacV1().ClusterRoles().Get(ctx, "hypercdr-agent", metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	required := []rbacv1.PolicyRule{
+		{APIGroups: []string{"storage.k8s.io"}, Resources: []string{"csidrivers"}, Verbs: []string{"get", "list", "watch"}},
+		{APIGroups: []string{"networking.k8s.io"}, Resources: []string{"ingressclasses"}, Verbs: []string{"get", "list", "watch"}},
+		{APIGroups: []string{"node.k8s.io"}, Resources: []string{"runtimeclasses"}, Verbs: []string{"get", "list", "watch"}},
+		{APIGroups: []string{"scheduling.k8s.io"}, Resources: []string{"priorityclasses"}, Verbs: []string{"get", "list", "watch"}},
+		{APIGroups: []string{"snapshot.storage.k8s.io"}, Resources: []string{"volumesnapshotclasses"}, Verbs: []string{"get", "list", "watch"}},
+		{APIGroups: []string{"cert-manager.io"}, Resources: []string{"clusterissuers"}, Verbs: []string{"get", "list", "watch"}},
+	}
+	role.Rules = append(role.Rules, required...)
+	_, err = r.client.RbacV1().ClusterRoles().Update(ctx, role, metav1.UpdateOptions{})
 	return err
 }
 

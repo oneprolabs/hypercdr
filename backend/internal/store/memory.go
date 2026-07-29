@@ -1020,6 +1020,13 @@ func (s *MemoryStore) ApplyInventory(input InventoryInput) (Cluster, bool, error
 	cluster.InventoryHash = input.Hash
 	cluster.Nodes = input.Nodes
 	cluster.StorageClasses = input.StorageClasses
+	if input.CapabilityScan {
+		cluster.APIResources = input.APIResources
+		cluster.NamespaceAPIs = input.NamespaceAPIs
+		cluster.Capabilities = input.Capabilities
+		cluster.CapabilitiesCollectedAt = input.CollectedAt
+		cluster.CapabilitiesComplete = input.CapabilitiesComplete
+	}
 	cluster.LastSeenAt = time.Now().UTC()
 	cluster.ConnectionStatus = "online"
 	s.clusters[input.ClusterID] = cluster

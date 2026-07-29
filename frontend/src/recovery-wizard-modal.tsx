@@ -32,6 +32,7 @@ export type RecoveryWizardConfig = {
   preflightChecks: boolean;
   autoStartValidation: boolean;
   notes: string;
+	forceProceed: boolean;
 };
 
 type RecoveryPoint = {
@@ -79,6 +80,7 @@ type Props = {
   onClose: () => void;
   onSubmit: () => void;
   submitting?: boolean;
+	readinessBlockers?: number;
 };
 
 function sourceMeta(type: RecoveryWizardConfig['sourceType']) {
@@ -165,6 +167,7 @@ export function RecoveryWizardModal(props: Props) {
     onClose,
     onSubmit,
     submitting = false,
+	readinessBlockers = 0,
   } = props;
 
   const currentClusterOption = clusterOptions.find(item => item.name === currentClusterName) || clusterOptions.find(item => item.isCurrent);
@@ -175,7 +178,7 @@ export function RecoveryWizardModal(props: Props) {
   const generatedNamespace = mode === 'drill' ? `${sourceNamespace}-drill` : `${sourceNamespace}-restore`;
   const targetNamespace = namespaceValue(config, sourceNamespace);
   const restoresToOriginalNamespace = config.namespaceMode === 'original' || targetNamespace === sourceNamespace;
-  const submitDisabled = !config.pointId || !config.targetCluster || !targetNamespace.trim() || (restoresToOriginalNamespace && !config.originalNamespaceConfirmed);
+	const submitDisabled = !config.pointId || !config.targetCluster || !targetNamespace.trim() || (restoresToOriginalNamespace && !config.originalNamespaceConfirmed) || (readinessBlockers > 0 && !config.forceProceed);
   const pointsBySource = {
     snapshot: points.filter(point => pointSourceType(point) === 'snapshot'),
     export: points.filter(point => pointSourceType(point) === 'export'),
@@ -437,6 +440,12 @@ export function RecoveryWizardModal(props: Props) {
             </div>
 
             <div className="hbdr-protect-footer">
+			  {readinessBlockers > 0 && (
+				<label className="hbdr-recovery-confirm-check" title={`${readinessBlockers} blocking readiness finding${readinessBlockers === 1 ? '' : 's'}`}>
+				  <input type="checkbox" checked={config.forceProceed} onChange={event => updateConfig({ forceProceed: event.target.checked })} />
+				  <span>I understand the identified risks and want to proceed anyway.</span>
+				</label>
+			  )}
               <button type="button" onClick={onClose} disabled={submitting}>Cancel</button>
               <button
                 type="button"

@@ -358,6 +358,11 @@ type Cluster struct {
 	InventoryHash              string                `json:"inventoryHash,omitempty"`
 	Nodes                      []ClusterNode         `json:"nodes,omitempty"`
 	StorageClasses             []ClusterStorageClass `json:"storageClasses,omitempty"`
+	APIResources               []ClusterAPIResource  `json:"apiResources,omitempty"`
+	NamespaceAPIs              []ClusterNamespaceAPI `json:"namespaceAPIs,omitempty"`
+	Capabilities               []ClusterCapability   `json:"capabilities,omitempty"`
+	CapabilitiesCollectedAt    time.Time             `json:"capabilitiesCollectedAt,omitempty"`
+	CapabilitiesComplete       bool                  `json:"capabilitiesComplete,omitempty"`
 	Role                       string                `json:"role"`
 	IsDefault                  bool                  `json:"isDefault"`
 	RegisteredAt               time.Time             `json:"registeredAt"`
@@ -390,6 +395,30 @@ type ClusterStorageClass struct {
 	AllowVolumeExpansion string `json:"allowVolumeExpansion"`
 	Default              bool   `json:"default,omitempty"`
 	AgeSeconds           int64  `json:"ageSeconds,omitempty"`
+}
+
+type ClusterAPIResource struct {
+	Group      string `json:"group,omitempty"`
+	Version    string `json:"version"`
+	Resource   string `json:"resource"`
+	Kind       string `json:"kind"`
+	Namespaced bool   `json:"namespaced"`
+}
+
+type ClusterNamespaceAPI struct {
+	Namespace string `json:"namespace"`
+	Group     string `json:"group"`
+	Version   string `json:"version"`
+	Resource  string `json:"resource"`
+	Kind      string `json:"kind"`
+	Count     int    `json:"count"`
+}
+
+type ClusterCapability struct {
+	Type   string            `json:"type"`
+	Name   string            `json:"name"`
+	Driver string            `json:"driver,omitempty"`
+	Fields map[string]string `json:"fields,omitempty"`
 }
 
 type ClusterUpdateInput struct {
@@ -470,16 +499,21 @@ type HeartbeatInput struct {
 }
 
 type InventoryInput struct {
-	ClusterID      string
-	KubeVersion    string
-	VeleroStatus   string
-	NodeCount      int
-	NamespaceCount int
-	Nodes          []ClusterNode
-	StorageClasses []ClusterStorageClass
-	Apps           []Application
-	CollectedAt    time.Time
-	Hash           string
+	ClusterID            string
+	KubeVersion          string
+	VeleroStatus         string
+	NodeCount            int
+	NamespaceCount       int
+	Nodes                []ClusterNode
+	StorageClasses       []ClusterStorageClass
+	APIResources         []ClusterAPIResource
+	NamespaceAPIs        []ClusterNamespaceAPI
+	Capabilities         []ClusterCapability
+	CapabilityScan       bool
+	CapabilitiesComplete bool
+	Apps                 []Application
+	CollectedAt          time.Time
+	Hash                 string
 }
 
 type StorageRepository struct {

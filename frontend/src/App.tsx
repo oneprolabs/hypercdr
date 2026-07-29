@@ -721,7 +721,7 @@ type ApiComponentDiscovery = {
 type ApiPlatformVersion = { version: string; gitCommit: string; buildTime: string; databaseSchemaVersion: string; deployMode: string };
 type ApiPlatformRelease = { id: string; version: string; apiImage: string; apiImageDigest: string; frontendImage: string; frontendImageDigest: string; databaseSchemaVersion: string; minimumAgentVersion?: string; rollbackSupported: boolean; releaseNotes?: string; status: 'candidate'|'active'|'retired'; publishedBy?: string; publishedAt?: string; createdAt: string };
 type ApiPlatformUpgrade = { id:string; releaseId:string; fromVersion:string; targetVersion:string; status:string; step:string; progress:number; errorMessage?:string; backupPath?:string; createdAt:string; completedAt?:string };
-type ApiPlatformPrecheck = { passed:boolean; currentVersion:string; checks:Array<{id:string;label:string;passed:boolean;detail?:unknown}> };
+type ApiPlatformPrecheck = { passed:boolean; currentVersion:string; checks:Array<{id:string;label:string;passed:boolean;blocking?:boolean;detail?:unknown}> };
 type ApiDiagnosticLog = { id:string; tenantId?:string; scope:'tenant'|'system'; level:'debug'|'info'|'warning'|'error'; component:string; operation?:string; message:string; clusterId?:string; taskId?:string; commandId?:string; requestId?:string; errorCode?:string; status?:string; durationMs?:number; details?:Record<string,unknown>; eventAt:string; createdAt:string };
 
 type ClusterTaskLog = {
@@ -5722,7 +5722,7 @@ function ApplicationDrPage(props: {
     { value: 'scope', label: 'Scope' },
     { value: 'policy', label: 'Policy' },
     { value: 'repository', label: 'Repository' },
-    { value: 'targetCluster', label: 'Target Cluster' },
+    { value: 'targetCluster', label: 'DR Pair' },
     { value: 'task', label: 'Sync Status' },
     { value: 'recoveryTask', label: 'Recovery Status' },
     { value: 'tags', label: 'Tags' },
@@ -6309,16 +6309,21 @@ function ApplicationDrPage(props: {
     if (visibleRunColumns.includes('targetCluster')) {
       columns.push({
         id: 'targetCluster',
-        header: 'Target Cluster',
+		header: 'DR Pair',
         accessorFn: app => appSortValue(app, 'targetCluster'),
-        size: 150,
-        minSize: 140,
-        maxSize: 300,
+        size: 260,
+        minSize: 240,
+        maxSize: 360,
         cell: info => {
           const target = info.row.original.targetCluster;
-          return <span className={`hbdr-dr-target ${target ? '' : 'hbdr-dr-target-empty'}`}><Server size={15} />{target || 'Backup only'}</span>;
+		  const source = clusters.find(cluster => cluster.id === info.row.original.clusterId)?.name || currentCluster?.name || 'Source';
+		  return (
+			<div className={`hbdr-dr-pair ${target ? '' : 'hbdr-dr-pair-empty'}`} title={`${source} → ${target || 'Not configured'}`}>
+			  <span className="hbdr-dr-pair-route"><strong title={source}>{source}</strong><ChevronRight size={13} /><strong title={target || 'Not configured'}>{target || 'Not configured'}</strong></span>
+			</div>
+		  );
         },
-        meta: { title: app => app.targetCluster || 'Backup only' },
+		meta: { title: app => app.targetCluster ? `DR pair target: ${app.targetCluster}` : 'Target cluster is not configured' },
       });
     }
     if (visibleRunColumns.includes('task')) {
@@ -6459,6 +6464,7 @@ function ApplicationDrPage(props: {
       notes: mode === 'drill'
         ? 'Validate service startup, storage attachment, and application smoke test after recovery.'
         : 'Confirm routing cutover, service dependencies, and production freeze before takeover.',
+	  forceProceed: false,
     };
   };
   const openRestoreAction = (mode: 'drill' | 'takeover') => {
@@ -6527,6 +6533,7 @@ function ApplicationDrPage(props: {
           transformPreset: action.config.transformPreset,
           storageProfileMode: action.config.storageProfileMode,
           alternateProfileId: action.config.alternateProfileId,
+		  forceProceed: action.config.forceProceed,
       });
       setLiveRecoveryTasks(prev => ({ ...prev, [action.app.name]: createdTask }));
       setSubmittingRecoveryTasks(prev => ({ ...prev, [action.app.name]: createdTask }));
@@ -7122,6 +7129,15 @@ function ApplicationDrPage(props: {
       await Promise.all(targetAppMeta.map(meta =>
         apiPatch(`/api/v1/applications/${meta.apiId}`, { protectionStatus: 'protected' })
       ));
+	  // Capability evidence is collected on demand after DR configuration.
+	  // Periodic inventory intentionally does not upload cluster-wide API data.
+	  await Promise.allSettled(targetAppMeta.flatMap(meta => {
+		const requests: Promise<unknown>[] = [apiPost(`/api/v1/clusters/${currentClusterId}/inventory/request`, { scope: 'capabilities', namespace: meta.name, includeDetails: true, reason: 'dr_configuration' })];
+		if (targetCluster?.id && targetCluster.id !== currentClusterId) {
+		  requests.push(apiPost(`/api/v1/clusters/${targetCluster.id}/inventory/request`, { scope: 'capabilities', namespace: meta.name, includeDetails: true, reason: 'dr_configuration' }));
+		}
+		return requests;
+	  }));
       const selectedPolicy = policies.find(policy => policy.id === policyId);
       const selectedStorage = storage.find(repo => repo.id === protectConfig.storageId);
       const selectedTarget = targetCluster || clusters.find(cluster => cluster.id === currentClusterId);
@@ -7675,7 +7691,7 @@ function ApplicationDrPage(props: {
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
+	  <AnimatePresence>
         {tagAction && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-slate-900/45 backdrop-blur-sm" onClick={() => setTagAction(null)} />
@@ -7776,6 +7792,7 @@ function ApplicationDrPage(props: {
             onClose={() => setRestoreAction(null)}
             onSubmit={confirmRestoreAction}
             submitting={recoverySubmitting}
+			readinessBlockers={0}
           />
         )}
       </AnimatePresence>
@@ -8034,8 +8051,8 @@ function ApplicationDrPage(props: {
                             {storageUsage.label && <em>{storageUsage.label}</em>}
                           </div>
                           <div className="hbdr-app-detail-config-item">
-                            <p>Target Cluster</p>
-                            <strong title={selectedDetailApp.targetCluster || 'Backup only'}>{selectedDetailApp.targetCluster || 'Backup only'}</strong>
+                            <p>DR Pair</p>
+                            <strong title={`${currentCluster?.name || 'Source'} → ${selectedDetailApp.targetCluster || 'Not configured'}`}>{currentCluster?.name || 'Source'} → {selectedDetailApp.targetCluster || 'Not configured'}</strong>
                           </div>
                           <div className="hbdr-app-detail-config-item">
                             <p>Policy</p>
@@ -11606,6 +11623,7 @@ function RealRestorePointPage({
       notes: mode === 'drill'
         ? 'Validate service startup, storage attachment, and namespace isolation after recovery.'
         : 'Confirm traffic cutover and production freeze before takeover.',
+	  forceProceed: false,
     };
   };
   const startRestoreAction = (mode: 'drill' | 'takeover') => {
@@ -12108,6 +12126,7 @@ function RealRestorePointPage({
                 transformPreset: action.config.transformPreset,
                 storageProfileMode: action.config.storageProfileMode,
                 alternateProfileId: action.config.alternateProfileId,
+				forceProceed: action.config.forceProceed,
               });
               setTasks(prev => [createdTask, ...prev.filter(task => task.id !== createdTask.id)]);
               setRestoreAction(null);
@@ -12672,6 +12691,7 @@ function RestorePointPage({ openDr, toast }: { openDr: () => void; toast: (msg: 
       notes: mode === 'drill'
         ? 'Validate service startup, storage attachment, and namespace isolation after recovery.'
         : 'Confirm traffic cutover and production freeze before takeover.',
+	  forceProceed: false,
     };
   };
   const startRestoreAction = (mode: 'drill' | 'takeover') => {
@@ -14669,8 +14689,6 @@ function UpgradeManagementPage({ isAdmin, toast, refreshPlatformData }: { isAdmi
   const [platformReleases, setPlatformReleases] = useState<ApiPlatformRelease[]>([]);
   const [platformUpgrades, setPlatformUpgrades] = useState<ApiPlatformUpgrade[]>([]);
   const [platformVersions, setPlatformVersions] = useState<string[]>([]);
-  const [platformTarget, setPlatformTarget] = useState<ApiPlatformRelease | null>(null);
-  const [platformPrecheck, setPlatformPrecheck] = useState<ApiPlatformPrecheck | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const load = useCallback(async () => {
@@ -14756,8 +14774,31 @@ function UpgradeManagementPage({ isAdmin, toast, refreshPlatformData }: { isAdmi
   };
 
   const registerPlatformRelease = async (version: string) => { setBusy(`platform-${version}`); try { await apiPost('/api/v1/platform/releases',{version,databaseSchemaVersion:'000009',minimumAgentVersion:'v20260721.4',rollbackSupported:true,releaseNotes:`HyperCDR platform ${version}`});toast(`${version} platform package validated`);await load(); } catch(error){toast(error instanceof Error?error.message:'Platform package validation failed')} finally{setBusy('')} };
-  const preparePlatformUpgrade = async (release: ApiPlatformRelease) => { setBusy(`precheck-${release.id}`); try { const result=await apiGet<ApiPlatformPrecheck>(`/api/v1/platform/upgrades/precheck?releaseId=${release.id}`);setPlatformPrecheck(result);setPlatformTarget(release); } catch(error){toast(error instanceof Error?error.message:'Pre-check failed')} finally{setBusy('')} };
-  const startPlatformUpgrade = async () => { if(!platformTarget)return;setBusy(`upgrade-${platformTarget.id}`);try{await apiPost('/api/v1/platform/upgrades',{releaseId:platformTarget.id});toast('Platform upgrade task created. The external upgrader continues during API restart.');setPlatformTarget(null);setPlatformPrecheck(null);await load()}catch(error){toast(error instanceof Error?error.message:'Platform upgrade could not start')}finally{setBusy('')} };
+  const startPlatformUpgrade = async (release: ApiPlatformRelease) => {
+    setBusy(`upgrade-${release.id}`);
+    try {
+      const precheck = await apiGet<ApiPlatformPrecheck>(`/api/v1/platform/upgrades/precheck?releaseId=${release.id}`);
+      const blocked = precheck.checks.filter(check => !check.passed && check.blocking !== false);
+      if (blocked.length > 0) {
+        const message = blocked.map(check => {
+          if (check.id === 'tasks') return `Upgrade blocked: ${String(check.detail ?? 0)} active DR task(s). Stop them or wait for completion, then retry.`;
+          if (check.id === 'release') return 'Upgrade blocked: the target release is not registered.';
+          if (check.id === 'mode') return 'Upgrade blocked: in-place upgrade requires formal deployment mode.';
+          if (check.id === 'version') return 'Upgrade blocked: select a version different from the running version.';
+          return `Upgrade blocked: ${check.label}.`;
+        }).join(' ');
+        toast(message);
+        return;
+      }
+      await apiPost('/api/v1/platform/upgrades', { releaseId: release.id });
+      toast(`Upgrading the platform to ${release.version}. Management services may be briefly unavailable.`);
+      await load();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Platform upgrade could not start');
+    } finally {
+      setBusy('');
+    }
+  };
 
   const componentPanel = (component: 'comm-agent' | 'velero', title: string) => {
     const items = releases.filter(item => item.component === component);
@@ -14826,7 +14867,7 @@ function UpgradeManagementPage({ isAdmin, toast, refreshPlatformData }: { isAdmi
           {activePlatformUpgrade
             ? <span className="justify-self-start rounded-full bg-blue-50 px-3 py-1.5 text-[10px] font-black text-blue-700 md:justify-self-end">Upgrading...</span>
             : isAdmin && latestPlatformRelease && platformUpdateAvailable
-              ? <button type="button" disabled={busy===`precheck-${latestPlatformRelease.id}`} onClick={()=>void preparePlatformUpgrade(latestPlatformRelease)} className="justify-self-start rounded bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50 md:justify-self-end">{busy===`precheck-${latestPlatformRelease.id}` ? 'Checking...' : 'Upgrade'}</button>
+              ? <button type="button" disabled={busy===`upgrade-${latestPlatformRelease.id}`} onClick={()=>void startPlatformUpgrade(latestPlatformRelease)} className="justify-self-start rounded bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50 md:justify-self-end">{busy===`upgrade-${latestPlatformRelease.id}` ? 'Starting...' : 'Upgrade'}</button>
               : <span className="justify-self-start rounded-full bg-emerald-50 px-3 py-1.5 text-[10px] font-black text-emerald-700 md:justify-self-end">Up to date</span>}
         </div>
         {activePlatformUpgrade && <div className="border-t border-slate-100 px-5 py-4"><div className="flex items-center justify-between text-xs"><strong>{activePlatformUpgrade.fromVersion} → {activePlatformUpgrade.targetVersion}</strong><span className="text-slate-500">{activePlatformUpgrade.progress}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-blue-600 transition-all" style={{width:`${activePlatformUpgrade.progress}%`}} /></div><p className="mt-2 text-xs text-slate-500">{activePlatformUpgrade.step}</p></div>}
@@ -14840,7 +14881,6 @@ function UpgradeManagementPage({ isAdmin, toast, refreshPlatformData }: { isAdmi
       <AnimatePresence>{publishTarget && <ModalFrame title="Publish Target Release" subtitle="This changes the upgrade target immediately but never upgrades clusters automatically." icon={<ShieldCheck size={18} />} onClose={() => setPublishTarget(null)}>
         <div className="space-y-4"><div className="rounded border border-blue-100 bg-blue-50 p-4"><strong className="text-sm text-blue-900">{publishTarget.component} · {publishTarget.version}</strong><p className="mt-1 break-all text-xs text-blue-700">{publishTarget.image}</p><p className="mt-2 font-mono text-[10px] text-blue-500">sha256:{shortDigest(publishTarget.imageDigest)}</p></div><p className="text-xs leading-5 text-slate-600">Eligible clusters will display Update after publication. Users must confirm each cluster upgrade. Existing tasks keep their original target snapshot.</p><div className="flex justify-end gap-2"><button onClick={() => setPublishTarget(null)} className="rounded px-4 py-2 text-xs font-bold text-slate-500">Cancel</button><button disabled={busy === publishTarget.id} onClick={() => void publish()} className="rounded bg-blue-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{busy === publishTarget.id ? 'Publishing...' : 'Publish Target'}</button></div></div>
       </ModalFrame>}</AnimatePresence>
-      <AnimatePresence>{platformTarget&&platformPrecheck&&<ModalFrame title="Confirm Platform Upgrade" subtitle={`${platformVersion?.version || 'current'} → ${platformTarget.version}`} icon={<Upload size={18}/>} onClose={()=>{setPlatformTarget(null);setPlatformPrecheck(null)}}><div className="space-y-4"><div className={`rounded-lg border p-4 ${platformPrecheck.passed?'border-emerald-100 bg-emerald-50':'border-rose-100 bg-rose-50'}`}><strong className={`text-sm ${platformPrecheck.passed?'text-emerald-800':'text-rose-800'}`}>{platformPrecheck.passed?'Ready to upgrade':'Upgrade is not available'}</strong><p className={`mt-1 text-xs leading-5 ${platformPrecheck.passed?'text-emerald-700':'text-rose-700'}`}>{platformPrecheck.passed?'The system check passed. Management services may be briefly unavailable during the upgrade.':platformPrecheck.checks.filter(check=>!check.passed).map(check=>check.label).join(' · ')}</p></div><p className="text-xs leading-5 text-slate-500">The system creates a database backup before switching versions. Cluster protection data is not changed.</p><div className="flex justify-end gap-2"><button onClick={()=>{setPlatformTarget(null);setPlatformPrecheck(null)}} className="rounded px-4 py-2 text-xs font-bold text-slate-500">Cancel</button><button disabled={!platformPrecheck.passed||busy===`upgrade-${platformTarget.id}`} onClick={()=>void startPlatformUpgrade()} className="rounded bg-indigo-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-40">Start Upgrade</button></div></div></ModalFrame>}</AnimatePresence>
     </motion.div>
   );
 }

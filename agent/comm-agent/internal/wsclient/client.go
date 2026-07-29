@@ -404,7 +404,17 @@ func inferLogLevel(message string) string {
 }
 
 func (c *Client) handleInventoryRequest(request protocol.Message[protocol.InventoryRequestPayload]) {
-	snapshot, err := c.collector.Collect()
+	var snapshot inventory.Snapshot
+	var err error
+	if request.Payload.Scope == "capabilities" {
+		if collector, ok := c.collector.(inventory.CapabilityCollector); ok {
+			snapshot, err = collector.CollectCapabilities(request.Payload.Namespace)
+		} else {
+			snapshot, err = c.collector.Collect()
+		}
+	} else {
+		snapshot, err = c.collector.Collect()
+	}
 	if err != nil {
 		if writeErr := c.sendMessageError(request.MessageID, protocol.MessagePlatformInventoryRequest, request.Payload.RequestID, "", "", "INVENTORY_COLLECT_FAILED", err.Error(), true); writeErr != nil {
 			c.logger.Warn("failed to send inventory request error response", "request_id", request.Payload.RequestID, "error", writeErr)
@@ -2878,6 +2888,14 @@ func (c *Client) sendInventory(full bool) error {
 }
 
 func (c *Client) writeInventory(report protocol.InventoryReportPayload) error {
+	// Cluster capabilities are intentionally sent only for an explicit DR
+	// readiness scan. Periodic inventory remains small and does not publish
+	// cluster-wide API discovery data.
+	if report.Scope != "capabilities" {
+		report.APIResources = nil
+		report.NamespaceAPIs = nil
+		report.Capabilities = nil
+	}
 	report.Velero.RecentBackups = c.filterInventoryBackups(report.Velero.RecentBackups)
 	report.AckRequired = false
 	if report.Scope == "" {

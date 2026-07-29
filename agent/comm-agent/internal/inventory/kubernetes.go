@@ -47,10 +47,13 @@ func (c *KubernetesCollector) Collect() (Snapshot, error) {
 			NodeCount:      len(state.Nodes),
 			NamespaceCount: len(state.Namespaces),
 		},
-		Nodes:          buildNodeInventory(state.Nodes),
-		StorageClasses: buildStorageClassInventory(state.StorageClasses),
-		Apps:           buildApplicationInventory(state),
-		Velero:         buildVeleroInventory(state.Velero),
+		Nodes:                buildNodeInventory(state.Nodes),
+		StorageClasses:       buildStorageClassInventory(state.StorageClasses),
+		APIResources:         buildAPIResourceInventory(state.APIResources),
+		Capabilities:         buildNamedCapabilityInventory(state.Capabilities),
+		CapabilitiesComplete: state.CapabilitiesComplete,
+		Apps:                 buildApplicationInventory(state),
+		Velero:               buildVeleroInventory(state.Velero),
 	}
 
 	hash, err := hashReport(report)
@@ -59,6 +62,51 @@ func (c *KubernetesCollector) Collect() (Snapshot, error) {
 	}
 	report.InventoryHash = hash
 	return Snapshot{Report: report, Hash: hash}, nil
+}
+
+func buildNamedCapabilityInventory(capabilities []kube.NamedCapability) []protocol.NamedCapabilityInventory {
+	items := make([]protocol.NamedCapabilityInventory, 0, len(capabilities))
+	for _, capability := range capabilities {
+		items = append(items, protocol.NamedCapabilityInventory{Type: capability.Type, Name: capability.Name, Driver: capability.Driver, Fields: capability.Fields})
+	}
+	return items
+}
+
+func (c *KubernetesCollector) CollectCapabilities(namespace string) (Snapshot, error) {
+	snapshot, err := c.Collect()
+	if err != nil {
+		return Snapshot{}, err
+	}
+	reader, ok := c.reader.(kube.CapabilityReader)
+	if !ok {
+		return snapshot, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	resources, err := reader.ReadNamespaceAPIs(ctx, namespace)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	for _, resource := range resources {
+		snapshot.Report.NamespaceAPIs = append(snapshot.Report.NamespaceAPIs, protocol.NamespaceAPIInventory{
+			Namespace: resource.Namespace, Group: resource.Group, Version: resource.Version,
+			Resource: resource.Resource, Kind: resource.Kind, Count: resource.Count,
+		})
+	}
+	snapshot.Report.Scope = "capabilities"
+	snapshot.Report.Namespace = namespace
+	return snapshot, nil
+}
+
+func buildAPIResourceInventory(resources []kube.APIResource) []protocol.APIResourceInventory {
+	items := make([]protocol.APIResourceInventory, 0, len(resources))
+	for _, resource := range resources {
+		items = append(items, protocol.APIResourceInventory{
+			Group: resource.Group, Version: resource.Version, Resource: resource.Resource,
+			Kind: resource.Kind, Namespaced: resource.Namespaced,
+		})
+	}
+	return items
 }
 
 func buildNodeInventory(nodes []kube.Node) []protocol.NodeInventory {

@@ -16,6 +16,7 @@ type RestoreManifest struct {
 type RestoreManifestSpec struct {
 	BackupName               string                     `json:"backupName"`
 	IncludedNamespaces       []string                   `json:"includedNamespaces,omitempty"`
+	ExcludedResources        []string                   `json:"excludedResources,omitempty"`
 	NamespaceMapping         map[string]string          `json:"namespaceMapping,omitempty"`
 	IncludeClusterResources  bool                       `json:"includeClusterResources"`
 	ExistingResourcePolicy   string                     `json:"existingResourcePolicy,omitempty"`
@@ -81,6 +82,7 @@ func BuildRestoreManifest(input RestoreBuildInput) (RestoreManifest, error) {
 		Spec: RestoreManifestSpec{
 			BackupName:               input.Command.VeleroBackupName,
 			IncludedNamespaces:       sourceNamespaces,
+			ExcludedResources:        input.Command.ExcludedResources,
 			IncludeClusterResources:  input.Command.IncludeClusterScoped,
 			ExistingResourcePolicy:   existingResourcePolicy(input.Command.ConflictPolicy),
 			DefaultVolumesToFsBackup: boolPtr(true),

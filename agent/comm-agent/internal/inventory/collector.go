@@ -19,6 +19,10 @@ type Collector interface {
 	Collect() (Snapshot, error)
 }
 
+type CapabilityCollector interface {
+	CollectCapabilities(namespace string) (Snapshot, error)
+}
+
 type StaticCollector struct {
 	cfg config.Config
 }
@@ -112,6 +116,15 @@ func (c *StaticCollector) Collect() (Snapshot, error) {
 	}
 	report.InventoryHash = hash
 	return Snapshot{Report: report, Hash: hash}, nil
+}
+
+func (c *StaticCollector) CollectCapabilities(namespace string) (Snapshot, error) {
+	snapshot, err := c.Collect()
+	if err == nil {
+		snapshot.Report.Scope = "capabilities"
+		snapshot.Report.Namespace = namespace
+	}
+	return snapshot, err
 }
 
 func hashReport(report protocol.InventoryReportPayload) (string, error) {

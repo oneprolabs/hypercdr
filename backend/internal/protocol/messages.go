@@ -119,21 +119,49 @@ type HeartbeatPayload struct {
 }
 
 type InventoryReportPayload struct {
-	AckRequired    bool                    `json:"ackRequired,omitempty"`
-	AckMessageID   string                  `json:"ackMessageId,omitempty"`
-	AckType        string                  `json:"ackType,omitempty"`
-	RequestID      string                  `json:"requestId,omitempty"`
-	Scope          string                  `json:"scope,omitempty"`
-	Reason         string                  `json:"reason,omitempty"`
-	Namespace      string                  `json:"namespace,omitempty"`
-	Full           bool                    `json:"full"`
-	CollectedAt    time.Time               `json:"collectedAt"`
-	InventoryHash  string                  `json:"inventoryHash"`
-	Cluster        ClusterSummary          `json:"cluster"`
-	Nodes          []NodeInventory         `json:"nodes"`
-	StorageClasses []StorageClassInventory `json:"storageClasses,omitempty"`
-	Apps           []ApplicationInventory  `json:"applications"`
-	Velero         VeleroInventory         `json:"velero"`
+	AckRequired          bool                       `json:"ackRequired,omitempty"`
+	AckMessageID         string                     `json:"ackMessageId,omitempty"`
+	AckType              string                     `json:"ackType,omitempty"`
+	RequestID            string                     `json:"requestId,omitempty"`
+	Scope                string                     `json:"scope,omitempty"`
+	Reason               string                     `json:"reason,omitempty"`
+	Namespace            string                     `json:"namespace,omitempty"`
+	Full                 bool                       `json:"full"`
+	CollectedAt          time.Time                  `json:"collectedAt"`
+	InventoryHash        string                     `json:"inventoryHash"`
+	Cluster              ClusterSummary             `json:"cluster"`
+	Nodes                []NodeInventory            `json:"nodes"`
+	StorageClasses       []StorageClassInventory    `json:"storageClasses,omitempty"`
+	APIResources         []APIResourceInventory     `json:"apiResources,omitempty"`
+	NamespaceAPIs        []NamespaceAPIInventory    `json:"namespaceAPIs,omitempty"`
+	Capabilities         []NamedCapabilityInventory `json:"capabilities,omitempty"`
+	CapabilitiesComplete bool                       `json:"capabilitiesComplete,omitempty"`
+	Apps                 []ApplicationInventory     `json:"applications"`
+	Velero               VeleroInventory            `json:"velero"`
+}
+
+type NamedCapabilityInventory struct {
+	Type   string            `json:"type"`
+	Name   string            `json:"name"`
+	Driver string            `json:"driver,omitempty"`
+	Fields map[string]string `json:"fields,omitempty"`
+}
+
+type NamespaceAPIInventory struct {
+	Namespace string `json:"namespace"`
+	Group     string `json:"group"`
+	Version   string `json:"version"`
+	Resource  string `json:"resource"`
+	Kind      string `json:"kind"`
+	Count     int    `json:"count"`
+}
+
+type APIResourceInventory struct {
+	Group      string `json:"group,omitempty"`
+	Version    string `json:"version"`
+	Resource   string `json:"resource"`
+	Kind       string `json:"kind"`
+	Namespaced bool   `json:"namespaced"`
 }
 
 type NodeInventory struct {
@@ -451,6 +479,7 @@ type RestoreCommand struct {
 	TransformPreset      string            `json:"transformPreset"`
 	StorageProfileMode   string            `json:"storageProfileMode"`
 	AlternateProfileID   string            `json:"alternateProfileId,omitempty"`
+	ExcludedResources    []string          `json:"excludedResources,omitempty"`
 }
 
 type StorageSyncCommand struct {

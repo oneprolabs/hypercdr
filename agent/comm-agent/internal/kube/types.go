@@ -9,6 +9,19 @@ type ClusterReader interface {
 	ReadCluster(ctx context.Context) (ClusterState, error)
 }
 
+type CapabilityReader interface {
+	ReadNamespaceAPIs(ctx context.Context, namespace string) ([]NamespaceAPI, error)
+}
+
+type NamespaceAPI struct {
+	Namespace string
+	Group     string
+	Version   string
+	Resource  string
+	Kind      string
+	Count     int
+}
+
 type VeleroBackupWaiter interface {
 	WaitForVeleroBackup(ctx context.Context, namespace string, name string, timeout time.Duration) error
 }
@@ -18,22 +31,40 @@ type VeleroBackupDeletionWaiter interface {
 }
 
 type ClusterState struct {
-	Name            string
-	KubeVersion     string
-	Nodes           []Node
-	StorageClasses  []StorageClass
-	Namespaces      []Namespace
-	Workloads       []Workload
-	Services        []NamespacedResource
-	Ingresses       []NamespacedResource
-	NetworkPolicies []NamespacedResource
-	ConfigMaps      []NamespacedResource
-	Secrets         []NamespacedResource
-	ServiceAccounts []NamespacedResource
-	PVCs            []PVC
-	OtherResources  []TypedNamespacedResource
-	Velero          VeleroState
-	CollectedAt     time.Time
+	Name                 string
+	KubeVersion          string
+	Nodes                []Node
+	StorageClasses       []StorageClass
+	APIResources         []APIResource
+	Capabilities         []NamedCapability
+	CapabilitiesComplete bool
+	Namespaces           []Namespace
+	Workloads            []Workload
+	Services             []NamespacedResource
+	Ingresses            []NamespacedResource
+	NetworkPolicies      []NamespacedResource
+	ConfigMaps           []NamespacedResource
+	Secrets              []NamespacedResource
+	ServiceAccounts      []NamespacedResource
+	PVCs                 []PVC
+	OtherResources       []TypedNamespacedResource
+	Velero               VeleroState
+	CollectedAt          time.Time
+}
+
+type NamedCapability struct {
+	Type   string
+	Name   string
+	Driver string
+	Fields map[string]string
+}
+
+type APIResource struct {
+	Group      string
+	Version    string
+	Resource   string
+	Kind       string
+	Namespaced bool
 }
 
 type Node struct {

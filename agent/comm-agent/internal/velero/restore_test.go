@@ -140,3 +140,27 @@ func TestBuildRestoreManifestRemovesNodePortForCloneRestore(t *testing.T) {
 		t.Fatalf("service nodePort modifier should be present for clone restores:\n%s", data)
 	}
 }
+
+func TestBuildRestoreManifestDoesNotExcludeNamespacedCRsByDefault(t *testing.T) {
+	manifest, err := BuildRestoreManifest(RestoreBuildInput{
+		TaskID: "task-no-implicit-exclusions", TaskType: "drill",
+		Command: protocol.RestoreCommand{VeleroBackupName: "backup-demo", SourceNamespace: "demo"},
+	})
+	if err != nil {
+		t.Fatalf("BuildRestoreManifest returned error: %v", err)
+	}
+	if len(manifest.Spec.ExcludedResources) != 0 {
+		t.Fatalf("namespaced CRs must not be excluded by default: %v", manifest.Spec.ExcludedResources)
+	}
+}
+
+func TestBuildRestoreManifestUsesOnlyExplicitExclusions(t *testing.T) {
+	want := []string{"backupactions.actions.kio.kasten.io"}
+	manifest, err := BuildRestoreManifest(RestoreBuildInput{TaskID: "task-explicit", TaskType: "drill", Command: protocol.RestoreCommand{VeleroBackupName: "backup-demo", SourceNamespace: "demo", ExcludedResources: want}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Spec.ExcludedResources) != 1 || manifest.Spec.ExcludedResources[0] != want[0] {
+		t.Fatalf("ExcludedResources=%v, want %v", manifest.Spec.ExcludedResources, want)
+	}
+}

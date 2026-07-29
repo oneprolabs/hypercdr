@@ -763,10 +763,11 @@ func (r *Router) platformPrecheck(releaseID string) ([]map[string]any, bool, sto
 			offline++
 		}
 	}
-	checks := []map[string]any{{"id": "release", "label": "Release package is registered", "passed": release.ID != ""}, {"id": "mode", "label": "Formal deployment mode", "passed": r.cfg.DeployMode != "development", "detail": r.cfg.DeployMode}, {"id": "tasks", "label": "No active DR tasks", "passed": activeTasks == 0, "detail": activeTasks}, {"id": "agents", "label": "All registered agents are online", "passed": offline == 0, "detail": offline}, {"id": "version", "label": "Target differs from running version", "passed": release.Version != "" && release.Version != buildinfo.Version}}
+	checks := []map[string]any{{"id": "release", "label": "Release package is registered", "passed": release.ID != "", "blocking": true}, {"id": "mode", "label": "Formal deployment mode", "passed": r.cfg.DeployMode != "development", "detail": r.cfg.DeployMode, "blocking": true}, {"id": "tasks", "label": "No active DR tasks", "passed": activeTasks == 0, "detail": activeTasks, "blocking": true}, {"id": "agents", "label": "Some registered agents are offline", "passed": offline == 0, "detail": offline, "blocking": false}, {"id": "version", "label": "Target differs from running version", "passed": release.Version != "" && release.Version != buildinfo.Version, "blocking": true}}
 	passed := true
 	for _, c := range checks {
-		if ok, _ := c["passed"].(bool); !ok {
+		blocking, _ := c["blocking"].(bool)
+		if ok, _ := c["passed"].(bool); blocking && !ok {
 			passed = false
 		}
 	}
@@ -1868,14 +1869,11 @@ func (r *Router) listClusters(w http.ResponseWriter, req *http.Request) {
 		clusters[i].LatestAgentVersion = latestAgentVersion
 		clusters[i].LatestAgentImage = latestAgentImage
 		clusters[i].LatestAgentImageDigest = latestAgentDigest
-		agentDigestMismatch := clusters[i].AgentImageDigest != "" && latestAgentDigest != "" && clusters[i].AgentImageDigest != latestAgentDigest
-		clusters[i].AgentUpgradeAvailable = upgradeTargetIsNewer(clusters[i].AgentVersion, latestAgentVersion, agentDigestMismatch)
+		clusters[i].AgentUpgradeAvailable = agentUpgradeIsAvailable(clusters[i], agentTarget)
 		clusters[i].LatestVeleroVersion = veleroTarget.Version
 		clusters[i].LatestVeleroImage = latestVeleroImage
 		clusters[i].LatestVeleroImageDigest = latestVeleroDigest
-		veleroRuntimeReported := clusters[i].VeleroImageDigest != "" && clusters[i].VeleroNodeAgentImageDigest != ""
-		veleroDigestMismatch := latestVeleroDigest != "" && veleroRuntimeReported && (clusters[i].VeleroImageDigest != latestVeleroDigest || clusters[i].VeleroNodeAgentImageDigest != latestVeleroDigest)
-		clusters[i].VeleroUpgradeAvailable = upgradeTargetIsNewer(clusters[i].VeleroVersion, veleroTarget.Version, veleroDigestMismatch)
+		clusters[i].VeleroUpgradeAvailable = veleroUpgradeIsAvailable(clusters[i], veleroTarget)
 		for _, task := range upgradeTasks {
 			if task.ClusterID != clusters[i].ID || isTerminalTaskStatus(task.Status) {
 				continue
@@ -1907,6 +1905,20 @@ func upgradeTargetIsNewer(currentVersion, targetVersion string, digestMismatch b
 		return digestMismatch
 	}
 	return comparison > 0 || comparison == 0 && digestMismatch
+}
+
+func agentUpgradeIsAvailable(cluster store.Cluster, target store.ComponentRelease) bool {
+	currentImage := strings.TrimSpace(cluster.AgentImage)
+	targetImage := strings.TrimSpace(target.Image)
+	imageMismatch := currentImage != "" && targetImage != "" && currentImage != targetImage
+	return upgradeTargetIsNewer(cluster.AgentVersion, target.Version, imageMismatch)
+}
+
+func veleroUpgradeIsAvailable(cluster store.Cluster, target store.ComponentRelease) bool {
+	currentImage := strings.TrimSpace(cluster.VeleroImage)
+	targetImage := strings.TrimSpace(target.Image)
+	imageMismatch := currentImage != "" && targetImage != "" && currentImage != targetImage
+	return upgradeTargetIsNewer(cluster.VeleroVersion, target.Version, imageMismatch)
 }
 
 func compareNumericVersions(left, right string) (int, bool) {
@@ -1960,6 +1972,25 @@ func isTerminalTaskStatus(status string) bool {
 	}
 }
 
+func agentUpgradeTargetMatches(cluster store.Cluster, expectedImage, expectedVersion, expectedDigest string) bool {
+	expectedImage = strings.TrimSpace(expectedImage)
+	expectedVersion = strings.TrimSpace(expectedVersion)
+	expectedDigest = strings.TrimSpace(expectedDigest)
+
+	// A registry manifest digest and the runtime image ID reported by Kubernetes
+	// are both valid sha256 values, but they identify different objects and are
+	// not guaranteed to be equal. Prefer the immutable upgrade identity carried
+	// by the running agent itself: its configured image and build version.
+	identityMatches := expectedImage != "" && strings.TrimSpace(cluster.AgentImage) == expectedImage &&
+		(expectedVersion == "" || strings.TrimSpace(cluster.AgentVersion) == expectedVersion)
+	digestMatches := expectedDigest != "" && strings.TrimSpace(cluster.AgentImageDigest) == expectedDigest
+	hasRuntimeIdentity := strings.TrimSpace(cluster.AgentImage) != "" && (expectedVersion == "" || strings.TrimSpace(cluster.AgentVersion) != "")
+	if hasRuntimeIdentity {
+		return identityMatches
+	}
+	return digestMatches
+}
+
 func (r *Router) completeAgentUpgradeAfterHeartbeat(cluster store.Cluster) {
 	tasks, err := r.store.ListTasks(cluster.ID)
 	if err != nil {
@@ -1973,9 +2004,7 @@ func (r *Router) completeAgentUpgradeAfterHeartbeat(cluster store.Cluster) {
 		expectedDigest := strings.TrimSpace(stringPayload(task.Payload, "expectedDigest"))
 		expectedImage := strings.TrimSpace(stringPayload(task.Payload, "image"))
 		expectedVersion := strings.TrimSpace(stringPayload(task.Payload, "version"))
-		digestMatches := expectedDigest != "" && strings.TrimSpace(cluster.AgentImageDigest) == expectedDigest
-		identityMatches := expectedDigest == "" && expectedImage != "" && cluster.AgentImage == expectedImage && (expectedVersion == "" || cluster.AgentVersion == expectedVersion)
-		if !digestMatches && !identityMatches {
+		if !agentUpgradeTargetMatches(cluster, expectedImage, expectedVersion, expectedDigest) {
 			continue
 		}
 		if _, _, err := r.store.UpdateTaskStatus(store.TaskStatusInput{
@@ -1986,7 +2015,7 @@ func (r *Router) completeAgentUpgradeAfterHeartbeat(cluster store.Cluster) {
 		}
 		_ = r.addTaskEventIfChanged(store.TaskEventInput{
 			TaskID: task.ID, Level: "info", Reason: "completed",
-			Message: "new agent reconnected and reported the expected image digest",
+			Message: "new agent reconnected and reported the expected image and version",
 			Payload: map[string]any{"image": cluster.AgentImage, "digest": cluster.AgentImageDigest, "version": cluster.AgentVersion},
 		})
 	}
@@ -2001,13 +2030,20 @@ func (r *Router) completeVeleroUpgradeAfterHeartbeat(cluster store.Cluster) {
 		if task.Type != "velero-upgrade" || isTerminalTaskStatus(task.Status) {
 			continue
 		}
-		expected := strings.TrimSpace(stringPayload(task.Payload, "expectedDigest"))
+		expectedDigest := strings.TrimSpace(stringPayload(task.Payload, "expectedDigest"))
+		expectedImage := strings.TrimSpace(stringPayload(task.Payload, "image"))
+		expectedVersion := strings.TrimSpace(stringPayload(task.Payload, "version"))
 		allNodesReady := cluster.VeleroNodeAgentDesired > 0 && cluster.VeleroNodeAgentReady == cluster.VeleroNodeAgentDesired
-		if expected == "" || cluster.VeleroImageDigest != expected || cluster.VeleroNodeAgentImageDigest != expected || !cluster.VeleroServerReady || !allNodesReady {
+		identityMatches := expectedImage != "" && strings.TrimSpace(cluster.VeleroImage) == expectedImage &&
+			(expectedVersion == "" || strings.TrimSpace(cluster.VeleroVersion) == expectedVersion)
+		digestMatches := expectedDigest != "" && cluster.VeleroImageDigest == expectedDigest && cluster.VeleroNodeAgentImageDigest == expectedDigest
+		hasRuntimeIdentity := strings.TrimSpace(cluster.VeleroImage) != "" && (expectedVersion == "" || strings.TrimSpace(cluster.VeleroVersion) != "")
+		verified := identityMatches || !hasRuntimeIdentity && digestMatches
+		if !verified || !cluster.VeleroServerReady || !allNodesReady {
 			continue
 		}
 		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "succeeded", Progress: 100, MarkDone: true})
-		_ = r.addTaskEventIfChanged(store.TaskEventInput{TaskID: task.ID, Level: "info", Reason: "completed", Message: "velero server and all scheduled node agents report the expected image digest"})
+		_ = r.addTaskEventIfChanged(store.TaskEventInput{TaskID: task.ID, Level: "info", Reason: "completed", Message: "velero server and all scheduled node agents report the expected image and version"})
 	}
 }
 
@@ -2034,23 +2070,53 @@ func (r *Router) resolveImageDigest(ctx context.Context, image string) (string, 
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}, // nolint:gosec -- lab Harbor commonly uses an internal CA.
 	}
 	manifestURL := fmt.Sprintf("https://%s/v2/%s/manifests/%s", registry, repository, reference)
-	accept := "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.index.v1+json"
-	manifestResp, err := registryRequest(ctx, client, http.MethodHead, manifestURL, repository, accept)
+	digest, err := resolveRegistryManifestDigest(ctx, client, manifestURL, repository)
 	if err != nil {
 		return "", err
-	}
-	defer manifestResp.Body.Close()
-	if manifestResp.StatusCode >= 300 {
-		return "", fmt.Errorf("registry manifest request failed: %s", manifestResp.Status)
-	}
-	digest := strings.TrimSpace(manifestResp.Header.Get("Docker-Content-Digest"))
-	if digest == "" {
-		return "", errors.New("registry manifest digest is empty")
 	}
 	r.imageDigestMu.Lock()
 	r.imageDigests[image] = imageDigestCacheEntry{Digest: digest, ExpiresAt: now.Add(imageDigestTTL)}
 	r.imageDigestMu.Unlock()
 	return digest, nil
+}
+
+func resolveRegistryManifestDigest(ctx context.Context, client *http.Client, manifestURL, repository string) (string, error) {
+	// Do not offer index and single-manifest media types in one request. Some
+	// registries negotiate a translated Docker representation when they are
+	// mixed, so the same immutable OCI index can receive different header
+	// digests between candidate registration and activation.
+	type manifestMediaGroup struct {
+		accept  string
+		allowed []string
+	}
+	acceptGroups := []manifestMediaGroup{
+		{
+			accept:  "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json",
+			allowed: []string{"application/vnd.oci.image.index.v1+json", "application/vnd.docker.distribution.manifest.list.v2+json"},
+		},
+		{
+			accept:  "application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json",
+			allowed: []string{"application/vnd.oci.image.manifest.v1+json", "application/vnd.docker.distribution.manifest.v2+json"},
+		},
+	}
+	var lastStatus string
+	for _, group := range acceptGroups {
+		manifestResp, err := registryRequest(ctx, client, http.MethodHead, manifestURL, repository, group.accept)
+		if err != nil {
+			return "", err
+		}
+		lastStatus = manifestResp.Status
+		digest := strings.TrimSpace(manifestResp.Header.Get("Docker-Content-Digest"))
+		contentType := strings.TrimSpace(strings.Split(manifestResp.Header.Get("Content-Type"), ";")[0])
+		_ = manifestResp.Body.Close()
+		if manifestResp.StatusCode < http.StatusMultipleChoices && digest != "" && slices.Contains(group.allowed, contentType) {
+			return digest, nil
+		}
+	}
+	if lastStatus != "" {
+		return "", fmt.Errorf("registry manifest request failed: %s", lastStatus)
+	}
+	return "", errors.New("registry manifest digest is empty")
 }
 
 var registryAuthParameterPattern = regexp.MustCompile(`([A-Za-z][A-Za-z0-9_-]*)="([^"]*)"`)
@@ -2348,7 +2414,7 @@ func (r *Router) getClusterInventoryRequest(w http.ResponseWriter, req *http.Req
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "inventory_request_not_found"})
 		return
 	}
-	if status.Status == "pending" && time.Since(status.CreatedAt) > 20*time.Second {
+	if status.Status == "pending" && time.Since(status.CreatedAt) > 60*time.Second {
 		status.Status = "timeout"
 		status.ErrorCode = "INVENTORY_REQUEST_TIMEOUT"
 		status.Message = "agent did not respond before timeout"
@@ -2787,7 +2853,7 @@ func (r *Router) upgradeClusterAgent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	for _, cluster := range clusters {
-		if cluster.ID == clusterID && cluster.AgentImageDigest != "" && cluster.AgentImageDigest == targetDigest {
+		if cluster.ID == clusterID && agentUpgradeTargetMatches(cluster, targetImage, target.Version, targetDigest) {
 			writeJSON(w, http.StatusConflict, map[string]any{"error": "agent_already_current", "message": "Comm Agent already uses the target image."})
 			return
 		}
@@ -2893,7 +2959,9 @@ func (r *Router) upgradeClusterVelero(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 	targetImage, targetDigest := target.Image, target.ImageDigest
-	if cluster.VeleroImageDigest == targetDigest && cluster.VeleroNodeAgentImageDigest == targetDigest && cluster.VeleroServerReady && cluster.VeleroNodeAgentDesired > 0 && cluster.VeleroNodeAgentReady == cluster.VeleroNodeAgentDesired {
+	veleroIdentityMatches := strings.TrimSpace(cluster.VeleroImage) == targetImage && strings.TrimSpace(cluster.VeleroVersion) == strings.TrimSpace(target.Version)
+	veleroDigestMatches := cluster.VeleroImageDigest == targetDigest && cluster.VeleroNodeAgentImageDigest == targetDigest
+	if (veleroIdentityMatches || veleroDigestMatches) && cluster.VeleroServerReady && cluster.VeleroNodeAgentDesired > 0 && cluster.VeleroNodeAgentReady == cluster.VeleroNodeAgentDesired {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "velero_already_current", "message": "Velero server and all node agents already use the target image."})
 		return
 	}
@@ -4478,6 +4546,7 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 			TransformPreset:      stringPayload(task.Payload, "transformPreset"),
 			StorageProfileMode:   stringPayload(task.Payload, "storageProfileMode"),
 			AlternateProfileID:   stringPayload(task.Payload, "alternateProfileId"),
+			ExcludedResources:    stringSlicePayload(task.Payload, "excludedResources"),
 		}
 	case "unregister":
 		payload.Deadline = time.Now().UTC().Add(10 * time.Minute)
@@ -6535,7 +6604,6 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 			return
 		}
 	}
-
 	commandID := store.NewPublicID()
 	task, err := r.store.CreateTask(store.TaskInput{
 		ClusterID:        body.ClusterID,
@@ -7047,16 +7115,21 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 				})
 			}
 			updated, ok, err := r.store.ApplyInventory(store.InventoryInput{
-				ClusterID:      clusterID,
-				KubeVersion:    inventory.Payload.Cluster.KubeVersion,
-				VeleroStatus:   inventory.Payload.Velero.Status,
-				NodeCount:      inventory.Payload.Cluster.NodeCount,
-				NamespaceCount: inventory.Payload.Cluster.NamespaceCount,
-				Nodes:          mapInventoryNodes(inventory.Payload.Nodes),
-				StorageClasses: mapInventoryStorageClasses(inventory.Payload.StorageClasses),
-				Apps:           apps,
-				CollectedAt:    inventory.Payload.CollectedAt,
-				Hash:           inventory.Payload.InventoryHash,
+				ClusterID:            clusterID,
+				KubeVersion:          inventory.Payload.Cluster.KubeVersion,
+				VeleroStatus:         inventory.Payload.Velero.Status,
+				NodeCount:            inventory.Payload.Cluster.NodeCount,
+				NamespaceCount:       inventory.Payload.Cluster.NamespaceCount,
+				Nodes:                mapInventoryNodes(inventory.Payload.Nodes),
+				StorageClasses:       mapInventoryStorageClasses(inventory.Payload.StorageClasses),
+				APIResources:         mapInventoryAPIResources(inventory.Payload.APIResources),
+				NamespaceAPIs:        mapInventoryNamespaceAPIs(inventory.Payload.NamespaceAPIs),
+				Capabilities:         mapInventoryCapabilities(inventory.Payload.Capabilities),
+				CapabilityScan:       inventory.Payload.Scope == "capabilities",
+				CapabilitiesComplete: inventory.Payload.CapabilitiesComplete,
+				Apps:                 apps,
+				CollectedAt:          inventory.Payload.CollectedAt,
+				Hash:                 inventory.Payload.InventoryHash,
 			})
 			if err != nil {
 				r.logger.Error("failed to apply inventory", "cluster_id", clusterID, "error", err)
@@ -8197,6 +8270,36 @@ func mapInventoryStorageClasses(storageClasses []protocol.StorageClassInventory)
 			Default:              storageClass.Default,
 			AgeSeconds:           storageClass.AgeSeconds,
 		})
+	}
+	return items
+}
+
+func mapInventoryAPIResources(resources []protocol.APIResourceInventory) []store.ClusterAPIResource {
+	items := make([]store.ClusterAPIResource, 0, len(resources))
+	for _, resource := range resources {
+		items = append(items, store.ClusterAPIResource{
+			Group: resource.Group, Version: resource.Version, Resource: resource.Resource,
+			Kind: resource.Kind, Namespaced: resource.Namespaced,
+		})
+	}
+	return items
+}
+
+func mapInventoryNamespaceAPIs(resources []protocol.NamespaceAPIInventory) []store.ClusterNamespaceAPI {
+	items := make([]store.ClusterNamespaceAPI, 0, len(resources))
+	for _, resource := range resources {
+		items = append(items, store.ClusterNamespaceAPI{
+			Namespace: resource.Namespace, Group: resource.Group, Version: resource.Version,
+			Resource: resource.Resource, Kind: resource.Kind, Count: resource.Count,
+		})
+	}
+	return items
+}
+
+func mapInventoryCapabilities(capabilities []protocol.NamedCapabilityInventory) []store.ClusterCapability {
+	items := make([]store.ClusterCapability, 0, len(capabilities))
+	for _, capability := range capabilities {
+		items = append(items, store.ClusterCapability{Type: capability.Type, Name: capability.Name, Driver: capability.Driver, Fields: capability.Fields})
 	}
 	return items
 }
@@ -11466,7 +11569,22 @@ rules:
     resources: ["configmaps"]
     verbs: ["create", "patch", "update"]
   - apiGroups: ["storage.k8s.io"]
-    resources: ["storageclasses"]
+    resources: ["storageclasses", "csidrivers"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingressclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["node.k8s.io"]
+    resources: ["runtimeclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["scheduling.k8s.io"]
+    resources: ["priorityclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["cert-manager.io"]
+    resources: ["clusterissuers"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterroles", "clusterrolebindings"]
