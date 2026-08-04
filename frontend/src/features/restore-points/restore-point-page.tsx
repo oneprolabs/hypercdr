@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { AlertCircle, Check, CheckCircle2, ChevronDown, Clock, DatabaseBackup, Eye, Filter, HardDrive, History, Layers, MoreVertical, Play, RefreshCw, Search, Server, Trash2, X } from 'lucide-react';
-import { RecoveryWizardModal, type RecoveryWizardConfig } from '../../recovery-wizard-modal';
+import { RecoveryWizardModal, type BackupContentResource, type RecoveryWizardConfig } from '../../recovery-wizard-modal';
 import { HyperTable, type HyperTableColumn } from '../../components/table';
 import { SearchBar } from '../../components/search-bar';
 import ListToolbarControls from '../../components/list-toolbar-controls';
@@ -419,6 +419,7 @@ export default function RealRestorePointPage({
     region: cluster.connectionStatus === 'online' ? 'connected' : 'disconnected',
     version: cluster.kubeVersion || 'unknown',
     isCurrent: index === 0,
+    storageClasses: cluster.storageClasses,
   }));
   const repositoryOptions = storageRepos.map(repo => ({
     id: repo.id,
@@ -457,7 +458,16 @@ export default function RealRestorePointPage({
       notes: mode === 'drill'
         ? 'Validate service startup, storage attachment, and namespace isolation after recovery.'
         : 'Confirm traffic cutover and production freeze before takeover.',
-	  forceProceed: false,
+      forceProceed: false,
+      includedResources: [],
+      excludedResources: [],
+      storageClassMappings: {},
+      imageMappings: {},
+      waitForWorkloads: true,
+      runValidation: mode === 'drill',
+      forceStart: false,
+      contentCatalogLoaded: false,
+      persistentDataExpected: false,
     };
   };
   const startRestoreAction = (mode: 'drill' | 'takeover') => {
@@ -902,7 +912,17 @@ export default function RealRestorePointPage({
                 <div className="hbdr-task-detail">
                   <TaskProcessTimeline task={recoveryTaskDetail.task} events={recoveryTaskDetailEvents} />
                   {(isFailedStatus(recoveryTaskDetail.task.status) || taskHasWarning(recoveryTaskDetail.task)) && (
-                    <TaskErrorDetailBlock failure={failure} details={details} />
+                    <TaskErrorDetailBlock failure={failure} details={details} onRetry={isFailedStatus(recoveryTaskDetail.task.status) ? async () => {
+                      try {
+                        const retried = await apiPost<ApiTask>(`/api/v1/tasks/${recoveryTaskDetail.task.id}/retry`, {});
+                        setTasks(prev => [retried, ...prev.filter(task => task.id !== retried.id)]);
+                        setRecoveryTaskDetail(null);
+                        toast('Recovery retry submitted');
+                        void load();
+                      } catch (error) {
+                        toast('Failed to retry recovery: ' + (error instanceof Error ? error.message : 'unknown error'));
+                      }
+                    } : undefined} />
                   )}
                   <TaskFinalResult task={recoveryTaskDetail.task} events={recoveryTaskDetailEvents} />
 
@@ -961,6 +981,15 @@ export default function RealRestorePointPage({
                 storageProfileMode: action.config.storageProfileMode,
                 alternateProfileId: action.config.alternateProfileId,
 				forceProceed: action.config.forceProceed,
+                includedResources: action.config.includedResources,
+                excludedResources: action.config.excludedResources,
+                storageClassMappings: action.config.storageClassMappings,
+                imageMappings: action.config.imageMappings,
+                waitForWorkloads: action.config.waitForWorkloads,
+                runValidation: action.config.runValidation,
+                forceStart: action.config.forceStart,
+                contentCatalogLoaded: action.config.contentCatalogLoaded,
+                persistentDataExpected: action.config.persistentDataExpected,
               });
               setTasks(prev => [createdTask, ...prev.filter(task => task.id !== createdTask.id)]);
               setRestoreAction(null);
@@ -972,6 +1001,7 @@ export default function RealRestorePointPage({
               setRecoverySubmitting(false);
             }
           }}
+          loadContents={restorePointId => apiGet<{ resources: BackupContentResource[]; truncated?: boolean }>(`/api/v1/restore-points/${encodeURIComponent(restorePointId)}/contents`)}
         />
       )}
     </motion.div>

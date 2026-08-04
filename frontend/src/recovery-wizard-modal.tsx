@@ -6,6 +6,7 @@ import {
   Cloud,
   GitBranch,
   Play,
+  RefreshCw,
   ShieldCheck,
   Target,
   X,
@@ -32,7 +33,16 @@ export type RecoveryWizardConfig = {
   preflightChecks: boolean;
   autoStartValidation: boolean;
   notes: string;
-	forceProceed: boolean;
+  forceProceed: boolean;
+  includedResources: string[];
+  excludedResources: string[];
+  storageClassMappings: Record<string, string>;
+  imageMappings: Record<string, string>;
+  waitForWorkloads: boolean;
+  runValidation: boolean;
+  forceStart: boolean;
+  contentCatalogLoaded: boolean;
+  persistentDataExpected: boolean;
 };
 
 type RecoveryPoint = {
@@ -49,6 +59,19 @@ type ClusterOption = {
   region: string;
   version: string;
   isCurrent: boolean;
+  storageClasses?: Array<{ name: string }>;
+};
+
+export type BackupContentResource = {
+  apiVersion: string;
+  kind: string;
+  namespace?: string;
+  name: string;
+  group?: string;
+  resource?: string;
+  clusterScoped: boolean;
+  images?: string[];
+  storageClasses?: string[];
 };
 
 type RepositoryOption = {
@@ -80,7 +103,8 @@ type Props = {
   onClose: () => void;
   onSubmit: () => void;
   submitting?: boolean;
-	readinessBlockers?: number;
+  readinessBlockers?: number;
+  loadContents?: (restorePointId: string) => Promise<{ resources: BackupContentResource[]; truncated?: boolean }>;
 };
 
 function sourceMeta(type: RecoveryWizardConfig['sourceType']) {
@@ -145,9 +169,10 @@ function inferTargetMode(
 
 function targetBehaviorPatch(
   targetMode: RecoveryWizardConfig['targetMode'],
+  namespaceMode: RecoveryWizardConfig['namespaceMode'],
 ): Pick<RecoveryWizardConfig, 'conflictPolicy' | 'useTransforms' | 'transformPreset'> {
   return {
-    conflictPolicy: 'skip',
+    conflictPolicy: namespaceMode === 'generated' ? 'replace' : 'skip',
     useTransforms: targetMode !== 'inPlace',
     transformPreset: targetMode === 'crossCluster' ? 'migration' : targetMode === 'sandbox' ? 'drill' : 'none',
   };
@@ -168,7 +193,14 @@ export function RecoveryWizardModal(props: Props) {
     onSubmit,
     submitting = false,
 	readinessBlockers = 0,
+    loadContents,
   } = props;
+
+  const [advancedOpen, setAdvancedOpen] = React.useState(false);
+  const [contents, setContents] = React.useState<BackupContentResource[]>([]);
+  const [contentsLoading, setContentsLoading] = React.useState(false);
+  const [contentsError, setContentsError] = React.useState('');
+  const [contentsReload, setContentsReload] = React.useState(0);
 
   const currentClusterOption = clusterOptions.find(item => item.name === currentClusterName) || clusterOptions.find(item => item.isCurrent);
   const currentTargetClusterName = currentClusterOption?.name || currentClusterName;
@@ -178,7 +210,11 @@ export function RecoveryWizardModal(props: Props) {
   const generatedNamespace = mode === 'drill' ? `${sourceNamespace}-drill` : `${sourceNamespace}-restore`;
   const targetNamespace = namespaceValue(config, sourceNamespace);
   const restoresToOriginalNamespace = config.namespaceMode === 'original' || targetNamespace === sourceNamespace;
-	const submitDisabled = !config.pointId || !config.targetCluster || !targetNamespace.trim() || (restoresToOriginalNamespace && !config.originalNamespaceConfirmed) || (readinessBlockers > 0 && !config.forceProceed);
+  const targetClusterOption = clusterOptions.find(item => item.name === config.targetCluster);
+  const backupStorageClasses = Array.from(new Set(contents.flatMap(item => item.storageClasses || []))).sort();
+  const backupImages = Array.from(new Set(contents.flatMap(item => item.images || []))).sort();
+  const restorePointUnavailable = Boolean(contentsError && /restore.?point.?not.?found|no longer available/i.test(contentsError));
+  const submitDisabled = !config.pointId || !config.targetCluster || !targetNamespace.trim() || restorePointUnavailable || (restoresToOriginalNamespace && !config.originalNamespaceConfirmed) || (readinessBlockers > 0 && !config.forceProceed);
   const pointsBySource = {
     snapshot: points.filter(point => pointSourceType(point) === 'snapshot'),
     export: points.filter(point => pointSourceType(point) === 'export'),
@@ -187,6 +223,47 @@ export function RecoveryWizardModal(props: Props) {
 
   const updateConfig = (patch: Partial<RecoveryWizardConfig>) => {
     setConfig(prev => (prev ? { ...prev, ...patch } : prev));
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!config.pointId || !loadContents) { setContents([]); return; }
+    setContentsLoading(true); setContentsError('');
+    updateConfig({ contentCatalogLoaded: false, persistentDataExpected: false, forceStart: false });
+    loadContents(config.pointId).then(result => {
+      if (!cancelled) {
+        const resources = result.resources || [];
+        setContents(resources);
+        updateConfig({ contentCatalogLoaded: true, persistentDataExpected: resources.some(item => ['PersistentVolumeClaim', 'PersistentVolume', 'VolumeSnapshot'].includes(item.kind)) });
+      }
+    }).catch(error => {
+      if (!cancelled) { setContents([]); updateConfig({ contentCatalogLoaded: false }); setContentsError(error instanceof Error ? error.message : 'Restore point contents could not be loaded.'); }
+    }).finally(() => { if (!cancelled) setContentsLoading(false); });
+    return () => { cancelled = true; };
+  }, [config.pointId, contentsReload]);
+
+  const uniqueContents = Array.from(contents.reduce((items, item) => {
+    const identity = [item.apiVersion, item.kind, item.namespace || '', item.name].join('|');
+    if (!items.has(identity)) items.set(identity, item);
+    return items;
+  }, new Map<string, BackupContentResource>()).values());
+  const resourceGroups = Array.from(uniqueContents.reduce((groups, item) => {
+    const resourceKey = item.resource ? `${item.resource}${item.group ? `.${item.group}` : ''}` : item.kind;
+    const key = `${item.apiVersion}|${resourceKey}|${item.clusterScoped ? 'cluster' : 'namespace'}`;
+    const current = groups.get(key) || { key, resourceKey, apiVersion: item.apiVersion, kind: item.kind, clusterScoped: item.clusterScoped, count: 0 };
+    current.count += 1; groups.set(key, current); return groups;
+  }, new Map<string, { key: string; resourceKey: string; apiVersion: string; kind: string; clusterScoped: boolean; count: number }>()).values()).sort((a, b) => a.kind.localeCompare(b.kind));
+
+  const toggleResourceGroup = (resourceKey: string, enabled: boolean) => {
+    const excluded = new Set(config.excludedResources || []);
+    if (enabled) excluded.delete(resourceKey); else excluded.add(resourceKey);
+    updateConfig({ excludedResources: Array.from(excluded).sort() });
+  };
+
+  const updateMapping = (field: 'storageClassMappings' | 'imageMappings', source: string, target: string) => {
+    const next = { ...(config[field] || {}) };
+    if (target.trim() && target.trim() !== source) next[source] = target.trim(); else delete next[source];
+    updateConfig({ [field]: next } as Partial<RecoveryWizardConfig>);
   };
 
   const choosePoint = (point: RecoveryPoint) => {
@@ -223,7 +300,7 @@ export function RecoveryWizardModal(props: Props) {
       targetCluster,
       targetMode,
       originalNamespaceConfirmed: false,
-      ...targetBehaviorPatch(targetMode),
+      ...targetBehaviorPatch(targetMode, config.namespaceMode),
     });
   };
 
@@ -234,7 +311,7 @@ export function RecoveryWizardModal(props: Props) {
       targetMode,
       targetNamespace: namespaceMode === 'original' ? sourceNamespace : namespaceMode === 'generated' ? generatedNamespace : config.targetNamespace,
       originalNamespaceConfirmed: false,
-      ...targetBehaviorPatch(targetMode),
+      ...targetBehaviorPatch(targetMode, namespaceMode),
     });
   };
 
@@ -246,7 +323,7 @@ export function RecoveryWizardModal(props: Props) {
       targetNamespace,
       targetMode,
       originalNamespaceConfirmed: false,
-      ...targetBehaviorPatch(targetMode),
+      ...targetBehaviorPatch(targetMode, namespaceMode),
     });
   };
 
@@ -257,7 +334,7 @@ export function RecoveryWizardModal(props: Props) {
       targetMode,
       targetNamespace: generatedNamespace,
       restoreMode: 'full',
-      conflictPolicy: 'skip',
+      conflictPolicy: 'replace',
       originalNamespaceConfirmed: false,
       useTransforms: targetMode !== 'inPlace',
       transformPreset: targetMode === 'crossCluster' ? 'migration' : 'drill',
@@ -434,6 +511,55 @@ export function RecoveryWizardModal(props: Props) {
                       </div>
                     </div>
                   </div>
+                </div>
+
+                <div className="hbdr-protect-section hbdr-recovery-advanced">
+                  <button type="button" className="hbdr-recovery-advanced-toggle" onClick={() => setAdvancedOpen(value => !value)}>
+                    <span><strong>Advanced options</strong><em>Content, mappings, validation, and conflict handling</em></span>
+                    <b>{advancedOpen ? 'Hide' : 'Show'}</b>
+                  </button>
+                  {advancedOpen && (
+                    <div className="hbdr-recovery-advanced-content">
+                      <section>
+                        <header><strong>Restore content</strong><span>Namespace resources and custom resources are included by default.</span></header>
+                        {contentsLoading && <p className="hbdr-recovery-inline-status"><RefreshCw size={13} className="animate-spin" /> Reading the selected Velero backup…</p>}
+                        {contentsError && (
+                          <div className="hbdr-recovery-content-failure">
+                            <p className="hbdr-recovery-inline-error">{restorePointUnavailable
+                              ? 'Selected restore point is no longer available. Refresh the restore point list and select another restore point.'
+                              : `Content preview unavailable: ${contentsError}.`}</p>
+                            {!restorePointUnavailable && <button type="button" onClick={() => setContentsReload(value => value + 1)}><RefreshCw size={12} />Retry content inspection</button>}
+                          </div>
+                        )}
+                        {!contentsLoading && !contentsError && <div className="hbdr-recovery-resource-list">
+                          {resourceGroups.map(group => {
+                            const enabled = !config.excludedResources?.includes(group.resourceKey);
+                            return <label key={group.key}>
+                              <input type="checkbox" checked={enabled} onChange={event => toggleResourceGroup(group.resourceKey, event.target.checked)} />
+                              <span><strong>{group.kind}</strong><em>{group.apiVersion} · {group.count} · {group.clusterScoped ? 'Cluster-scoped' : 'Namespace-scoped'}</em></span>
+                            </label>;
+                          })}
+                          {resourceGroups.length === 0 && <p>No resource catalog was returned.</p>}
+                        </div>}
+                        <label className="hbdr-recovery-confirm-check"><input type="checkbox" checked={config.includeClusterScoped} onChange={event => updateConfig({ includeClusterScoped: event.target.checked })} /><span>Include cluster-scoped resources from this backup</span></label>
+                      </section>
+                      <section>
+                        <header><strong>Environment mappings</strong><span>Leave blank to preserve the value stored in the backup.</span></header>
+                        {backupStorageClasses.map(source => <label className="hbdr-recovery-mapping" key={`sc-${source}`}><span>StorageClass <b>{source}</b></span><select value={config.storageClassMappings?.[source] || ''} onChange={event => updateMapping('storageClassMappings', source, event.target.value)}><option value="">Keep original</option>{(targetClusterOption?.storageClasses || []).map(item => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label>)}
+                        {backupImages.map(source => <label className="hbdr-recovery-image-mapping" key={`image-${source}`}>
+                          <span><em>Source image</em><b title={source}>{source}</b></span>
+                          <span><em>Target image</em><input title={config.imageMappings?.[source] || ''} value={config.imageMappings?.[source] || ''} onChange={event => updateMapping('imageMappings', source, event.target.value)} placeholder="Keep original image" /></span>
+                        </label>)}
+                        {config.contentCatalogLoaded && backupStorageClasses.length === 0 && backupImages.length === 0 && <p className="hbdr-recovery-muted">No StorageClass or container image references were found in the inspected backup.</p>}
+                        {!config.contentCatalogLoaded && <p className="hbdr-recovery-muted">Mappings are unavailable until restore point content inspection succeeds.</p>}
+                      </section>
+                      <section>
+                        <header><strong>Validation</strong><span>These checks run after Kubernetes resources and persistent data are restored.</span></header>
+                        <label className="hbdr-recovery-confirm-check"><input type="checkbox" checked={config.waitForWorkloads} onChange={event => updateConfig({ waitForWorkloads: event.target.checked })} /><span>Wait for workloads and pods to become ready</span></label>
+                        <label className="hbdr-recovery-confirm-check"><input type="checkbox" checked={config.runValidation} onChange={event => updateConfig({ runValidation: event.target.checked })} /><span>Run application validation</span></label>
+                      </section>
+                    </div>
+                  )}
                 </div>
 
               </div>

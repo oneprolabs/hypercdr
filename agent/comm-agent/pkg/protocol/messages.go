@@ -13,25 +13,27 @@ const (
 )
 
 const (
-	MessageAgentRegister        = "agent.register"
-	MessageAgentHeartbeat       = "agent.heartbeat"
-	MessageAgentInventoryReport = "agent.inventory.report"
-	MessageAgentTaskAccepted    = "agent.task.accepted"
-	MessageAgentTaskProgress    = "agent.task.progress"
-	MessageAgentTaskCompleted   = "agent.task.completed"
-	MessageAgentTaskFailed      = "agent.task.failed"
-	MessageAgentVeleroEvent     = "agent.velero.event"
-	MessageAgentLogReport       = "agent.log.report"
+	MessageAgentRegister            = "agent.register"
+	MessageAgentHeartbeat           = "agent.heartbeat"
+	MessageAgentInventoryReport     = "agent.inventory.report"
+	MessageAgentTaskAccepted        = "agent.task.accepted"
+	MessageAgentTaskProgress        = "agent.task.progress"
+	MessageAgentTaskCompleted       = "agent.task.completed"
+	MessageAgentTaskFailed          = "agent.task.failed"
+	MessageAgentVeleroEvent         = "agent.velero.event"
+	MessageAgentLogReport           = "agent.log.report"
+	MessageAgentBackupContentReport = "agent.backup-content.report"
 
-	MessagePlatformRegisterAccepted = "platform.register.accepted"
-	MessagePlatformRegisterRejected = "platform.register.rejected"
-	MessagePlatformTaskDispatch     = "platform.task.dispatch"
-	MessagePlatformTaskCancel       = "platform.task.cancel"
-	MessagePlatformInventoryRequest = "platform.inventory.request"
-	MessagePlatformLogRequest       = "platform.log.request"
-	MessagePlatformEventAck         = "platform.event.ack"
-	MessagePlatformEventError       = "platform.event.error"
-	MessageAgentMessageError        = "agent.message.error"
+	MessagePlatformRegisterAccepted     = "platform.register.accepted"
+	MessagePlatformRegisterRejected     = "platform.register.rejected"
+	MessagePlatformTaskDispatch         = "platform.task.dispatch"
+	MessagePlatformTaskCancel           = "platform.task.cancel"
+	MessagePlatformInventoryRequest     = "platform.inventory.request"
+	MessagePlatformLogRequest           = "platform.log.request"
+	MessagePlatformBackupContentRequest = "platform.backup-content.request"
+	MessagePlatformEventAck             = "platform.event.ack"
+	MessagePlatformEventError           = "platform.event.error"
+	MessageAgentMessageError            = "agent.message.error"
 )
 
 type Message[T any] struct {
@@ -316,6 +318,32 @@ type LogReportPayload struct {
 	Message   string     `json:"message,omitempty"`
 }
 
+type BackupContentRequestPayload struct {
+	RequestID        string `json:"requestId"`
+	VeleroBackupName string `json:"veleroBackupName"`
+	VeleroNamespace  string `json:"veleroNamespace"`
+}
+
+type BackupResourceSummary struct {
+	APIVersion     string   `json:"apiVersion"`
+	Kind           string   `json:"kind"`
+	Namespace      string   `json:"namespace,omitempty"`
+	Name           string   `json:"name"`
+	Group          string   `json:"group,omitempty"`
+	Resource       string   `json:"resource,omitempty"`
+	ClusterScoped  bool     `json:"clusterScoped"`
+	Images         []string `json:"images,omitempty"`
+	StorageClasses []string `json:"storageClasses,omitempty"`
+}
+
+type BackupContentReportPayload struct {
+	RequestID string                  `json:"requestId"`
+	Resources []BackupResourceSummary `json:"resources"`
+	Truncated bool                    `json:"truncated,omitempty"`
+	ErrorCode string                  `json:"errorCode,omitempty"`
+	Message   string                  `json:"message,omitempty"`
+}
+
 type TaskCancelPayload struct {
 	TaskID          string `json:"taskId,omitempty"`
 	CommandID       string `json:"commandId,omitempty"`
@@ -481,23 +509,31 @@ type ProtectionCleanupCommand struct {
 }
 
 type RestoreCommand struct {
-	RestorePointID       string            `json:"restorePointId"`
-	VeleroBackupName     string            `json:"veleroBackupName"`
-	StorageRepo          string            `json:"storageRepo,omitempty"`
-	SourceNamespace      string            `json:"sourceNamespace"`
-	SourceNamespaces     []string          `json:"sourceNamespaces,omitempty"`
-	TargetNamespace      string            `json:"targetNamespace"`
-	TargetNamespaces     map[string]string `json:"targetNamespaces,omitempty"`
-	TargetMode           string            `json:"targetMode"`
-	RestoreMode          string            `json:"restoreMode"`
-	ArtifactMode         string            `json:"artifactMode"`
-	ConflictPolicy       string            `json:"conflictPolicy"`
-	IncludeClusterScoped bool              `json:"includeClusterScoped"`
-	UseTransforms        bool              `json:"useTransforms"`
-	TransformPreset      string            `json:"transformPreset"`
-	StorageProfileMode   string            `json:"storageProfileMode"`
-	AlternateProfileID   string            `json:"alternateProfileId,omitempty"`
-	ExcludedResources    []string          `json:"excludedResources,omitempty"`
+	RestorePointID         string            `json:"restorePointId"`
+	VeleroBackupName       string            `json:"veleroBackupName"`
+	StorageRepo            string            `json:"storageRepo,omitempty"`
+	SourceNamespace        string            `json:"sourceNamespace"`
+	SourceNamespaces       []string          `json:"sourceNamespaces,omitempty"`
+	TargetNamespace        string            `json:"targetNamespace"`
+	TargetNamespaces       map[string]string `json:"targetNamespaces,omitempty"`
+	TargetMode             string            `json:"targetMode"`
+	RestoreMode            string            `json:"restoreMode"`
+	ArtifactMode           string            `json:"artifactMode"`
+	ConflictPolicy         string            `json:"conflictPolicy"`
+	IncludeClusterScoped   bool              `json:"includeClusterScoped"`
+	UseTransforms          bool              `json:"useTransforms"`
+	TransformPreset        string            `json:"transformPreset"`
+	StorageProfileMode     string            `json:"storageProfileMode"`
+	AlternateProfileID     string            `json:"alternateProfileId,omitempty"`
+	IncludedResources      []string          `json:"includedResources,omitempty"`
+	ExcludedResources      []string          `json:"excludedResources,omitempty"`
+	StorageClassMappings   map[string]string `json:"storageClassMappings,omitempty"`
+	ImageMappings          map[string]string `json:"imageMappings,omitempty"`
+	WaitForWorkloads       bool              `json:"waitForWorkloads"`
+	RunValidation          bool              `json:"runValidation"`
+	ForceStart             bool              `json:"forceStart,omitempty"`
+	ContentCatalogLoaded   bool              `json:"contentCatalogLoaded,omitempty"`
+	PersistentDataExpected bool              `json:"persistentDataExpected,omitempty"`
 }
 
 type StorageSyncCommand struct {

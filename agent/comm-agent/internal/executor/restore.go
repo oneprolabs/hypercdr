@@ -118,8 +118,16 @@ func (e KubernetesRestoreExecutor) SubmitRestore(ctx context.Context, manifest v
 	if err != nil {
 		return err
 	}
-	if _, err = e.applier.ApplyManifest(ctx, modifier); err != nil {
+	modifierObject, err := e.applier.ApplyManifest(ctx, modifier)
+	if err != nil {
 		return err
+	}
+	modifierWaiter, ok := e.applier.(kube.ResourceModifierWaiter)
+	if !ok {
+		return errors.New("kubernetes resource modifier propagation check is not supported by this executor")
+	}
+	if err := modifierWaiter.WaitForResourceModifier(ctx, modifierObject.Namespace, modifierObject.Name, 15*time.Second); err != nil {
+		return fmt.Errorf("resource modifier is not ready for Velero restore validation: %w", err)
 	}
 	unstructured, err := kube.ManifestFromStruct(manifest)
 	if err != nil {

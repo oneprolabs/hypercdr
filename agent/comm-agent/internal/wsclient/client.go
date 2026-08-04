@@ -51,6 +51,7 @@ type Client struct {
 	readiness      kube.RestoreReadinessReader
 	applier        kube.ManifestApplier
 	deleteWaiter   kube.VeleroBackupDeletionWaiter
+	contentReader  kube.BackupContentReader
 	uninstaller    kube.Uninstaller
 	agentRuntime   interface {
 		kube.AgentRuntimeReader
@@ -97,6 +98,7 @@ func NewWithRuntimeDependencies(cfg config.Config, logger *slog.Logger, applier 
 	scheduleReader, _ := applier.(kube.VeleroScheduleReader)
 	readiness, _ := applier.(kube.RestoreReadinessReader)
 	deleteWaiter, _ := applier.(kube.VeleroBackupDeletionWaiter)
+	contentReader, _ := applier.(kube.BackupContentReader)
 	outbox, err := newEventOutbox(cfg.StateDir)
 	if err != nil && logger != nil {
 		logger.Warn("failed to initialize event outbox; terminal events will not survive restart", "state_dir", cfg.StateDir, "error", err)
@@ -128,6 +130,7 @@ func NewWithRuntimeDependencies(cfg config.Config, logger *slog.Logger, applier 
 		readiness:         readiness,
 		applier:           applier,
 		deleteWaiter:      deleteWaiter,
+		contentReader:     contentReader,
 		uninstaller:       uninstaller,
 		agentRuntime:      agentRuntime,
 		backupSamples:     map[string][]volumeProgressSample{},
@@ -333,6 +336,12 @@ func (c *Client) readMessages() error {
 				return err
 			}
 			go c.handleLogRequest(request)
+		case protocol.MessagePlatformBackupContentRequest:
+			var request protocol.Message[protocol.BackupContentRequestPayload]
+			if err := json.Unmarshal(data, &request); err != nil {
+				return err
+			}
+			go c.handleBackupContentRequest(request)
 		case protocol.MessagePlatformTaskCancel:
 			var request protocol.Message[protocol.TaskCancelPayload]
 			if err := json.Unmarshal(data, &request); err != nil {
@@ -386,6 +395,31 @@ func (c *Client) handleLogRequest(request protocol.Message[protocol.LogRequestPa
 	message := protocol.NewMessage(protocol.MessageKindResponse, protocol.MessageAgentLogReport, c.cfg.ClusterID, c.cfg.AgentID, report)
 	if err := c.writeJSON(message); err != nil {
 		c.logger.Warn("failed to send component log report", "request_id", request.Payload.RequestID, "component", request.Payload.Component, "error", err)
+	}
+}
+
+func (c *Client) handleBackupContentRequest(request protocol.Message[protocol.BackupContentRequestPayload]) {
+	report := protocol.BackupContentReportPayload{RequestID: request.Payload.RequestID, Resources: []protocol.BackupResourceSummary{}}
+	if c.contentReader == nil {
+		report.ErrorCode = "BACKUP_CONTENTS_UNAVAILABLE"
+		report.Message = "Backup contents reader is unavailable on this cluster agent."
+	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		resources, truncated, err := c.contentReader.ReadVeleroBackupContents(ctx, request.Payload.VeleroNamespace, request.Payload.VeleroBackupName, 5000)
+		if err != nil {
+			report.ErrorCode = "BACKUP_CONTENTS_READ_FAILED"
+			report.Message = err.Error()
+		} else {
+			report.Truncated = truncated
+			for _, item := range resources {
+				report.Resources = append(report.Resources, protocol.BackupResourceSummary{APIVersion: item.APIVersion, Kind: item.Kind, Namespace: item.Namespace, Name: item.Name, Group: item.Group, Resource: item.Resource, ClusterScoped: item.ClusterScoped, Images: item.Images, StorageClasses: item.StorageClasses})
+			}
+		}
+	}
+	message := protocol.NewMessage(protocol.MessageKindResponse, protocol.MessageAgentBackupContentReport, c.cfg.ClusterID, c.cfg.AgentID, report)
+	if err := c.writeJSON(message); err != nil {
+		c.logger.Warn("failed to send backup contents report", "request_id", request.Payload.RequestID, "error", err)
 	}
 }
 
@@ -1484,7 +1518,9 @@ func (c *Client) pollVeleroStatus(task protocol.TaskDispatchPayload, object kube
 
 func (c *Client) pollRestoreStatus(task protocol.TaskDispatchPayload, object kube.AppliedObject, basePayload map[string]any) {
 	c.pollVeleroStatusWithSuccess(task, object, basePayload, restoreStatusResult, func(payload map[string]any, message string) {
-		if c.readiness == nil || task.Restore == nil {
+		if c.readiness == nil || task.Restore == nil || !task.Restore.WaitForWorkloads {
+			payload["readinessStage"] = "skipped"
+			payload["applicationValidationStage"] = "skipped"
 			if err := c.sendTaskCompleted(task, payload, message); err != nil {
 				c.logger.Error("failed to send task completed", "task_id", task.TaskID, "error", err)
 			}
@@ -1597,6 +1633,12 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, b
 			}
 			if readiness.Ready {
 				payload["readinessStage"] = "succeeded"
+				if task.Restore != nil && task.Restore.RunValidation {
+					payload["applicationValidationStage"] = "succeeded"
+					payload["applicationValidation"] = map[string]any{"type": "kubernetes-readiness", "namespace": namespace, "result": "passed", "message": "Namespace, workloads, and pods are ready."}
+				} else {
+					payload["applicationValidationStage"] = "skipped"
+				}
 				if err := c.sendTaskProgress(task, payload, 99, "Restored application readiness validation completed successfully."); err != nil {
 					c.logger.Error("failed to send restore readiness success event", "task_id", task.TaskID, "error", err)
 					return
@@ -1650,6 +1692,15 @@ func (c *Client) enrichVeleroFailure(ctx context.Context, object kube.AppliedObj
 		message = status.Message
 	}
 	if object.Kind != "Restore" {
+		return message, payload
+	}
+	// FailedValidation happens before Velero writes a restore-results object.
+	// Preserve its authoritative validationErrors instead of replacing it with
+	// the inevitable secondary object-storage "key does not exist" error.
+	if strings.EqualFold(status.Phase, "FailedValidation") {
+		if strings.TrimSpace(message) == "" {
+			message = "Velero rejected the restore during validation."
+		}
 		return message, payload
 	}
 	summary := c.restoreResultSummary(ctx, object, payload)
@@ -2760,6 +2811,7 @@ func (c *Client) sendTaskAccepted(task protocol.TaskDispatchPayload) error {
 }
 
 func (c *Client) sendTaskProgress(task protocol.TaskDispatchPayload, veleroPayload map[string]any, progress int, text string) error {
+	veleroPayload = withRecoveryStages(task, veleroPayload, progress, "running", "", text)
 	metrics := taskProgressMetrics(veleroPayload)
 	message := protocol.NewMessage(protocol.MessageKindEvent, protocol.MessageAgentTaskProgress, c.cfg.ClusterID, c.cfg.AgentID, protocol.TaskProgressPayload{
 		AckRequired:         false,
@@ -2815,6 +2867,7 @@ func taskProgressMetrics(veleroPayload map[string]any) taskProgressMetricSet {
 }
 
 func (c *Client) sendTaskCompleted(task protocol.TaskDispatchPayload, veleroPayload map[string]any, text string) error {
+	veleroPayload = withRecoveryStages(task, veleroPayload, 100, "succeeded", "", text)
 	message := protocol.NewMessage(protocol.MessageKindEvent, protocol.MessageAgentTaskCompleted, c.cfg.ClusterID, c.cfg.AgentID, protocol.TaskCompletedPayload{
 		AckRequired: true,
 		TaskID:      task.TaskID,
@@ -2833,6 +2886,15 @@ func (c *Client) sendTaskFailed(task protocol.TaskDispatchPayload, code string, 
 }
 
 func (c *Client) sendTaskFailedWithDetails(task protocol.TaskDispatchPayload, code string, text string, details map[string]any) error {
+	if isRecoveryTask(task.Type) {
+		if details == nil {
+			details = map[string]any{}
+		} else {
+			details = cloneVeleroPayload(details)
+		}
+		veleroPayload := wsMapFromAny(details["velero"])
+		details["velero"] = withRecoveryStages(task, veleroPayload, 0, "failed", code, text)
+	}
 	message := protocol.NewMessage(protocol.MessageKindEvent, protocol.MessageAgentTaskFailed, c.cfg.ClusterID, c.cfg.AgentID, protocol.TaskFailedPayload{
 		AckRequired: true,
 		TaskID:      task.TaskID,
@@ -2842,6 +2904,157 @@ func (c *Client) sendTaskFailedWithDetails(task protocol.TaskDispatchPayload, co
 		Details:     details,
 	})
 	return c.sendReliableEvent(message)
+}
+
+func withRecoveryStages(task protocol.TaskDispatchPayload, payload map[string]any, progress int, outcome string, errorCode string, message string) map[string]any {
+	if !isRecoveryTask(task.Type) {
+		return payload
+	}
+	result := cloneVeleroPayload(payload)
+	status := func(id string) string {
+		switch outcome {
+		case "succeeded":
+			if id == "restoring_data" && task.Restore != nil && task.Restore.ContentCatalogLoaded && !task.Restore.PersistentDataExpected {
+				return "not_applicable"
+			}
+			if id == "waiting_for_workloads" && task.Restore != nil && !task.Restore.WaitForWorkloads {
+				return "skipped"
+			}
+			if id == "application_validation" && (task.Restore == nil || !task.Restore.RunValidation) {
+				return "skipped"
+			}
+			return "succeeded"
+		case "failed":
+			return recoveryFailureStageStatus(id, errorCode)
+		}
+		readinessStage := strings.TrimSpace(fmt.Sprint(result["readinessStage"]))
+		switch id {
+		case "preparing_restore":
+			return "succeeded"
+		case "restoring_resources":
+			if readinessStage != "" || progress >= 90 {
+				return "succeeded"
+			}
+			return "running"
+		case "restoring_data":
+			if readinessStage != "" || progress >= 90 {
+				return "succeeded"
+			}
+			if len(wsMapFromAny(result["volumeProgress"])) > 0 {
+				return "running"
+			}
+			return "pending"
+		case "waiting_for_workloads":
+			if readinessStage == "skipped" {
+				return "skipped"
+			}
+			if readinessStage == "succeeded" {
+				return "succeeded"
+			}
+			if readinessStage == "started" {
+				return "running"
+			}
+			return "pending"
+		case "application_validation":
+			validationStage := strings.TrimSpace(fmt.Sprint(result["applicationValidationStage"]))
+			if validationStage != "" {
+				return validationStage
+			}
+			return "pending"
+		default:
+			return "pending"
+		}
+	}
+	definitions := []struct {
+		id   string
+		name string
+	}{
+		{"preparing_restore", "Preparing Restore"},
+		{"restoring_resources", "Restoring Kubernetes Resources"},
+		{"restoring_data", "Restoring Persistent Data"},
+		{"waiting_for_workloads", "Waiting for Workloads"},
+		{"application_validation", "Validating Application"},
+		{"finalizing_drill", "Finalizing Drill"},
+	}
+	stages := make([]map[string]any, 0, len(definitions))
+	for _, definition := range definitions {
+		stage := map[string]any{"id": definition.id, "name": definition.name, "status": status(definition.id)}
+		stage["updatedAt"] = time.Now().UTC().Format(time.RFC3339)
+		if stage["status"] == "failed" {
+			stage["errorCode"] = errorCode
+			stage["message"] = message
+		}
+		if evidence := recoveryStageEvidence(definition.id, result); len(evidence) > 0 {
+			stage["evidence"] = evidence
+		}
+		stages = append(stages, stage)
+	}
+	result["recoveryStages"] = stages
+	return result
+}
+
+func recoveryStageEvidence(stageID string, payload map[string]any) []string {
+	evidence := []string{}
+	switch stageID {
+	case "restoring_resources":
+		status := wsMapFromAny(payload["status"])
+		if phase := strings.TrimSpace(fmt.Sprint(status["phase"])); phase != "" {
+			evidence = append(evidence, "Velero Restore phase: "+phase)
+		}
+		if raw := wsMapFromAny(status["raw"]); len(raw) > 0 {
+			if restored := strings.TrimSpace(fmt.Sprint(raw["itemsRestored"])); restored != "" {
+				evidence = append(evidence, "Resources restored: "+restored)
+			}
+		}
+	case "restoring_data":
+		volume := wsMapFromAny(payload["volumeProgress"])
+		if total := strings.TrimSpace(fmt.Sprint(volume["totalBytes"])); total != "" && total != "<nil>" {
+			evidence = append(evidence, "Persistent bytes: "+total)
+		}
+	case "waiting_for_workloads":
+		readiness := wsMapFromAny(payload["readiness"])
+		if namespace := strings.TrimSpace(fmt.Sprint(readiness["namespace"])); namespace != "" {
+			evidence = append(evidence, "Target namespace: "+namespace)
+		}
+	case "application_validation":
+		validation := wsMapFromAny(payload["applicationValidation"])
+		if message := strings.TrimSpace(fmt.Sprint(validation["message"])); message != "" {
+			evidence = append(evidence, message)
+		}
+	}
+	return evidence
+}
+
+func recoveryFailureStageStatus(stageID string, errorCode string) string {
+	failureStage := "preparing_restore"
+	switch {
+	case strings.Contains(errorCode, "VOLUME") || strings.Contains(errorCode, "PVC"):
+		failureStage = "restoring_data"
+	case strings.Contains(errorCode, "WORKLOAD") || strings.Contains(errorCode, "READINESS"):
+		failureStage = "waiting_for_workloads"
+	case errorCode == "RESTORE_FAILED" || strings.Contains(errorCode, "STATUS"):
+		failureStage = "restoring_resources"
+	}
+	order := map[string]int{
+		"preparing_restore": 0, "restoring_resources": 1, "restoring_data": 2,
+		"waiting_for_workloads": 3, "application_validation": 4, "finalizing_drill": 5,
+	}
+	if stageID == failureStage {
+		return "failed"
+	}
+	if order[stageID] < order[failureStage] {
+		return "succeeded"
+	}
+	return "pending"
+}
+
+func isRecoveryTask(taskType string) bool {
+	switch taskType {
+	case "restore", "drill", "takeover", "failback":
+		return true
+	default:
+		return false
+	}
 }
 
 func backupVeleroPayload(manifest velero.BackupManifest, includeManifest bool) map[string]any {

@@ -455,6 +455,11 @@ func (a *DynamicManifestApplier) readPodReadiness(ctx context.Context, namespace
 		name := pod.GetName()
 		result.PodCount++
 		if code, message := podTerminalReadinessFailure(pod.Object); code != "" {
+			if code == "RESTORE_WORKLOAD_IMAGE_PULL_FAILED" {
+				if detail := a.podImagePullFailureEvent(ctx, namespace, name); detail != "" && !strings.Contains(message, detail) {
+					message += ". Underlying kubelet error: " + detail
+				}
+			}
 			result.FailureCode = code
 			result.FailureMessage = message
 			result.UnreadyPods = append(result.UnreadyPods, name)
@@ -467,6 +472,33 @@ func (a *DynamicManifestApplier) readPodReadiness(ctx context.Context, namespace
 		result.UnreadyPods = append(result.UnreadyPods, name)
 	}
 	return nil
+}
+
+func (a *DynamicManifestApplier) podImagePullFailureEvent(ctx context.Context, namespace string, podName string) string {
+	events, err := a.client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "events"}).Namespace(namespace).List(ctx, metav1.ListOptions{
+		FieldSelector: "involvedObject.kind=Pod,involvedObject.name=" + podName,
+	})
+	if err != nil {
+		return ""
+	}
+	return imagePullFailureEventMessage(events.Items)
+}
+
+func imagePullFailureEventMessage(events []unstructured.Unstructured) string {
+	message := ""
+	for _, event := range events {
+		candidate, _, _ := unstructured.NestedString(event.Object, "message")
+		lower := strings.ToLower(candidate)
+		if !strings.Contains(lower, "failed to pull image") && !strings.Contains(lower, "failed to pull and unpack image") {
+			continue
+		}
+		// Prefer the detailed kubelet event over the short ErrImagePull or
+		// ImagePullBackOff state exposed in containerStatuses.
+		if len(candidate) > len(message) {
+			message = candidate
+		}
+	}
+	return message
 }
 
 func podTerminalReadinessFailure(object map[string]any) (string, string) {
@@ -576,6 +608,17 @@ func firstStringField(values map[string]any, keys ...string) string {
 	for _, key := range keys {
 		if value := stringField(values, key); value != "" {
 			return value
+		}
+		if items, ok := values[key].([]any); ok {
+			parts := make([]string, 0, len(items))
+			for _, item := range items {
+				if value := strings.TrimSpace(fmt.Sprint(item)); value != "" {
+					parts = append(parts, value)
+				}
+			}
+			if len(parts) > 0 {
+				return strings.Join(parts, "; ")
+			}
 		}
 	}
 	return ""

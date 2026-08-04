@@ -26,6 +26,14 @@ type VeleroBackupWaiter interface {
 	WaitForVeleroBackup(ctx context.Context, namespace string, name string, timeout time.Duration) error
 }
 
+// ResourceModifierWaiter provides a propagation barrier between creating the
+// ConfigMap and creating the Velero Restore that references it. Velero validates
+// Restore resources from an informer cache, so an immediately-created Restore
+// can otherwise race the ConfigMap add event and become FailedValidation.
+type ResourceModifierWaiter interface {
+	WaitForResourceModifier(ctx context.Context, namespace string, name string, timeout time.Duration) error
+}
+
 type VeleroBackupDeletionWaiter interface {
 	WaitForVeleroBackupDeleted(ctx context.Context, namespace string, name string, timeout time.Duration) error
 }

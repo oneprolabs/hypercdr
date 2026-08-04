@@ -43,27 +43,32 @@ import (
 )
 
 type Router struct {
-	cfg           config.Config
-	logger        *slog.Logger
-	mux           *http.ServeMux
-	store         store.Store
-	hub           *sessionHub
-	captchaMu     sync.Mutex
-	captchas      map[string]captchaChallenge
-	oauthMu       sync.Mutex
-	oauthStates   map[string]time.Time
-	inventoryMu   sync.Mutex
-	inventory     map[string]inventoryRequestStatus
-	imageDigestMu sync.Mutex
-	imageDigests  map[string]imageDigestCacheEntry
-	logRequestMu  sync.Mutex
-	logRequests   map[string]chan protocol.LogReportPayload
-	logCollectMu  sync.Mutex
-	logMaintMu    sync.Mutex
-	logMaintRun   bool
-	logCleanupAt  time.Time
-	logRetryAfter map[string]time.Time
-	schedulerOnce sync.Once
+	cfg                    config.Config
+	logger                 *slog.Logger
+	mux                    *http.ServeMux
+	store                  store.Store
+	hub                    *sessionHub
+	captchaMu              sync.Mutex
+	captchas               map[string]captchaChallenge
+	oauthMu                sync.Mutex
+	oauthStates            map[string]time.Time
+	inventoryMu            sync.Mutex
+	inventory              map[string]inventoryRequestStatus
+	imageDigestMu          sync.Mutex
+	imageDigests           map[string]imageDigestCacheEntry
+	logRequestMu           sync.Mutex
+	logRequests            map[string]chan protocol.LogReportPayload
+	backupContentRequestMu sync.Mutex
+	backupContentRequests  map[string]chan protocol.BackupContentReportPayload
+	contentIndexMu         sync.Mutex
+	contentIndexing        map[string]struct{}
+	contentIndexSlots      chan struct{}
+	logCollectMu           sync.Mutex
+	logMaintMu             sync.Mutex
+	logMaintRun            bool
+	logCleanupAt           time.Time
+	logRetryAfter          map[string]time.Time
+	schedulerOnce          sync.Once
 }
 
 type requestUserContextKey struct{}
@@ -102,17 +107,20 @@ type imageDigestCacheEntry struct {
 
 func NewRouter(cfg config.Config, logger *slog.Logger, repo store.Store) http.Handler {
 	router := &Router{
-		cfg:           cfg,
-		logger:        logger,
-		mux:           http.NewServeMux(),
-		store:         repo,
-		hub:           newSessionHub(),
-		captchas:      map[string]captchaChallenge{},
-		oauthStates:   map[string]time.Time{},
-		inventory:     map[string]inventoryRequestStatus{},
-		imageDigests:  map[string]imageDigestCacheEntry{},
-		logRequests:   map[string]chan protocol.LogReportPayload{},
-		logRetryAfter: map[string]time.Time{},
+		cfg:                   cfg,
+		logger:                logger,
+		mux:                   http.NewServeMux(),
+		store:                 repo,
+		hub:                   newSessionHub(),
+		captchas:              map[string]captchaChallenge{},
+		oauthStates:           map[string]time.Time{},
+		inventory:             map[string]inventoryRequestStatus{},
+		imageDigests:          map[string]imageDigestCacheEntry{},
+		logRequests:           map[string]chan protocol.LogReportPayload{},
+		backupContentRequests: map[string]chan protocol.BackupContentReportPayload{},
+		contentIndexing:       map[string]struct{}{},
+		contentIndexSlots:     make(chan struct{}, 2),
+		logRetryAfter:         map[string]time.Time{},
 	}
 	router.routes()
 	router.startScheduler()
@@ -383,10 +391,12 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("POST /api/v1/protection-plans/{id}/storage/reconfigure", r.tenantGuard("plan", r.reconfigureProtectionPlanStorage))
 	r.mux.HandleFunc("DELETE /api/v1/protection-plans/{id}", r.tenantGuard("plan", r.deleteProtectionPlan))
 	r.mux.HandleFunc("GET /api/v1/restore-points", r.listRestorePoints)
+	r.mux.HandleFunc("GET /api/v1/restore-points/{id}/contents", r.getRestorePointContents)
 	r.mux.HandleFunc("POST /api/v1/restore-points/delete", r.deleteRestorePoints)
 	r.mux.HandleFunc("GET /api/v1/tasks", r.listTasks)
 	r.mux.HandleFunc("GET /api/v1/tasks/{id}/events", r.tenantGuard("task", r.listTaskEvents))
 	r.mux.HandleFunc("POST /api/v1/tasks/{id}/cancel", r.tenantGuard("task", r.cancelTask))
+	r.mux.HandleFunc("POST /api/v1/tasks/{id}/retry", r.tenantGuard("task", r.retryRecoveryTask))
 	r.mux.HandleFunc("POST /api/v1/tasks/backup", r.createBackupTask)
 	r.mux.HandleFunc("POST /api/v1/tasks/restore", r.createRestoreTask)
 	r.mux.HandleFunc("POST /api/v1/tasks/drill", r.createDrillTask)
@@ -1728,7 +1738,7 @@ func (r *Router) listComponentReleases(w http.ResponseWriter, req *http.Request)
 }
 
 func (r *Router) createComponentRelease(w http.ResponseWriter, req *http.Request) {
-	var body struct{ Component, Version, Image, ReleaseNotes string }
+	var body struct{ Component, Version, Image, ImageDigest, ReleaseNotes string }
 	if err := decodeJSON(req, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
 		return
@@ -1738,10 +1748,18 @@ func (r *Router) createComponentRelease(w http.ResponseWriter, req *http.Request
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "component_or_image_invalid"})
 		return
 	}
-	digest, err := r.resolveImageDigest(req.Context(), body.Image)
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "image_unavailable", "message": err.Error()})
+	digest := strings.TrimSpace(body.ImageDigest)
+	if digest != "" && !validImageDigest(digest) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "image_digest_invalid"})
 		return
+	}
+	if digest == "" {
+		var err error
+		digest, err = r.resolveImageDigest(req.Context(), body.Image)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]any{"error": "image_unavailable", "message": err.Error()})
+			return
+		}
 	}
 	if strings.TrimSpace(body.Version) == "" {
 		body.Version = imageVersion(body.Image)
@@ -1752,6 +1770,18 @@ func (r *Router) createComponentRelease(w http.ResponseWriter, req *http.Request
 		return
 	}
 	writeJSON(w, http.StatusCreated, item)
+}
+
+func validImageDigest(value string) bool {
+	if !strings.HasPrefix(value, "sha256:") || len(value) != len("sha256:")+64 {
+		return false
+	}
+	for _, char := range strings.TrimPrefix(value, "sha256:") {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *Router) activateComponentRelease(w http.ResponseWriter, req *http.Request) {
@@ -1781,10 +1811,17 @@ func (r *Router) activateComponentRelease(w http.ResponseWriter, req *http.Reque
 			return
 		}
 	}
-	digest, err := r.resolveImageDigest(req.Context(), selected.Image)
-	if err != nil || digest != selected.ImageDigest {
+	digest, resolveErr := r.resolveImageDigest(req.Context(), selected.Image)
+	if resolveErr == nil && digest != selected.ImageDigest {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "release_image_changed", "message": "The image is unavailable or its digest no longer matches the validated candidate."})
 		return
+	}
+	if resolveErr != nil && !validImageDigest(selected.ImageDigest) {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "release_image_unverified", "message": "The release has no verified image digest and the registry could not be queried."})
+		return
+	}
+	if resolveErr != nil {
+		r.logger.Warn("registry digest recheck unavailable; using publisher-verified component digest", "component", selected.Component, "version", selected.Version, "error", resolveErr)
 	}
 	item, ok, err := r.store.ActivateComponentRelease(id, "admin")
 	if err != nil {
@@ -4530,23 +4567,31 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 			sourceNamespaces = []string{sourceNamespace}
 		}
 		payload.Restore = &protocol.RestoreCommand{
-			RestorePointID:       stringPayload(task.Payload, "restorePointId"),
-			VeleroBackupName:     stringPayload(task.Payload, "veleroBackupName"),
-			StorageRepo:          stringPayload(task.Payload, "storageRepo"),
-			SourceNamespace:      sourceNamespace,
-			SourceNamespaces:     sourceNamespaces,
-			TargetNamespace:      stringPayload(task.Payload, "targetNamespace"),
-			TargetNamespaces:     stringMapPayload(task.Payload, "targetNamespaces"),
-			TargetMode:           stringPayload(task.Payload, "targetMode"),
-			RestoreMode:          stringPayload(task.Payload, "restoreMode"),
-			ArtifactMode:         stringPayload(task.Payload, "artifactMode"),
-			ConflictPolicy:       stringPayload(task.Payload, "conflictPolicy"),
-			IncludeClusterScoped: boolPayload(task.Payload, "includeClusterScoped"),
-			UseTransforms:        boolPayload(task.Payload, "useTransforms"),
-			TransformPreset:      stringPayload(task.Payload, "transformPreset"),
-			StorageProfileMode:   stringPayload(task.Payload, "storageProfileMode"),
-			AlternateProfileID:   stringPayload(task.Payload, "alternateProfileId"),
-			ExcludedResources:    stringSlicePayload(task.Payload, "excludedResources"),
+			RestorePointID:         stringPayload(task.Payload, "restorePointId"),
+			VeleroBackupName:       stringPayload(task.Payload, "veleroBackupName"),
+			StorageRepo:            stringPayload(task.Payload, "storageRepo"),
+			SourceNamespace:        sourceNamespace,
+			SourceNamespaces:       sourceNamespaces,
+			TargetNamespace:        stringPayload(task.Payload, "targetNamespace"),
+			TargetNamespaces:       stringMapPayload(task.Payload, "targetNamespaces"),
+			TargetMode:             stringPayload(task.Payload, "targetMode"),
+			RestoreMode:            stringPayload(task.Payload, "restoreMode"),
+			ArtifactMode:           stringPayload(task.Payload, "artifactMode"),
+			ConflictPolicy:         stringPayload(task.Payload, "conflictPolicy"),
+			IncludeClusterScoped:   boolPayload(task.Payload, "includeClusterScoped"),
+			UseTransforms:          boolPayload(task.Payload, "useTransforms"),
+			TransformPreset:        stringPayload(task.Payload, "transformPreset"),
+			StorageProfileMode:     stringPayload(task.Payload, "storageProfileMode"),
+			AlternateProfileID:     stringPayload(task.Payload, "alternateProfileId"),
+			IncludedResources:      stringSlicePayload(task.Payload, "includedResources"),
+			ExcludedResources:      stringSlicePayload(task.Payload, "excludedResources"),
+			StorageClassMappings:   stringMapPayload(task.Payload, "storageClassMappings"),
+			ImageMappings:          stringMapPayload(task.Payload, "imageMappings"),
+			WaitForWorkloads:       boolPayload(task.Payload, "waitForWorkloads"),
+			RunValidation:          boolPayload(task.Payload, "runValidation"),
+			ForceStart:             boolPayload(task.Payload, "forceStart"),
+			ContentCatalogLoaded:   boolPayload(task.Payload, "contentCatalogLoaded"),
+			PersistentDataExpected: boolPayload(task.Payload, "persistentDataExpected"),
 		}
 	case "unregister":
 		payload.Deadline = time.Now().UTC().Add(10 * time.Minute)
@@ -6467,6 +6512,7 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 		SourceNamespaces           []string          `json:"sourceNamespaces"`
 		TargetNamespace            string            `json:"targetNamespace"`
 		TargetNamespaces           map[string]string `json:"targetNamespaces"`
+		NamespaceMode              string            `json:"namespaceMode"`
 		TargetMode                 string            `json:"targetMode"`
 		RestoreMode                string            `json:"restoreMode"`
 		ArtifactMode               string            `json:"artifactMode"`
@@ -6477,6 +6523,15 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 		TransformPreset            string            `json:"transformPreset"`
 		StorageProfileMode         string            `json:"storageProfileMode"`
 		AlternateProfileID         string            `json:"alternateProfileId"`
+		IncludedResources          []string          `json:"includedResources"`
+		ExcludedResources          []string          `json:"excludedResources"`
+		StorageClassMappings       map[string]string `json:"storageClassMappings"`
+		ImageMappings              map[string]string `json:"imageMappings"`
+		WaitForWorkloads           *bool             `json:"waitForWorkloads"`
+		RunValidation              *bool             `json:"runValidation"`
+		ForceStart                 bool              `json:"forceStart"`
+		ContentCatalogLoaded       bool              `json:"contentCatalogLoaded"`
+		PersistentDataExpected     bool              `json:"persistentDataExpected"`
 	}
 	if err := decodeJSON(req, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
@@ -6576,6 +6631,8 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 	if body.ConflictPolicy == "" {
 		body.ConflictPolicy = "none"
 	}
+	waitForWorkloads := body.WaitForWorkloads == nil || *body.WaitForWorkloads
+	runValidation := body.RunValidation == nil || *body.RunValidation
 	if body.RestoreMode == "dataOnly" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "data_only_restore_not_enabled"})
 		return
@@ -6587,6 +6644,7 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 	if body.TargetMode == "" {
 		body.TargetMode = "same-namespace"
 	}
+	body.ConflictPolicy = recoveryConflictPolicy(taskType, body.NamespaceMode, body.SourceNamespace, body.TargetNamespace, body.ConflictPolicy)
 	if taskType == "drill" {
 		activeTask, found, err := r.findActiveRecoveryTask("drill", body.ClusterID, body.SourceNamespace)
 		if err != nil {
@@ -6622,6 +6680,7 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 			"sourceNamespaces":           body.SourceNamespaces,
 			"targetNamespace":            body.TargetNamespace,
 			"targetNamespaces":           body.TargetNamespaces,
+			"namespaceMode":              body.NamespaceMode,
 			"targetMode":                 body.TargetMode,
 			"restoreMode":                body.RestoreMode,
 			"artifactMode":               body.ArtifactMode,
@@ -6632,6 +6691,15 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 			"transformPreset":            body.TransformPreset,
 			"storageProfileMode":         body.StorageProfileMode,
 			"alternateProfileId":         body.AlternateProfileID,
+			"includedResources":          body.IncludedResources,
+			"excludedResources":          body.ExcludedResources,
+			"storageClassMappings":       body.StorageClassMappings,
+			"imageMappings":              body.ImageMappings,
+			"waitForWorkloads":           waitForWorkloads,
+			"runValidation":              runValidation,
+			"forceStart":                 body.ForceStart,
+			"contentCatalogLoaded":       body.ContentCatalogLoaded,
+			"persistentDataExpected":     body.PersistentDataExpected,
 		},
 	})
 	if err != nil {
@@ -6641,6 +6709,21 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 	}
 	go r.dispatchRecoveryTaskAfterStorageSync(task, body.StorageRepo, storageRepoID, storageSourceClusterID)
 	writeJSON(w, http.StatusCreated, task)
+}
+
+func recoveryConflictPolicy(taskType string, namespaceMode string, sourceNamespace string, targetNamespace string, requested string) string {
+	if taskType != "drill" || targetNamespace == "" || targetNamespace == sourceNamespace {
+		return requested
+	}
+	// A generated drill namespace is disposable sandbox state. Reusing it with
+	// Velero's skip policy leaves objects from an earlier failed drill in place,
+	// which also prevents resource/image modifiers from being applied on retry.
+	// Legacy clients did not send namespaceMode, so recognize the conventional
+	// generated name as well.
+	if namespaceMode == "generated" || (namespaceMode == "" && targetNamespace == sourceNamespace+"-drill") {
+		return "replace"
+	}
+	return requested
 }
 
 func (r *Router) findActiveRecoveryTask(taskType string, clusterID string, sourceNamespace string) (store.Task, bool, error) {
@@ -6658,6 +6741,45 @@ func (r *Router) findActiveRecoveryTask(taskType string, clusterID string, sourc
 		}
 	}
 	return store.Task{}, false, nil
+}
+
+func (r *Router) retryRecoveryTask(w http.ResponseWriter, req *http.Request) {
+	original, ok, err := r.findTask(req.PathValue("id"))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "get_task_failed"})
+		return
+	}
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "task_not_found"})
+		return
+	}
+	if original.Type != "restore" && original.Type != "drill" && original.Type != "takeover" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "task_not_retriable"})
+		return
+	}
+	if isActiveTaskStatus(original.Status) {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "task_still_active"})
+		return
+	}
+	payload := cloneStringAnyMap(original.Payload)
+	payload["retryOfTaskId"] = original.ID
+	payload["requestedBy"] = requestActor(req)
+	task, err := r.store.CreateTask(store.TaskInput{ClusterID: original.ClusterID, AppID: original.AppID, ProtectionPlanID: original.ProtectionPlanID, RestorePointID: original.RestorePointID, Type: original.Type, Status: "queued", CommandID: store.NewPublicID(), Payload: payload})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "retry_task_create_failed"})
+		return
+	}
+	_ = r.store.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "info", Reason: "retry_created", Message: "Recovery retry created from task " + original.ID})
+	go r.dispatchRecoveryTask(task)
+	writeJSON(w, http.StatusCreated, task)
+}
+
+func cloneStringAnyMap(source map[string]any) map[string]any {
+	result := make(map[string]any, len(source)+1)
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
 }
 
 func isActiveTaskStatus(status string) bool {
@@ -7203,6 +7325,21 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 			r.logRequestMu.Lock()
 			waiter := r.logRequests[report.Payload.RequestID]
 			r.logRequestMu.Unlock()
+			if waiter != nil {
+				select {
+				case waiter <- report.Payload:
+				default:
+				}
+			}
+		case protocol.MessageAgentBackupContentReport:
+			var report protocol.Message[protocol.BackupContentReportPayload]
+			if err := json.Unmarshal(data, &report); err != nil {
+				r.logger.Warn("failed to decode backup contents report", "cluster_id", clusterID, "error", err)
+				continue
+			}
+			r.backupContentRequestMu.Lock()
+			waiter := r.backupContentRequests[report.Payload.RequestID]
+			r.backupContentRequestMu.Unlock()
 			if waiter != nil {
 				select {
 				case waiter <- report.Payload:
@@ -8432,6 +8569,7 @@ func (r *Router) ingestVeleroBackupsFromInventory(clusterID string, backups []ma
 			r.logger.Error("failed to create restore point from scheduled backup", "backup", name, "error", err)
 			continue
 		}
+		r.scheduleRestorePointContentIndex(point)
 		task, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{
 			TaskID:   task.ID,
 			Status:   "succeeded",
@@ -8661,6 +8799,9 @@ func taskFailurePayloadPatch(details map[string]any) map[string]any {
 	}
 	patch := map[string]any{}
 	if velero := mapFromAny(details["velero"]); len(velero) > 0 {
+		if stages := sliceFromAny(velero["recoveryStages"]); len(stages) > 0 {
+			patch["recoveryStages"] = stages
+		}
 		if volumeProgress := mapFromAny(velero["volumeProgress"]); len(volumeProgress) > 0 {
 			patch["volumeProgress"] = volumeProgress
 		}
@@ -8764,6 +8905,9 @@ func backupTaskPayloadPatch(velero map[string]any) map[string]any {
 	}
 	if phase := stringFromMap(velero, "phase"); phase != "" {
 		patch["phase"] = phase
+	}
+	if stages := sliceFromAny(velero["recoveryStages"]); len(stages) > 0 {
+		patch["recoveryStages"] = stages
 	}
 	if len(patch) == 0 {
 		return nil
@@ -9075,7 +9219,7 @@ func (r *Router) createRestorePointFromVeleroEvent(clusterID string, plan store.
 	}
 	sourceNamespace := firstNonEmptyString(event.Labels["hypercdr.io/source-namespace"], firstStringFromStrings(event.IncludedNamespaces), taskPayloadString(task.Payload, "sourceNamespace"))
 	scheduled := taskPayloadBool(task.Payload, "scheduled")
-	return r.store.CreateRestorePoint(store.RestorePointInput{
+	point, err := r.store.CreateRestorePoint(store.RestorePointInput{
 		ProtectionPlanID:  plan.ID,
 		SourceClusterID:   clusterID,
 		AppID:             plan.AppID,
@@ -9102,6 +9246,10 @@ func (r *Router) createRestorePointFromVeleroEvent(clusterID string, plan store.
 			"sourceNamespaces":   event.IncludedNamespaces,
 		},
 	})
+	if err == nil {
+		r.scheduleRestorePointContentIndex(point)
+	}
+	return point, err
 }
 
 func (r *Router) createRestorePointFromBackup(task store.Task, veleroPayload map[string]any) (store.RestorePoint, error) {
@@ -9169,6 +9317,7 @@ func (r *Router) createRestorePointFromBackup(task store.Task, veleroPayload map
 	if err != nil {
 		return store.RestorePoint{}, err
 	}
+	r.scheduleRestorePointContentIndex(point)
 	if task.ID != "" && point.ID != "" {
 		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{
 			TaskID:         task.ID,
@@ -10113,6 +10262,199 @@ func (r *Router) requestClusterLogs(clusterID, component string, since time.Time
 		return report, requestID, 200, nil
 	case <-time.After(25 * time.Second):
 		return protocol.LogReportPayload{}, requestID, 504, errors.New("The cluster agent did not respond to automatic log collection.")
+	}
+}
+
+func (r *Router) getRestorePointContents(w http.ResponseWriter, req *http.Request) {
+	point, ok, err := r.store.GetRestorePoint(req.PathValue("id"))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "get_restore_point_failed"})
+		return
+	}
+	if !ok || !tenantVisible(req, point.TenantID) {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "restore_point_not_found"})
+		return
+	}
+	clusterID := point.SourceClusterID
+	if !r.clusterVisible(req, clusterID) {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "cluster_not_found"})
+		return
+	}
+	if index, ok := restorePointContentIndex(point); ok && index.Status == "ready" {
+		writeJSON(w, http.StatusOK, map[string]any{"restorePointId": point.ID, "veleroBackupName": point.VeleroBackupName, "clusterId": clusterID, "resources": index.Resources, "truncated": index.Truncated, "indexedAt": index.IndexedAt, "source": "index"})
+		return
+	}
+	// Compatibility path for restore points created before content indexing
+	// was introduced. The successful result is persisted, so subsequent opens
+	// no longer depend on the source cluster or object storage.
+	report, status, err := r.requestBackupContents(clusterID, point.VeleroBackupName, r.cfg.AgentNamespace)
+	if err != nil {
+		r.persistRestorePointContentIndex(point, report, "failed", err.Error())
+		writeJSON(w, status, map[string]any{"error": "backup_contents_unavailable", "message": err.Error(), "errorCode": report.ErrorCode})
+		return
+	}
+	r.persistRestorePointContentIndex(point, report, "ready", "")
+	writeJSON(w, http.StatusOK, map[string]any{"restorePointId": point.ID, "veleroBackupName": point.VeleroBackupName, "clusterId": clusterID, "resources": report.Resources, "truncated": report.Truncated, "indexedAt": time.Now().UTC(), "source": "indexed_now"})
+}
+
+type restorePointIndex struct {
+	Status           string                           `json:"status"`
+	Resources        []protocol.BackupResourceSummary `json:"resources"`
+	Truncated        bool                             `json:"truncated,omitempty"`
+	IndexedAt        time.Time                        `json:"indexedAt,omitempty"`
+	GeneratorVersion string                           `json:"generatorVersion,omitempty"`
+	LastError        string                           `json:"lastError,omitempty"`
+	RetryAt          time.Time                        `json:"retryAt,omitempty"`
+}
+
+func restorePointContentIndex(point store.RestorePoint) (restorePointIndex, bool) {
+	value, ok := point.Metadata["contentIndex"]
+	if !ok {
+		return restorePointIndex{}, false
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return restorePointIndex{}, false
+	}
+	var index restorePointIndex
+	if json.Unmarshal(raw, &index) != nil || index.Status == "" {
+		return restorePointIndex{}, false
+	}
+	index.Resources = normalizeBackupResourceSummaries(index.Resources)
+	return index, true
+}
+
+// normalizeBackupResourceSummaries repairs catalogs produced by comm-agent
+// versions that interpreted Velero's canonical scope directory as the
+// resource name (for example namespaces.backupactions.actions.kio.kasten.io).
+// It also removes API-version representations of the same Kubernetes object.
+func normalizeBackupResourceSummaries(resources []protocol.BackupResourceSummary) []protocol.BackupResourceSummary {
+	result := make([]protocol.BackupResourceSummary, 0, len(resources))
+	seen := map[string]struct{}{}
+	for _, item := range resources {
+		if item.Resource == "namespaces" || item.Resource == "cluster" {
+			apiGroup := ""
+			if group, _, found := strings.Cut(item.APIVersion, "/"); found {
+				apiGroup = group
+			}
+			if apiGroup == "" {
+				item.Resource = item.Group
+				item.Group = ""
+			} else if suffix := "." + apiGroup; strings.HasSuffix(item.Group, suffix) {
+				item.Resource = strings.TrimSuffix(item.Group, suffix)
+				item.Group = apiGroup
+			}
+		}
+		identity := strings.Join([]string{item.APIVersion, item.Kind, item.Namespace, item.Name}, "\x00")
+		if _, exists := seen[identity]; exists {
+			continue
+		}
+		seen[identity] = struct{}{}
+		result = append(result, item)
+	}
+	return result
+}
+
+func (r *Router) persistRestorePointContentIndex(point store.RestorePoint, report protocol.BackupContentReportPayload, status string, message string) {
+	index := restorePointIndex{Status: status, Resources: normalizeBackupResourceSummaries(report.Resources), Truncated: report.Truncated, GeneratorVersion: r.clusterAgentVersion(point.SourceClusterID), LastError: message}
+	if status == "ready" {
+		index.IndexedAt = time.Now().UTC()
+		index.LastError = ""
+	} else {
+		index.RetryAt = time.Now().UTC().Add(5 * time.Minute)
+	}
+	if _, _, err := r.store.UpdateRestorePointState(store.RestorePointStateInput{ID: point.ID, Status: point.Status, Metadata: map[string]any{"contentIndex": index}}); err != nil {
+		r.logger.Error("failed to persist restore point content index", "restore_point_id", point.ID, "error", err)
+	}
+}
+
+func (r *Router) clusterAgentVersion(clusterID string) string {
+	clusters, err := r.store.ListClusters()
+	if err != nil {
+		return ""
+	}
+	for _, cluster := range clusters {
+		if cluster.ID == clusterID {
+			return cluster.AgentVersion
+		}
+	}
+	return ""
+}
+
+func (r *Router) scheduleRestorePointContentIndex(point store.RestorePoint) {
+	if point.ID == "" || point.Status != "available" {
+		return
+	}
+	if index, ok := restorePointContentIndex(point); ok && index.Status == "ready" {
+		currentVersion := r.clusterAgentVersion(point.SourceClusterID)
+		if currentVersion == "" || index.GeneratorVersion == currentVersion {
+			return
+		}
+	} else if ok && index.Status == "failed" && time.Now().UTC().Before(index.RetryAt) {
+		return
+	}
+	r.contentIndexMu.Lock()
+	if _, running := r.contentIndexing[point.ID]; running {
+		r.contentIndexMu.Unlock()
+		return
+	}
+	r.contentIndexing[point.ID] = struct{}{}
+	r.contentIndexMu.Unlock()
+	go func() {
+		defer func() {
+			r.contentIndexMu.Lock()
+			delete(r.contentIndexing, point.ID)
+			r.contentIndexMu.Unlock()
+		}()
+		r.contentIndexSlots <- struct{}{}
+		defer func() { <-r.contentIndexSlots }()
+		delays := []time.Duration{0, 5 * time.Second, 30 * time.Second}
+		for attempt, delay := range delays {
+			if delay > 0 {
+				time.Sleep(delay)
+			}
+			report, _, err := r.requestBackupContents(point.SourceClusterID, point.VeleroBackupName, r.cfg.AgentNamespace)
+			if err == nil {
+				r.persistRestorePointContentIndex(point, report, "ready", "")
+				r.logger.Info("restore point content index created", "restore_point_id", point.ID, "resources", len(report.Resources), "attempt", attempt+1)
+				return
+			}
+			r.persistRestorePointContentIndex(point, report, "failed", err.Error())
+			r.logger.Warn("restore point content indexing failed", "restore_point_id", point.ID, "attempt", attempt+1, "error", err)
+		}
+	}()
+}
+
+func (r *Router) requestBackupContents(clusterID string, backupName string, veleroNamespace string) (protocol.BackupContentReportPayload, int, error) {
+	conn, ok := r.hub.get(clusterID)
+	if !ok {
+		return protocol.BackupContentReportPayload{}, http.StatusConflict, errors.New("Cluster is offline. Restore point contents cannot be inspected.")
+	}
+	if strings.TrimSpace(veleroNamespace) == "" {
+		veleroNamespace = "hypercdr-agent"
+	}
+	requestID := store.NewPublicID()
+	waiter := make(chan protocol.BackupContentReportPayload, 1)
+	r.backupContentRequestMu.Lock()
+	r.backupContentRequests[requestID] = waiter
+	r.backupContentRequestMu.Unlock()
+	defer func() {
+		r.backupContentRequestMu.Lock()
+		delete(r.backupContentRequests, requestID)
+		r.backupContentRequestMu.Unlock()
+	}()
+	message := protocol.Message[protocol.BackupContentRequestPayload]{Version: protocol.Version, MessageID: store.NewPublicID(), MessageKind: protocol.MessageKindRequest, Type: protocol.MessagePlatformBackupContentRequest, ClusterID: clusterID, Timestamp: time.Now().UTC(), Payload: protocol.BackupContentRequestPayload{RequestID: requestID, VeleroBackupName: backupName, VeleroNamespace: veleroNamespace}}
+	if err := conn.WriteJSON(message); err != nil {
+		return protocol.BackupContentReportPayload{}, http.StatusBadGateway, err
+	}
+	select {
+	case report := <-waiter:
+		if report.ErrorCode != "" {
+			return report, http.StatusBadGateway, errors.New(report.Message)
+		}
+		return report, http.StatusOK, nil
+	case <-time.After(50 * time.Second):
+		return protocol.BackupContentReportPayload{}, http.StatusGatewayTimeout, errors.New("The cluster agent did not return restore point contents in time.")
 	}
 }
 

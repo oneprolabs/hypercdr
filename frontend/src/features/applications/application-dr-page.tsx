@@ -7,7 +7,7 @@ import {
   Settings2, ShieldCheck, ShieldOff, Trash2, Upload, X, Zap,
 } from 'lucide-react';
 import { DrConfigurationModal } from '../../dr-configuration-modal';
-import { RecoveryWizardModal, type RecoveryWizardConfig } from '../../recovery-wizard-modal';
+import { RecoveryWizardModal, type BackupContentResource, type RecoveryWizardConfig } from '../../recovery-wizard-modal';
 import { HyperTable, type HyperTableColumn } from '../../components/table';
 import { SearchBar } from '../../components/search-bar';
 import ListToolbarControls from '../../components/list-toolbar-controls';
@@ -1463,7 +1463,16 @@ export default function ApplicationDrPage(props: {
       notes: mode === 'drill'
         ? 'Validate service startup, storage attachment, and application smoke test after recovery.'
         : 'Confirm routing cutover, service dependencies, and production freeze before takeover.',
-	  forceProceed: false,
+      forceProceed: false,
+      includedResources: [],
+      excludedResources: [],
+      storageClassMappings: {},
+      imageMappings: {},
+      waitForWorkloads: true,
+      runValidation: mode === 'drill',
+      forceStart: false,
+      contentCatalogLoaded: false,
+      persistentDataExpected: false,
     };
   };
   const openRestoreAction = (mode: 'drill' | 'takeover') => {
@@ -1533,6 +1542,15 @@ export default function ApplicationDrPage(props: {
           storageProfileMode: action.config.storageProfileMode,
           alternateProfileId: action.config.alternateProfileId,
 		  forceProceed: action.config.forceProceed,
+          includedResources: action.config.includedResources,
+          excludedResources: action.config.excludedResources,
+          storageClassMappings: action.config.storageClassMappings,
+          imageMappings: action.config.imageMappings,
+          waitForWorkloads: action.config.waitForWorkloads,
+          runValidation: action.config.runValidation,
+          forceStart: action.config.forceStart,
+          contentCatalogLoaded: action.config.contentCatalogLoaded,
+          persistentDataExpected: action.config.persistentDataExpected,
       });
       setLiveRecoveryTasks(prev => ({ ...prev, [action.app.name]: createdTask }));
       setSubmittingRecoveryTasks(prev => ({ ...prev, [action.app.name]: createdTask }));
@@ -2772,6 +2790,7 @@ export default function ApplicationDrPage(props: {
               region: cluster.region,
               version: cluster.version,
               isCurrent: currentCluster?.id === cluster.id,
+              storageClasses: cluster.storageClasses,
             }))}
             repositoryOptions={storage.map(repo => ({
               id: repo.id,
@@ -2792,6 +2811,7 @@ export default function ApplicationDrPage(props: {
             onSubmit={confirmRestoreAction}
             submitting={recoverySubmitting}
 			readinessBlockers={0}
+            loadContents={restorePointId => apiGet<{ resources: BackupContentResource[]; truncated?: boolean }>(`/api/v1/restore-points/${encodeURIComponent(restorePointId)}/contents`)}
           />
         )}
       </AnimatePresence>

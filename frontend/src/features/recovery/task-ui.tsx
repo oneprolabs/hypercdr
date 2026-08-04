@@ -1,5 +1,5 @@
 import React from 'react';
-import { Boxes, Calendar, ClipboardList, Clock, FileCog, Gauge, HardDrive, KeyRound, MoreVertical, Network, Settings2, User } from 'lucide-react';
+import { Boxes, Calendar, ClipboardList, Clock, FileCog, Gauge, HardDrive, KeyRound, MoreVertical, Network, RefreshCw, Settings2, User } from 'lucide-react';
 import { formatLocalDateTime } from '../../lib/date-time';
 import type { AppItem, ResourceCategoryKey, ResourceKindSummary, ResourceRef } from '../clusters/types';
 import type { ApiRestorePoint, ApiTask, ApiTaskEvent, VolumeProgressInfo } from './types';
@@ -495,13 +495,16 @@ export function TaskErrorStatus({
 export function TaskErrorDetailBlock({
   failure,
   details,
+  onRetry,
 }: {
   failure: { code: string; title: string; description: string; fullText: string };
   details?: string[];
+  onRetry?: () => void;
 }) {
   const fullDetails = details && details.length > 0 ? details : failure.fullText ? [failure.fullText] : [];
   const definition = errorMessageDefinition(failure.code);
   const possibleCause = productTaskMessage(fullDetails[0] || failure.description || 'No specific cause was reported.');
+  const solution = taskFailureSolution(failure.code, fullDetails, definition.detail);
   return (
     <div className="hbdr-task-detail-error">
       <header>
@@ -516,7 +519,7 @@ export function TaskErrorDetailBlock({
         </section>
         <section>
           <b>Solution</b>
-          <p>{productTaskMessage(definition.detail)}</p>
+          <p>{solution}</p>
         </section>
         <section>
           <b>Technical details</b>
@@ -527,18 +530,51 @@ export function TaskErrorDetailBlock({
           )}
         </section>
       </div>
+      {onRetry && <div className="hbdr-task-detail-error-actions"><button type="button" onClick={onRetry}><RefreshCw size={13} />Retry recovery</button></div>}
     </div>
   );
 }
 
+function taskFailureSolution(code: string, details: string[], fallback: string): string {
+  const evidence = details.join(' ').toLowerCase();
+  if (code === '140005') {
+    if (/timeout|timed out|i\/o timeout|connection refused|no route|dial tcp/.test(evidence)) {
+      return 'Verify outbound DNS and TCP 443 access from every target worker node to the registry shown in the technical details. If direct access is blocked, map the image to an internal registry in Advanced options and retry.';
+    }
+    if (/unauthorized|authentication required|denied|pull access/.test(evidence)) {
+      return 'Create or copy an imagePullSecret in the target namespace, attach it to the restored ServiceAccount or Pod template, verify registry permission, and retry.';
+    }
+    if (/not found|manifest unknown/.test(evidence)) {
+      return 'Confirm that the exact repository and tag or digest exists. Map it to an available target-registry image in Advanced options, then retry.';
+    }
+  }
+  return productTaskMessage(fallback);
+}
+
 export function TaskProcessTimeline({ task, events }: { task: ApiTask; events: ApiTaskEvent[] }) {
   const terminal = !isActiveTaskStatus(task.status);
+  const recoveryStages = taskRecoveryStages(task, events);
   return (
     <div className="hbdr-task-detail-section">
       <div className="hbdr-task-detail-section-title">
         <strong>Execution process</strong>
         <span>{terminal ? `${events.length} records` : `Live · ${events.length} records`}</span>
       </div>
+      {recoveryStages.length > 0 && (
+        <div className="hbdr-recovery-stage-list" aria-label="Recovery stages">
+          {recoveryStages.map(stage => (
+            <section key={stage.id} className={`is-${stage.status}`}>
+              <i aria-hidden="true" />
+              <div>
+                <strong>{stage.name}</strong>
+                {stage.message && <span>{productTaskMessage(stage.message)}</span>}
+                {stage.evidence.length > 0 && <ul>{stage.evidence.map((item, index) => <li key={`${stage.id}-${index}`}>{item}</li>)}</ul>}
+              </div>
+              <em>{stage.status.replace(/_/g, ' ')}</em>
+            </section>
+          ))}
+        </div>
+      )}
       <div className="hbdr-task-detail-events" aria-live="polite">
         {events.length > 0 ? events.map(event => {
           const errors = eventRestoreResultErrors(event);
@@ -556,6 +592,37 @@ export function TaskProcessTimeline({ task, events }: { task: ApiTask; events: A
       </div>
     </div>
   );
+}
+
+type TaskRecoveryStage = {
+  id: string;
+  name: string;
+  status: string;
+  message: string;
+  evidence: string[];
+};
+
+function taskRecoveryStages(task: ApiTask, events: ApiTaskEvent[]): TaskRecoveryStage[] {
+  const candidates: unknown[] = [task.payload?.recoveryStages, task.payload?.velero?.recoveryStages];
+  [...events].reverse().forEach(event => {
+    candidates.push(event.payload?.recoveryStages, event.payload?.velero?.recoveryStages);
+  });
+  const raw = candidates.find(value => Array.isArray(value)) as Array<Record<string, unknown>> | undefined;
+  if (!raw) return [];
+  return raw.map((stage, index) => {
+    const status = String(stage.status || 'pending').trim().toLowerCase().replace(/\s+/g, '_');
+    const evidenceValue = stage.evidence;
+    const evidence = Array.isArray(evidenceValue)
+      ? evidenceValue.map(item => typeof item === 'string' ? item : JSON.stringify(item)).filter(Boolean)
+      : evidenceValue ? [typeof evidenceValue === 'string' ? evidenceValue : JSON.stringify(evidenceValue)] : [];
+    return {
+      id: String(stage.id || `stage-${index}`),
+      name: String(stage.name || stage.id || `Stage ${index + 1}`),
+      status,
+      message: String(stage.message || ''),
+      evidence,
+    };
+  });
 }
 
 export function taskProcessEventMessage(event: ApiTaskEvent): string {

@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -102,6 +103,28 @@ func TestKubernetesRestoreExecutorAppliesVeleroRestore(t *testing.T) {
 	}
 	if applier.waitedBackupNamespace != "hypercdr-agent" || applier.waitedBackupName != "backup-a" {
 		t.Fatalf("restore should wait for backup before submit, namespace=%q name=%q", applier.waitedBackupNamespace, applier.waitedBackupName)
+	}
+	if applier.waitedModifierNamespace != "hypercdr-agent" || applier.waitedModifierName == "" {
+		t.Fatalf("restore should wait for resource modifier propagation, namespace=%q name=%q", applier.waitedModifierNamespace, applier.waitedModifierName)
+	}
+}
+
+func TestKubernetesRestoreExecutorDoesNotCreateRestoreBeforeModifierPropagates(t *testing.T) {
+	applier := &fakeManifestApplier{waitModifierErr: context.DeadlineExceeded}
+	exec := NewRestoreExecutor(Config{Mode: ModeKubernetes, AgentNamespace: "hypercdr-agent", Applier: applier})
+	manifest, err := exec.BuildRestoreManifest(protocol.TaskDispatchPayload{
+		TaskID: "task-restore", CommandID: "command-restore", Type: "drill",
+		Restore: &protocol.RestoreCommand{VeleroBackupName: "backup-a", SourceNamespace: "default", TargetNamespace: "default-drill", ConflictPolicy: "update"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = exec.SubmitRestore(context.Background(), manifest)
+	if err == nil || !strings.Contains(err.Error(), "resource modifier is not ready") {
+		t.Fatalf("expected propagation error, got %v", err)
+	}
+	if len(applier.manifests) != 1 || applier.manifests[0]["kind"] != "ConfigMap" {
+		t.Fatalf("Restore must not be created before modifier propagation, manifests=%#v", applier.manifests)
 	}
 }
 
@@ -287,11 +310,20 @@ func TestKubernetesStorageExecutorAppliesBackupStorageLocation(t *testing.T) {
 }
 
 type fakeManifestApplier struct {
-	manifests             []kube.Manifest
-	waitedBackupNamespace string
-	waitedBackupName      string
-	waitedBackupTimeout   time.Duration
-	waitBackupErr         error
+	manifests               []kube.Manifest
+	waitedBackupNamespace   string
+	waitedBackupName        string
+	waitedBackupTimeout     time.Duration
+	waitBackupErr           error
+	waitedModifierNamespace string
+	waitedModifierName      string
+	waitModifierErr         error
+}
+
+func (a *fakeManifestApplier) WaitForResourceModifier(ctx context.Context, namespace string, name string, timeout time.Duration) error {
+	a.waitedModifierNamespace = namespace
+	a.waitedModifierName = name
+	return a.waitModifierErr
 }
 
 func (a *fakeManifestApplier) ApplyManifest(ctx context.Context, manifest kube.Manifest) (kube.AppliedObject, error) {

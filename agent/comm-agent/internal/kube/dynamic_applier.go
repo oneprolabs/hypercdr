@@ -232,6 +232,45 @@ func (a *DynamicManifestApplier) WaitForVeleroBackup(ctx context.Context, namesp
 	}
 }
 
+func (a *DynamicManifestApplier) WaitForResourceModifier(ctx context.Context, namespace string, name string, timeoutDuration time.Duration) error {
+	if namespace == "" || name == "" {
+		return fmt.Errorf("resource modifier namespace and name are required")
+	}
+	if timeoutDuration <= 0 {
+		timeoutDuration = 15 * time.Second
+	}
+	resource := a.client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}).Namespace(namespace)
+	timeout := time.NewTimer(timeoutDuration)
+	defer timeout.Stop()
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	observed := false
+	var observedAt time.Time
+	for {
+		configMap, err := resource.Get(ctx, name, v1.GetOptions{})
+		if err == nil && configMap.GetResourceVersion() != "" {
+			if !observed {
+				observed = true
+				observedAt = time.Now()
+			}
+			// The API read confirms persistence. A short grace period gives the
+			// Velero controller informer time to consume the same add/update event.
+			if time.Since(observedAt) >= 2*time.Second {
+				return nil
+			}
+		} else if err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timeout.C:
+			return fmt.Errorf("timed out waiting for resource modifier ConfigMap %s/%s to propagate", namespace, name)
+		case <-ticker.C:
+		}
+	}
+}
+
 func (a *DynamicManifestApplier) WaitForVeleroBackupDeleted(ctx context.Context, namespace string, name string, timeoutDuration time.Duration) error {
 	if namespace == "" {
 		return fmt.Errorf("velero namespace is required")
