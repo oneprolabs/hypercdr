@@ -121,6 +121,8 @@ export function latestVolumeProgress(events?: ApiTaskEvent[]): VolumeProgressInf
       operation: typeof progress.operation === 'string' ? progress.operation : undefined,
       bytesDone: Number(progress.bytesDone || 0),
       totalBytes: Number(progress.totalBytes || 0),
+	  incrementalBytes: Number(progress.incrementalBytes || 0),
+	  incrementalCount: Number(progress.incrementalCount || 0),
       knownTotal: Boolean(progress.knownTotal),
       allTotalsKnown: Boolean(progress.allTotalsKnown),
       percent: Number(progress.percent || 0),
@@ -151,6 +153,9 @@ export function taskProgressInfo(task: ApiTask, events?: ApiTaskEvent[]): Volume
       speedBytesPerSecond: Number(metrics.speedBytesPerSecond || 0),
       etaSeconds: Number(metrics.etaSeconds || 0),
     };
+  }
+  if (['succeeded', 'failed', 'canceled', 'cancelled'].includes(task.status)) {
+    return null;
   }
   const volume = latestVolumeProgress(events);
   if (!volume || !volume.knownTotal || !volume.allTotalsKnown || volume.totalBytes <= 0) {

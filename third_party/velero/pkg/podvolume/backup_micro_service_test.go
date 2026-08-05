@@ -155,7 +155,7 @@ func TestOnDataPathCompleted(t *testing.T) {
 		{
 			name:        "marshal fail",
 			marshalErr:  errors.New("fake-marshal-error"),
-			expectedErr: "Failed to marshal backup result { false { } 0}: fake-marshal-error",
+			expectedErr: "Failed to marshal backup result { false { } 0 0}: fake-marshal-error",
 		},
 		{
 			name:                "succeed",
@@ -258,8 +258,8 @@ func TestCancelPodVolumeBackup(t *testing.T) {
 	}{
 		{
 			name:                "no fs backup",
-			expectedEventReason: datapath.EventReasonCancelled,
-			expectedEventMsg:    "Data path for PVB fake-pvb canceled",
+			expectedEventReason: datapath.EventReasonStopped,
+			expectedEventMsg:    "Data path for fake-pvb exited without start",
 			expectedErr:         datapath.ErrCancelled,
 		},
 	}

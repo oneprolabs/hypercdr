@@ -71,7 +71,7 @@ type itemCollector struct {
 type nsTracker struct {
 	singleLabelSelector labels.Selector
 	orLabelSelector     []labels.Selector
-	namespaceFilter     *collections.IncludesExcludes
+	namespaceFilter     *collections.NamespaceIncludesExcludes
 	logger              logrus.FieldLogger
 
 	namespaceMap map[string]bool
@@ -103,7 +103,7 @@ func (nt *nsTracker) init(
 	unstructuredNSs []unstructured.Unstructured,
 	singleLabelSelector labels.Selector,
 	orLabelSelector []labels.Selector,
-	namespaceFilter *collections.IncludesExcludes,
+	namespaceFilter *collections.NamespaceIncludesExcludes,
 	logger logrus.FieldLogger,
 ) {
 	if nt.namespaceMap == nil {
@@ -497,7 +497,8 @@ func (r *itemCollector) getResourceItems(
 				kind:          resource.Kind,
 			})
 
-			if item.GetNamespace() != "" {
+			if item.GetNamespace() != "" &&
+				r.backupRequest.NamespaceIncludesExcludes.ShouldInclude(item.GetNamespace()) {
 				log.Debugf("Track namespace %s in nsTracker", item.GetNamespace())
 				r.nsTracker.track(item.GetNamespace())
 			}
@@ -635,7 +636,7 @@ func coreGroupResourcePriority(resource string) int {
 // getNamespacesToList examines ie and resolves the includes and excludes to a full list of
 // namespaces to list. If ie is nil or it includes *, the result is just "" (list across all
 // namespaces). Otherwise, the result is a list of every included namespace minus all excluded ones.
-func getNamespacesToList(ie *collections.IncludesExcludes) []string {
+func getNamespacesToList(ie *collections.NamespaceIncludesExcludes) []string {
 	if ie == nil {
 		return []string{""}
 	}
@@ -646,9 +647,9 @@ func getNamespacesToList(ie *collections.IncludesExcludes) []string {
 	}
 
 	var list []string
-	for _, i := range ie.GetIncludes() {
-		if ie.ShouldInclude(i) {
-			list = append(list, i)
+	for _, n := range ie.GetIncludes() {
+		if ie.ShouldInclude(n) {
+			list = append(list, n)
 		}
 	}
 
@@ -753,21 +754,28 @@ func (r *itemCollector) collectNamespaces(
 	}
 
 	unstructuredList, err := resourceClient.List(metav1.ListOptions{})
+
+	activeNamespacesHashSet := make(map[string]bool)
+	for _, namespace := range unstructuredList.Items {
+		activeNamespacesHashSet[namespace.GetName()] = true
+	}
+
 	if err != nil {
 		log.WithError(errors.WithStack(err)).Error("error list namespaces")
 		return nil, errors.WithStack(err)
 	}
 
-	for _, includedNSName := range r.backupRequest.Backup.Spec.IncludedNamespaces {
+	// Change to look at the struct includes/excludes
+	// In case wildcards are expanded, we need to look at the struct includes/excludes
+	for _, includedNSName := range r.backupRequest.NamespaceIncludesExcludes.GetIncludes() {
 		nsExists := false
 		// Skip checking the namespace existing when it's "*".
 		if includedNSName == "*" {
 			continue
 		}
-		for _, unstructuredNS := range unstructuredList.Items {
-			if unstructuredNS.GetName() == includedNSName {
-				nsExists = true
-			}
+
+		if _, ok := activeNamespacesHashSet[includedNSName]; ok {
+			nsExists = true
 		}
 
 		if !nsExists {
@@ -809,17 +817,18 @@ func (r *itemCollector) collectNamespaces(
 	var items []*kubernetesResource
 
 	for index := range unstructuredList.Items {
+		nsName := unstructuredList.Items[index].GetName()
+
 		path, err := r.writeToFile(&unstructuredList.Items[index])
 		if err != nil {
-			log.WithError(err).Errorf("Error writing item %s to file",
-				unstructuredList.Items[index].GetName())
+			log.WithError(err).Errorf("Error writing item %s to file", nsName)
 			continue
 		}
 
 		items = append(items, &kubernetesResource{
 			groupResource: gr,
 			preferredGVR:  preferredGVR,
-			name:          unstructuredList.Items[index].GetName(),
+			name:          nsName,
 			path:          path,
 			kind:          resource.Kind,
 		})

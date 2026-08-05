@@ -496,6 +496,8 @@ func resourceForObject(object AppliedObject) (schema.GroupVersionResource, bool,
 		return schema.GroupVersionResource{Version: "v1", Resource: "secrets"}, true, nil
 	case "v1/ConfigMap":
 		return schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}, true, nil
+	case "apiextensions.k8s.io/v1/CustomResourceDefinition":
+		return schema.GroupVersionResource{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}, false, nil
 	case "velero.io/v1/Backup":
 		return schema.GroupVersionResource{Group: "velero.io", Version: "v1", Resource: "backups"}, true, nil
 	case "velero.io/v1/Schedule":

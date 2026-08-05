@@ -103,3 +103,15 @@ func TestProgress(t *testing.T) {
 		p.FinishedFile(fileName, nil)
 	}
 }
+
+func TestGetIncrementalSizeNeverReturnsNegativeBytes(t *testing.T) {
+	p := &Progress{estimatedTotalBytes: 210427776, cachedBytes: 210427803}
+	if got := p.GetIncrementalSize(); got != 0 {
+		t.Fatalf("expected negative Kopia accounting skew to be clamped to zero, got %d", got)
+	}
+
+	p.cachedBytes = 200000000
+	if got := p.GetIncrementalSize(); got != 10427776 {
+		t.Fatalf("expected positive incremental bytes to be preserved, got %d", got)
+	}
+}

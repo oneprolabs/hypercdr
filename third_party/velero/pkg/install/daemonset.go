@@ -57,6 +57,10 @@ func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1api.DaemonSet
 		daemonSetArgs = append(daemonSetArgs, fmt.Sprintf("--node-agent-configmap=%s", c.nodeAgentConfigMap))
 	}
 
+	if len(c.backupRepoConfigMap) > 0 {
+		daemonSetArgs = append(daemonSetArgs, fmt.Sprintf("--backup-repository-configmap=%s", c.backupRepoConfigMap))
+	}
+
 	userID := int64(0)
 	mountPropagationMode := corev1api.MountPropagationHostToContainer
 
@@ -194,7 +198,8 @@ func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1api.DaemonSet
 					Secret: &corev1api.SecretVolumeSource{
 						// read-only for Owner, Group, Public
 						DefaultMode: ptr.To(int32(0444)),
-						SecretName:  "cloud-credentials",
+						// #nosec G101 -- This is a reference to a Secret resource name, not a credential
+						SecretName: "cloud-credentials",
 					},
 				},
 			},
@@ -231,12 +236,28 @@ func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1api.DaemonSet
 	if c.forWindows {
 		daemonSet.Spec.Template.Spec.SecurityContext = nil
 		daemonSet.Spec.Template.Spec.Containers[0].SecurityContext = nil
-		daemonSet.Spec.Template.Spec.NodeSelector = map[string]string{
-			"kubernetes.io/os": "windows",
-		}
 		daemonSet.Spec.Template.Spec.OS = &corev1api.PodOS{
 			Name: "windows",
 		}
+
+		daemonSet.Spec.Template.Spec.Affinity = &corev1api.Affinity{
+			NodeAffinity: &corev1api.NodeAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: &corev1api.NodeSelector{
+					NodeSelectorTerms: []corev1api.NodeSelectorTerm{
+						{
+							MatchExpressions: []corev1api.NodeSelectorRequirement{
+								{
+									Key:      "kubernetes.io/os",
+									Values:   []string{"windows"},
+									Operator: corev1api.NodeSelectorOpIn,
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
 		daemonSet.Spec.Template.Spec.Tolerations = []corev1api.Toleration{
 			{
 				Key:      "os",
@@ -252,11 +273,22 @@ func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1api.DaemonSet
 			},
 		}
 	} else {
-		daemonSet.Spec.Template.Spec.NodeSelector = map[string]string{
-			"kubernetes.io/os": "linux",
-		}
-		daemonSet.Spec.Template.Spec.OS = &corev1api.PodOS{
-			Name: "linux",
+		daemonSet.Spec.Template.Spec.Affinity = &corev1api.Affinity{
+			NodeAffinity: &corev1api.NodeAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: &corev1api.NodeSelector{
+					NodeSelectorTerms: []corev1api.NodeSelectorTerm{
+						{
+							MatchExpressions: []corev1api.NodeSelectorRequirement{
+								{
+									Key:      "kubernetes.io/os",
+									Values:   []string{"windows"},
+									Operator: corev1api.NodeSelectorOpNotIn,
+								},
+							},
+						},
+					},
+				},
+			},
 		}
 	}
 

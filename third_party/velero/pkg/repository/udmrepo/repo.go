@@ -77,10 +77,17 @@ type AdvancedFeatureInfo struct {
 
 // BackupRepoService is used to initialize, open or maintain a backup repository
 type BackupRepoService interface {
-	// Init creates a backup repository or connect to an existing backup repository.
+	// Create creates a new backup repository.
 	// repoOption: option to the backup repository and the underlying backup storage.
-	// createNew: indicates whether to create a new or connect to an existing backup repository.
-	Init(ctx context.Context, repoOption RepoOptions, createNew bool) error
+	Create(ctx context.Context, repoOption RepoOptions) error
+
+	// Connect connects to an existing backup repository.
+	// repoOption: option to the backup repository and the underlying backup storage.
+	Connect(ctx context.Context, repoOption RepoOptions) error
+
+	// IsReady checks if the backup repository has been ready in the underlying backup storage.
+	// repoOption: option to the underlying backup storage
+	IsReady(ctx context.Context, repoOption RepoOptions, readOnly bool) (bool, error)
 
 	// Open opens an backup repository that has been created/connected.
 	// repoOption: options to open the backup repository and the underlying storage.
@@ -93,6 +100,9 @@ type BackupRepoService interface {
 	// DefaultMaintenanceFrequency returns the defgault frequency of maintenance, callers refer this
 	// frequency to maintain the backup repository to get the best maintenance performance
 	DefaultMaintenanceFrequency() time.Duration
+
+	// ClientSideCacheLimit returns the max cache size required on client side
+	ClientSideCacheLimit(repoOption map[string]string) int64
 }
 
 // BackupRepo provides the access to the backup repository

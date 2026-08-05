@@ -1376,7 +1376,7 @@ export default function App() {
         const res = await apiGet<ApiList<ApiTask>>('/api/v1/tasks');
         const tasks = listItems(res);
         const clusterTasks = tasks
-          .filter(task => task.type === 'register' || task.type === 'unregister')
+          .filter(task => ['register', 'unregister', 'agent-upgrade', 'velero-upgrade'].includes(task.type))
           .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
         const visibleClusterTasks = clusterTasks.filter(task => isActiveTaskStatus(task.status)).concat(clusterTasks.filter(task => !isActiveTaskStatus(task.status)).slice(0, 8));
         if (cancelled) return;

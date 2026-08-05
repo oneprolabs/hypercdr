@@ -663,6 +663,11 @@ func (r *KubernetesClusterReader) enrichBackupInventory(ctx context.Context, sum
 	metadataBytes := objectStats.MetadataPackageBytes
 	uploadedMetadataBytes := metadataBytes
 	uploadedVolumeBytes := volumeBytes
+	uploadedVolumeSource := "estimatedFromVolumeBytes"
+	if volumeProgress.IncrementalCount > 0 {
+		uploadedVolumeBytes = volumeProgress.IncrementalBytes
+		uploadedVolumeSource = "veleroIncrementalBytes"
+	}
 	totalBytes := metadataBytes + volumeBytes
 	uploadedBytes := uploadedMetadataBytes + uploadedVolumeBytes
 	sizeStatus := "complete"
@@ -670,18 +675,20 @@ func (r *KubernetesClusterReader) enrichBackupInventory(ctx context.Context, sum
 		sizeStatus = "partial"
 	}
 	size := map[string]any{
-		"sizeStatus":            sizeStatus,
-		"totalBytes":            totalBytes,
-		"metadataBytes":         metadataBytes,
-		"volumeBytes":           volumeBytes,
-		"uploadedBytes":         uploadedBytes,
-		"uploadedMetadataBytes": uploadedMetadataBytes,
-		"uploadedVolumeBytes":   uploadedVolumeBytes,
+		"sizeStatus":             sizeStatus,
+		"totalBytes":             totalBytes,
+		"metadataBytes":          metadataBytes,
+		"volumeBytes":            volumeBytes,
+		"uploadedBytes":          uploadedBytes,
+		"uploadedMetadataBytes":  uploadedMetadataBytes,
+		"uploadedVolumeBytes":    uploadedVolumeBytes,
+		"incrementalVolumeBytes": volumeProgress.IncrementalBytes,
+		"incrementalVolumeCount": volumeProgress.IncrementalCount,
 		"sources": map[string]any{
 			"metadataBytes":         "objectStoreBackupArtifacts",
 			"volumeBytes":           volumeSource,
 			"uploadedMetadataBytes": "objectStoreBackupArtifacts",
-			"uploadedVolumeBytes":   "estimatedFromVolumeBytes",
+			"uploadedVolumeBytes":   uploadedVolumeSource,
 		},
 		"accuracy": map[string]any{
 			"totalBytes":            "mixed",
@@ -711,19 +718,23 @@ func backupInventoryVolumeProgressPayload(progress VolumeProgress) map[string]an
 	items := make([]map[string]any, 0, len(progress.Items))
 	for _, item := range progress.Items {
 		items = append(items, map[string]any{
-			"kind":       item.Kind,
-			"name":       item.Name,
-			"phase":      item.Phase,
-			"bytesDone":  item.BytesDone,
-			"totalBytes": item.TotalBytes,
-			"knownTotal": item.KnownTotal,
-			"message":    item.Message,
+			"kind":             item.Kind,
+			"name":             item.Name,
+			"phase":            item.Phase,
+			"bytesDone":        item.BytesDone,
+			"totalBytes":       item.TotalBytes,
+			"incrementalBytes": item.IncrementalBytes,
+			"incrementalKnown": item.IncrementalKnown,
+			"knownTotal":       item.KnownTotal,
+			"message":          item.Message,
 		})
 	}
 	return map[string]any{
 		"operation":         "backup",
 		"bytesDone":         progress.BytesDone,
 		"totalBytes":        progress.TotalBytes,
+		"incrementalBytes":  progress.IncrementalBytes,
+		"incrementalCount":  progress.IncrementalCount,
 		"knownTotal":        progress.KnownTotal,
 		"allTotalsKnown":    progress.AllTotalsKnown,
 		"knownTotalCount":   progress.KnownTotalCount,

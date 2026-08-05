@@ -191,7 +191,7 @@ curl -kfsS https://192.168.8.149:3002/install.sh | head -20
 
 ```text
 AGENT_IMAGE="192.168.8.149:5001/hypercdr/comm-agent:v20260714.5"
-VELERO_IMAGE="192.168.8.149:5001/hypercdr/velero:v1.17.1-helperfix"
+VELERO_IMAGE="192.168.8.149:5001/hypercdr/velero:v1.18.2-hcdr.2"
 ```
 
 ## 6. 本次已验证结果

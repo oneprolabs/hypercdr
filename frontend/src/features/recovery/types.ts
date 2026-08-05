@@ -138,6 +138,8 @@ export type VolumeProgressInfo = {
   operation?: string;
   bytesDone: number;
   totalBytes: number;
+	incrementalBytes?: number;
+	incrementalCount?: number;
   knownTotal: boolean;
   allTotalsKnown?: boolean;
   percent: number;

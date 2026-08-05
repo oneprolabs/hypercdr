@@ -14,7 +14,7 @@ const formatPercent=(value:number)=>Number.isFinite(value)?Math.max(0,Math.min(1
 const taskStatusLabel=(status?:string)=>status==='succeeded'?'Succeeded':status==='failed'?'Failed':['running','accepted','dispatched','queued'].includes(status||'')?'Running':status||'Unknown';
 const taskStatusClass=(status?:string)=>status==='succeeded'?'text-emerald-600':status==='failed'?'text-rose-600':['running','accepted','dispatched','queued'].includes(status||'')?'text-blue-600':'text-slate-500';
 const latestVolumeProgress=(events?:ApiTaskEvent[]):VolumeProgressInfo|null=>{for(let index=(events?.length||0)-1;index>=0;index--){const progress=events?.[index]?.payload?.velero?.volumeProgress;if(progress&&typeof progress==='object')return{bytesDone:Number(progress.bytesDone||0),totalBytes:Number(progress.totalBytes||0),knownTotal:Boolean(progress.knownTotal),allTotalsKnown:Boolean(progress.allTotalsKnown),percent:Number(progress.percent||0),speedBytesPerSecond:Number(progress.speedBytesPerSecond||0),etaSeconds:Number(progress.etaSeconds||0)}}return null};
-const taskProgressInfo=(task:ApiTask,events?:ApiTaskEvent[])=>{const metrics=task.payload?.progressMetrics&&typeof task.payload.progressMetrics==='object'?task.payload.progressMetrics:task.payload||{};const totalBytes=Number(metrics.totalBytes||0),syncedBytes=Number(metrics.syncedBytes||0);if(totalBytes>0)return{bytesDone:Math.max(0,syncedBytes),totalBytes,knownTotal:true,allTotalsKnown:true,percent:Number(metrics.percent||(syncedBytes>0?syncedBytes*100/totalBytes:0)),speedBytesPerSecond:Number(metrics.speedBytesPerSecond||0),etaSeconds:Number(metrics.etaSeconds||0)};const volume=latestVolumeProgress(events);return volume?.knownTotal&&volume.allTotalsKnown&&volume.totalBytes>0?volume:null};
+const taskProgressInfo=(task:ApiTask,events?:ApiTaskEvent[])=>{const metrics=task.payload?.progressMetrics&&typeof task.payload.progressMetrics==='object'?task.payload.progressMetrics:task.payload||{};const totalBytes=Number(metrics.totalBytes||0),syncedBytes=Number(metrics.syncedBytes||0);if(totalBytes>0)return{bytesDone:Math.max(0,syncedBytes),totalBytes,knownTotal:true,allTotalsKnown:true,percent:Number(metrics.percent||(syncedBytes>0?syncedBytes*100/totalBytes:0)),speedBytesPerSecond:Number(metrics.speedBytesPerSecond||0),etaSeconds:Number(metrics.etaSeconds||0)};if(['succeeded','failed','canceled','cancelled'].includes(task.status))return null;const volume=latestVolumeProgress(events);return volume?.knownTotal&&volume.allTotalsKnown&&volume.totalBytes>0?volume:null};
 
 export default function ClusterActivityPanel({ logs, clusters }: { logs: Record<string, ClusterTaskLog[]>; clusters: Cluster[] }) {
   const entries = Object.entries(logs)
@@ -25,8 +25,14 @@ export default function ClusterActivityPanel({ logs, clusters }: { logs: Record<
     .sort((a, b) => (b.log.task.createdAt || '').localeCompare(a.log.task.createdAt || ''));
   const visibleEntries = entries.filter(entry => !['succeeded', 'failed', 'canceled'].includes(entry.log.task.status || '')).concat(entries.filter(entry => ['succeeded', 'failed', 'canceled'].includes(entry.log.task.status || '')).slice(0, 8));
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const taskTypeLabel = (type: string) => type === 'register' ? 'Register cluster' : type === 'unregister' ? 'Unregister cluster' : type;
-  const taskInitials = (entry: { log: ClusterTaskLog }) => entry.log.task.type === 'register' ? 'R' : entry.log.task.type === 'unregister' ? 'U' : (entry.log.task.type || '?').charAt(0).toUpperCase();
+  const taskTypeLabel = (type: string) => type === 'register' ? 'Register cluster' : type === 'unregister' ? 'Unregister cluster' : type === 'agent-upgrade' ? 'Upgrade Comm Agent' : type === 'velero-upgrade' ? 'Upgrade Velero' : type;
+  const taskInitials = (entry: { log: ClusterTaskLog }) => entry.log.task.type === 'register' ? 'R' : entry.log.task.type === 'unregister' ? 'U' : entry.log.task.type === 'agent-upgrade' ? 'CA' : entry.log.task.type === 'velero-upgrade' ? 'V' : (entry.log.task.type || '?').charAt(0).toUpperCase();
+  const taskAccent = (type: string) => type === 'register' ? 'bg-blue-500' : type === 'unregister' ? 'bg-rose-500' : type === 'agent-upgrade' ? 'bg-indigo-500' : type === 'velero-upgrade' ? 'bg-cyan-600' : 'bg-slate-500';
+  const componentLabel = (task: ApiTask) => task.type === 'agent-upgrade' ? 'Comm Agent' : task.type === 'velero-upgrade' ? 'Velero' : 'Cluster lifecycle';
+  const componentDetail = (task: ApiTask) => {
+    if (task.type === 'agent-upgrade' || task.type === 'velero-upgrade') return String(task.payload?.version || task.payload?.image || '-');
+    return task.type === 'register' ? String(task.payload?.agentVersion || 'New cluster') : task.type === 'unregister' ? 'Remove managed cluster' : '-';
+  };
   const clusterDisplay = (entry: { cluster: Cluster | null; clusterId: string; log: ClusterTaskLog }) => {
     if (entry.cluster) return entry.cluster.name === 'unknown-cluster' ? 'Unnamed cluster' : entry.cluster.name;
     const archived = entry.log.task.payload?.archivedClusterId as string | undefined;
@@ -58,7 +64,7 @@ export default function ClusterActivityPanel({ logs, clusters }: { logs: Record<
         const entry = info.row.original;
         return (
           <div className="flex min-w-0 items-center gap-2">
-            <span className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[10px] font-black text-white ${entry.log.task.type === 'register' ? 'bg-blue-500' : 'bg-rose-500'}`}>{taskInitials(entry)}</span>
+            <span className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[9px] font-black text-white ${taskAccent(entry.log.task.type)}`}>{taskInitials(entry)}</span>
             <div className="min-w-0">
               <p className="truncate font-bold text-slate-900">{taskTypeLabel(entry.log.task.type)}</p>
               <p className="truncate font-mono text-[10px] text-slate-400">{entry.log.task.id.slice(0, 8)}</p>
@@ -69,8 +75,8 @@ export default function ClusterActivityPanel({ logs, clusters }: { logs: Record<
       meta: { title: entry => `${taskTypeLabel(entry.log.task.type)} / ${entry.log.task.id}` },
     },
     {
-      id: 'target',
-      header: 'Target',
+      id: 'cluster',
+      header: 'Cluster',
       accessorFn: entry => clusterDisplay(entry),
       size: 260,
       minSize: 180,
@@ -88,6 +94,24 @@ export default function ClusterActivityPanel({ logs, clusters }: { logs: Record<
         );
       },
       meta: { title: entry => `${clusterDisplay(entry)} / ${targetLabel(entry)}` },
+    },
+    {
+      id: 'component',
+      header: 'Component / Version',
+      accessorFn: entry => componentLabel(entry.log.task),
+      size: 190,
+      minSize: 150,
+      maxSize: 320,
+      cell: info => {
+        const task = info.row.original.log.task;
+        return (
+          <div className="min-w-0">
+            <p className="truncate font-semibold text-slate-700">{componentLabel(task)}</p>
+            <p className="truncate font-mono text-[10px] text-slate-400">{componentDetail(task)}</p>
+          </div>
+        );
+      },
+      meta: { title: entry => `${componentLabel(entry.log.task)} / ${componentDetail(entry.log.task)}` },
     },
     {
       id: 'status',
@@ -122,7 +146,7 @@ export default function ClusterActivityPanel({ logs, clusters }: { logs: Record<
               formatEta(volume.etaSeconds),
             ].filter(Boolean).join(' · ')
           : lastEvent?.message || (active ? 'Awaiting task events from agent...' : (entry.log.task.errorMessage || 'No events recorded yet.'));
-        const progress = volume ? volume.percent : (active ? 0 : (entry.log.task.progress || 0));
+        const progress = volume ? volume.percent : (entry.log.task.progress || 0);
         return (
           <div className="flex min-w-0 items-center gap-2">
             <div className="h-1.5 w-20 shrink-0 overflow-hidden rounded-full bg-slate-100">
@@ -193,7 +217,7 @@ export default function ClusterActivityPanel({ logs, clusters }: { logs: Record<
           </div>
           <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-500">Idle</span>
         </div>
-        <div className="px-4 py-4 text-center text-xs font-medium text-slate-400">No recent tasks yet. Register or unregister a cluster to see activity here.</div>
+        <div className="px-4 py-4 text-center text-xs font-medium text-slate-400">No recent cluster lifecycle or component tasks yet.</div>
       </div>
     );
   }

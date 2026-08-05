@@ -51,11 +51,15 @@ if [[ "${PUBLISH:-}" != "TRUE" ]]; then
     echo "Not set to publish"
     goreleaser release \
         --clean \
+        --parallelism 2 \
+        --timeout 60m \
         --release-notes="${RELEASE_NOTES_FILE}" \
         --snapshot # Generate an unversioned snapshot release, skipping all validations and without publishing any artifacts (implies --skip-publish, --skip-announce and --skip-validate)
 else
     echo "Getting ready to publish"
     goreleaser release \
         --clean \
+        --parallelism 2 \
+        --timeout 60m \
         --release-notes="${RELEASE_NOTES_FILE}"
 fi

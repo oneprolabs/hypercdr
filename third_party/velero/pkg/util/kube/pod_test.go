@@ -747,24 +747,23 @@ func TestCollectPodLogs(t *testing.T) {
 func TestToSystemAffinity(t *testing.T) {
 	tests := []struct {
 		name           string
-		loadAffinities []*LoadAffinity
+		loadAffinity   *LoadAffinity
+		volumeTopology *corev1api.NodeSelector
 		expected       *corev1api.Affinity
 	}{
 		{
 			name: "loadAffinity is nil",
 		},
 		{
-			name:           "loadAffinity is empty",
-			loadAffinities: []*LoadAffinity{},
+			name:         "loadAffinity is empty",
+			loadAffinity: &LoadAffinity{},
 		},
 		{
 			name: "with match label",
-			loadAffinities: []*LoadAffinity{
-				{
-					NodeSelector: metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"key-1": "value-1",
-						},
+			loadAffinity: &LoadAffinity{
+				NodeSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"key-1": "value-1",
 					},
 				},
 			},
@@ -788,23 +787,21 @@ func TestToSystemAffinity(t *testing.T) {
 		},
 		{
 			name: "with match expression",
-			loadAffinities: []*LoadAffinity{
-				{
-					NodeSelector: metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"key-2": "value-2",
+			loadAffinity: &LoadAffinity{
+				NodeSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"key-2": "value-2",
+					},
+					MatchExpressions: []metav1.LabelSelectorRequirement{
+						{
+							Key:      "key-3",
+							Values:   []string{"value-3-1", "value-3-2"},
+							Operator: metav1.LabelSelectorOpNotIn,
 						},
-						MatchExpressions: []metav1.LabelSelectorRequirement{
-							{
-								Key:      "key-3",
-								Values:   []string{"value-3-1", "value-3-2"},
-								Operator: metav1.LabelSelectorOpNotIn,
-							},
-							{
-								Key:      "key-4",
-								Values:   []string{"value-4-1", "value-4-2", "value-4-3"},
-								Operator: metav1.LabelSelectorOpDoesNotExist,
-							},
+						{
+							Key:      "key-4",
+							Values:   []string{"value-4-1", "value-4-2", "value-4-3"},
+							Operator: metav1.LabelSelectorOpDoesNotExist,
 						},
 					},
 				},
@@ -838,19 +835,49 @@ func TestToSystemAffinity(t *testing.T) {
 			},
 		},
 		{
-			name: "multiple load affinities",
-			loadAffinities: []*LoadAffinity{
-				{
-					NodeSelector: metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"key-1": "value-1",
+			name: "with olume topology",
+			volumeTopology: &corev1api.NodeSelector{
+				NodeSelectorTerms: []corev1api.NodeSelectorTerm{
+					{
+						MatchExpressions: []corev1api.NodeSelectorRequirement{
+							{
+								Key:      "key-5",
+								Values:   []string{"value-5-1", "value-5-2", "value-5-3"},
+								Operator: corev1api.NodeSelectorOpGt,
+							},
+							{
+								Key:      "key-6",
+								Values:   []string{"value-5-1", "value-5-2", "value-5-3"},
+								Operator: corev1api.NodeSelectorOpGt,
+							},
 						},
 					},
-				},
-				{
-					NodeSelector: metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"key-2": "value-2",
+					{
+						MatchExpressions: []corev1api.NodeSelectorRequirement{
+							{
+								Key:      "key-7",
+								Values:   []string{"value-7-1", "value-7-2", "value-7-3"},
+								Operator: corev1api.NodeSelectorOpGt,
+							},
+							{
+								Key:      "key-8",
+								Values:   []string{"value-8-1", "value-8-2", "value-8-3"},
+								Operator: corev1api.NodeSelectorOpGt,
+							},
+						},
+					},
+					{
+						MatchFields: []corev1api.NodeSelectorRequirement{
+							{
+								Key:      "key-9",
+								Values:   []string{"value-9-1", "value-9-2", "value-9-3"},
+								Operator: corev1api.NodeSelectorOpGt,
+							},
+							{
+								Key:      "key-a",
+								Values:   []string{"value-a-1", "value-a-2", "value-a-3"},
+								Operator: corev1api.NodeSelectorOpGt,
+							},
 						},
 					},
 				},
@@ -862,9 +889,176 @@ func TestToSystemAffinity(t *testing.T) {
 							{
 								MatchExpressions: []corev1api.NodeSelectorRequirement{
 									{
-										Key:      "key-1",
-										Values:   []string{"value-1"},
+										Key:      "key-5",
+										Values:   []string{"value-5-1", "value-5-2", "value-5-3"},
+										Operator: corev1api.NodeSelectorOpGt,
+									},
+									{
+										Key:      "key-6",
+										Values:   []string{"value-5-1", "value-5-2", "value-5-3"},
+										Operator: corev1api.NodeSelectorOpGt,
+									},
+								},
+							},
+							{
+								MatchExpressions: []corev1api.NodeSelectorRequirement{
+									{
+										Key:      "key-7",
+										Values:   []string{"value-7-1", "value-7-2", "value-7-3"},
+										Operator: corev1api.NodeSelectorOpGt,
+									},
+									{
+										Key:      "key-8",
+										Values:   []string{"value-8-1", "value-8-2", "value-8-3"},
+										Operator: corev1api.NodeSelectorOpGt,
+									},
+								},
+							},
+							{
+								MatchFields: []corev1api.NodeSelectorRequirement{
+									{
+										Key:      "key-9",
+										Values:   []string{"value-9-1", "value-9-2", "value-9-3"},
+										Operator: corev1api.NodeSelectorOpGt,
+									},
+									{
+										Key:      "key-a",
+										Values:   []string{"value-a-1", "value-a-2", "value-a-3"},
+										Operator: corev1api.NodeSelectorOpGt,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "with match expression and volume topology",
+			loadAffinity: &LoadAffinity{
+				NodeSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"key-2": "value-2",
+					},
+					MatchExpressions: []metav1.LabelSelectorRequirement{
+						{
+							Key:      "key-3",
+							Values:   []string{"value-3-1", "value-3-2"},
+							Operator: metav1.LabelSelectorOpNotIn,
+						},
+						{
+							Key:      "key-4",
+							Values:   []string{"value-4-1", "value-4-2", "value-4-3"},
+							Operator: metav1.LabelSelectorOpDoesNotExist,
+						},
+					},
+				},
+			},
+			volumeTopology: &corev1api.NodeSelector{
+				NodeSelectorTerms: []corev1api.NodeSelectorTerm{
+					{
+						MatchExpressions: []corev1api.NodeSelectorRequirement{
+							{
+								Key:      "key-5",
+								Values:   []string{"value-5-1", "value-5-2", "value-5-3"},
+								Operator: corev1api.NodeSelectorOpGt,
+							},
+							{
+								Key:      "key-6",
+								Values:   []string{"value-5-1", "value-5-2", "value-5-3"},
+								Operator: corev1api.NodeSelectorOpGt,
+							},
+						},
+					},
+					{
+						MatchExpressions: []corev1api.NodeSelectorRequirement{
+							{
+								Key:      "key-7",
+								Values:   []string{"value-7-1", "value-7-2", "value-7-3"},
+								Operator: corev1api.NodeSelectorOpGt,
+							},
+							{
+								Key:      "key-8",
+								Values:   []string{"value-8-1", "value-8-2", "value-8-3"},
+								Operator: corev1api.NodeSelectorOpGt,
+							},
+						},
+					},
+					{
+						MatchFields: []corev1api.NodeSelectorRequirement{
+							{
+								Key:      "key-9",
+								Values:   []string{"value-9-1", "value-9-2", "value-9-3"},
+								Operator: corev1api.NodeSelectorOpGt,
+							},
+							{
+								Key:      "key-a",
+								Values:   []string{"value-a-1", "value-a-2", "value-a-3"},
+								Operator: corev1api.NodeSelectorOpGt,
+							},
+						},
+					},
+				},
+			},
+			expected: &corev1api.Affinity{
+				NodeAffinity: &corev1api.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1api.NodeSelector{
+						NodeSelectorTerms: []corev1api.NodeSelectorTerm{
+							{
+								MatchExpressions: []corev1api.NodeSelectorRequirement{
+									{
+										Key:      "key-5",
+										Values:   []string{"value-5-1", "value-5-2", "value-5-3"},
+										Operator: corev1api.NodeSelectorOpGt,
+									},
+									{
+										Key:      "key-6",
+										Values:   []string{"value-5-1", "value-5-2", "value-5-3"},
+										Operator: corev1api.NodeSelectorOpGt,
+									},
+									{
+										Key:      "key-2",
+										Values:   []string{"value-2"},
 										Operator: corev1api.NodeSelectorOpIn,
+									},
+									{
+										Key:      "key-3",
+										Values:   []string{"value-3-1", "value-3-2"},
+										Operator: corev1api.NodeSelectorOpNotIn,
+									},
+									{
+										Key:      "key-4",
+										Values:   []string{"value-4-1", "value-4-2", "value-4-3"},
+										Operator: corev1api.NodeSelectorOpDoesNotExist,
+									},
+								},
+							},
+							{
+								MatchExpressions: []corev1api.NodeSelectorRequirement{
+									{
+										Key:      "key-7",
+										Values:   []string{"value-7-1", "value-7-2", "value-7-3"},
+										Operator: corev1api.NodeSelectorOpGt,
+									},
+									{
+										Key:      "key-8",
+										Values:   []string{"value-8-1", "value-8-2", "value-8-3"},
+										Operator: corev1api.NodeSelectorOpGt,
+									},
+									{
+										Key:      "key-2",
+										Values:   []string{"value-2"},
+										Operator: corev1api.NodeSelectorOpIn,
+									},
+									{
+										Key:      "key-3",
+										Values:   []string{"value-3-1", "value-3-2"},
+										Operator: corev1api.NodeSelectorOpNotIn,
+									},
+									{
+										Key:      "key-4",
+										Values:   []string{"value-4-1", "value-4-2", "value-4-3"},
+										Operator: corev1api.NodeSelectorOpDoesNotExist,
 									},
 								},
 							},
@@ -874,6 +1068,28 @@ func TestToSystemAffinity(t *testing.T) {
 										Key:      "key-2",
 										Values:   []string{"value-2"},
 										Operator: corev1api.NodeSelectorOpIn,
+									},
+									{
+										Key:      "key-3",
+										Values:   []string{"value-3-1", "value-3-2"},
+										Operator: corev1api.NodeSelectorOpNotIn,
+									},
+									{
+										Key:      "key-4",
+										Values:   []string{"value-4-1", "value-4-2", "value-4-3"},
+										Operator: corev1api.NodeSelectorOpDoesNotExist,
+									},
+								},
+								MatchFields: []corev1api.NodeSelectorRequirement{
+									{
+										Key:      "key-9",
+										Values:   []string{"value-9-1", "value-9-2", "value-9-3"},
+										Operator: corev1api.NodeSelectorOpGt,
+									},
+									{
+										Key:      "key-a",
+										Values:   []string{"value-a-1", "value-a-2", "value-a-3"},
+										Operator: corev1api.NodeSelectorOpGt,
 									},
 								},
 							},
@@ -886,7 +1102,7 @@ func TestToSystemAffinity(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			affinity := ToSystemAffinity(test.loadAffinities)
+			affinity := ToSystemAffinity(test.loadAffinity, test.volumeTopology)
 			assert.True(t, reflect.DeepEqual(affinity, test.expected))
 		})
 	}
@@ -896,10 +1112,11 @@ func TestDiagnosePod(t *testing.T) {
 	testCases := []struct {
 		name     string
 		pod      *corev1api.Pod
+		events   *corev1api.EventList
 		expected string
 	}{
 		{
-			name: "pod with all info",
+			name: "pod with all info but event",
 			pod: &corev1api.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "fake-pod",
@@ -924,15 +1141,118 @@ func TestDiagnosePod(t *testing.T) {
 							Message: "fake-message-2",
 						},
 					},
+					Message: "fake-message-3",
 				},
 			},
-			expected: "Pod fake-ns/fake-pod, phase Pending, node name fake-node\nPod condition Initialized, status True, reason fake-reason-1, message fake-message-1\nPod condition PodScheduled, status False, reason fake-reason-2, message fake-message-2\n",
+			expected: "Pod fake-ns/fake-pod, phase Pending, node name fake-node, message fake-message-3\nPod condition Initialized, status True, reason fake-reason-1, message fake-message-1\nPod condition PodScheduled, status False, reason fake-reason-2, message fake-message-2\n",
+		},
+		{
+			name: "pod with all info and empty event list",
+			pod: &corev1api.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "fake-pod",
+					Namespace: "fake-ns",
+				},
+				Spec: corev1api.PodSpec{
+					NodeName: "fake-node",
+				},
+				Status: corev1api.PodStatus{
+					Phase: corev1api.PodPending,
+					Conditions: []corev1api.PodCondition{
+						{
+							Type:    corev1api.PodInitialized,
+							Status:  corev1api.ConditionTrue,
+							Reason:  "fake-reason-1",
+							Message: "fake-message-1",
+						},
+						{
+							Type:    corev1api.PodScheduled,
+							Status:  corev1api.ConditionFalse,
+							Reason:  "fake-reason-2",
+							Message: "fake-message-2",
+						},
+					},
+					Message: "fake-message-3",
+				},
+			},
+			events:   &corev1api.EventList{},
+			expected: "Pod fake-ns/fake-pod, phase Pending, node name fake-node, message fake-message-3\nPod condition Initialized, status True, reason fake-reason-1, message fake-message-1\nPod condition PodScheduled, status False, reason fake-reason-2, message fake-message-2\n",
+		},
+		{
+			name: "pod with all info and events",
+			pod: &corev1api.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "fake-pod",
+					Namespace: "fake-ns",
+					UID:       "fake-pod-uid",
+				},
+				Spec: corev1api.PodSpec{
+					NodeName: "fake-node",
+				},
+				Status: corev1api.PodStatus{
+					Phase: corev1api.PodPending,
+					Conditions: []corev1api.PodCondition{
+						{
+							Type:    corev1api.PodInitialized,
+							Status:  corev1api.ConditionTrue,
+							Reason:  "fake-reason-1",
+							Message: "fake-message-1",
+						},
+						{
+							Type:    corev1api.PodScheduled,
+							Status:  corev1api.ConditionFalse,
+							Reason:  "fake-reason-2",
+							Message: "fake-message-2",
+						},
+					},
+					Message: "fake-message-3",
+				},
+			},
+			events: &corev1api.EventList{Items: []corev1api.Event{
+				{
+					InvolvedObject: corev1api.ObjectReference{UID: "fake-uid-1"},
+					Type:           corev1api.EventTypeWarning,
+					Reason:         "reason-1",
+					Message:        "message-1",
+				},
+				{
+					InvolvedObject: corev1api.ObjectReference{UID: "fake-uid-2"},
+					Type:           corev1api.EventTypeWarning,
+					Reason:         "reason-2",
+					Message:        "message-2",
+				},
+				{
+					InvolvedObject: corev1api.ObjectReference{UID: "fake-pod-uid"},
+					Type:           corev1api.EventTypeWarning,
+					Reason:         "reason-3",
+					Message:        "message-3",
+				},
+				{
+					InvolvedObject: corev1api.ObjectReference{UID: "fake-pod-uid"},
+					Type:           corev1api.EventTypeNormal,
+					Reason:         "reason-4",
+					Message:        "message-4",
+				},
+				{
+					InvolvedObject: corev1api.ObjectReference{UID: "fake-pod-uid"},
+					Type:           corev1api.EventTypeNormal,
+					Reason:         "reason-5",
+					Message:        "message-5",
+				},
+				{
+					InvolvedObject: corev1api.ObjectReference{UID: "fake-pod-uid"},
+					Type:           corev1api.EventTypeWarning,
+					Reason:         "reason-6",
+					Message:        "message-6",
+				},
+			}},
+			expected: "Pod fake-ns/fake-pod, phase Pending, node name fake-node, message fake-message-3\nPod condition Initialized, status True, reason fake-reason-1, message fake-message-1\nPod condition PodScheduled, status False, reason fake-reason-2, message fake-message-2\nPod event reason reason-3, message message-3\nPod event reason reason-6, message message-6\n",
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			diag := DiagnosePod(tc.pod)
+			diag := DiagnosePod(tc.pod, tc.events)
 			assert.Equal(t, tc.expected, diag)
 		})
 	}

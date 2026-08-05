@@ -263,6 +263,7 @@ type VeleroOptions struct {
 	DefaultVolumesToFsBackup        bool
 	UploaderType                    string
 	DefaultSnapshotMoveData         bool
+	CSISnapshotEarlyFrequentPolling bool
 	DisableInformerCache            bool
 	ScheduleSkipImmediately         bool
 	PodResources                    kube.PodResources
@@ -271,6 +272,7 @@ type VeleroOptions struct {
 	RepoMaintenanceJobConfigMap     string
 	NodeAgentConfigMap              string
 	ItemBlockWorkerCount            int
+	ConcurrentBackups               int
 	KubeletRootDir                  string
 	NodeAgentDisableHostPath        bool
 	ServerPriorityClassName         string
@@ -362,6 +364,7 @@ func AllResources(o *VeleroOptions) *unstructured.UnstructuredList {
 		WithPodResources(o.PodResources),
 		WithKeepLatestMaintenanceJobs(o.KeepLatestMaintenanceJobs),
 		WithItemBlockWorkerCount(o.ItemBlockWorkerCount),
+		WithConcurrentBackups(o.ConcurrentBackups),
 	}
 
 	if o.ServerPriorityClassName != "" {
@@ -386,6 +389,10 @@ func AllResources(o *VeleroOptions) *unstructured.UnstructuredList {
 
 	if o.DefaultSnapshotMoveData {
 		deployOpts = append(deployOpts, WithDefaultSnapshotMoveData(true))
+	}
+
+	if o.CSISnapshotEarlyFrequentPolling {
+		deployOpts = append(deployOpts, WithCSISnapshotEarlyFrequentPolling(true))
 	}
 
 	if o.DisableInformerCache {
@@ -424,6 +431,10 @@ func AllResources(o *VeleroOptions) *unstructured.UnstructuredList {
 		}
 		if len(o.NodeAgentConfigMap) > 0 {
 			dsOpts = append(dsOpts, WithNodeAgentConfigMap(o.NodeAgentConfigMap))
+		}
+
+		if len(o.BackupRepoConfigMap) > 0 {
+			dsOpts = append(dsOpts, WithBackupRepoConfigMap(o.BackupRepoConfigMap))
 		}
 
 		if len(o.KubeletRootDir) > 0 {

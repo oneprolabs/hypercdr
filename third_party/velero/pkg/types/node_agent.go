@@ -66,6 +66,14 @@ type RestorePVC struct {
 	IgnoreDelayBinding bool `json:"ignoreDelayBinding,omitempty"`
 }
 
+type CachePVC struct {
+	// StorageClass specifies the storage class for cache PVC
+	StorageClass string `json:"storageClass,omitempty"`
+
+	// ResidentThresholdInMB specifies the minimum size of the backup data to create cache PVC
+	ResidentThresholdInMB int64 `json:"residentThresholdInMB,omitempty"`
+}
+
 type NodeAgentConfigs struct {
 	// LoadConcurrency is the config for data path load concurrency per node.
 	LoadConcurrency *LoadConcurrency `json:"loadConcurrency,omitempty"`
@@ -87,4 +95,13 @@ type NodeAgentConfigs struct {
 
 	// PrivilegedFsBackup determines whether to create fs-backup pods as privileged pods
 	PrivilegedFsBackup bool `json:"privilegedFsBackup,omitempty"`
+
+	// CachePVCConfig is the config for cachePVC
+	CachePVCConfig *CachePVC `json:"cachePVC,omitempty"`
+
+	// PodAnnotations are annotations to be added to pods created by node-agent, i.e., data mover pods.
+	PodAnnotations map[string]string `json:"podAnnotations,omitempty"`
+
+	// PodLabels are labels to be added to pods created by node-agent, i.e., data mover pods.
+	PodLabels map[string]string `json:"podLabels,omitempty"`
 }

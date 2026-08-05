@@ -8,18 +8,26 @@ on:
       - "design/**"
       - "**/*.md"
 jobs:
+  get-go-version:
+    uses: ./.github/workflows/get-go-version.yaml
+    with:
+      ref: ${{ github.event.pull_request.base.ref }}
+
   # Build the Velero CLI and image once for all Kubernetes versions, and cache it so the fan-out workers can get it.
   build:
     runs-on: ubuntu-latest
+    needs: get-go-version
     outputs:
       minio-dockerfile-sha: ${{ steps.minio-version.outputs.dockerfile_sha }}
     steps:
       - name: Check out the code
-        uses: actions/checkout@v5
-      - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/checkout@v6
+      
+      - name: Set up Go version
+        uses: actions/setup-go@v6
         with:
-          go-version-file: 'go.mod'
+          go-version: ${{ needs.get-go-version.outputs.version }}
+
       # Look for a CLI that's made for this PR
       - name: Fetch built CLI
         id: cli-cache
@@ -50,7 +58,7 @@ jobs:
       - name: Check Bitnami MinIO Dockerfile version
         id: minio-version
         run: |
-          DOCKERFILE_SHA=$(curl -s https://api.github.com/repos/bitnami/containers/commits?path=bitnami/minio/2025/debian-12/Dockerfile\&per_page=1 | jq -r '.[0].sha')
+          DOCKERFILE_SHA=$(curl -s https://api.github.com/repos/bitnami/containers/commits?path=bitnami/minio/2026/debian-12/Dockerfile\&per_page=1 | jq -r '.[0].sha')
           echo "dockerfile_sha=${DOCKERFILE_SHA}" >> $GITHUB_OUTPUT
       - name: Cache MinIO Image
         uses: actions/cache@v4
@@ -63,7 +71,7 @@ jobs:
         run: |
           echo "Building MinIO image from Bitnami Dockerfile..."
           git clone --depth 1 https://github.com/bitnami/containers.git /tmp/bitnami-containers
-          cd /tmp/bitnami-containers/bitnami/minio/2025/debian-12
+          cd /tmp/bitnami-containers/bitnami/minio/2026/debian-12
           docker build -t bitnami/minio:local .
           docker save bitnami/minio:local > ${{ github.workspace }}/minio-image.tar
   # Create json of k8s versions to test
@@ -97,17 +105,20 @@ jobs:
     needs:
       - build
       - setup-test-matrix
+      - get-go-version
     runs-on: ubuntu-latest
     strategy:
       matrix: ${{fromJson(needs.setup-test-matrix.outputs.matrix)}}
       fail-fast: false
     steps:
       - name: Check out the code
-        uses: actions/checkout@v5
-      - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/checkout@v6
+
+      - name: Set up Go version
+        uses: actions/setup-go@v6
         with:
-          go-version-file: 'go.mod'
+          go-version: ${{ needs.get-go-version.outputs.version }}
+
       # Fetch the pre-built MinIO image from the build job
       - name: Fetch built MinIO Image
         uses: actions/cache@v4
@@ -122,11 +133,11 @@ jobs:
       - name: Install MinIO
         run: |
           docker run -d --rm -p 9000:9000 -e "MINIO_ROOT_USER=minio" -e "MINIO_ROOT_PASSWORD=minio123" -e "MINIO_DEFAULT_BUCKETS=bucket,additional-bucket" bitnami/minio:local
-      - uses: engineerd/setup-kind@v0.6.2
+      - uses: helm/kind-action@v1
         with:
-          skipClusterLogsExport: true
-          version: "v0.27.0"
-          image: "kindest/node:v${{ matrix.k8s }}"
+          cluster_name: "kind"
+          version: "v0.32.0"
+          node_image: "kindest/node:v${{ matrix.k8s }}"
       - name: Fetch built CLI
         id: cli-cache
         uses: actions/cache@v4
@@ -174,7 +185,7 @@ jobs:
         timeout-minutes: 30
       - name: Upload debug bundle
         if: ${{ failure() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
-          name: DebugBundle
+          name: DebugBundle-k8s-${{ matrix.k8s }}-job-${{ strategy.job-index }}
           path: /home/runner/work/velero/velero/test/e2e/debug-bundle*

@@ -38,6 +38,8 @@ import (
 
 	"github.com/pkg/errors"
 	"golang.org/x/mod/semver"
+	schedulingv1api "k8s.io/api/scheduling/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	ver "k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -45,9 +47,11 @@ import (
 
 	"github.com/vmware-tanzu/velero/internal/volume"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	"github.com/vmware-tanzu/velero/pkg/builder"
 	cliinstall "github.com/vmware-tanzu/velero/pkg/cmd/cli/install"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/flag"
 	veleroexec "github.com/vmware-tanzu/velero/pkg/util/exec"
+	"github.com/vmware-tanzu/velero/test"
 	. "github.com/vmware-tanzu/velero/test"
 	common "github.com/vmware-tanzu/velero/test/util/common"
 	. "github.com/vmware-tanzu/velero/test/util/k8s"
@@ -95,6 +99,15 @@ var ImagesMatrix = map[string]map[string][]string{
 		"velero":                {"velero/velero:v1.16.2"},
 		"velero-restore-helper": {"velero/velero:v1.16.2"},
 	},
+	"v1.17": {
+		"aws":                   {"velero/velero-plugin-for-aws:v1.13.2"},
+		"azure":                 {"velero/velero-plugin-for-microsoft-azure:v1.13.2"},
+		"vsphere":               {"vsphereveleroplugin/velero-plugin-for-vsphere:v1.5.2"},
+		"gcp":                   {"velero/velero-plugin-for-gcp:v1.13.2"},
+		"datamover":             {"velero/velero-plugin-for-aws:v1.13.2"},
+		"velero":                {"velero/velero:v1.17.2"},
+		"velero-restore-helper": {"velero/velero:v1.17.2"},
+	},
 	"main": {
 		"aws":                   {"velero/velero-plugin-for-aws:main"},
 		"azure":                 {"velero/velero-plugin-for-microsoft-azure:main"},
@@ -124,12 +137,13 @@ func SetImagesToDefaultValues(config VeleroConfig, version string) (VeleroConfig
 
 	ret.Plugins = ""
 
-	versionWithoutPatch := semver.MajorMinor(version)
+	versionWithoutPatch := getVersionWithoutPatch(version)
+
 	// Read migration case needs images from the PluginsMatrix map.
 	images, ok := ImagesMatrix[versionWithoutPatch]
 	if !ok {
-		return config, fmt.Errorf("fail to read the images for version %s from the ImagesMatrix",
-			versionWithoutPatch)
+		fmt.Printf("Cannot read the images for version %s from the ImagesMatrix. Use the original values.\n", versionWithoutPatch)
+		return config, nil
 	}
 
 	ret.VeleroImage = images[Velero][0]
@@ -149,17 +163,32 @@ func SetImagesToDefaultValues(config VeleroConfig, version string) (VeleroConfig
 		ret.Plugins = images[AWS][0]
 	}
 
-	// Because Velero CSI plugin is deprecated in v1.14,
-	// only need to install it for version lower than v1.14.
-	if strings.Contains(ret.Features, FeatureCSI) &&
-		semver.Compare(versionWithoutPatch, "v1.14") < 0 {
-		ret.Plugins = ret.Plugins + "," + images[CSI][0]
-	}
 	if ret.SnapshotMoveData && ret.CloudProvider == Azure {
 		ret.Plugins = ret.Plugins + "," + images[AWS][0]
 	}
 
 	return ret, nil
+}
+
+func getVersionWithoutPatch(version string) string {
+	versionWithoutPatch := ""
+
+	mainRe := regexp.MustCompile(`^main$`)
+	releaseRe := regexp.MustCompile(`^release-(\d+)\.(\d+)(-dev)?$`)
+
+	switch {
+	case mainRe.MatchString(version):
+		versionWithoutPatch = "main"
+	case releaseRe.MatchString(version):
+		matches := releaseRe.FindStringSubmatch(version)
+		versionWithoutPatch = fmt.Sprintf("v%s.%s", matches[1], matches[2])
+	default:
+		versionWithoutPatch = semver.MajorMinor(version)
+	}
+
+	fmt.Println("The version is ", versionWithoutPatch)
+
+	return versionWithoutPatch
 }
 
 func getPluginsByVersion(version string, cloudProvider string, needDataMoverPlugin bool) ([]string, error) {
@@ -274,6 +303,9 @@ func getProviderVeleroInstallOptions(veleroCfg *VeleroConfig,
 	io.ItemBlockWorkerCount = veleroCfg.ItemBlockWorkerCount
 	io.ServerPriorityClassName = veleroCfg.ServerPriorityClassName
 	io.NodeAgentPriorityClassName = veleroCfg.NodeAgentPriorityClassName
+	io.RepoMaintenanceJobConfigMap = veleroCfg.RepoMaintenanceJobConfigMap
+	io.BackupRepoConfigMap = veleroCfg.BackupRepoConfigMap
+	io.NodeAgentConfigMap = veleroCfg.NodeAgentConfigMap
 
 	return io, nil
 }
@@ -908,12 +940,12 @@ func CheckVeleroVersion(ctx context.Context, veleroCLI string, expectedVer strin
 	return nil
 }
 
-func InstallVeleroCLI(version string) (string, error) {
+func InstallVeleroCLI(ctx context.Context, version string) (string, error) {
 	var tempVeleroCliDir string
 	name := "velero-" + version + "-" + runtime.GOOS + "-" + runtime.GOARCH
 	postfix := ".tar.gz"
 	tarball := name + postfix
-	err := wait.PollImmediate(time.Second*5, time.Minute*5, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(ctx, time.Second*5, time.Minute*5, true, func(ctx context.Context) (bool, error) {
 		tempFile, err := getVeleroCliTarball("https://github.com/vmware-tanzu/velero/releases/download/" + version + "/" + tarball)
 		if err != nil {
 			return false, errors.WithMessagef(err, "failed to get Velero CLI tarball")
@@ -923,7 +955,7 @@ func InstallVeleroCLI(version string) (string, error) {
 			return false, errors.WithMessagef(err, "failed to create temp dir for tarball extraction")
 		}
 
-		cmd := exec.Command("tar", "-xvf", tempFile.Name(), "-C", tempVeleroCliDir)
+		cmd := exec.CommandContext(ctx, "tar", "-xvf", tempFile.Name(), "-C", tempVeleroCliDir)
 		defer os.Remove(tempFile.Name())
 
 		if _, err := cmd.Output(); err != nil {
@@ -1560,9 +1592,6 @@ func RestorePVRNum(ctx context.Context, veleroNamespace, restoreName string) (in
 }
 
 func IsSupportUploaderType(version string) (bool, error) {
-	if strings.Contains(version, "self") {
-		return true, nil
-	}
 	verSupportUploaderType, err := ver.ParseSemantic("v1.10.0")
 	if err != nil {
 		return false, err
@@ -1811,4 +1840,44 @@ func KubectlGetAllDeleteBackupRequest(ctx context.Context, backupName, veleroNam
 	cmds = append(cmds, cmd)
 
 	return common.GetListByCmdPipes(ctx, cmds)
+}
+
+func CreatePriorityClasses(ctx context.Context, client kbclient.Client) error {
+	dataMoverPriorityClass := builder.ForPriorityClass(test.PriorityClassNameForDataMover).
+		Value(90000).PreemptionPolicy("Never").Result()
+	if err := client.Create(ctx, dataMoverPriorityClass); err != nil {
+		fmt.Printf("Fail to create PriorityClass %s: %s\n", test.PriorityClassNameForDataMover, err.Error())
+		return fmt.Errorf("fail to create PriorityClass %s: %w", test.PriorityClassNameForDataMover, err)
+	}
+
+	repoMaintenancePriorityClass := builder.ForPriorityClass(test.PriorityClassNameForRepoMaintenance).
+		Value(80000).PreemptionPolicy("Never").Result()
+	if err := client.Create(ctx, repoMaintenancePriorityClass); err != nil {
+		fmt.Printf("Fail to create PriorityClass %s: %s\n", test.PriorityClassNameForRepoMaintenance, err.Error())
+		return fmt.Errorf("fail to create PriorityClass %s: %w", test.PriorityClassNameForRepoMaintenance, err)
+	}
+
+	return nil
+}
+
+func DeletePriorityClasses(ctx context.Context, client kbclient.Client) error {
+	priorityClassDataMover := &schedulingv1api.PriorityClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: test.PriorityClassNameForDataMover,
+		},
+	}
+	if err := client.Delete(ctx, priorityClassDataMover); err != nil {
+		return err
+	}
+
+	priorityClassRepoMaintenance := &schedulingv1api.PriorityClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: test.PriorityClassNameForRepoMaintenance,
+		},
+	}
+	if err := client.Delete(ctx, priorityClassRepoMaintenance); err != nil {
+		return err
+	}
+
+	return nil
 }

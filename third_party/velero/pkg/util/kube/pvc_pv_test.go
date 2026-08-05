@@ -1593,10 +1593,11 @@ func TestDiagnosePVC(t *testing.T) {
 	testCases := []struct {
 		name     string
 		pvc      *corev1api.PersistentVolumeClaim
+		events   *corev1api.EventList
 		expected string
 	}{
 		{
-			name: "pvc with all info",
+			name: "pvc with all info but events",
 			pvc: &corev1api.PersistentVolumeClaim{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "fake-pvc",
@@ -1611,11 +1612,83 @@ func TestDiagnosePVC(t *testing.T) {
 			},
 			expected: "PVC fake-ns/fake-pvc, phase Pending, binding to fake-pv\n",
 		},
+		{
+			name: "pvc with all info and empty events",
+			pvc: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "fake-pvc",
+					Namespace: "fake-ns",
+				},
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeName: "fake-pv",
+				},
+				Status: corev1api.PersistentVolumeClaimStatus{
+					Phase: corev1api.ClaimPending,
+				},
+			},
+			events:   &corev1api.EventList{},
+			expected: "PVC fake-ns/fake-pvc, phase Pending, binding to fake-pv\n",
+		},
+		{
+			name: "pvc with all info and events",
+			pvc: &corev1api.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "fake-pvc",
+					Namespace: "fake-ns",
+					UID:       "fake-pvc-uid",
+				},
+				Spec: corev1api.PersistentVolumeClaimSpec{
+					VolumeName: "fake-pv",
+				},
+				Status: corev1api.PersistentVolumeClaimStatus{
+					Phase: corev1api.ClaimPending,
+				},
+			},
+			events: &corev1api.EventList{Items: []corev1api.Event{
+				{
+					InvolvedObject: corev1api.ObjectReference{UID: "fake-uid-1"},
+					Type:           corev1api.EventTypeWarning,
+					Reason:         "reason-1",
+					Message:        "message-1",
+				},
+				{
+					InvolvedObject: corev1api.ObjectReference{UID: "fake-uid-2"},
+					Type:           corev1api.EventTypeWarning,
+					Reason:         "reason-2",
+					Message:        "message-2",
+				},
+				{
+					InvolvedObject: corev1api.ObjectReference{UID: "fake-pvc-uid"},
+					Type:           corev1api.EventTypeWarning,
+					Reason:         "reason-3",
+					Message:        "message-3",
+				},
+				{
+					InvolvedObject: corev1api.ObjectReference{UID: "fake-pvc-uid"},
+					Type:           corev1api.EventTypeNormal,
+					Reason:         "reason-4",
+					Message:        "message-4",
+				},
+				{
+					InvolvedObject: corev1api.ObjectReference{UID: "fake-pvc-uid"},
+					Type:           corev1api.EventTypeNormal,
+					Reason:         "reason-5",
+					Message:        "message-5",
+				},
+				{
+					InvolvedObject: corev1api.ObjectReference{UID: "fake-pvc-uid"},
+					Type:           corev1api.EventTypeWarning,
+					Reason:         "reason-6",
+					Message:        "message-6",
+				},
+			}},
+			expected: "PVC fake-ns/fake-pvc, phase Pending, binding to fake-pv\nPVC event reason reason-3, message message-3\nPVC event reason reason-6, message message-6\n",
+		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			diag := DiagnosePVC(tc.pvc)
+			diag := DiagnosePVC(tc.pvc, tc.events)
 			assert.Equal(t, tc.expected, diag)
 		})
 	}
@@ -1833,6 +1906,146 @@ func TestGetPVCAttachingNodeOS(t *testing.T) {
 			nodeOS := GetPVCAttachingNodeOS(test.pvc, kubeClient.CoreV1(), kubeClient.StorageV1(), velerotest.NewLogger())
 
 			assert.Equal(t, test.expectedNodeOS, nodeOS)
+		})
+	}
+}
+
+func TestGetVolumeTopology(t *testing.T) {
+	pvWithoutNodeAffinity := &corev1api.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "fake-pv",
+		},
+	}
+
+	pvWithNodeAffinity := &corev1api.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "fake-pv",
+		},
+		Spec: corev1api.PersistentVolumeSpec{
+			NodeAffinity: &corev1api.VolumeNodeAffinity{
+				Required: &corev1api.NodeSelector{
+					NodeSelectorTerms: []corev1api.NodeSelectorTerm{
+						{
+							MatchExpressions: []corev1api.NodeSelectorRequirement{
+								{
+									Key: "fake-key",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	scObjWithoutVolumeBind := &storagev1api.StorageClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "fake-storage-class",
+		},
+	}
+
+	volumeBindImmediate := storagev1api.VolumeBindingImmediate
+	scObjWithImeediateBind := &storagev1api.StorageClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "fake-storage-class",
+		},
+		VolumeBindingMode: &volumeBindImmediate,
+	}
+
+	volumeBindWffc := storagev1api.VolumeBindingWaitForFirstConsumer
+	scObjWithWffcBind := &storagev1api.StorageClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "fake-storage-class",
+		},
+		VolumeBindingMode: &volumeBindWffc,
+	}
+
+	tests := []struct {
+		name          string
+		pvName        string
+		scName        string
+		kubeClientObj []runtime.Object
+		expectedErr   string
+		expected      *corev1api.NodeSelector
+	}{
+		{
+			name:        "invalid pvName",
+			scName:      "fake-storage-class",
+			expectedErr: "invalid parameter, pv , sc fake-storage-class",
+		},
+		{
+			name:        "invalid scName",
+			pvName:      "fake-pv",
+			expectedErr: "invalid parameter, pv fake-pv, sc ",
+		},
+		{
+			name:        "no sc",
+			pvName:      "fake-pv",
+			scName:      "fake-storage-class",
+			expectedErr: "error getting storage class fake-storage-class: storageclasses.storage.k8s.io \"fake-storage-class\" not found",
+		},
+		{
+			name:          "sc without binding mode",
+			pvName:        "fake-pv",
+			scName:        "fake-storage-class",
+			kubeClientObj: []runtime.Object{scObjWithoutVolumeBind},
+		},
+		{
+			name:          "sc without immediate binding mode",
+			pvName:        "fake-pv",
+			scName:        "fake-storage-class",
+			kubeClientObj: []runtime.Object{scObjWithImeediateBind},
+		},
+		{
+			name:          "get pv fail",
+			pvName:        "fake-pv",
+			scName:        "fake-storage-class",
+			kubeClientObj: []runtime.Object{scObjWithWffcBind},
+			expectedErr:   "error getting PV fake-pv: persistentvolumes \"fake-pv\" not found",
+		},
+		{
+			name:   "pv with no affinity",
+			pvName: "fake-pv",
+			scName: "fake-storage-class",
+			kubeClientObj: []runtime.Object{
+				scObjWithWffcBind,
+				pvWithoutNodeAffinity,
+			},
+		},
+		{
+			name:   "pv with affinity",
+			pvName: "fake-pv",
+			scName: "fake-storage-class",
+			kubeClientObj: []runtime.Object{
+				scObjWithWffcBind,
+				pvWithNodeAffinity,
+			},
+			expected: &corev1api.NodeSelector{
+				NodeSelectorTerms: []corev1api.NodeSelectorTerm{
+					{
+						MatchExpressions: []corev1api.NodeSelectorRequirement{
+							{
+								Key: "fake-key",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fakeKubeClient := fake.NewSimpleClientset(test.kubeClientObj...)
+
+			var kubeClient kubernetes.Interface = fakeKubeClient
+
+			affinity, err := GetVolumeTopology(t.Context(), kubeClient.CoreV1(), kubeClient.StorageV1(), test.pvName, test.scName)
+
+			if test.expectedErr != "" {
+				assert.EqualError(t, err, test.expectedErr)
+			} else {
+				assert.Equal(t, test.expected, affinity)
+			}
 		})
 	}
 }

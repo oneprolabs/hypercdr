@@ -130,7 +130,7 @@ cd /data/hypercdr/hypercdr-platform/platform/frontend && npm run dev -- --host 0
 - 第一阶段不引入 KMS。
 
 ### 4.9 Velero
-- 固定版本：**v1.17.1**（docker image `192.168.8.149/hypercdr/velero:v1.17.1-helperfix`）。完整 Velero 源码已拆分到 `/data/hypercdr/hypercdr-velero`，平台仓库只保留 CRD 和镜像引用。
+- 当前固定版本：**v1.18.2**，HyperCDR 镜像版本为 `v1.18.2-hcdr.2`。完整固定源码位于 `/data/hypercdr-main/third_party/velero`，平台内嵌同版本 CRD；构建过程产生的文件放在 `/data/hypercdr-runtime` 或 `/tmp`。
 - 安装方式：hypercdr installer 一体化安装，namespace `velero`（与 `hypercdr-agent` 同 namespace）。
 - 第一阶段 **PVC 备份**：**remote snapshot**（上传 tar 到对象存储），**不做** local snapshot。
 - 第一阶段 **不**做跨 namespace 恢复。
@@ -437,10 +437,10 @@ DR 页面阶段不会跳。
 - `platform-api:dev`
 - `comm-agent:dev`
 - `postgres:16`
-- `velero:v1.17.1-helperfix`
+- `velero:v1.18.2-hcdr.2`
 - `velero-plugin-for-aws:v1.13.0`
 
-注意：`velero:v1.17.1-helperfix` 是从本地源码 `/data/hypercdr/hypercdr-velero/velero-1.17.1` 用 Go 1.24.9 编译 `velero`、`velero-helper`、`velero-restore-helper` 后构建并推送的镜像，不是直接使用官方 Velero 镜像。
+注意：`velero:v1.18.2-hcdr.2` 是从仓库内固定源码 `/data/hypercdr-main/third_party/velero` 构建并推送的镜像，不是直接使用官方 Velero 镜像。
 
 ### 平台服务
 
@@ -461,7 +461,7 @@ systemd 服务：
 - `HCDR_AGENT_WS_ENDPOINT=ws://192.168.8.149:18080/ws/agent`
 - `HCDR_IMAGE_REGISTRY=192.168.8.149/hypercdr`
 - `HCDR_AGENT_IMAGE=192.168.8.149/hypercdr/comm-agent:dev`
-- `HCDR_VELERO_IMAGE=192.168.8.149/hypercdr/velero:v1.17.1-helperfix`
+- `HCDR_VELERO_IMAGE=<registry>/hypercdr/velero:v1.18.2-hcdr.2`
 - `HCDR_VELERO_AWS_PLUGIN_IMAGE=192.168.8.149/hypercdr/velero-plugin-for-aws:v1.13.0`
 - `HCDR_REGISTRY_CA_PATH=/data/harbor/cert/hypercdr-ca.crt`
 
@@ -485,7 +485,7 @@ systemd 服务：
 - `http://127.0.0.1:18080/install.sh` 返回 200，并包含：
   - `ENDPOINT="ws://192.168.8.149:18080/ws/agent"`
   - `AGENT_IMAGE="192.168.8.149/hypercdr/comm-agent:dev"`
-  - `VELERO_IMAGE="192.168.8.149/hypercdr/velero:v1.17.1-helperfix"`
+  - `VELERO_IMAGE="<registry>/hypercdr/velero:v1.18.2-hcdr.2"`
   - `VELERO_AWS_PLUGIN_IMAGE="192.168.8.149/hypercdr/velero-plugin-for-aws:v1.13.0"`
   - `REGISTRY_CA_URL="http://192.168.8.149:18080/assets/registry/ca.crt"`
 - `http://127.0.0.1:18080/prepare-node.sh` 返回 200，并包含：
@@ -510,7 +510,7 @@ systemd 服务：
   - Agent WebSocket：`ws://192.168.8.149:3002/ws/agent`
 - `install.sh` 当前默认镜像：
   - `192.168.8.149/hypercdr/comm-agent:v20260714.1`
-  - `192.168.8.149/hypercdr/velero:v1.17.1-helperfix`
+  - `<registry>/hypercdr/velero:v1.18.2-hcdr.2`
   - `192.168.8.149/hypercdr/velero-plugin-for-aws:v1.13.0`
 - 旧 systemd 直跑服务已停止、禁用并移除 unit：
   - `hypercdr-platform-api.service`

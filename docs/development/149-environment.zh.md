@@ -110,7 +110,7 @@ HCDR_PUBLIC_BASE_URL=https://192.168.8.149:3002
 HCDR_AGENT_WS_ENDPOINT=wss://192.168.8.149:3002/ws/agent
 HCDR_IMAGE_REGISTRY=192.168.8.149:5001/hypercdr
 HCDR_AGENT_IMAGE=192.168.8.149:5001/hypercdr/comm-agent:v20260714.5
-HCDR_VELERO_IMAGE=192.168.8.149:5001/hypercdr/velero:v1.17.1-helperfix
+HCDR_VELERO_IMAGE=192.168.8.149:5001/hypercdr/velero:v1.18.2-hcdr.2
 HCDR_VELERO_AWS_PLUGIN_IMAGE=192.168.8.149:5001/hypercdr/velero-plugin-for-aws:v1.13.0
 HCDR_REGISTRY_CA_PATH=/etc/hypercdr/registry-ca.crt
 ```
@@ -149,7 +149,7 @@ HCDR_REGISTRY_CA_PATH=/etc/hypercdr/registry-ca.crt
 192.168.8.149:5001/hypercdr/comm-agent:dev
 192.168.8.149:5001/hypercdr/comm-agent:v20260714.5
 192.168.8.149:5001/hypercdr/postgres:16
-192.168.8.149:5001/hypercdr/velero:v1.17.1-helperfix
+192.168.8.149:5001/hypercdr/velero:v1.18.2-hcdr.2
 192.168.8.149:5001/hypercdr/velero-plugin-for-aws:v1.13.0
 ```
 
@@ -157,7 +157,7 @@ HCDR_REGISTRY_CA_PATH=/etc/hypercdr/registry-ca.crt
 
 - `platform-api:dev` 来自平台后端源码编译。
 - `comm-agent:dev` 来自 agent 源码编译。
-- `velero:v1.17.1-helperfix` 来自本地 Velero 源码编译后构建，不是直接拉取官方 Velero 镜像。
+- `velero:v1.18.2-hcdr.2` 从 `/data/hypercdr-main/third_party/velero` 的固定源码构建，不是直接拉取官方 Velero 镜像。
 - `velero-plugin-for-aws:v1.13.0` 从外部镜像源同步后推送到本机 Harbor。
 
 ## Go 版本
@@ -266,7 +266,7 @@ http://192.168.8.149:18080/prepare-node.sh
 ```text
 wss://192.168.8.149:3002/ws/agent
 192.168.8.149:5001/hypercdr/comm-agent:v20260714.5
-192.168.8.149:5001/hypercdr/velero:v1.17.1-helperfix
+192.168.8.149:5001/hypercdr/velero:v1.18.2-hcdr.2
 192.168.8.149:5001/hypercdr/velero-plugin-for-aws:v1.13.0
 ```
 

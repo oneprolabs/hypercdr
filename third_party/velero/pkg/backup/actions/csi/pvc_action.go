@@ -24,7 +24,7 @@ import (
 
 	"k8s.io/client-go/util/retry"
 
-	volumegroupsnapshotv1beta1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta1"
+	volumegroupsnapshotv1beta2 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumegroupsnapshot/v1beta2"
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -57,6 +57,8 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
 	"github.com/vmware-tanzu/velero/pkg/util/csi"
 	kubeutil "github.com/vmware-tanzu/velero/pkg/util/kube"
+	podvolumeutil "github.com/vmware-tanzu/velero/pkg/util/podvolume"
+	vhutil "github.com/vmware-tanzu/velero/pkg/util/volumehelper"
 )
 
 // TODO: Replace hardcoded VolumeSnapshot finalizer strings with constants from
@@ -72,6 +74,14 @@ const (
 type pvcBackupItemAction struct {
 	log      logrus.FieldLogger
 	crClient crclient.Client
+
+	// pvcPodCache provides lazy per-namespace caching of PVC-to-Pod mappings.
+	// Since plugin instances are unique per backup (created via newPluginManager and
+	// cleaned up via CleanupClients at backup completion), we can safely cache this
+	// without mutex or backup UID tracking.
+	// This avoids the O(N*M) performance issue when there are many PVCs and pods.
+	// See issue #9179 and PR #9226 for details.
+	pvcPodCache *podvolumeutil.PVCPodCache
 }
 
 // AppliesTo returns information indicating that the PVCBackupItemAction
@@ -95,6 +105,59 @@ func (p *pvcBackupItemAction) validateBackup(backup velerov1api.Backup) (valid b
 	}
 
 	return true
+}
+
+// ensurePVCPodCacheForNamespace ensures the PVC-to-Pod cache is built for the given namespace.
+// This uses lazy per-namespace caching following the pattern from PR #9226.
+// Since plugin instances are unique per backup, we can safely cache without mutex or backup UID tracking.
+func (p *pvcBackupItemAction) ensurePVCPodCacheForNamespace(ctx context.Context, namespace string) error {
+	// Initialize cache if needed
+	if p.pvcPodCache == nil {
+		p.pvcPodCache = podvolumeutil.NewPVCPodCache()
+	}
+
+	// Build cache for namespace if not already done
+	if !p.pvcPodCache.IsNamespaceBuilt(namespace) {
+		p.log.Debugf("Building PVC-to-Pod cache for namespace %s", namespace)
+		if err := p.pvcPodCache.BuildCacheForNamespace(ctx, namespace, p.crClient); err != nil {
+			return errors.Wrapf(err, "failed to build PVC-to-Pod cache for namespace %s", namespace)
+		}
+	}
+	return nil
+}
+
+// getVolumeHelperWithCache creates a VolumeHelper using the pre-built PVC-to-Pod cache.
+// The cache should be ensured for the relevant namespace(s) before calling this.
+func (p *pvcBackupItemAction) getVolumeHelperWithCache(backup *velerov1api.Backup) (vhutil.VolumeHelper, error) {
+	// Create VolumeHelper with our lazy-built cache
+	vh, err := volumehelper.NewVolumeHelperWithCache(
+		*backup,
+		p.crClient,
+		p.log,
+		p.pvcPodCache,
+	)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create VolumeHelper")
+	}
+	return vh, nil
+}
+
+// getOrCreateVolumeHelper returns a VolumeHelper with lazy per-namespace caching.
+// The VolumeHelper uses the pvcPodCache which is populated lazily as namespaces are encountered.
+// Callers should use ensurePVCPodCacheForNamespace before calling methods that need
+// PVC-to-Pod lookups for a specific namespace.
+// Since plugin instances are unique per backup (created via newPluginManager and
+// cleaned up via CleanupClients at backup completion), we can safely cache this.
+// See issue #9179 and PR #9226 for details.
+func (p *pvcBackupItemAction) getOrCreateVolumeHelper(backup *velerov1api.Backup) (vhutil.VolumeHelper, error) {
+	// Initialize the PVC-to-Pod cache if needed
+	if p.pvcPodCache == nil {
+		p.pvcPodCache = podvolumeutil.NewPVCPodCache()
+	}
+
+	// Return the VolumeHelper with our lazily-built cache
+	// The cache will be populated incrementally as namespaces are encountered
+	return p.getVolumeHelperWithCache(backup)
 }
 
 func (p *pvcBackupItemAction) validatePVCandPV(
@@ -248,12 +311,20 @@ func (p *pvcBackupItemAction) Execute(
 		return item, nil, "", nil, nil
 	}
 
-	shouldSnapshot, err := volumehelper.ShouldPerformSnapshotWithBackup(
+	// Ensure PVC-to-Pod cache is built for this namespace (lazy per-namespace caching)
+	if err := p.ensurePVCPodCacheForNamespace(context.TODO(), pvc.Namespace); err != nil {
+		return nil, nil, "", nil, err
+	}
+
+	// Get or create the cached VolumeHelper for this backup
+	vh, err := p.getOrCreateVolumeHelper(backup)
+	if err != nil {
+		return nil, nil, "", nil, err
+	}
+
+	shouldSnapshot, err := vh.ShouldPerformSnapshot(
 		item,
 		kuberesource.PersistentVolumeClaims,
-		*backup,
-		p.crClient,
-		p.log,
 	)
 	if err != nil {
 		return nil, nil, "", nil, err
@@ -396,7 +467,7 @@ func (p *pvcBackupItemAction) Progress(
 		return progress, biav2.InvalidOperationIDError(operationID)
 	}
 
-	dataUpload, err := getDataUpload(context.Background(), p.crClient, operationID)
+	dataUpload, err := getDataUpload(context.Background(), p.crClient, backup.Namespace, operationID)
 	if err != nil {
 		p.log.Errorf(
 			"fail to get DataUpload for backup %s/%s by operation ID %s: %s",
@@ -441,7 +512,7 @@ func (p *pvcBackupItemAction) Cancel(operationID string, backup *velerov1api.Bac
 		return biav2.InvalidOperationIDError(operationID)
 	}
 
-	dataUpload, err := getDataUpload(context.Background(), p.crClient, operationID)
+	dataUpload, err := getDataUpload(context.Background(), p.crClient, backup.Namespace, operationID)
 	if err != nil {
 		p.log.Errorf(
 			"fail to get DataUpload for backup %s/%s: %s",
@@ -534,10 +605,12 @@ func createDataUpload(
 func getDataUpload(
 	ctx context.Context,
 	crClient crclient.Client,
+	namespace string,
 	operationID string,
 ) (*velerov2alpha1.DataUpload, error) {
 	dataUploadList := new(velerov2alpha1.DataUploadList)
 	err := crClient.List(ctx, dataUploadList, &crclient.ListOptions{
+		Namespace: namespace,
 		LabelSelector: labels.SelectorFromSet(
 			map[string]string{velerov1api.AsyncOperationIDLabel: operationID},
 		),
@@ -621,8 +694,41 @@ func (p *pvcBackupItemAction) getVolumeSnapshotReference(
 			return nil, errors.Wrapf(err, "failed to list PVCs in VolumeGroupSnapshot group %q in namespace %q", group, pvc.Namespace)
 		}
 
+		// Ensure PVC-to-Pod cache is built for this namespace (lazy per-namespace caching)
+		if err := p.ensurePVCPodCacheForNamespace(ctx, pvc.Namespace); err != nil {
+			return nil, errors.Wrapf(err, "failed to build PVC-to-Pod cache for namespace %s", pvc.Namespace)
+		}
+
+		// Get the cached VolumeHelper for filtering PVCs by volume policy
+		vh, err := p.getOrCreateVolumeHelper(backup)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to get VolumeHelper for filtering PVCs in group %q", group)
+		}
+
+		// Filter PVCs by volume policy
+		filteredPVCs, err := p.filterPVCsByVolumePolicy(groupedPVCs, vh)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to filter PVCs by volume policy for VolumeGroupSnapshot group %q", group)
+		}
+
+		// Warn if any PVCs were filtered out
+		if len(filteredPVCs) < len(groupedPVCs) {
+			for _, originalPVC := range groupedPVCs {
+				found := false
+				for _, filteredPVC := range filteredPVCs {
+					if originalPVC.Name == filteredPVC.Name {
+						found = true
+						break
+					}
+				}
+				if !found {
+					p.log.Warnf("PVC %s/%s has VolumeGroupSnapshot label %s=%s but is excluded by volume policy", originalPVC.Namespace, originalPVC.Name, vgsLabelKey, group)
+				}
+			}
+		}
+
 		// Determine the CSI driver for the grouped PVCs
-		driver, err := p.determineCSIDriver(groupedPVCs)
+		driver, err := p.determineCSIDriver(filteredPVCs)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to determine CSI driver for PVCs in VolumeGroupSnapshot group %q", group)
 		}
@@ -643,7 +749,7 @@ func (p *pvcBackupItemAction) getVolumeSnapshotReference(
 		}
 
 		// Wait for all the VS objects associated with the VGS to have status and VGS Name (VS readiness is checked in legacy flow) and get the PVC-to-VS map
-		vsMap, err := p.waitForVGSAssociatedVS(ctx, groupedPVCs, newVGS, backup.Spec.CSISnapshotTimeout.Duration)
+		vsMap, err := p.waitForVGSAssociatedVS(ctx, filteredPVCs, newVGS, backup.Spec.CSISnapshotTimeout.Duration)
 		if err != nil {
 			return nil, errors.Wrapf(err, "timeout waiting for VolumeSnapshots to have status created via VolumeGroupSnapshot %s", newVGS.Name)
 		}
@@ -661,7 +767,7 @@ func (p *pvcBackupItemAction) getVolumeSnapshotReference(
 		}
 
 		// Re-fetch latest VGS to ensure status is populated after VGSC binding
-		latestVGS := &volumegroupsnapshotv1beta1.VolumeGroupSnapshot{}
+		latestVGS := &volumegroupsnapshotv1beta2.VolumeGroupSnapshot{}
 		if err := p.crClient.Get(ctx, crclient.ObjectKeyFromObject(newVGS), latestVGS); err != nil {
 			return nil, errors.Wrapf(err, "failed to re-fetch VolumeGroupSnapshot %s after VGSC binding wait", newVGS.Name)
 		}
@@ -734,6 +840,38 @@ func (p *pvcBackupItemAction) listGroupedPVCs(ctx context.Context, namespace, la
 	return pvcList.Items, nil
 }
 
+func (p *pvcBackupItemAction) filterPVCsByVolumePolicy(
+	pvcs []corev1api.PersistentVolumeClaim,
+	vh vhutil.VolumeHelper,
+) ([]corev1api.PersistentVolumeClaim, error) {
+	var filteredPVCs []corev1api.PersistentVolumeClaim
+
+	for _, pvc := range pvcs {
+		// Convert PVC to unstructured for ShouldPerformSnapshotWithVolumeHelper
+		pvcMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&pvc)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to convert PVC %s/%s to unstructured", pvc.Namespace, pvc.Name)
+		}
+		unstructuredPVC := &unstructured.Unstructured{Object: pvcMap}
+
+		// Check if this PVC should be snapshotted according to volume policies
+		// Uses the cached VolumeHelper for better performance with many PVCs/pods
+		shouldSnapshot, err := vh.ShouldPerformSnapshot(
+			unstructuredPVC,
+			kuberesource.PersistentVolumeClaims,
+		)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to check volume policy for PVC %s/%s", pvc.Namespace, pvc.Name)
+		}
+
+		if shouldSnapshot {
+			filteredPVCs = append(filteredPVCs, pvc)
+		}
+	}
+
+	return filteredPVCs, nil
+}
+
 func (p *pvcBackupItemAction) determineCSIDriver(
 	pvcs []corev1api.PersistentVolumeClaim,
 ) (string, error) {
@@ -777,7 +915,7 @@ func (p *pvcBackupItemAction) determineVGSClass(
 	}
 
 	// 3. Fallback to label-based default
-	vgsClassList := &volumegroupsnapshotv1beta1.VolumeGroupSnapshotClassList{}
+	vgsClassList := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotClassList{}
 	if err := p.crClient.List(ctx, vgsClassList); err != nil {
 		return "", errors.Wrap(err, "failed to list VolumeGroupSnapshotClasses")
 	}
@@ -806,22 +944,22 @@ func (p *pvcBackupItemAction) createVolumeGroupSnapshot(
 	backup *velerov1api.Backup,
 	pvc corev1api.PersistentVolumeClaim,
 	vgsLabelKey, vgsLabelValue, vgsClassName string,
-) (*volumegroupsnapshotv1beta1.VolumeGroupSnapshot, error) {
+) (*volumegroupsnapshotv1beta2.VolumeGroupSnapshot, error) {
 	vgsLabels := map[string]string{
 		velerov1api.BackupNameLabel: label.GetValidName(backup.Name),
 		velerov1api.BackupUIDLabel:  string(backup.UID),
 		vgsLabelKey:                 vgsLabelValue,
 	}
 
-	vgs := &volumegroupsnapshotv1beta1.VolumeGroupSnapshot{
+	vgs := &volumegroupsnapshotv1beta2.VolumeGroupSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: fmt.Sprintf("velero-%s-", vgsLabelValue),
 			Namespace:    pvc.Namespace,
 			Labels:       vgsLabels,
 		},
-		Spec: volumegroupsnapshotv1beta1.VolumeGroupSnapshotSpec{
+		Spec: volumegroupsnapshotv1beta2.VolumeGroupSnapshotSpec{
 			VolumeGroupSnapshotClassName: &vgsClassName,
-			Source: volumegroupsnapshotv1beta1.VolumeGroupSnapshotSource{
+			Source: volumegroupsnapshotv1beta2.VolumeGroupSnapshotSource{
 				Selector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						vgsLabelKey: vgsLabelValue,
@@ -849,7 +987,7 @@ func (p *pvcBackupItemAction) createVolumeGroupSnapshot(
 func (p *pvcBackupItemAction) waitForVGSAssociatedVS(
 	ctx context.Context,
 	groupedPVCs []corev1api.PersistentVolumeClaim,
-	vgs *volumegroupsnapshotv1beta1.VolumeGroupSnapshot,
+	vgs *volumegroupsnapshotv1beta2.VolumeGroupSnapshot,
 	timeout time.Duration,
 ) (map[string]*snapshotv1api.VolumeSnapshot, error) {
 	expected := len(groupedPVCs)
@@ -892,10 +1030,10 @@ func (p *pvcBackupItemAction) waitForVGSAssociatedVS(
 	return vsMap, nil
 }
 
-func hasOwnerReference(obj metav1.Object, vgs *volumegroupsnapshotv1beta1.VolumeGroupSnapshot) bool {
+func hasOwnerReference(obj metav1.Object, vgs *volumegroupsnapshotv1beta2.VolumeGroupSnapshot) bool {
 	for _, ref := range obj.GetOwnerReferences() {
 		if ref.Kind == kuberesource.VGSKind &&
-			ref.APIVersion == volumegroupsnapshotv1beta1.GroupName+"/"+volumegroupsnapshotv1beta1.SchemeGroupVersion.Version &&
+			ref.APIVersion == volumegroupsnapshotv1beta2.GroupName+"/"+volumegroupsnapshotv1beta2.SchemeGroupVersion.Version &&
 			ref.UID == vgs.UID {
 			return true
 		}
@@ -906,7 +1044,7 @@ func hasOwnerReference(obj metav1.Object, vgs *volumegroupsnapshotv1beta1.Volume
 func (p *pvcBackupItemAction) updateVGSCreatedVS(
 	ctx context.Context,
 	vsMap map[string]*snapshotv1api.VolumeSnapshot,
-	vgs *volumegroupsnapshotv1beta1.VolumeGroupSnapshot,
+	vgs *volumegroupsnapshotv1beta2.VolumeGroupSnapshot,
 	backup *velerov1api.Backup,
 ) error {
 	for pvcName, vs := range vsMap {
@@ -949,7 +1087,7 @@ func (p *pvcBackupItemAction) updateVGSCreatedVS(
 	return nil
 }
 
-func (p *pvcBackupItemAction) patchVGSCDeletionPolicy(ctx context.Context, vgs *volumegroupsnapshotv1beta1.VolumeGroupSnapshot) error {
+func (p *pvcBackupItemAction) patchVGSCDeletionPolicy(ctx context.Context, vgs *volumegroupsnapshotv1beta2.VolumeGroupSnapshot) error {
 	if vgs == nil || vgs.Status == nil || vgs.Status.BoundVolumeGroupSnapshotContentName == nil {
 		return errors.New("VolumeGroupSnapshotContent name not found in VGS status")
 	}
@@ -957,7 +1095,7 @@ func (p *pvcBackupItemAction) patchVGSCDeletionPolicy(ctx context.Context, vgs *
 	vgscName := vgs.Status.BoundVolumeGroupSnapshotContentName
 
 	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		vgsc := &volumegroupsnapshotv1beta1.VolumeGroupSnapshotContent{}
+		vgsc := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{}
 		if err := p.crClient.Get(ctx, crclient.ObjectKey{Name: *vgscName}, vgsc); err != nil {
 			return errors.Wrapf(err, "failed to get VolumeGroupSnapshotContent %s for VolumeGroupSnapshot %s/%s", *vgscName, vgs.Namespace, vgs.Name)
 		}
@@ -976,9 +1114,9 @@ func (p *pvcBackupItemAction) patchVGSCDeletionPolicy(ctx context.Context, vgs *
 	})
 }
 
-func (p *pvcBackupItemAction) deleteVGSAndVGSC(ctx context.Context, vgs *volumegroupsnapshotv1beta1.VolumeGroupSnapshot) error {
+func (p *pvcBackupItemAction) deleteVGSAndVGSC(ctx context.Context, vgs *volumegroupsnapshotv1beta2.VolumeGroupSnapshot) error {
 	if vgs.Status != nil && vgs.Status.BoundVolumeGroupSnapshotContentName != nil {
-		vgsc := &volumegroupsnapshotv1beta1.VolumeGroupSnapshotContent{
+		vgsc := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotContent{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: *vgs.Status.BoundVolumeGroupSnapshotContentName,
 			},
@@ -1003,11 +1141,11 @@ func (p *pvcBackupItemAction) deleteVGSAndVGSC(ctx context.Context, vgs *volumeg
 
 func (p *pvcBackupItemAction) waitForVGSCBinding(
 	ctx context.Context,
-	vgs *volumegroupsnapshotv1beta1.VolumeGroupSnapshot,
+	vgs *volumegroupsnapshotv1beta2.VolumeGroupSnapshot,
 	timeout time.Duration,
 ) error {
 	return wait.PollUntilContextTimeout(ctx, time.Second, timeout, true, func(ctx context.Context) (bool, error) {
-		vgsRef := &volumegroupsnapshotv1beta1.VolumeGroupSnapshot{}
+		vgsRef := &volumegroupsnapshotv1beta2.VolumeGroupSnapshot{}
 		if err := p.crClient.Get(ctx, crclient.ObjectKeyFromObject(vgs), vgsRef); err != nil {
 			return false, err
 		}
@@ -1020,8 +1158,8 @@ func (p *pvcBackupItemAction) waitForVGSCBinding(
 	})
 }
 
-func (p *pvcBackupItemAction) getVGSByLabels(ctx context.Context, namespace string, labels map[string]string) (*volumegroupsnapshotv1beta1.VolumeGroupSnapshot, error) {
-	vgsList := &volumegroupsnapshotv1beta1.VolumeGroupSnapshotList{}
+func (p *pvcBackupItemAction) getVGSByLabels(ctx context.Context, namespace string, labels map[string]string) (*volumegroupsnapshotv1beta2.VolumeGroupSnapshot, error) {
+	vgsList := &volumegroupsnapshotv1beta2.VolumeGroupSnapshotList{}
 	if err := p.crClient.List(ctx, vgsList,
 		crclient.InNamespace(namespace),
 		crclient.MatchingLabels(labels),

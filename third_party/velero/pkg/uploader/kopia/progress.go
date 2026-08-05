@@ -177,3 +177,14 @@ func (p *Progress) EstimationParameters() upload.EstimationParameters {
 func (p *Progress) Enabled() bool {
 	return true
 }
+
+func (p *Progress) GetIncrementalSize() int64 {
+	incrementalBytes := atomic.LoadInt64(&p.estimatedTotalBytes) - atomic.LoadInt64(&p.cachedBytes)
+	// Kopia's cached-byte callbacks can include a few bytes that are not part of
+	// its final logical-size estimate. Incremental bytes are a size, so never
+	// expose that accounting skew as a negative value in Velero status.
+	if incrementalBytes < 0 {
+		return 0
+	}
+	return incrementalBytes
+}

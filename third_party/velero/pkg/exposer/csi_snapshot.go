@@ -124,6 +124,15 @@ func (e *csiSnapshotExposer) Expose(ctx context.Context, ownerObject corev1api.O
 		"owner": ownerObject.Name,
 	})
 
+	volumeTopology, err := kube.GetVolumeTopology(ctx, e.kubeClient.CoreV1(), e.kubeClient.StorageV1(), csiExposeParam.SourcePVName, csiExposeParam.StorageClass)
+	if err != nil {
+		return errors.Wrapf(err, "error getting volume topology for PV %s, storage class %s", csiExposeParam.SourcePVName, csiExposeParam.StorageClass)
+	}
+
+	if volumeTopology != nil {
+		curLog.Infof("Using volume topology %v", volumeTopology)
+	}
+
 	curLog.Info("Exposing CSI snapshot")
 
 	volumeSnapshot, err := csi.WaitVolumeSnapshotReady(ctx, e.csiSnapshotClient, csiExposeParam.SnapshotName, csiExposeParam.SourceNamespace, csiExposeParam.ExposeTimeout, curLog)
@@ -254,12 +263,13 @@ func (e *csiSnapshotExposer) Expose(ctx context.Context, ownerObject corev1api.O
 		csiExposeParam.NodeOS,
 		csiExposeParam.PriorityClassName,
 		intoleratableNodes,
+		volumeTopology,
 	)
 	if err != nil {
 		return errors.Wrap(err, "error to create backup pod")
 	}
 
-	curLog.WithField("pod name", backupPod.Name).WithField("affinity", csiExposeParam.Affinity).Info("Backup pod is created")
+	curLog.WithField("pod name", backupPod.Name).WithField("affinity", affinity).Info("Backup pod is created")
 
 	defer func() {
 		if err != nil {
@@ -320,7 +330,8 @@ func (e *csiSnapshotExposer) GetExposed(ctx context.Context, ownerObject corev1a
 	curLog.WithField("pod", pod.Name).Infof("Backup volume is found in pod at index %v", i)
 
 	var nodeOS *string
-	if os, found := pod.Spec.NodeSelector[kube.NodeOSLabel]; found {
+	if pod.Spec.OS != nil {
+		os := string(pod.Spec.OS.Name)
 		nodeOS = &os
 	}
 
@@ -381,8 +392,13 @@ func (e *csiSnapshotExposer) DiagnoseExpose(ctx context.Context, ownerObject cor
 		diag += fmt.Sprintf("error getting backup vs %s, err: %v\n", backupVSName, err)
 	}
 
+	events, err := e.kubeClient.CoreV1().Events(ownerObject.Namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		diag += fmt.Sprintf("error listing events, err: %v\n", err)
+	}
+
 	if pod != nil {
-		diag += kube.DiagnosePod(pod)
+		diag += kube.DiagnosePod(pod, events)
 
 		if pod.Spec.NodeName != "" {
 			if err := nodeagent.KbClientIsRunningInNode(ctx, ownerObject.Namespace, pod.Spec.NodeName, e.kubeClient); err != nil {
@@ -392,7 +408,7 @@ func (e *csiSnapshotExposer) DiagnoseExpose(ctx context.Context, ownerObject cor
 	}
 
 	if pvc != nil {
-		diag += kube.DiagnosePVC(pvc)
+		diag += kube.DiagnosePVC(pvc, events)
 
 		if pvc.Spec.VolumeName != "" {
 			if pv, err := e.kubeClient.CoreV1().PersistentVolumes().Get(ctx, pvc.Spec.VolumeName, metav1.GetOptions{}); err != nil {
@@ -404,7 +420,7 @@ func (e *csiSnapshotExposer) DiagnoseExpose(ctx context.Context, ownerObject cor
 	}
 
 	if vs != nil {
-		diag += csi.DiagnoseVS(vs)
+		diag += csi.DiagnoseVS(vs, events)
 
 		if vs.Status != nil && vs.Status.BoundVolumeSnapshotContentName != nil && *vs.Status.BoundVolumeSnapshotContentName != "" {
 			if vsc, err := e.csiSnapshotClient.VolumeSnapshotContents().Get(ctx, *vs.Status.BoundVolumeSnapshotContentName, metav1.GetOptions{}); err != nil {
@@ -583,6 +599,7 @@ func (e *csiSnapshotExposer) createBackupPod(
 	nodeOS string,
 	priorityClassName string,
 	intoleratableNodes []string,
+	volumeTopology *corev1api.NodeSelector,
 ) (*corev1api.Pod, error) {
 	podName := ownerObject.Name
 
@@ -638,6 +655,10 @@ func (e *csiSnapshotExposer) createBackupPod(
 	args = append(args, podInfo.logFormatArgs...)
 	args = append(args, podInfo.logLevelArgs...)
 
+	if affinity == nil {
+		affinity = &kube.LoadAffinity{}
+	}
+
 	var securityCtx *corev1api.PodSecurityContext
 	nodeSelector := map[string]string{}
 	podOS := corev1api.PodOS{}
@@ -649,8 +670,13 @@ func (e *csiSnapshotExposer) createBackupPod(
 			},
 		}
 
-		nodeSelector[kube.NodeOSLabel] = kube.NodeOSWindows
 		podOS.Name = kube.NodeOSWindows
+
+		affinity.NodeSelector.MatchExpressions = append(affinity.NodeSelector.MatchExpressions, metav1.LabelSelectorRequirement{
+			Key:      kube.NodeOSLabel,
+			Values:   []string{kube.NodeOSWindows},
+			Operator: metav1.LabelSelectorOpIn,
+		})
 
 		toleration = append(toleration, []corev1api.Toleration{
 			{
@@ -678,11 +704,15 @@ func (e *csiSnapshotExposer) createBackupPod(
 			}
 		}
 
-		nodeSelector[kube.NodeOSLabel] = kube.NodeOSLinux
 		podOS.Name = kube.NodeOSLinux
+
+		affinity.NodeSelector.MatchExpressions = append(affinity.NodeSelector.MatchExpressions, metav1.LabelSelectorRequirement{
+			Key:      kube.NodeOSLabel,
+			Values:   []string{kube.NodeOSWindows},
+			Operator: metav1.LabelSelectorOpNotIn,
+		})
 	}
 
-	var podAffinity *corev1api.Affinity
 	if len(intoleratableNodes) > 0 {
 		if affinity == nil {
 			affinity = &kube.LoadAffinity{}
@@ -695,9 +725,7 @@ func (e *csiSnapshotExposer) createBackupPod(
 		})
 	}
 
-	if affinity != nil {
-		podAffinity = kube.ToSystemAffinity([]*kube.LoadAffinity{affinity})
-	}
+	podAffinity := kube.ToSystemAffinity(affinity, volumeTopology)
 
 	pod := &corev1api.Pod{
 		ObjectMeta: metav1.ObjectMeta{

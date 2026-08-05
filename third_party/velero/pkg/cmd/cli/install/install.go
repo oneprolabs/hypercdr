@@ -81,6 +81,7 @@ type Options struct {
 	DefaultVolumesToFsBackup        bool
 	UploaderType                    string
 	DefaultSnapshotMoveData         bool
+	CSISnapshotEarlyFrequentPolling bool
 	DisableInformerCache            bool
 	ScheduleSkipImmediately         bool
 	PodResources                    kubeutil.PodResources
@@ -89,8 +90,10 @@ type Options struct {
 	RepoMaintenanceJobConfigMap     string
 	NodeAgentConfigMap              string
 	ItemBlockWorkerCount            int
+	ConcurrentBackups               int
 	NodeAgentDisableHostPath        bool
 	kubeletRootDir                  string
+	Apply                           bool
 	ServerPriorityClassName         string
 	NodeAgentPriorityClassName      string
 }
@@ -101,6 +104,7 @@ func (o *Options) BindFlags(flags *pflag.FlagSet) {
 	flags.StringVar(&o.BucketName, "bucket", o.BucketName, "Name of the object storage bucket where backups should be stored")
 	flags.StringVar(&o.SecretFile, "secret-file", o.SecretFile, "File containing credentials for backup and volume provider. If not specified, --no-secret must be used for confirmation. Optional.")
 	flags.BoolVar(&o.NoSecret, "no-secret", o.NoSecret, "Flag indicating if a secret should be created. Must be used as confirmation if --secret-file is not provided. Optional.")
+	flags.BoolVar(&o.Apply, "apply", o.Apply, "Flag indicating if resources should be applied instead of created. This can be used for updating existing resources.")
 	flags.BoolVar(&o.NoDefaultBackupLocation, "no-default-backup-location", o.NoDefaultBackupLocation, "Flag indicating if a default backup location should be created. Must be used as confirmation if --bucket or --provider are not provided. Optional.")
 	flags.StringVar(&o.Image, "image", o.Image, "Image to use for the Velero and node agent pods. Optional.")
 	flags.StringVar(&o.Prefix, "prefix", o.Prefix, "Prefix under which all Velero data should be stored within the bucket. Optional.")
@@ -138,6 +142,7 @@ func (o *Options) BindFlags(flags *pflag.FlagSet) {
 	flags.BoolVar(&o.DefaultVolumesToFsBackup, "default-volumes-to-fs-backup", o.DefaultVolumesToFsBackup, "Bool flag to configure Velero server to use pod volume file system backup by default for all volumes on all backups. Optional.")
 	flags.StringVar(&o.UploaderType, "uploader-type", o.UploaderType, fmt.Sprintf("The type of uploader to transfer the data of pod volumes, supported value: '%s'", uploader.KopiaType))
 	flags.BoolVar(&o.DefaultSnapshotMoveData, "default-snapshot-move-data", o.DefaultSnapshotMoveData, "Bool flag to configure Velero server to move data by default for all snapshots supporting data movement. Optional.")
+	flags.BoolVar(&o.CSISnapshotEarlyFrequentPolling, "csi-snapshot-early-frequent-polling", o.CSISnapshotEarlyFrequentPolling, "Bool flag to configure Velero server to use early frequent polling by default for all CSI snapshots. Optional.")
 	flags.BoolVar(&o.DisableInformerCache, "disable-informer-cache", o.DisableInformerCache, "Disable informer cache for Get calls on restore. With this enabled, it will speed up restore in cases where there are backup resources which already exist in the cluster, but for very large clusters this will increase velero memory usage. Default is false (don't disable). Optional.")
 	flags.BoolVar(&o.ScheduleSkipImmediately, "schedule-skip-immediately", o.ScheduleSkipImmediately, "Skip the first scheduled backup immediately after creating a schedule. Default is false (don't skip).")
 	flags.BoolVar(&o.NodeAgentDisableHostPath, "node-agent-disable-host-path", o.NodeAgentDisableHostPath, "Don't mount the pod volume host path to node-agent. Optional. Pod volume host path mount is required by fs-backup but could be disabled for other backup methods.")
@@ -196,6 +201,12 @@ func (o *Options) BindFlags(flags *pflag.FlagSet) {
 		o.ItemBlockWorkerCount,
 		"Number of worker threads to process ItemBlocks. Default is one. Optional.",
 	)
+	flags.IntVar(
+		&o.ConcurrentBackups,
+		"concurrent-backups",
+		o.ConcurrentBackups,
+		"Number of backups to process concurrently. Default is one. Optional.",
+	)
 	flags.StringVar(
 		&o.ServerPriorityClassName,
 		"server-priority-class-name",
@@ -229,16 +240,17 @@ func NewInstallOptions() *Options {
 		NodeAgentPodCPULimit:      install.DefaultNodeAgentPodCPULimit,
 		NodeAgentPodMemLimit:      install.DefaultNodeAgentPodMemLimit,
 		// Default to creating a VSL unless we're told otherwise
-		UseVolumeSnapshots:       true,
-		NoDefaultBackupLocation:  false,
-		CRDsOnly:                 false,
-		DefaultVolumesToFsBackup: false,
-		UploaderType:             uploader.KopiaType,
-		DefaultSnapshotMoveData:  false,
-		DisableInformerCache:     false,
-		ScheduleSkipImmediately:  false,
-		kubeletRootDir:           install.DefaultKubeletRootDir,
-		NodeAgentDisableHostPath: false,
+		UseVolumeSnapshots:              true,
+		NoDefaultBackupLocation:         false,
+		CRDsOnly:                        false,
+		DefaultVolumesToFsBackup:        false,
+		UploaderType:                    uploader.KopiaType,
+		DefaultSnapshotMoveData:         false,
+		CSISnapshotEarlyFrequentPolling: false,
+		DisableInformerCache:            false,
+		ScheduleSkipImmediately:         false,
+		kubeletRootDir:                  install.DefaultKubeletRootDir,
+		NodeAgentDisableHostPath:        false,
 	}
 }
 
@@ -266,11 +278,21 @@ func (o *Options) AsVeleroOptions() (*install.VeleroOptions, error) {
 			return nil, err
 		}
 	}
-	veleroPodResources, err := kubeutil.ParseResourceRequirements(o.VeleroPodCPURequest, o.VeleroPodMemRequest, o.VeleroPodCPULimit, o.VeleroPodMemLimit)
+	veleroPodResources, err := kubeutil.ParseCPUAndMemoryResources(
+		o.VeleroPodCPURequest,
+		o.VeleroPodMemRequest,
+		o.VeleroPodCPULimit,
+		o.VeleroPodMemLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
-	nodeAgentPodResources, err := kubeutil.ParseResourceRequirements(o.NodeAgentPodCPURequest, o.NodeAgentPodMemRequest, o.NodeAgentPodCPULimit, o.NodeAgentPodMemLimit)
+	nodeAgentPodResources, err := kubeutil.ParseCPUAndMemoryResources(
+		o.NodeAgentPodCPURequest,
+		o.NodeAgentPodMemRequest,
+		o.NodeAgentPodCPULimit,
+		o.NodeAgentPodMemLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -305,6 +327,7 @@ func (o *Options) AsVeleroOptions() (*install.VeleroOptions, error) {
 		DefaultVolumesToFsBackup:        o.DefaultVolumesToFsBackup,
 		UploaderType:                    o.UploaderType,
 		DefaultSnapshotMoveData:         o.DefaultSnapshotMoveData,
+		CSISnapshotEarlyFrequentPolling: o.CSISnapshotEarlyFrequentPolling,
 		DisableInformerCache:            o.DisableInformerCache,
 		ScheduleSkipImmediately:         o.ScheduleSkipImmediately,
 		PodResources:                    o.PodResources,
@@ -313,6 +336,7 @@ func (o *Options) AsVeleroOptions() (*install.VeleroOptions, error) {
 		RepoMaintenanceJobConfigMap:     o.RepoMaintenanceJobConfigMap,
 		NodeAgentConfigMap:              o.NodeAgentConfigMap,
 		ItemBlockWorkerCount:            o.ItemBlockWorkerCount,
+		ConcurrentBackups:               o.ConcurrentBackups,
 		KubeletRootDir:                  o.kubeletRootDir,
 		NodeAgentDisableHostPath:        o.NodeAgentDisableHostPath,
 		ServerPriorityClassName:         o.ServerPriorityClassName,
@@ -361,8 +385,8 @@ This is useful as a starting point for more customized installations.
 
   # velero install --provider azure --plugins velero/velero-plugin-for-microsoft-azure:v1.0.0 --bucket $BLOB_CONTAINER --secret-file ./credentials-velero --backup-location-config resourceGroup=$AZURE_BACKUP_RESOURCE_GROUP,storageAccount=$AZURE_STORAGE_ACCOUNT_ID[,subscriptionId=$AZURE_BACKUP_SUBSCRIPTION_ID] --snapshot-location-config apiTimeout=<YOUR_TIMEOUT>[,resourceGroup=$AZURE_BACKUP_RESOURCE_GROUP,subscriptionId=$AZURE_BACKUP_SUBSCRIPTION_ID]`,
 		Run: func(c *cobra.Command, args []string) {
-			cmd.CheckError(o.Validate(c, args, f))
 			cmd.CheckError(o.Complete(args, f))
+			cmd.CheckError(o.Validate(c, args, f))
 			cmd.CheckError(o.Run(c, f))
 		},
 	}
@@ -408,7 +432,7 @@ func (o *Options) Run(c *cobra.Command, f client.Factory) error {
 
 	errorMsg := fmt.Sprintf("\n\nError installing Velero. Use `kubectl logs deploy/velero -n %s` to check the deploy logs", o.Namespace)
 
-	err = install.Install(dynamicFactory, kbClient, resources, os.Stdout)
+	err = install.Install(dynamicFactory, kbClient, resources, os.Stdout, o.Apply)
 	if err != nil {
 		return errors.Wrap(err, errorMsg)
 	}

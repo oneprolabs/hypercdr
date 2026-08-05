@@ -138,9 +138,12 @@ func TestAgentUpgradeIsAvailableForDifferentImageAtSameVersion(t *testing.T) {
 
 func TestVeleroUpgradeIsNotAvailableForMatchingImageAndVersionWithDifferentDigestKinds(t *testing.T) {
 	cluster := store.Cluster{
-		VeleroVersion:     "v1.17.1",
-		VeleroImage:       "registry.example/hypercdr/velero:v1.17.1",
-		VeleroImageDigest: "sha256:runtime-image-id",
+		VeleroVersion:          "v1.17.1",
+		VeleroImage:            "registry.example/hypercdr/velero:v1.17.1",
+		VeleroImageDigest:      "sha256:runtime-image-id",
+		VeleroServerReady:      true,
+		VeleroNodeAgentDesired: 2,
+		VeleroNodeAgentReady:   2,
 	}
 	target := store.ComponentRelease{
 		Version:     "v1.17.1",
@@ -150,6 +153,60 @@ func TestVeleroUpgradeIsNotAvailableForMatchingImageAndVersionWithDifferentDiges
 
 	if veleroUpgradeIsAvailable(cluster, target) {
 		t.Fatal("matching Velero image and version must not display Update when digest kinds differ")
+	}
+}
+
+func TestVeleroUpgradeIsNotAvailableWhenPublishedDigestIsAlreadyRunning(t *testing.T) {
+	target := store.ComponentRelease{
+		Version:     "v1.18.2-hcdr.1",
+		Image:       "registry.example/hypercdr/velero:v1.18.2-hcdr.1",
+		ImageDigest: "sha256:published",
+	}
+	cluster := store.Cluster{
+		VeleroVersion:              "v1.18.2",
+		VeleroImage:                target.Image,
+		VeleroImageDigest:          target.ImageDigest,
+		VeleroNodeAgentImageDigest: target.ImageDigest,
+		VeleroServerReady:          true,
+		VeleroNodeAgentDesired:     2,
+		VeleroNodeAgentReady:       2,
+	}
+
+	if veleroUpgradeIsAvailable(cluster, target) {
+		t.Fatal("published build suffix must not display Update when the target digest is already fully ready")
+	}
+}
+
+func TestVeleroUpgradeRemainsAvailableWhenTargetDigestIsNotFullyReady(t *testing.T) {
+	target := store.ComponentRelease{Version: "v1.18.2-hcdr.1", Image: "registry.example/hypercdr/velero:v1.18.2-hcdr.1", ImageDigest: "sha256:published"}
+	cluster := store.Cluster{
+		VeleroVersion:              "v1.18.2",
+		VeleroImage:                target.Image,
+		VeleroImageDigest:          target.ImageDigest,
+		VeleroNodeAgentImageDigest: target.ImageDigest,
+		VeleroServerReady:          true,
+		VeleroNodeAgentDesired:     2,
+		VeleroNodeAgentReady:       1,
+	}
+
+	if !veleroUpgradeIsAvailable(cluster, target) {
+		t.Fatal("an incomplete target rollout must still offer Update so the platform can reconcile it")
+	}
+}
+
+func TestVeleroUpgradeDigestVerificationAllowsPackagingVersionSuffix(t *testing.T) {
+	cluster := store.Cluster{
+		VeleroVersion:              "v1.18.2",
+		VeleroImage:                "registry.example/hypercdr/velero:v1.18.2-hcdr.1",
+		VeleroImageDigest:          "sha256:published",
+		VeleroNodeAgentImageDigest: "sha256:published",
+	}
+	expectedVersion := "v1.18.2-hcdr.1"
+	identityMatches := cluster.VeleroImage == "registry.example/hypercdr/velero:v1.18.2-hcdr.1" && cluster.VeleroVersion == expectedVersion
+	digestMatches := cluster.VeleroImageDigest == "sha256:published" && cluster.VeleroNodeAgentImageDigest == "sha256:published"
+
+	if identityMatches || !digestMatches {
+		t.Fatal("test fixture must exercise digest verification with a packaging-only version mismatch")
 	}
 }
 

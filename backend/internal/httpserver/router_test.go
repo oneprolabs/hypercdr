@@ -649,7 +649,7 @@ func TestVeleroCRDsEndpoint(t *testing.T) {
 	server := httptest.NewServer(NewRouter(config.Config{}, logger, repo))
 	defer server.Close()
 
-	resp, err := http.Get(server.URL + "/assets/velero/v1.17.1/crds.yaml")
+	resp, err := http.Get(server.URL + "/assets/velero/v1.18.2/crds.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -803,7 +803,11 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 	text := body.String()
 	for _, expected := range []string{
 		"registry.local:5000/hypercdr/comm-agent:active",
-		"/assets/velero/v1.17.1/crds.yaml",
+		"/assets/velero/v1.18.2/crds.yaml",
+		"--concurrent-backups=2",
+		"--node-agent-configmap=node-agent-config",
+		`"prepareQueueLength": 4`,
+		`"cachePVC"`,
 		"kind: Deployment",
 		"type: Recreate",
 		"name: velero",

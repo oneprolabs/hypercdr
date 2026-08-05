@@ -50,6 +50,7 @@ type podTemplateConfig struct {
 	serviceAccountName              string
 	uploaderType                    string
 	defaultSnapshotMoveData         bool
+	csiSnapshotEarlyFrequentPolling bool
 	privilegedNodeAgent             bool
 	disableInformerCache            bool
 	scheduleSkipImmediately         bool
@@ -59,6 +60,7 @@ type podTemplateConfig struct {
 	repoMaintenanceJobConfigMap     string
 	nodeAgentConfigMap              string
 	itemBlockWorkerCount            int
+	concurrentBackups               int
 	forWindows                      bool
 	kubeletRootDir                  string
 	nodeAgentDisableHostPath        bool
@@ -165,6 +167,12 @@ func WithDefaultSnapshotMoveData(b bool) podTemplateOption {
 	}
 }
 
+func WithCSISnapshotEarlyFrequentPolling(b bool) podTemplateOption {
+	return func(c *podTemplateConfig) {
+		c.csiSnapshotEarlyFrequentPolling = b
+	}
+}
+
 func WithDisableInformerCache(b bool) podTemplateOption {
 	return func(c *podTemplateConfig) {
 		c.disableInformerCache = b
@@ -221,6 +229,12 @@ func WithRepoMaintenanceJobConfigMap(repoMaintenanceJobConfigMap string) podTemp
 func WithItemBlockWorkerCount(itemBlockWorkerCount int) podTemplateOption {
 	return func(c *podTemplateConfig) {
 		c.itemBlockWorkerCount = itemBlockWorkerCount
+	}
+}
+
+func WithConcurrentBackups(concurrentBackups int) podTemplateOption {
+	return func(c *podTemplateConfig) {
+		c.concurrentBackups = concurrentBackups
 	}
 }
 
@@ -337,6 +351,10 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1api.Deployme
 		args = append(args, fmt.Sprintf("--item-block-worker-count=%d", c.itemBlockWorkerCount))
 	}
 
+	if c.concurrentBackups > 0 {
+		args = append(args, fmt.Sprintf("--concurrent-backups=%d", c.concurrentBackups))
+	}
+
 	deployment := &appsv1api.Deployment{
 		ObjectMeta: objectMeta(namespace, "velero"),
 		TypeMeta: metav1.TypeMeta{
@@ -353,11 +371,25 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1api.Deployme
 				Spec: corev1api.PodSpec{
 					RestartPolicy:      corev1api.RestartPolicyAlways,
 					ServiceAccountName: c.serviceAccountName,
-					NodeSelector: map[string]string{
-						"kubernetes.io/os": "linux",
-					},
 					OS: &corev1api.PodOS{
 						Name: "linux",
+					},
+					Affinity: &corev1api.Affinity{
+						NodeAffinity: &corev1api.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &corev1api.NodeSelector{
+								NodeSelectorTerms: []corev1api.NodeSelectorTerm{
+									{
+										MatchExpressions: []corev1api.NodeSelectorRequirement{
+											{
+												Key:      "kubernetes.io/os",
+												Values:   []string{"windows"},
+												Operator: corev1api.NodeSelectorOpNotIn,
+											},
+										},
+									},
+								},
+							},
+						},
 					},
 					Containers: []corev1api.Container{
 						{
@@ -429,7 +461,8 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1api.Deployme
 					Secret: &corev1api.SecretVolumeSource{
 						// read-only for Owner, Group, Public
 						DefaultMode: ptr.To(int32(0444)),
-						SecretName:  "cloud-credentials",
+						// #nosec G101 -- This is a reference to a Secret resource name, not a credential
+						SecretName: "cloud-credentials",
 					},
 				},
 			},
@@ -459,6 +492,15 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1api.Deployme
 			{
 				Name:  "ALIBABA_CLOUD_CREDENTIALS_FILE",
 				Value: "/credentials/cloud",
+			},
+		}...)
+	}
+
+	if c.csiSnapshotEarlyFrequentPolling {
+		deployment.Spec.Template.Spec.Containers[0].Env = append(deployment.Spec.Template.Spec.Containers[0].Env, []corev1api.EnvVar{
+			{
+				Name:  "CSI_SNAPSHOT_EARLY_FREQUENT_POLLING",
+				Value: "true",
 			},
 		}...)
 	}

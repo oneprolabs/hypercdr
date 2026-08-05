@@ -146,6 +146,10 @@ type CSISnapshotInfo struct {
 
 	// The VolumeSnapshot's Status.ReadyToUse value
 	ReadyToUse *bool
+
+	// The VolumeGroupSnapshotHandle from VSC status, used to create stub VGSC during restore
+	// for CSI drivers that populate this field (e.g., Ceph RBD).
+	VolumeGroupSnapshotHandle string `json:"volumeGroupSnapshotHandle,omitempty"`
 }
 
 // SnapshotDataMovementInfo is used for displaying the snapshot data mover status.
@@ -169,6 +173,9 @@ type SnapshotDataMovementInfo struct {
 
 	// Moved snapshot data size.
 	Size int64 `json:"size"`
+
+	// Moved snapshot incremental size.
+	IncrementalSize int64 `json:"incrementalSize,omitempty"`
 
 	// The DataUpload's Status.Phase value
 	Phase velerov2alpha1.DataUploadPhase
@@ -217,6 +224,9 @@ type PodVolumeInfo struct {
 	// The snapshot corresponding volume size.
 	Size int64 `json:"size,omitempty"`
 
+	// The incremental snapshot size.
+	IncrementalSize int64 `json:"incrementalSize,omitempty"`
+
 	// The type of the uploader that uploads the data. The valid values are `kopia` and `restic`.
 	UploaderType string `json:"uploaderType"`
 
@@ -240,14 +250,15 @@ type PodVolumeInfo struct {
 
 func newPodVolumeInfoFromPVB(pvb *velerov1api.PodVolumeBackup) *PodVolumeInfo {
 	return &PodVolumeInfo{
-		SnapshotHandle: pvb.Status.SnapshotID,
-		Size:           pvb.Status.Progress.TotalBytes,
-		UploaderType:   pvb.Spec.UploaderType,
-		VolumeName:     pvb.Spec.Volume,
-		PodName:        pvb.Spec.Pod.Name,
-		PodNamespace:   pvb.Spec.Pod.Namespace,
-		NodeName:       pvb.Spec.Node,
-		Phase:          pvb.Status.Phase,
+		SnapshotHandle:  pvb.Status.SnapshotID,
+		Size:            pvb.Status.Progress.TotalBytes,
+		IncrementalSize: pvb.Status.IncrementalBytes,
+		UploaderType:    pvb.Spec.UploaderType,
+		VolumeName:      pvb.Spec.Volume,
+		PodName:         pvb.Spec.Pod.Name,
+		PodNamespace:    pvb.Spec.Pod.Namespace,
+		NodeName:        pvb.Spec.Node,
+		Phase:           pvb.Status.Phase,
 	}
 }
 
@@ -449,6 +460,10 @@ func (v *BackupVolumesInformation) generateVolumeInfoForCSIVolumeSnapshot() {
 		if volumeSnapshotContent.Status.SnapshotHandle != nil {
 			snapshotHandle = *volumeSnapshotContent.Status.SnapshotHandle
 		}
+		volumeGroupSnapshotHandle := ""
+		if volumeSnapshotContent.Status != nil && volumeSnapshotContent.Status.VolumeGroupSnapshotHandle != nil {
+			volumeGroupSnapshotHandle = *volumeSnapshotContent.Status.VolumeGroupSnapshotHandle
+		}
 		if pvcPVInfo := v.pvMap.retrieve("", *volumeSnapshot.Spec.Source.PersistentVolumeClaimName, volumeSnapshot.Namespace); pvcPVInfo != nil {
 			volumeInfo := &BackupVolumeInfo{
 				BackupMethod:          CSISnapshot,
@@ -459,12 +474,13 @@ func (v *BackupVolumesInformation) generateVolumeInfoForCSIVolumeSnapshot() {
 				SnapshotDataMoved:     false,
 				PreserveLocalSnapshot: true,
 				CSISnapshotInfo: &CSISnapshotInfo{
-					VSCName:        *volumeSnapshot.Status.BoundVolumeSnapshotContentName,
-					Size:           size,
-					Driver:         volumeSnapshotContent.Spec.Driver,
-					SnapshotHandle: snapshotHandle,
-					OperationID:    operation.Spec.OperationID,
-					ReadyToUse:     volumeSnapshot.Status.ReadyToUse,
+					VSCName:                   *volumeSnapshot.Status.BoundVolumeSnapshotContentName,
+					Size:                      size,
+					Driver:                    volumeSnapshotContent.Spec.Driver,
+					SnapshotHandle:            snapshotHandle,
+					OperationID:               operation.Spec.OperationID,
+					ReadyToUse:                volumeSnapshot.Status.ReadyToUse,
+					VolumeGroupSnapshotHandle: volumeGroupSnapshotHandle,
 				},
 				PVInfo: &PVInfo{
 					ReclaimPolicy: string(pvcPVInfo.PV.Spec.PersistentVolumeReclaimPolicy),

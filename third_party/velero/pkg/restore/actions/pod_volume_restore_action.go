@@ -101,6 +101,7 @@ func (a *PodVolumeRestoreAction) Execute(input *velero.RestoreItemActionExecuteI
 
 	opts := &ctrlclient.ListOptions{
 		LabelSelector: label.NewSelectorForBackup(input.Restore.Spec.BackupName),
+		Namespace:     input.Restore.Namespace,
 	}
 	podVolumeBackupList := new(velerov1api.PodVolumeBackupList)
 	if err := a.crClient.List(context.TODO(), podVolumeBackupList, opts); err != nil {
@@ -163,12 +164,19 @@ func (a *PodVolumeRestoreAction) Execute(input *velero.RestoreItemActionExecuteI
 		memLimit = defaultMemRequestLimit
 	}
 
-	resourceReqs, err := kube.ParseResourceRequirements(cpuRequest, memRequest, cpuLimit, memLimit)
+	resourceReqs, err := kube.ParseCPUAndMemoryResources(
+		cpuRequest,
+		memRequest,
+		cpuLimit,
+		memLimit,
+	)
 	if err != nil {
 		log.Errorf("couldn't parse resource requirements: %s.", err)
-		resourceReqs, _ = kube.ParseResourceRequirements(
-			defaultCPURequestLimit, defaultMemRequestLimit, // requests
-			defaultCPURequestLimit, defaultMemRequestLimit, // limits
+		resourceReqs, _ = kube.ParseCPUAndMemoryResources(
+			defaultCPURequestLimit,
+			defaultMemRequestLimit,
+			defaultCPURequestLimit,
+			defaultMemRequestLimit,
 		)
 	}
 
@@ -185,8 +193,8 @@ func (a *PodVolumeRestoreAction) Execute(input *velero.RestoreItemActionExecuteI
 			securityContextSet = true
 		}
 	}
-	// if first container in pod has a SecurityContext set, then copy this security context
-	if len(pod.Spec.Containers) != 0 && pod.Spec.Containers[0].SecurityContext != nil {
+	// if securityContext configmap is unavailable but first container in pod has a SecurityContext set, then copy this security context
+	if !securityContextSet && len(pod.Spec.Containers) != 0 && pod.Spec.Containers[0].SecurityContext != nil {
 		securityContext = *pod.Spec.Containers[0].SecurityContext.DeepCopy()
 		securityContextSet = true
 	}

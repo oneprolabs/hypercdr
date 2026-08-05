@@ -45,7 +45,7 @@ The repository metadata is currently not usable: `/data/hypercdr/.git` exists bu
   - Project `hypercdr` exists and is public.
   - Current pushed images:
     - `192.168.8.149/hypercdr/comm-agent:dev`
-    - `192.168.8.149/hypercdr/velero:v1.17.1-helperfix`
+    - `<registry>/hypercdr/velero:v1.18.2-hcdr.2`
   - The Velero source is maintained in the sibling `hypercdr-velero` repository. The platform repository consumes the published Velero image and keeps only the runtime CRDs and image references.
   - Harbor TLS has been replaced with a HyperCDR internal CA signed certificate:
     - CA: `/data/harbor/cert/hypercdr-ca.crt`, valid until 2036-06-08.
@@ -269,20 +269,20 @@ These are hard requirements for the first production-oriented phase.
   - A HyperCDR-developed WebSocket client module, currently `comm-agent`.
 - Velero owns actual backup and restore execution.
 - `comm-agent` owns communication with the central platform and Kubernetes API operations needed to drive Velero.
-- HyperCDR should not modify Velero source code in this phase.
+- HyperCDR vendors the pinned Velero source and keeps product-specific fixes minimal and covered by focused tests.
 - Velero should be installed automatically by the HyperCDR installer in phase 1. The user should not have to pre-install Velero manually.
 - Phase 1 should pin Velero to a fixed stable version instead of pulling `latest`.
-- Current phase-1 baseline is Velero `v1.17.1`. The full Velero source is maintained outside this repository in the sibling `hypercdr-velero` repository; this platform repository keeps only the CRDs and image references needed at runtime.
+- Current baseline is Velero `v1.18.2`, built as `v1.18.2-hcdr.2`. The pinned source is maintained in this repository under `third_party/velero`; generated build state stays under `/data/hypercdr-runtime` or `/tmp`.
 - `comm-agent` must be built and packaged as a container image by this project.
 - Current packaging foundation:
   - `deployments/docker/comm-agent.Dockerfile` builds the Go `comm-agent` binary and packages it into a distroless runtime image.
   - `tools/build_comm_agent_image.sh` builds `registry.local:5000/hypercdr/comm-agent:dev` by default, or uses `HCDR_IMAGE_REGISTRY`, `HCDR_AGENT_IMAGE_TAG`, and `HCDR_AGENT_IMAGE`.
   - Set `HCDR_PUSH_IMAGE=true` to push after build.
 - Installer foundation:
-  - The backend embeds Velero `v1.17.1` CRDs under `platform/backend/internal/veleroassets/crds`.
-  - `GET /assets/velero/v1.17.1/crds.yaml` serves the bundled CRDs so managed clusters do not need internet access for CRD installation.
+  - The backend embeds Velero `v1.18.2` CRDs under `backend/internal/veleroassets/crds`.
+  - `GET /assets/velero/v1.18.2/crds.yaml` serves the bundled CRDs so managed clusters do not need internet access. The v1.17.1 URL remains as a rolling-upgrade compatibility alias.
   - `/install.sh` applies the bundled CRDs, installs Velero Deployment, installs Velero node-agent DaemonSet, installs the AWS/S3 plugin initContainer, and then deploys `comm-agent`.
-  - Default images come from `HCDR_IMAGE_REGISTRY`: `velero:v1.17.1-helperfix`, `velero-plugin-for-aws:v1.13.0`, and `comm-agent:dev`.
+  - Default images come from `HCDR_IMAGE_REGISTRY`: `velero:v1.18.2-hcdr.2`, supported object-store plugins, and the published Comm Agent release.
 - The target deployment model assumes an internal/private image registry. Required runtime images, including `comm-agent`, Velero, and any required Velero helper/node-agent images, should be mirrored or pushed into that registry so cluster installation does not depend on external network access.
 - Internal registry address is configurable. Use a professional default such as `registry.local:5000/hypercdr` in docs/examples, but expect the real deployment to receive a host/IP, username, and password from the user.
 

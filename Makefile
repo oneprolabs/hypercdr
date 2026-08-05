@@ -40,5 +40,7 @@ fmt:
 	cd agent/comm-agent && gofmt -w $$(find . -name '*.go' -type f)
 
 verify: test
-	git diff --check
+	git diff --check -- . ':!third_party/velero'
+	test "$$(cat third_party/velero/UPSTREAM_BASELINE)" = "c253c7fe37d78c9b7e55c68544f7c5b2608712d8"
+	bash -n third_party/velero/deployments/build-velero-image.sh third_party/velero/hack/build-restic.sh
 	find scripts bootstrap -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n

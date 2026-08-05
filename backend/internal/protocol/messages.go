@@ -398,16 +398,22 @@ type AgentUpgradeCommand struct {
 }
 
 type VeleroUpgradeCommand struct {
-	ClusterID        string `json:"clusterId"`
-	Namespace        string `json:"namespace"`
-	Image            string `json:"image"`
-	Version          string `json:"version,omitempty"`
-	ExpectedDigest   string `json:"expectedDigest,omitempty"`
-	DeploymentName   string `json:"deploymentName,omitempty"`
-	DaemonSetName    string `json:"daemonSetName,omitempty"`
-	AWSPluginImage   string `json:"awsPluginImage,omitempty"`
-	AzurePluginImage string `json:"azurePluginImage,omitempty"`
-	GCPPluginImage   string `json:"gcpPluginImage,omitempty"`
+	ClusterID                string `json:"clusterId"`
+	Namespace                string `json:"namespace"`
+	Image                    string `json:"image"`
+	Version                  string `json:"version,omitempty"`
+	ExpectedDigest           string `json:"expectedDigest,omitempty"`
+	DeploymentName           string `json:"deploymentName,omitempty"`
+	DaemonSetName            string `json:"daemonSetName,omitempty"`
+	AWSPluginImage           string `json:"awsPluginImage,omitempty"`
+	AzurePluginImage         string `json:"azurePluginImage,omitempty"`
+	GCPPluginImage           string `json:"gcpPluginImage,omitempty"`
+	ConcurrentBackups        int    `json:"concurrentBackups,omitempty"`
+	NodeAgentConcurrency     int    `json:"nodeAgentConcurrency,omitempty"`
+	PrepareQueueLength       int    `json:"prepareQueueLength,omitempty"`
+	CacheStorageClass        string `json:"cacheStorageClass,omitempty"`
+	CacheResidentThresholdMB int    `json:"cacheResidentThresholdMB,omitempty"`
+	CRDsURL                  string `json:"crdsUrl,omitempty"`
 }
 
 type UnregisterCommand struct {

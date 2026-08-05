@@ -326,7 +326,7 @@ curl -k https://<SOURCE_HARBOR>/api/v2.0/systeminfo
 ```text
 hypercdr/platform-api:dev
 hypercdr/comm-agent:dev
-hypercdr/velero:v1.17.1-helperfix
+hypercdr/velero:v1.18.2-hcdr.2
 hypercdr/postgres:16
 ```
 
@@ -452,7 +452,7 @@ agent 安装命令会默认使用中控平台安装时填写的 Harbor 镜像库
 
 ```text
 <DEPLOY_HOST_IP>:5000/hypercdr/comm-agent:dev
-<DEPLOY_HOST_IP>:5000/hypercdr/velero:v1.17.1-helperfix
+<DEPLOY_HOST_IP>:5000/hypercdr/velero:v1.18.2-hcdr.2
 ```
 
 在每个源集群、目标集群都执行一次注册。

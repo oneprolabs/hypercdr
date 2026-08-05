@@ -78,6 +78,7 @@ const (
 	agentPongWait   = 90 * time.Second
 	agentPingPeriod = 30 * time.Second
 	imageDigestTTL  = 10 * time.Minute
+	veleroCRDsPath  = "/assets/velero/v1.18.2/crds.yaml"
 )
 
 var cleanObjectStoragePrefix = deleteObjectStoragePrefix
@@ -405,6 +406,8 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("POST /api/v1/agent-tokens/validate", r.validateAgentToken)
 	r.mux.HandleFunc("GET /prepare-node.sh", r.prepareNodeScript)
 	r.mux.HandleFunc("GET /install.sh", r.installScript)
+	r.mux.HandleFunc("GET "+veleroCRDsPath, r.veleroCRDs)
+	// Keep the previous asset URL available while installed agents roll forward.
 	r.mux.HandleFunc("GET /assets/velero/v1.17.1/crds.yaml", r.veleroCRDs)
 	r.mux.HandleFunc("GET /assets/registry/ca.crt", r.registryCA)
 	r.mux.HandleFunc("GET /ws/agent", r.agentWebSocket)
@@ -1952,6 +1955,15 @@ func agentUpgradeIsAvailable(cluster store.Cluster, target store.ComponentReleas
 }
 
 func veleroUpgradeIsAvailable(cluster store.Cluster, target store.ComponentRelease) bool {
+	identityMatches := strings.TrimSpace(cluster.VeleroImage) == strings.TrimSpace(target.Image) &&
+		strings.TrimSpace(cluster.VeleroVersion) == strings.TrimSpace(target.Version)
+	digestMatches := strings.TrimSpace(target.ImageDigest) != "" &&
+		cluster.VeleroImageDigest == target.ImageDigest && cluster.VeleroNodeAgentImageDigest == target.ImageDigest
+	fullyReady := cluster.VeleroServerReady && cluster.VeleroNodeAgentDesired > 0 &&
+		cluster.VeleroNodeAgentReady == cluster.VeleroNodeAgentDesired
+	if (identityMatches || digestMatches) && fullyReady {
+		return false
+	}
 	currentImage := strings.TrimSpace(cluster.VeleroImage)
 	targetImage := strings.TrimSpace(target.Image)
 	imageMismatch := currentImage != "" && targetImage != "" && currentImage != targetImage
@@ -2074,8 +2086,11 @@ func (r *Router) completeVeleroUpgradeAfterHeartbeat(cluster store.Cluster) {
 		identityMatches := expectedImage != "" && strings.TrimSpace(cluster.VeleroImage) == expectedImage &&
 			(expectedVersion == "" || strings.TrimSpace(cluster.VeleroVersion) == expectedVersion)
 		digestMatches := expectedDigest != "" && cluster.VeleroImageDigest == expectedDigest && cluster.VeleroNodeAgentImageDigest == expectedDigest
-		hasRuntimeIdentity := strings.TrimSpace(cluster.VeleroImage) != "" && (expectedVersion == "" || strings.TrimSpace(cluster.VeleroVersion) != "")
-		verified := identityMatches || !hasRuntimeIdentity && digestMatches
+		// Velero reports its upstream binary version (for example v1.18.2), while
+		// HyperCDR release tags may carry a build suffix (v1.18.2-hcdr.1). The
+		// immutable server and all-node image digests are authoritative when the
+		// reported version intentionally omits that packaging suffix.
+		verified := identityMatches || digestMatches
 		if !verified || !cluster.VeleroServerReady || !allNodesReady {
 			continue
 		}
@@ -2967,6 +2982,16 @@ func (r *Router) upgradeClusterAgent(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) upgradeClusterVelero(w http.ResponseWriter, req *http.Request) {
+	var input struct {
+		Repair bool `json:"repair"`
+	}
+	if req.Body != nil {
+		decoder := json.NewDecoder(io.LimitReader(req.Body, 1<<20))
+		if err := decoder.Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_request"})
+			return
+		}
+	}
 	clusterID := req.PathValue("id")
 	clusters, listErr := r.store.ListClusters()
 	if listErr != nil {
@@ -2998,7 +3023,7 @@ func (r *Router) upgradeClusterVelero(w http.ResponseWriter, req *http.Request) 
 	targetImage, targetDigest := target.Image, target.ImageDigest
 	veleroIdentityMatches := strings.TrimSpace(cluster.VeleroImage) == targetImage && strings.TrimSpace(cluster.VeleroVersion) == strings.TrimSpace(target.Version)
 	veleroDigestMatches := cluster.VeleroImageDigest == targetDigest && cluster.VeleroNodeAgentImageDigest == targetDigest
-	if (veleroIdentityMatches || veleroDigestMatches) && cluster.VeleroServerReady && cluster.VeleroNodeAgentDesired > 0 && cluster.VeleroNodeAgentReady == cluster.VeleroNodeAgentDesired {
+	if !input.Repair && (veleroIdentityMatches || veleroDigestMatches) && cluster.VeleroServerReady && cluster.VeleroNodeAgentDesired > 0 && cluster.VeleroNodeAgentReady == cluster.VeleroNodeAgentDesired {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "velero_already_current", "message": "Velero server and all node agents already use the target image."})
 		return
 	}
@@ -3019,11 +3044,22 @@ func (r *Router) upgradeClusterVelero(w http.ResponseWriter, req *http.Request) 
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "agent_offline", "message": "Cluster agent is offline. Reconnect the agent before upgrading Velero."})
 		return
 	}
+	cacheStorageClass := ""
+	for _, storageClass := range cluster.StorageClasses {
+		if storageClass.Default {
+			cacheStorageClass = storageClass.Name
+			break
+		}
+	}
 	task, err := r.store.CreateTask(store.TaskInput{ClusterID: clusterID, Type: "velero-upgrade", Status: "queued", CommandID: store.NewPublicID(), Payload: map[string]any{
 		"requestedBy": requestActor(req),
+		"operation":   map[bool]string{true: "repair", false: "upgrade"}[input.Repair],
 		"clusterId":   clusterID, "namespace": r.agentNamespace(), "image": targetImage, "version": target.Version, "releaseId": target.ID,
 		"expectedDigest": targetDigest, "deploymentName": "velero", "daemonSetName": "node-agent",
 		"awsPluginImage": r.cfg.VeleroAWSPlugin, "azurePluginImage": r.cfg.VeleroAzurePlugin, "gcpPluginImage": r.cfg.VeleroGCPPlugin,
+		"concurrentBackups": 2, "nodeAgentConcurrency": 2, "prepareQueueLength": 4,
+		"cacheStorageClass": cacheStorageClass, "cacheResidentThresholdMB": 1024,
+		"crdsUrl": strings.TrimRight(r.cfg.PublicBaseURL, "/") + veleroCRDsPath,
 	}})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "create_task_failed"})
@@ -3035,7 +3071,11 @@ func (r *Router) upgradeClusterVelero(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 	task, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "dispatched", Progress: 0})
-	_ = r.store.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "info", Reason: "dispatched", Message: "Velero upgrade task dispatched to cluster agent"})
+	dispatchMessage := "Velero upgrade task dispatched to cluster agent"
+	if input.Repair {
+		dispatchMessage = "Velero repair task dispatched to cluster agent"
+	}
+	_ = r.store.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "info", Reason: "dispatched", Message: dispatchMessage})
 	writeJSON(w, http.StatusAccepted, task)
 }
 
@@ -3381,7 +3421,7 @@ func (r *Router) installScript(w http.ResponseWriter, req *http.Request) {
 	script = strings.ReplaceAll(script, "{{AGENT_NAMESPACE}}", r.cfg.AgentNamespace)
 	script = strings.ReplaceAll(script, "{{AGENT_WS_ENDPOINT}}", r.agentWSEndpoint(req))
 	script = strings.ReplaceAll(script, "{{TOKEN_VALIDATE_URL}}", r.publicBaseURL(req)+"/api/v1/agent-tokens/validate")
-	script = strings.ReplaceAll(script, "{{VELERO_CRDS_URL}}", r.publicBaseURL(req)+"/assets/velero/v1.17.1/crds.yaml")
+	script = strings.ReplaceAll(script, "{{VELERO_CRDS_URL}}", r.publicBaseURL(req)+veleroCRDsPath)
 	script = strings.ReplaceAll(script, "{{REGISTRY_CA_URL}}", r.publicBaseURL(req)+"/assets/registry/ca.crt")
 	script = strings.ReplaceAll(script, "{{VELERO_IMAGE}}", veleroTarget.Image)
 	script = strings.ReplaceAll(script, "{{VELERO_AWS_PLUGIN_IMAGE}}", r.cfg.VeleroAWSPlugin)
@@ -4556,6 +4596,10 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 			Image: stringPayload(task.Payload, "image"), Version: stringPayload(task.Payload, "version"), ExpectedDigest: stringPayload(task.Payload, "expectedDigest"),
 			DeploymentName: stringPayload(task.Payload, "deploymentName"), DaemonSetName: stringPayload(task.Payload, "daemonSetName"),
 			AWSPluginImage: stringPayload(task.Payload, "awsPluginImage"), AzurePluginImage: stringPayload(task.Payload, "azurePluginImage"), GCPPluginImage: stringPayload(task.Payload, "gcpPluginImage"),
+			ConcurrentBackups: int(int64FromAny(task.Payload["concurrentBackups"])), NodeAgentConcurrency: int(int64FromAny(task.Payload["nodeAgentConcurrency"])),
+			PrepareQueueLength: int(int64FromAny(task.Payload["prepareQueueLength"])), CacheStorageClass: stringPayload(task.Payload, "cacheStorageClass"),
+			CacheResidentThresholdMB: int(int64FromAny(task.Payload["cacheResidentThresholdMB"])),
+			CRDsURL:                  stringPayload(task.Payload, "crdsUrl"),
 		}
 		if payload.VeleroUpgrade.Image == "" {
 			return protocol.Message[protocol.TaskDispatchPayload]{}, errors.New("velero upgrade image is required")
@@ -8986,6 +9030,11 @@ func taskCompletedPayloadPatch(payload protocol.TaskCompletedPayload) map[string
 	volumeProgress := mapFromAny(payload.Velero["volumeProgress"])
 	if len(volumeProgress) > 0 {
 		patch["volumeProgress"] = volumeProgress
+	} else {
+		// Task payloads are merged into the persisted JSON document. Explicitly
+		// overwrite the last running sample so a completed task cannot retain an
+		// InProgress volumeProgress value from an earlier progress event.
+		patch["volumeProgress"] = nil
 	}
 	if len(patch) == 0 {
 		return nil
@@ -11710,7 +11759,17 @@ metadata:
   name: node-agent-config
   namespace: ${NAMESPACE}
 data:
-  loadConcurrency: "1"
+  node-agent-config.json: |
+    {
+      "loadConcurrency": {
+        "globalConfig": 2,
+        "prepareQueueLength": 4
+      },
+      "cachePVC": {
+        "storageClass": "${STORAGE_CLASS}",
+        "residentThresholdInMB": 1024
+      }
+    }
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -11759,6 +11818,7 @@ ${IMAGE_PULL_SECRETS_BLOCK}
           args:
             - server
             - --default-volumes-to-fs-backup
+            - --concurrent-backups=2
             - --plugin-dir=/plugins
           env:
             - name: VELERO_SCRATCH_DIR
@@ -11826,6 +11886,7 @@ ${IMAGE_PULL_SECRETS_BLOCK}
           args:
             - node-agent
             - server
+            - --node-agent-configmap=node-agent-config
           env:
             - name: NODE_NAME
               valueFrom:

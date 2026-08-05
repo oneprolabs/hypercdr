@@ -56,6 +56,8 @@ type VolumeProgress struct {
 	Items             []VolumeProgressItem
 	BytesDone         int64
 	TotalBytes        int64
+	IncrementalBytes  int64
+	IncrementalCount  int
 	KnownTotal        bool
 	AllTotalsKnown    bool
 	KnownTotalCount   int
@@ -99,13 +101,15 @@ type RestoreResultSummary struct {
 }
 
 type VolumeProgressItem struct {
-	Kind       string
-	Name       string
-	Phase      string
-	BytesDone  int64
-	TotalBytes int64
-	KnownTotal bool
-	Message    string
+	Kind             string
+	Name             string
+	Phase            string
+	BytesDone        int64
+	TotalBytes       int64
+	IncrementalBytes int64
+	IncrementalKnown bool
+	KnownTotal       bool
+	Message          string
 }
 
 type VeleroBackupSummary struct {
@@ -314,6 +318,10 @@ func (a *DynamicManifestApplier) getVolumeProgress(ctx context.Context, namespac
 			}
 			result.Items = append(result.Items, progress)
 			result.BytesDone += progress.BytesDone
+			if progress.IncrementalKnown {
+				result.IncrementalBytes += progress.IncrementalBytes
+				result.IncrementalCount++
+			}
 			if progress.KnownTotal {
 				result.TotalBytes += progress.TotalBytes
 				result.KnownTotal = true
@@ -376,16 +384,27 @@ func volumeProgressBelongsTo(item unstructured.Unstructured, label string, owner
 func volumeProgressFromItem(kind string, item unstructured.Unstructured) VolumeProgressItem {
 	bytesDone, _, _ := unstructured.NestedInt64(item.Object, "status", "progress", "bytesDone")
 	totalBytes, ok, _ := unstructured.NestedInt64(item.Object, "status", "progress", "totalBytes")
+	incrementalBytes, incrementalKnown, _ := unstructured.NestedInt64(item.Object, "status", "incrementalBytes")
+	if incrementalBytes < 0 {
+		incrementalBytes = 0
+	}
 	phase, _, _ := unstructured.NestedString(item.Object, "status", "phase")
+	// Velero's int64 status field uses omitempty, so a successfully measured
+	// zero-byte incremental upload is absent from the serialized object.
+	if !incrementalKnown && phase == "Completed" && (kind == "DataUpload" || kind == "PodVolumeBackup") {
+		incrementalKnown = true
+	}
 	message, _, _ := unstructured.NestedString(item.Object, "status", "message")
 	return VolumeProgressItem{
-		Kind:       kind,
-		Name:       item.GetName(),
-		Phase:      phase,
-		BytesDone:  bytesDone,
-		TotalBytes: totalBytes,
-		KnownTotal: ok && totalBytes > 0,
-		Message:    message,
+		Kind:             kind,
+		Name:             item.GetName(),
+		Phase:            phase,
+		BytesDone:        bytesDone,
+		TotalBytes:       totalBytes,
+		IncrementalBytes: incrementalBytes,
+		IncrementalKnown: incrementalKnown,
+		KnownTotal:       ok && totalBytes > 0,
+		Message:          message,
 	}
 }
 

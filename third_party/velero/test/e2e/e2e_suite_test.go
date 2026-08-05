@@ -39,10 +39,12 @@ import (
 	. "github.com/vmware-tanzu/velero/test/e2e/basic/resources-check"
 	. "github.com/vmware-tanzu/velero/test/e2e/bsl-mgmt"
 	. "github.com/vmware-tanzu/velero/test/e2e/migration"
+	. "github.com/vmware-tanzu/velero/test/e2e/nodeagentconfig"
 	. "github.com/vmware-tanzu/velero/test/e2e/parallelfilesdownload"
 	. "github.com/vmware-tanzu/velero/test/e2e/parallelfilesupload"
 	. "github.com/vmware-tanzu/velero/test/e2e/privilegesmgmt"
 	. "github.com/vmware-tanzu/velero/test/e2e/pv-backup"
+	. "github.com/vmware-tanzu/velero/test/e2e/repomaintenance"
 	. "github.com/vmware-tanzu/velero/test/e2e/resource-filtering"
 	. "github.com/vmware-tanzu/velero/test/e2e/resourcemodifiers"
 	. "github.com/vmware-tanzu/velero/test/e2e/resourcepolicies"
@@ -125,7 +127,7 @@ func init() {
 	flag.StringVar(
 		&test.VeleroCfg.UpgradeFromVeleroVersion,
 		"upgrade-from-velero-version",
-		"v1.7.1",
+		"v1.16.2",
 		"comma-separated list of Velero version to be tested with for the pre-upgrade velero server.",
 	)
 	flag.StringVar(
@@ -137,7 +139,7 @@ func init() {
 	flag.StringVar(
 		&test.VeleroCfg.MigrateFromVeleroVersion,
 		"migrate-from-velero-version",
-		"self",
+		"v1.17.1",
 		"comma-separated list of Velero version to be tested with on source cluster.",
 	)
 	flag.StringVar(
@@ -439,12 +441,6 @@ var _ = Describe(
 )
 
 var _ = Describe(
-	"Node selectors of persistent volume claims can be changed during restores",
-	Label("Basic", "SelectedNode", "SKIP_KIND"),
-	PVCSelectedNodeChangingTest,
-)
-
-var _ = Describe(
 	"Backup/restore of 2500 namespaces",
 	Label("Scale", "LongTime"),
 	MultiNSBackupRestore,
@@ -660,6 +656,24 @@ var _ = Describe(
 	ParallelFilesDownloadTest,
 )
 
+var _ = Describe(
+	"Test Repository Maintenance Job Configuration's global part",
+	Label("RepoMaintenance", "LongTime"),
+	GlobalRepoMaintenanceTest,
+)
+
+var _ = Describe(
+	"Test Repository Maintenance Job Configuration's specific part",
+	Label("RepoMaintenance", "LongTime"),
+	SpecificRepoMaintenanceTest,
+)
+
+var _ = Describe(
+	"Test node agent config's LoadAffinity part",
+	Label("NodeAgentConfig", "LoadAffinity"),
+	LoadAffinities,
+)
+
 func GetKubeConfigContext() error {
 	var err error
 	var tcDefault, tcStandby k8s.TestClient
@@ -713,6 +727,36 @@ func TestE2e(t *testing.T) {
 		}
 	}
 
+	// Validate the Velero version
+	if len(test.VeleroCfg.VeleroVersion) > 0 {
+		if err := veleroutil.ValidateVeleroVersion(test.VeleroCfg.VeleroVersion); err != nil {
+			fmt.Println("VeleroVersion is invalid: ", test.VeleroCfg.VeleroVersion)
+			t.Error(err)
+		}
+	}
+
+	// Validate the UpgradeFromVeleroVersion if provided
+	if len(test.VeleroCfg.UpgradeFromVeleroVersion) > 0 {
+		versions := strings.Split(test.VeleroCfg.UpgradeFromVeleroVersion, ",")
+		for _, version := range versions {
+			if err := veleroutil.ValidateVeleroVersion(version); err != nil {
+				fmt.Println("UpgradeFromVeleroVersion is invalid: ", version)
+				t.Error(err)
+			}
+		}
+	}
+
+	// Validate the MigrateFromVeleroVersion if provided
+	if len(test.VeleroCfg.MigrateFromVeleroVersion) > 0 {
+		versions := strings.Split(test.VeleroCfg.MigrateFromVeleroVersion, ",")
+		for _, version := range versions {
+			if err := veleroutil.ValidateVeleroVersion(version); err != nil {
+				fmt.Println("MigrateFromVeleroVersion is invalid: ", version)
+				t.Error(err)
+			}
+		}
+	}
+
 	var err error
 	if err = GetKubeConfigContext(); err != nil {
 		fmt.Println(err)
@@ -740,6 +784,12 @@ var _ = BeforeSuite(func() {
 		).To(Succeed())
 	}
 
+	By("Install PriorityClasses for E2E.")
+	Expect(veleroutil.CreatePriorityClasses(
+		context.Background(),
+		test.VeleroCfg.ClientToInstallVelero.Kubebuilder,
+	)).To(Succeed())
+
 	if test.InstallVelero {
 		By("Install test resources before testing")
 		Expect(
@@ -764,6 +814,8 @@ var _ = AfterSuite(func() {
 			test.StorageClassName,
 		),
 	).To(Succeed())
+
+	By("Delete PriorityClasses created by E2E")
 	Expect(
 		k8s.DeleteStorageClass(
 			ctx,
@@ -782,6 +834,11 @@ var _ = AfterSuite(func() {
 			),
 		).To(Succeed())
 	}
+
+	Expect(veleroutil.DeletePriorityClasses(
+		ctx,
+		test.VeleroCfg.ClientToInstallVelero.Kubebuilder,
+	)).To(Succeed())
 
 	// If the Velero is installed during test, and the FailFast is not enabled,
 	// uninstall Velero. If not, either Velero is not installed, or kept it for debug on failure.

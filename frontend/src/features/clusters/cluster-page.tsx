@@ -710,17 +710,6 @@ export default function ClusterPage(props: {
                   <div><span>Last Seen</span><p>{formatLastSeen(cluster.lastSeenAt)}</p></div>
                 </div>
               </div>
-              {cluster.agentUpgradeStatus === 'upgrading' && (
-                <div className="mb-2 rounded-md border border-blue-100 bg-blue-50/70 px-2.5 py-2">
-                  <div className="mb-1.5 flex items-center justify-between text-[10px] font-semibold text-blue-700">
-                    <span>{(cluster.agentUpgradeProgress || 0) >= 70 ? 'Waiting for agent to reconnect' : 'Updating agent deployment'}</span>
-                    <span>{formatPercent(cluster.agentUpgradeProgress || 0)}%</span>
-                  </div>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-blue-100">
-                    <div className="h-full rounded-full bg-blue-600 transition-all duration-500" style={{ width: `${Math.max(4, Math.min(100, cluster.agentUpgradeProgress || 0))}%` }} />
-                  </div>
-                </div>
-              )}
               <div className="cluster-metrics-grid grid grid-cols-3 gap-2 border-t border-slate-50 pt-2 text-xs">
                 <Metric label="Namespaces" value={cluster.namespaces} onClick={() => setClusterResourceDetail({ cluster, type: 'namespaces' })} />
                 <Metric label="Nodes" value={cluster.nodes} onClick={() => setClusterResourceDetail({ cluster, type: 'nodes' })} />

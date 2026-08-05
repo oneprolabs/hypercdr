@@ -1,13 +1,16 @@
 package wsclient
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -24,12 +27,15 @@ import (
 
 	"github.com/gorilla/websocket"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	k8syaml "k8s.io/apimachinery/pkg/util/yaml"
 )
 
 const (
 	backupStorageLocationCheckTimeout = 5 * time.Second
 	backupStorageLocationRetryCount   = 3
 	backupStorageLocationRetryDelay   = time.Second
+	veleroStatusReadRetryGrace       = 2 * time.Minute
+	veleroCRDBundleMaxBytes           = 10 << 20
 )
 
 type Client struct {
@@ -651,15 +657,95 @@ func (c *Client) executeVeleroUpgradeTask(task protocol.TaskDispatchPayload) {
 	_ = c.sendTaskProgress(task, map[string]any{"kind": "VeleroUpgrade", "image": command.Image}, 15, "velero upgrade accepted; updating server and node agents")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
+	if err := c.agentRuntime.PrepareVeleroUpgrade(ctx); err != nil {
+		_ = c.sendTaskFailedWithDetails(task, "VELERO_UPGRADE_PERMISSION_FAILED", "failed to prepare Velero upgrade permissions", map[string]any{"error": err.Error()})
+		return
+	}
+	if command.CRDsURL != "" {
+		_ = c.sendTaskProgress(task, map[string]any{"kind": "VeleroUpgrade", "image": command.Image}, 20, "applying Velero CRDs")
+		if err := c.applyVeleroCRDs(ctx, command.CRDsURL); err != nil {
+			_ = c.sendTaskFailedWithDetails(task, "VELERO_CRD_UPGRADE_FAILED", "failed to apply Velero CRDs", map[string]any{"error": err.Error(), "crdsUrl": command.CRDsURL})
+			return
+		}
+	}
 	if err := c.agentRuntime.UpgradeVelero(ctx, kube.VeleroUpgradeOptions{
 		Namespace: command.Namespace, Image: command.Image, DeploymentName: command.DeploymentName, DaemonSetName: command.DaemonSetName,
 		AWSPluginImage: command.AWSPluginImage, AzurePluginImage: command.AzurePluginImage, GCPPluginImage: command.GCPPluginImage,
+		ConcurrentBackups: command.ConcurrentBackups, NodeAgentConcurrency: command.NodeAgentConcurrency,
+		PrepareQueueLength: command.PrepareQueueLength, CacheStorageClass: command.CacheStorageClass,
+		CacheResidentThresholdMB: command.CacheResidentThresholdMB,
 	}); err != nil {
 		_ = c.sendTaskFailedWithDetails(task, "VELERO_UPGRADE_FAILED", "velero rollout failed", map[string]any{"error": err.Error(), "image": command.Image})
 		return
 	}
 	_ = c.sendTaskProgress(task, map[string]any{"kind": "VeleroUpgrade", "image": command.Image}, 85, "velero server and all scheduled node agents are ready; verifying image digest")
 	_ = c.sendTaskCompleted(task, map[string]any{"kind": "VeleroUpgrade", "image": command.Image, "expectedDigest": command.ExpectedDigest}, "velero rollout completed; waiting for heartbeat verification")
+}
+
+func (c *Client) applyVeleroCRDs(ctx context.Context, rawURL string) error {
+	if c.applier == nil {
+		return errors.New("manifest applier is not configured")
+	}
+	target, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || (target.Scheme != "http" && target.Scheme != "https") || target.Host == "" {
+		return fmt.Errorf("invalid Velero CRD URL %q", rawURL)
+	}
+	platform, err := url.Parse(c.cfg.PlatformEndpoint)
+	if err != nil || !strings.EqualFold(target.Host, platform.Host) {
+		return fmt.Errorf("Velero CRD URL host %q does not match platform host %q", target.Host, platform.Host)
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if c.cfg.PlatformTLSSkipVerify {
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec -- follows the configured platform TLS policy
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
+	if err != nil {
+		return err
+	}
+	response, err := (&http.Client{Timeout: 30 * time.Second, Transport: transport}).Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("download Velero CRDs: %s", response.Status)
+	}
+	bundle, err := io.ReadAll(io.LimitReader(response.Body, veleroCRDBundleMaxBytes+1))
+	if err != nil {
+		return fmt.Errorf("read Velero CRD bundle: %w", err)
+	}
+	if len(bundle) > veleroCRDBundleMaxBytes {
+		return fmt.Errorf("Velero CRD bundle exceeds %d bytes", veleroCRDBundleMaxBytes)
+	}
+	decoder := k8syaml.NewYAMLOrJSONDecoder(bytes.NewReader(bundle), 4096)
+	applied := 0
+	for {
+		var manifest kube.Manifest
+		if err := decoder.Decode(&manifest); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return err
+		}
+		if len(manifest) == 0 {
+			continue
+		}
+		object, err := kube.ObjectFromManifest(manifest)
+		if err != nil {
+			return err
+		}
+		if object.APIVersion != "apiextensions.k8s.io/v1" || object.Kind != "CustomResourceDefinition" {
+			return fmt.Errorf("unexpected object %s/%s in Velero CRD bundle", object.APIVersion, object.Kind)
+		}
+		if _, err := c.applier.ApplyManifest(ctx, manifest); err != nil {
+			return fmt.Errorf("apply Velero CRD %s: %w", object.Name, err)
+		}
+		applied++
+	}
+	if applied == 0 {
+		return errors.New("Velero CRD bundle is empty")
+	}
+	return nil
 }
 
 func (c *Client) executeUnregisterTask(task protocol.TaskDispatchPayload) {
@@ -1428,12 +1514,27 @@ func (c *Client) pollVeleroStatus(task protocol.TaskDispatchPayload, object kube
 	started := time.Now().UTC()
 	progress := 0
 	samples := make([]volumeProgressSample, 0, 12)
+	var statusReadErrorSince time.Time
 	for {
 		status, err := c.statusReader.GetManifestStatus(context.Background(), object)
 		if err != nil {
+			now := time.Now().UTC()
+			if isTransientKubernetesReadError(err) && now.Before(deadline) {
+				if statusReadErrorSince.IsZero() {
+					statusReadErrorSince = now
+				}
+				if shouldRetryVeleroStatusRead(err, now, statusReadErrorSince, deadline) {
+					if c.logger != nil {
+						c.logger.Warn("temporary Kubernetes API error while reading Velero status; retrying", "kind", object.Kind, "name", object.Name, "error", err)
+					}
+					time.Sleep(interval)
+					continue
+				}
+			}
 			_ = c.sendTaskFailed(task, object.Kind+"_STATUS_READ_FAILED", err.Error())
 			return
 		}
+		statusReadErrorSince = time.Time{}
 		terminal, success, nextProgress, message, code := decide(status, time.Since(started))
 		if !usesVolumeProgress(object) && nextProgress > progress {
 			progress = nextProgress
@@ -1539,12 +1640,27 @@ func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, 
 	started := time.Now().UTC()
 	progress := 0
 	samples := make([]volumeProgressSample, 0, 12)
+	var statusReadErrorSince time.Time
 	for {
 		status, err := c.statusReader.GetManifestStatus(context.Background(), object)
 		if err != nil {
+			now := time.Now().UTC()
+			if isTransientKubernetesReadError(err) && now.Before(deadline) {
+				if statusReadErrorSince.IsZero() {
+					statusReadErrorSince = now
+				}
+				if shouldRetryVeleroStatusRead(err, now, statusReadErrorSince, deadline) {
+					if c.logger != nil {
+						c.logger.Warn("temporary Kubernetes API error while reading Velero status; retrying", "kind", object.Kind, "name", object.Name, "error", err)
+					}
+					time.Sleep(interval)
+					continue
+				}
+			}
 			_ = c.sendTaskFailed(task, object.Kind+"_STATUS_READ_FAILED", err.Error())
 			return
 		}
+		statusReadErrorSince = time.Time{}
 		terminal, success, nextProgress, message, code := decide(status, time.Since(started))
 		if !usesVolumeProgress(object) && nextProgress > progress {
 			progress = nextProgress
@@ -1835,6 +1951,11 @@ func isTransientKubernetesReadError(err error) bool {
 	return err != nil && (apierrors.IsTimeout(err) || apierrors.IsServerTimeout(err) || apierrors.IsTooManyRequests(err) || isUncertainKubernetesSubmitError(err))
 }
 
+func shouldRetryVeleroStatusRead(err error, now time.Time, firstErrorAt time.Time, taskDeadline time.Time) bool {
+	return isTransientKubernetesReadError(err) && now.Before(taskDeadline) &&
+		!firstErrorAt.IsZero() && now.Sub(firstErrorAt) < veleroStatusReadRetryGrace
+}
+
 func (c *Client) waitForBackupStorageLocation(ctx context.Context, name string, timeout time.Duration) error {
 	if timeout <= 0 || c.statusReader == nil {
 		return c.requireBackupStorageLocation(ctx, name)
@@ -1965,19 +2086,23 @@ func (c *Client) buildVolumeProgressPayload(ctx context.Context, object kube.App
 	items := make([]map[string]any, 0, len(progress.Items))
 	for _, item := range progress.Items {
 		items = append(items, map[string]any{
-			"kind":       item.Kind,
-			"name":       item.Name,
-			"phase":      item.Phase,
-			"bytesDone":  item.BytesDone,
-			"totalBytes": item.TotalBytes,
-			"knownTotal": item.KnownTotal,
-			"message":    item.Message,
+			"kind":             item.Kind,
+			"name":             item.Name,
+			"phase":            item.Phase,
+			"bytesDone":        item.BytesDone,
+			"totalBytes":       item.TotalBytes,
+			"incrementalBytes": item.IncrementalBytes,
+			"incrementalKnown": item.IncrementalKnown,
+			"knownTotal":       item.KnownTotal,
+			"message":          item.Message,
 		})
 	}
 	payload := map[string]any{
 		"operation":           operation,
 		"bytesDone":           progress.BytesDone,
 		"totalBytes":          progress.TotalBytes,
+		"incrementalBytes":    progress.IncrementalBytes,
+		"incrementalCount":    progress.IncrementalCount,
 		"knownTotal":          progress.KnownTotal,
 		"allTotalsKnown":      progress.AllTotalsKnown,
 		"knownTotalCount":     progress.KnownTotalCount,
@@ -2027,6 +2152,12 @@ func (c *Client) attachBackupSizeStats(ctx context.Context, object kube.AppliedO
 	metadataBytes := objectStats.MetadataPackageBytes
 	uploadedMetadataBytes := metadataBytes
 	uploadedVolumeBytes := volumeBytes
+	if int64FromAny(volumeProgress["incrementalCount"]) > 0 {
+		uploadedVolumeBytes = int64FromAny(volumeProgress["incrementalBytes"])
+		if uploadedVolumeBytes < 0 {
+			uploadedVolumeBytes = 0
+		}
+	}
 	totalBytes := metadataBytes + volumeBytes
 	uploadedBytes := uploadedMetadataBytes + uploadedVolumeBytes
 	sizeStatus := "complete"

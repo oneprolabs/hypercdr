@@ -10,7 +10,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -27,6 +26,7 @@ type AgentUpgrader interface {
 
 type VeleroRuntimeManager interface {
 	VeleroRuntimeStatus(ctx context.Context, namespace string) (VeleroRuntimeStatus, error)
+	PrepareVeleroUpgrade(ctx context.Context) error
 	UpgradeVelero(ctx context.Context, options VeleroUpgradeOptions) error
 }
 
@@ -49,13 +49,18 @@ type VeleroRuntimeStatus struct {
 }
 
 type VeleroUpgradeOptions struct {
-	Namespace        string
-	Image            string
-	DeploymentName   string
-	DaemonSetName    string
-	AWSPluginImage   string
-	AzurePluginImage string
-	GCPPluginImage   string
+	Namespace                string
+	Image                    string
+	DeploymentName           string
+	DaemonSetName            string
+	AWSPluginImage           string
+	AzurePluginImage         string
+	GCPPluginImage           string
+	ConcurrentBackups        int
+	NodeAgentConcurrency     int
+	PrepareQueueLength       int
+	CacheStorageClass        string
+	CacheResidentThresholdMB int
 }
 
 type AgentUpgradeOptions struct {
@@ -165,9 +170,6 @@ func splitKubernetesLogLine(line string) (time.Time, string) {
 }
 
 func (r *KubernetesAgentRuntime) UpgradeAgent(ctx context.Context, options AgentUpgradeOptions) error {
-	if err := r.ensureReadinessCollectionPermissions(ctx); err != nil {
-		return fmt.Errorf("update readiness collection permissions: %w", err)
-	}
 	namespace := strings.TrimSpace(options.Namespace)
 	if namespace == "" {
 		namespace = "hypercdr-agent"
@@ -215,24 +217,6 @@ func (r *KubernetesAgentRuntime) UpgradeAgent(ctx context.Context, options Agent
 	return err
 }
 
-func (r *KubernetesAgentRuntime) ensureReadinessCollectionPermissions(ctx context.Context) error {
-	role, err := r.client.RbacV1().ClusterRoles().Get(ctx, "hypercdr-agent", metav1.GetOptions{})
-	if err != nil {
-		return err
-	}
-	required := []rbacv1.PolicyRule{
-		{APIGroups: []string{"storage.k8s.io"}, Resources: []string{"csidrivers"}, Verbs: []string{"get", "list", "watch"}},
-		{APIGroups: []string{"networking.k8s.io"}, Resources: []string{"ingressclasses"}, Verbs: []string{"get", "list", "watch"}},
-		{APIGroups: []string{"node.k8s.io"}, Resources: []string{"runtimeclasses"}, Verbs: []string{"get", "list", "watch"}},
-		{APIGroups: []string{"scheduling.k8s.io"}, Resources: []string{"priorityclasses"}, Verbs: []string{"get", "list", "watch"}},
-		{APIGroups: []string{"snapshot.storage.k8s.io"}, Resources: []string{"volumesnapshotclasses"}, Verbs: []string{"get", "list", "watch"}},
-		{APIGroups: []string{"cert-manager.io"}, Resources: []string{"clusterissuers"}, Verbs: []string{"get", "list", "watch"}},
-	}
-	role.Rules = append(role.Rules, required...)
-	_, err = r.client.RbacV1().ClusterRoles().Update(ctx, role, metav1.UpdateOptions{})
-	return err
-}
-
 func (r *KubernetesAgentRuntime) VeleroRuntimeStatus(ctx context.Context, namespace string) (VeleroRuntimeStatus, error) {
 	namespace = firstNonEmpty(namespace, "hypercdr-agent")
 	deployment, err := r.client.AppsV1().Deployments(namespace).Get(ctx, "velero", metav1.GetOptions{})
@@ -270,8 +254,11 @@ func (r *KubernetesAgentRuntime) UpgradeVelero(ctx context.Context, options Vele
 	if strings.TrimSpace(options.Image) == "" {
 		return fmt.Errorf("velero image is required")
 	}
-	if err := r.ensureDaemonSetUpgradePermission(ctx); err != nil {
-		return fmt.Errorf("ensure node-agent upgrade permission: %w", err)
+	if err := r.PrepareVeleroUpgrade(ctx); err != nil {
+		return err
+	}
+	if err := r.ensureVeleroPerformanceConfig(ctx, namespace, options); err != nil {
+		return fmt.Errorf("configure velero performance options: %w", err)
 	}
 	initContainers := []map[string]any{}
 	for _, plugin := range []struct{ name, image string }{
@@ -283,7 +270,11 @@ func (r *KubernetesAgentRuntime) UpgradeVelero(ctx context.Context, options Vele
 			initContainers = append(initContainers, map[string]any{"name": plugin.name, "image": plugin.image})
 		}
 	}
-	podSpec := map[string]any{"containers": []map[string]any{{"name": "velero", "image": options.Image}}}
+	serverContainer := map[string]any{"name": "velero", "image": options.Image}
+	if options.ConcurrentBackups > 0 {
+		serverContainer["args"] = []string{"server", "--default-volumes-to-fs-backup", fmt.Sprintf("--concurrent-backups=%d", options.ConcurrentBackups), "--plugin-dir=/plugins"}
+	}
+	podSpec := map[string]any{"containers": []map[string]any{serverContainer}}
 	if len(initContainers) > 0 {
 		podSpec["initContainers"] = initContainers
 	}
@@ -291,7 +282,11 @@ func (r *KubernetesAgentRuntime) UpgradeVelero(ctx context.Context, options Vele
 	if _, err := r.client.AppsV1().Deployments(namespace).Patch(ctx, deploymentName, types.StrategicMergePatchType, deploymentPatch, metav1.PatchOptions{}); err != nil {
 		return fmt.Errorf("update velero deployment: %w", err)
 	}
-	daemonSetPatch, _ := json.Marshal(map[string]any{"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"annotations": map[string]string{"hypercdr.io/velero-upgrade-at": time.Now().UTC().Format(time.RFC3339Nano)}}, "spec": map[string]any{"containers": []map[string]any{{"name": "node-agent", "image": options.Image}}}}}})
+	nodeAgentContainer := map[string]any{"name": "node-agent", "image": options.Image}
+	if options.NodeAgentConcurrency > 0 {
+		nodeAgentContainer["args"] = []string{"node-agent", "server", "--node-agent-configmap=node-agent-config"}
+	}
+	daemonSetPatch, _ := json.Marshal(map[string]any{"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"annotations": map[string]string{"hypercdr.io/velero-upgrade-at": time.Now().UTC().Format(time.RFC3339Nano)}}, "spec": map[string]any{"containers": []map[string]any{nodeAgentContainer}}}}})
 	if _, err := r.client.AppsV1().DaemonSets(namespace).Patch(ctx, daemonSetName, types.StrategicMergePatchType, daemonSetPatch, metav1.PatchOptions{}); err != nil {
 		return fmt.Errorf("update node-agent daemonset: %w", err)
 	}
@@ -319,6 +314,56 @@ func (r *KubernetesAgentRuntime) UpgradeVelero(ctx context.Context, options Vele
 	}
 }
 
+func (r *KubernetesAgentRuntime) PrepareVeleroUpgrade(ctx context.Context) error {
+	if err := r.ensureDaemonSetUpgradePermission(ctx); err != nil {
+		return fmt.Errorf("ensure node-agent upgrade permission: %w", err)
+	}
+	if err := r.ensureVeleroCRDUpgradePermission(ctx); err != nil {
+		return fmt.Errorf("ensure Velero CRD upgrade permission: %w", err)
+	}
+	return nil
+}
+
+func (r *KubernetesAgentRuntime) ensureVeleroPerformanceConfig(ctx context.Context, namespace string, options VeleroUpgradeOptions) error {
+	if options.NodeAgentConcurrency <= 0 {
+		return nil
+	}
+	config := map[string]any{
+		"loadConcurrency": map[string]any{
+			"globalConfig":       options.NodeAgentConcurrency,
+			"prepareQueueLength": options.PrepareQueueLength,
+		},
+	}
+	if strings.TrimSpace(options.CacheStorageClass) != "" {
+		if _, err := r.client.StorageV1().StorageClasses().Get(ctx, options.CacheStorageClass, metav1.GetOptions{}); err != nil {
+			return fmt.Errorf("cache storage class %q is unavailable: %w", options.CacheStorageClass, err)
+		}
+		config["cachePVC"] = map[string]any{
+			"storageClass":          options.CacheStorageClass,
+			"residentThresholdInMB": options.CacheResidentThresholdMB,
+		}
+	}
+	data, err := json.Marshal(config)
+	if err != nil {
+		return err
+	}
+	configMaps := r.client.CoreV1().ConfigMaps(namespace)
+	current, err := configMaps.Get(ctx, "node-agent-config", metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		_, err = configMaps.Create(ctx, &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: "node-agent-config", Namespace: namespace},
+			Data:       map[string]string{"node-agent-config.json": string(data)},
+		}, metav1.CreateOptions{})
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	current.Data = map[string]string{"node-agent-config.json": string(data)}
+	_, err = configMaps.Update(ctx, current, metav1.UpdateOptions{})
+	return err
+}
+
 func (r *KubernetesAgentRuntime) ensureDaemonSetUpgradePermission(ctx context.Context) error {
 	role, err := r.client.RbacV1().ClusterRoles().Get(ctx, "hypercdr-agent", metav1.GetOptions{})
 	if err != nil {
@@ -339,6 +384,27 @@ func (r *KubernetesAgentRuntime) ensureDaemonSetUpgradePermission(ctx context.Co
 		return err
 	}
 	return fmt.Errorf("hypercdr-agent ClusterRole has no apps/daemonsets rule")
+}
+
+func (r *KubernetesAgentRuntime) ensureVeleroCRDUpgradePermission(ctx context.Context) error {
+	role, err := r.client.RbacV1().ClusterRoles().Get(ctx, "hypercdr-agent", metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	for i := range role.Rules {
+		rule := &role.Rules[i]
+		if !containsString(rule.APIGroups, "apiextensions.k8s.io") || !containsString(rule.Resources, "customresourcedefinitions") {
+			continue
+		}
+		for _, verb := range []string{"create", "update", "patch"} {
+			if !containsString(rule.Verbs, verb) {
+				rule.Verbs = append(rule.Verbs, verb)
+			}
+		}
+		_, err = r.client.RbacV1().ClusterRoles().Update(ctx, role, metav1.UpdateOptions{})
+		return err
+	}
+	return fmt.Errorf("hypercdr-agent ClusterRole has no apiextensions.k8s.io/customresourcedefinitions rule")
 }
 
 func containsString(values []string, target string) bool {

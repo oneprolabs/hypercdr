@@ -118,28 +118,37 @@ func TestIsRunningInNode(t *testing.T) {
 		Phase(corev1api.PodRunning).
 		NodeName("fake-node").
 		Result()
+	nodeAgentPodOtherNs := builder.ForPod("other-ns", "fake-pod-other").
+		Labels(map[string]string{"role": "node-agent"}).
+		Phase(corev1api.PodRunning).
+		NodeName("fake-node").
+		Result()
 
 	tests := []struct {
 		name          string
 		kubeClientObj []runtime.Object
+		namespace     string
 		nodeName      string
 		expectErr     string
 	}{
 		{
 			name:      "node name is empty",
+			namespace: "fake-ns",
 			expectErr: "node name is empty",
 		},
 		{
-			name:     "ds pod not found",
-			nodeName: "fake-node",
+			name:      "ds pod not found",
+			namespace: "fake-ns",
+			nodeName:  "fake-node",
 			kubeClientObj: []runtime.Object{
 				nonNodeAgentPod,
 			},
 			expectErr: "daemonset pod not found in running state in node fake-node",
 		},
 		{
-			name:     "ds po are not all running",
-			nodeName: "fake-node",
+			name:      "ds po are not all running",
+			namespace: "fake-ns",
+			nodeName:  "fake-node",
 			kubeClientObj: []runtime.Object{
 				nodeAgentPodNotRunning,
 				nodeAgentPodRunning1,
@@ -147,8 +156,9 @@ func TestIsRunningInNode(t *testing.T) {
 			expectErr: "daemonset pod not found in running state in node fake-node",
 		},
 		{
-			name:     "ds pods wrong node name",
-			nodeName: "fake-node",
+			name:      "ds pods wrong node name",
+			namespace: "fake-ns",
+			nodeName:  "fake-node",
 			kubeClientObj: []runtime.Object{
 				nodeAgentPodNotRunning,
 				nodeAgentPodRunning1,
@@ -157,13 +167,31 @@ func TestIsRunningInNode(t *testing.T) {
 			expectErr: "daemonset pod not found in running state in node fake-node",
 		},
 		{
-			name:     "succeed",
-			nodeName: "fake-node",
+			name:      "succeed",
+			namespace: "fake-ns",
+			nodeName:  "fake-node",
 			kubeClientObj: []runtime.Object{
 				nodeAgentPodNotRunning,
 				nodeAgentPodRunning1,
 				nodeAgentPodRunning2,
 				nodeAgentPodRunning3,
+			},
+		},
+		{
+			name:      "cross-namespace isolation - pod in wrong namespace on same node",
+			namespace: "fake-ns",
+			nodeName:  "fake-node",
+			kubeClientObj: []runtime.Object{
+				nodeAgentPodOtherNs,
+			},
+			expectErr: "daemonset pod not found in running state in node fake-node",
+		},
+		{
+			name:      "cross-namespace isolation - pod in correct namespace on same node",
+			namespace: "other-ns",
+			nodeName:  "fake-node",
+			kubeClientObj: []runtime.Object{
+				nodeAgentPodOtherNs,
 			},
 		},
 	}
@@ -175,7 +203,7 @@ func TestIsRunningInNode(t *testing.T) {
 
 			fakeClient := fakeClientBuilder.WithRuntimeObjects(test.kubeClientObj...).Build()
 
-			err := IsRunningInNode(t.Context(), "", test.nodeName, fakeClient)
+			err := IsRunningInNode(t.Context(), test.namespace, test.nodeName, fakeClient)
 			if test.expectErr == "" {
 				assert.NoError(t, err)
 			} else {
@@ -249,6 +277,7 @@ func TestGetConfigs(t *testing.T) {
 	cmWithValidData := builder.ForConfigMap("fake-ns", "node-agent-config").Data("fake-key", "{\"loadConcurrency\":{\"globalConfig\": 5}}").Result()
 	cmWithPriorityClass := builder.ForConfigMap("fake-ns", "node-agent-config").Data("fake-key", "{\"priorityClassName\": \"high-priority\"}").Result()
 	cmWithPriorityClassAndOther := builder.ForConfigMap("fake-ns", "node-agent-config").Data("fake-key", "{\"priorityClassName\": \"low-priority\", \"loadConcurrency\":{\"globalConfig\": 3}}").Result()
+	cmWithMultipleKeysInData := builder.ForConfigMap("fake-ns", "node-agent-config").Data("fake-key-1", "{}", "fake-key-2", "{}").Result()
 
 	tests := []struct {
 		name          string
@@ -330,6 +359,14 @@ func TestGetConfigs(t *testing.T) {
 					GlobalConfig: 3,
 				},
 			},
+		},
+		{
+			name:      "ConfigMap's Data has more than one key",
+			namespace: "fake-ns",
+			kubeClientObj: []runtime.Object{
+				cmWithMultipleKeysInData,
+			},
+			expectErr: "more than one keys are found in ConfigMap node-agent-config's data. only expect one",
 		},
 	}
 

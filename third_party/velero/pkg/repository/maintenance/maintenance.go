@@ -32,11 +32,14 @@ import (
 	corev1api "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	"github.com/vmware-tanzu/velero/pkg/constant"
+	velerolabel "github.com/vmware-tanzu/velero/pkg/label"
 	velerotypes "github.com/vmware-tanzu/velero/pkg/types"
 	"github.com/vmware-tanzu/velero/pkg/util"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
@@ -68,11 +71,22 @@ func GenerateJobName(repo string) string {
 }
 
 // DeleteOldJobs deletes old maintenance jobs and keeps the latest N jobs
-func DeleteOldJobs(cli client.Client, repo string, keep int, logger logrus.FieldLogger) error {
+func DeleteOldJobs(cli client.Client, repo velerov1api.BackupRepository, keep int, logger logrus.FieldLogger) error {
 	logger.Infof("Start to delete old maintenance jobs. %d jobs will be kept.", keep)
 	// Get the maintenance job list by label
 	jobList := &batchv1api.JobList{}
-	err := cli.List(context.TODO(), jobList, client.MatchingLabels(map[string]string{RepositoryNameLabel: repo}))
+	err := cli.List(
+		context.TODO(),
+		jobList,
+		&client.ListOptions{
+			Namespace: repo.Namespace,
+			LabelSelector: labels.SelectorFromSet(
+				map[string]string{
+					RepositoryNameLabel: velerolabel.ReturnNameOrHash(repo.Name),
+				},
+			),
+		},
+	)
 	if err != nil {
 		return err
 	}
@@ -277,9 +291,19 @@ func getJobConfig(
 		if globalResult.PriorityClassName != "" {
 			result.PriorityClassName = globalResult.PriorityClassName
 		}
+
+		// Pod's labels are only read from global config, not per-repository
+		if len(globalResult.PodLabels) > 0 {
+			result.PodLabels = globalResult.PodLabels
+		}
+
+		// Pod's annotations are only read from global config, not per-repository
+		if len(globalResult.PodAnnotations) > 0 {
+			result.PodAnnotations = globalResult.PodAnnotations
+		}
 	}
 
-	logger.Debugf("Didn't find content for repository %s in cm %s", repo.Name, repoMaintenanceJobConfig)
+	logger.Debugf("Configuration content for repository %s is %+v", repo.Name, result)
 
 	return result, nil
 }
@@ -339,10 +363,17 @@ func WaitJobComplete(cli client.Client, ctx context.Context, jobName, ns string,
 // and then return the maintenance jobs' status in the range of limit
 func WaitAllJobsComplete(ctx context.Context, cli client.Client, repo *velerov1api.BackupRepository, limit int, log logrus.FieldLogger) ([]velerov1api.BackupRepositoryMaintenanceStatus, error) {
 	jobList := &batchv1api.JobList{}
-	err := cli.List(context.TODO(), jobList, &client.ListOptions{
-		Namespace: repo.Namespace,
-	},
-		client.MatchingLabels(map[string]string{RepositoryNameLabel: repo.Name}),
+	err := cli.List(
+		context.TODO(),
+		jobList,
+		&client.ListOptions{
+			Namespace: repo.Namespace,
+			LabelSelector: labels.SelectorFromSet(
+				map[string]string{
+					RepositoryNameLabel: velerolabel.ReturnNameOrHash(repo.Name),
+				},
+			),
+		},
 	)
 
 	if err != nil {
@@ -544,33 +575,61 @@ func buildJob(
 	// Set resource limits and requests
 	cpuRequest := DefaultMaintenanceJobCPURequest
 	memRequest := DefaultMaintenanceJobMemRequest
+	ephemeralStorageRequest := constant.DefaultEphemeralStorageRequest
 	cpuLimit := DefaultMaintenanceJobCPULimit
 	memLimit := DefaultMaintenanceJobMemLimit
+	ephemeralStorageLimit := constant.DefaultEphemeralStorageLimit
 	if config != nil && config.PodResources != nil {
 		cpuRequest = config.PodResources.CPURequest
 		memRequest = config.PodResources.MemoryRequest
 		cpuLimit = config.PodResources.CPULimit
 		memLimit = config.PodResources.MemoryLimit
+		// To make the PodResources ConfigMap without ephemeral storage request/limit backward compatible,
+		// need to avoid set value as empty, because empty string will cause parsing error.
+		if config.PodResources.EphemeralStorageRequest != "" {
+			ephemeralStorageRequest = config.PodResources.EphemeralStorageRequest
+		}
+		if config.PodResources.EphemeralStorageLimit != "" {
+			ephemeralStorageLimit = config.PodResources.EphemeralStorageLimit
+		}
 	}
-	resources, err := kube.ParseResourceRequirements(cpuRequest, memRequest, cpuLimit, memLimit)
+	resources, err := kube.ParseResourceRequirements(
+		cpuRequest,
+		memRequest,
+		ephemeralStorageRequest,
+		cpuLimit,
+		memLimit,
+		ephemeralStorageLimit,
+	)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to parse resource requirements for maintenance job")
 	}
 
 	podLabels := map[string]string{
-		RepositoryNameLabel: repo.Name,
+		RepositoryNameLabel: velerolabel.ReturnNameOrHash(repo.Name),
 	}
-
-	for _, k := range util.ThirdPartyLabels {
-		if v := veleroutil.GetVeleroServerLabelValue(deployment, k); v != "" {
+	if config != nil && len(config.PodLabels) > 0 {
+		for k, v := range config.PodLabels {
 			podLabels[k] = v
+		}
+	} else {
+		for _, k := range util.ThirdPartyLabels {
+			if v := veleroutil.GetVeleroServerLabelValue(deployment, k); v != "" {
+				podLabels[k] = v
+			}
 		}
 	}
 
 	podAnnotations := map[string]string{}
-	for _, k := range util.ThirdPartyAnnotations {
-		if v := veleroutil.GetVeleroServerAnnotationValue(deployment, k); v != "" {
+	if config != nil && len(config.PodAnnotations) > 0 {
+		for k, v := range config.PodAnnotations {
 			podAnnotations[k] = v
+		}
+	} else {
+		for _, k := range util.ThirdPartyAnnotations {
+			if v := veleroutil.GetVeleroServerAnnotationValue(deployment, k); v != "" {
+				podAnnotations[k] = v
+			}
 		}
 	}
 
@@ -588,7 +647,7 @@ func buildJob(
 			Name:      GenerateJobName(repo.Name),
 			Namespace: repo.Namespace,
 			Labels: map[string]string{
-				RepositoryNameLabel: repo.Name,
+				RepositoryNameLabel: velerolabel.ReturnNameOrHash(repo.Name),
 			},
 		},
 		Spec: batchv1api.JobSpec{
@@ -630,7 +689,7 @@ func buildJob(
 	}
 
 	if config != nil && len(config.LoadAffinities) > 0 {
-		affinity := kube.ToSystemAffinity(config.LoadAffinities)
+		affinity := kube.ToSystemAffinity(config.LoadAffinities[0], nil)
 		job.Spec.Template.Spec.Affinity = affinity
 	}
 

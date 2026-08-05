@@ -17,6 +17,8 @@ limitations under the License.
 package csi
 
 import (
+	"context"
+
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -106,6 +108,25 @@ func (p *volumeSnapshotContentRestoreItemAction) Execute(
 	} else {
 		p.log.Errorf("fail to get snapshot handle from VSC %s status", vsc.Name)
 		return nil, errors.Errorf("fail to get snapshot handle from VSC %s status", vsc.Name)
+	}
+
+	// Look up a VolumeSnapshotClass matching the driver for credential lookup.
+	// Some CSI drivers (e.g., Ceph RBD) need credentials for snapshot verification.
+	// Instead of keeping the original class name (which may not exist on target cluster),
+	// we find a matching class by driver to make restore portable.
+	vsc.Spec.VolumeSnapshotClassName = nil
+	vscList := &snapshotv1api.VolumeSnapshotClassList{}
+	if err := p.client.List(context.Background(), vscList); err == nil {
+		for i := range vscList.Items {
+			if vscList.Items[i].Driver == vsc.Spec.Driver {
+				vsc.Spec.VolumeSnapshotClassName = &vscList.Items[i].Name
+				p.log.Infof("Set VolumeSnapshotClassName to %s for VSC %s based on driver match",
+					vscList.Items[i].Name, vsc.Name)
+				break
+			}
+		}
+	} else {
+		p.log.Warnf("Failed to list VolumeSnapshotClasses: %v", err)
 	}
 
 	additionalItems := []velero.ResourceIdentifier{}

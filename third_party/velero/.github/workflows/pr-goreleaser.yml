@@ -14,11 +14,11 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
       name: Checkout
 
     - name: Verify .goreleaser.yml and try a dryrun release.
-      if: github.repository == 'vmware-tanzu/velero'
+      if: github.repository == 'velero-io/velero'
       run: |
         CHANGELOG=$(ls changelogs | sort -V -r | head -n 1)
         GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} \

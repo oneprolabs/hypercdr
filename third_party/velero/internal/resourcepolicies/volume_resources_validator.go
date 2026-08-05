@@ -46,6 +46,7 @@ type volumeConditions struct {
 	CSI          *csiVolumeSource  `yaml:"csi,omitempty"`
 	VolumeTypes  []SupportedVolume `yaml:"volumeTypes,omitempty"`
 	PVCLabels    map[string]string `yaml:"pvcLabels,omitempty"`
+	PVCPhase     []string          `yaml:"pvcPhase,omitempty"`
 }
 
 func (c *capacityCondition) validate() error {
@@ -89,7 +90,7 @@ func decodeStruct(r io.Reader, s any) error {
 func (a *Action) validate() error {
 	// validate Type
 	valid := false
-	if a.Type == Skip || a.Type == Snapshot || a.Type == FSBackup {
+	if a.Type == Skip || a.Type == Snapshot || a.Type == FSBackup || a.Type == Custom {
 		valid = true
 	}
 	if !valid {

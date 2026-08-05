@@ -62,6 +62,8 @@ GINKGO_LABELS ?=
 # https://onsi.github.io/ginkgo/#mental-model-how-ginkgo-handles-failure
 FAIL_FAST ?= false
 
+VERSION ?= main
+
 VELERO_CLI ?=$$(pwd)/../_output/bin/$(GOOS)/$(GOARCH)/velero
 
 VELERO_IMAGE ?= velero/velero:main
@@ -74,7 +76,7 @@ HAS_VSPHERE_PLUGIN ?= false
 RESTORE_HELPER_IMAGE ?=
 
 #Released version only
-UPGRADE_FROM_VELERO_VERSION ?= v1.15.2,v1.16.2
+UPGRADE_FROM_VELERO_VERSION ?= v1.15.2,v1.16.2,v1.17.2
 
 # UPGRADE_FROM_VELERO_CLI can has the same format(a list divided by comma) with UPGRADE_FROM_VELERO_VERSION
 # Upgrade tests will be executed sequently according to the list by UPGRADE_FROM_VELERO_VERSION
@@ -83,7 +85,7 @@ UPGRADE_FROM_VELERO_VERSION ?= v1.15.2,v1.16.2
 # to the end, nil string will be set if UPGRADE_FROM_VELERO_CLI is shorter than UPGRADE_FROM_VELERO_VERSION
 UPGRADE_FROM_VELERO_CLI ?=
 
-MIGRATE_FROM_VELERO_VERSION ?= v1.15.2,self
+MIGRATE_FROM_VELERO_VERSION ?= v1.17.2,$(VERSION)
 MIGRATE_FROM_VELERO_CLI ?=
 
 VELERO_NAMESPACE ?= velero
@@ -184,7 +186,7 @@ ginkgo: ${GOBIN}/ginkgo
 
 # This target does not run if ginkgo is already in $GOBIN
 ${GOBIN}/ginkgo:
-	GOBIN=${GOBIN} go install github.com/onsi/ginkgo/v2/ginkgo@v2.22.0
+	GOBIN=${GOBIN} go install github.com/onsi/ginkgo/v2/ginkgo@v2.28.3
 
 .PHONY: run-e2e
 run-e2e: ginkgo
