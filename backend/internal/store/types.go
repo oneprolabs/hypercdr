@@ -406,6 +406,7 @@ type ClusterAPIResource struct {
 }
 
 type ClusterNamespaceAPI struct {
+	Scope     string `json:"scope,omitempty"`
 	Namespace string `json:"namespace"`
 	Group     string `json:"group"`
 	Version   string `json:"version"`
@@ -510,10 +511,31 @@ type InventoryInput struct {
 	NamespaceAPIs        []ClusterNamespaceAPI
 	Capabilities         []ClusterCapability
 	CapabilityScan       bool
+	CapabilityNamespace  string
 	CapabilitiesComplete bool
 	Apps                 []Application
 	CollectedAt          time.Time
 	Hash                 string
+}
+
+func mergeNamespaceAPIs(existing, scanned []ClusterNamespaceAPI, namespace string) []ClusterNamespaceAPI {
+	if strings.TrimSpace(namespace) == "" {
+		return scanned
+	}
+	merged := make([]ClusterNamespaceAPI, 0, len(existing)+len(scanned))
+	replacesClusterScope := false
+	for _, resource := range scanned {
+		if resource.Scope == "cluster" {
+			replacesClusterScope = true
+			break
+		}
+	}
+	for _, resource := range existing {
+		if resource.Namespace != namespace && !(replacesClusterScope && resource.Scope == "cluster") {
+			merged = append(merged, resource)
+		}
+	}
+	return append(merged, scanned...)
 }
 
 type StorageRepository struct {
@@ -631,45 +653,59 @@ type PolicyInput struct {
 }
 
 type ProtectionPlan struct {
-	ID                   string           `json:"id"`
-	TenantID             string           `json:"tenantId"`
-	SourceClusterID      string           `json:"sourceClusterId"`
-	AppID                string           `json:"appId"`
-	AppIDs               []string         `json:"appIds"`
-	ScopeType            string           `json:"scopeType"`
-	IncludedResources    []string         `json:"includedResources,omitempty"`
-	LabelSelector        LabelSelector    `json:"labelSelector,omitempty"`
-	IncludeClusterScoped bool             `json:"includeClusterScoped"`
-	StorageRepoID        string           `json:"storageRepoId,omitempty"`
-	PolicyID             string           `json:"policyId,omitempty"`
-	TargetClusterID      string           `json:"targetClusterId,omitempty"`
-	ExcludedResources    []string         `json:"excludedResources,omitempty"`
-	PreHooks             []map[string]any `json:"preHooks,omitempty"`
-	PostHooks            []map[string]any `json:"postHooks,omitempty"`
-	PlanStorageSize      map[string]any   `json:"planStorageSize,omitempty"`
-	NextFireAt           time.Time        `json:"nextFireAt,omitempty"`
-	ScheduleEnabled      bool             `json:"scheduleEnabled,omitempty"`
-	Status               string           `json:"status"`
-	CreatedAt            time.Time        `json:"createdAt"`
-	UpdatedAt            time.Time        `json:"updatedAt"`
+	ID                   string            `json:"id"`
+	TenantID             string            `json:"tenantId"`
+	SourceClusterID      string            `json:"sourceClusterId"`
+	AppID                string            `json:"appId"`
+	AppIDs               []string          `json:"appIds"`
+	ScopeType            string            `json:"scopeType"`
+	IncludedResources    []string          `json:"includedResources,omitempty"`
+	ResourceSelection    ResourceSelection `json:"resourceSelection"`
+	LabelSelector        LabelSelector     `json:"labelSelector,omitempty"`
+	IncludeClusterScoped bool              `json:"includeClusterScoped"`
+	StorageRepoID        string            `json:"storageRepoId,omitempty"`
+	PolicyID             string            `json:"policyId,omitempty"`
+	TargetClusterID      string            `json:"targetClusterId,omitempty"`
+	ExcludedResources    []string          `json:"excludedResources,omitempty"`
+	PreHooks             []map[string]any  `json:"preHooks,omitempty"`
+	PostHooks            []map[string]any  `json:"postHooks,omitempty"`
+	PlanStorageSize      map[string]any    `json:"planStorageSize,omitempty"`
+	NextFireAt           time.Time         `json:"nextFireAt,omitempty"`
+	ScheduleEnabled      bool              `json:"scheduleEnabled,omitempty"`
+	Status               string            `json:"status"`
+	CreatedAt            time.Time         `json:"createdAt"`
+	UpdatedAt            time.Time         `json:"updatedAt"`
 }
 
 type ProtectionPlanInput struct {
-	TenantID             string           `json:"-"`
-	SourceClusterID      string           `json:"sourceClusterId"`
-	AppID                string           `json:"appId"`
-	AppIDs               []string         `json:"appIds"`
-	ScopeType            string           `json:"scopeType"`
-	IncludedResources    []string         `json:"includedResources"`
-	LabelSelector        LabelSelector    `json:"labelSelector"`
-	IncludeClusterScoped bool             `json:"includeClusterScoped"`
-	StorageRepoID        string           `json:"storageRepoId"`
-	PolicyID             string           `json:"policyId"`
-	TargetClusterID      string           `json:"targetClusterId"`
-	ExcludedResources    []string         `json:"excludedResources"`
-	PreHooks             []map[string]any `json:"preHooks"`
-	PostHooks            []map[string]any `json:"postHooks"`
-	Status               string           `json:"status"`
+	TenantID             string            `json:"-"`
+	SourceClusterID      string            `json:"sourceClusterId"`
+	AppID                string            `json:"appId"`
+	AppIDs               []string          `json:"appIds"`
+	ScopeType            string            `json:"scopeType"`
+	IncludedResources    []string          `json:"includedResources"`
+	ResourceSelection    ResourceSelection `json:"resourceSelection"`
+	LabelSelector        LabelSelector     `json:"labelSelector"`
+	IncludeClusterScoped bool              `json:"includeClusterScoped"`
+	StorageRepoID        string            `json:"storageRepoId"`
+	PolicyID             string            `json:"policyId"`
+	TargetClusterID      string            `json:"targetClusterId"`
+	ExcludedResources    []string          `json:"excludedResources"`
+	PreHooks             []map[string]any  `json:"preHooks"`
+	PostHooks            []map[string]any  `json:"postHooks"`
+	Status               string            `json:"status"`
+}
+
+// ResourceSelection captures the user-facing resource-type selection used by
+// current protection plans. "all" deliberately has no type arrays: it keeps
+// Velero's native all-resource defaults rather than encoding an ambiguous
+// empty selection. "custom" carries independent namespace/cluster scopes.
+// Legacy fields above remain only for rolling-agent protocol compatibility;
+// legacy Filter plans are migrated to the scoped model.
+type ResourceSelection struct {
+	Mode            string   `json:"mode"`
+	NamespaceScoped []string `json:"namespaceScoped,omitempty"`
+	ClusterScoped   []string `json:"clusterScoped,omitempty"`
 }
 
 type LabelSelector struct {

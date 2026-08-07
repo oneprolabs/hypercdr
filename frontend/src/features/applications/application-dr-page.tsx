@@ -72,6 +72,9 @@ export default function ApplicationDrPage(props: {
   const [submittingRecoveryTasks, setSubmittingRecoveryTasks] = useState<Record<string, ApiTask>>({});
   const [syncSubmitting, setSyncSubmitting] = useState(false);
   const [recoverySubmitting, setRecoverySubmitting] = useState(false);
+  const [resourceCatalogLoading, setResourceCatalogLoading] = useState(false);
+  const [resourceCatalogLoaded, setResourceCatalogLoaded] = useState(false);
+  const resourceCatalogRequestsRef = useRef(new Map<string, { clusterId: string; requestId: string }>());
   const [configAppNames, setConfigAppNames] = useState<string[]>([]);
   const [protectedAppNames, setProtectedAppNames] = useState<string[]>(() => apps.filter(app => app.stage === 'run').map(app => app.name));
   const [appUiOverrides, setAppUiOverrides] = useState<Record<string, Partial<AppItem>>>({});
@@ -85,6 +88,7 @@ export default function ApplicationDrPage(props: {
     includeRules: [] as Array<{ group: string; resource: string; name: string; version: string; labels: string }>,
     includedResources: [] as string[],
     includeAllResources: true,
+    resourceSelection: { mode: 'all' as const, namespaceScoped: [] as string[], clusterScoped: [] as string[] },
     labelSelector: { matchLabels: {} as Record<string, string>, matchExpressions: [] as Array<{ key: string; operator: string; values: string[] }> },
     excludedResources: [] as string[],
     storageType: 'local',
@@ -97,6 +101,52 @@ export default function ApplicationDrPage(props: {
     postScripts: [] as Array<{ name: string; size: number; lastModified?: number; content: string; source: 'upload' | 'manual'; isEntry?: boolean }>,
   });
   const [showAddRuleForm, setShowAddRuleForm] = useState(false);
+  const discoveredResourceOptions = useMemo(() => {
+    const wizardSelection = protectWizardMode === 'modify'
+      ? selectedRunApps
+      : (configAppNames.length ? configAppNames : selectedConfigApps);
+    const targetNames = new Set(wizardSelection.flatMap(name => {
+      const app = apps.find(item => item.name === name);
+      return app ? [app.name, app.namespace] : [name];
+    }));
+    const seen = new Set<string>();
+    const namespaceScoped: Array<{ key: string; label: string; detail: string; count?: number }> = [];
+    const clusterScoped: Array<{ key: string; label: string; detail: string; count?: number }> = [];
+    for (const resource of currentCluster?.namespaceApis || []) {
+      if (resource.count <= 0) continue;
+      const key = resource.group ? `${resource.resource}.${resource.group}` : resource.resource;
+      const clusterResource = resource.scope === 'cluster';
+      if (!clusterResource && !targetNames.has(resource.namespace)) continue;
+      const identity = `${clusterResource ? 'cluster' : 'namespace'}:${key}`;
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      const option = { key, label: resource.kind, detail: `${resource.group || 'core'}/${resource.version} · ${key}`, count: resource.count };
+      if (clusterResource) clusterScoped.push(option);
+      else namespaceScoped.push(option);
+    }
+    // Older installed agents may not yet report the complete namespace API
+    // catalog. Preserve currently observed standard inventory until rolling
+    // upgrades deliver the discovery-based counts.
+    for (const app of apps.filter(item => targetNames.has(item.name) || targetNames.has(item.namespace))) {
+      for (const category of app.resourceSummary?.categories || []) {
+        for (const item of category.items || []) {
+          if (item.count <= 0 || !item.kind) continue;
+          const candidates = (currentCluster?.apiResources || []).filter(resource => resource.namespaced && resource.kind === item.kind);
+          for (const resource of candidates) {
+            const key = resource.group ? `${resource.resource}.${resource.group}` : resource.resource;
+            const identity = `namespace:${key}`;
+            if (seen.has(identity)) continue;
+            seen.add(identity);
+            namespaceScoped.push({ key, label: resource.kind, detail: `${resource.group || 'core'}/${resource.version} · ${key}` });
+          }
+        }
+      }
+    }
+    const byLabel = (a: { label: string; key: string }, b: { label: string; key: string }) => a.label.localeCompare(b.label) || a.key.localeCompare(b.key);
+    namespaceScoped.sort(byLabel);
+    clusterScoped.sort(byLabel);
+    return { namespaceScoped, clusterScoped };
+  }, [apps, configAppNames, currentCluster?.apiResources, currentCluster?.namespaceApis, protectWizardMode, selectedConfigApps, selectedRunApps]);
   const [newExcludeRule, setNewExcludeRule] = useState({ group: '', resource: '', name: '', version: '', labels: '' });
   const [editingRuleIndex, setEditingRuleIndex] = useState<number | null>(null);
   const syncTasks: Record<string, ApiTask> = { ...liveAppTasks, ...submittingSyncTasks };
@@ -424,12 +474,10 @@ export default function ApplicationDrPage(props: {
   const unitMembers = (app: AppItem) => app.memberApps?.length ? app.memberApps : [app];
   const unitNamespaces = (app: AppItem) => unitMembers(app).map(item => item.namespace || item.name);
   const taskForUnit = (tasks: Record<string, ApiTask>, app: AppItem) => {
-    if (tasks[app.name]) return tasks[app.name];
-    if (app.protectionPlanId) {
-      const planTask = Object.values(tasks).find(task => task?.protectionPlanId === app.protectionPlanId);
-      if (planTask) return planTask;
-    }
-    return unitMembers(app).map(member => tasks[member.name]).find(Boolean);
+    if (!app.protectionPlanId) return undefined;
+    const direct = tasks[app.name];
+    if (direct?.protectionPlanId === app.protectionPlanId) return direct;
+    return Object.values(tasks).find(task => task?.protectionPlanId === app.protectionPlanId);
   };
   const recoveryTaskForUnit = (app: AppItem) =>
     taskForUnit(submittingRecoveryTasks, app) || taskForUnit(liveRecoveryTasks, app);
@@ -518,7 +566,7 @@ export default function ApplicationDrPage(props: {
     age: app.lastBackup || '1 days ago',
     score: app.isProtected ? 90 : 70,
     scope: app.isProtected
-      ? (protectionPlanForApp(app)?.scopeType || 'all')
+      ? (protectionPlanForApp(app)?.resourceSelection?.mode || 'all')
       : 'Pending Selection',
     scopeTag: undefined as string | undefined,
     taskStatus: app.isProtected ? 'normal' as const : 'warning' as const,
@@ -885,7 +933,7 @@ export default function ApplicationDrPage(props: {
     setResourceRefreshStatus({ key: refreshKey, status: 'pending', message: 'Requesting latest resources...' });
     try {
       const submitted = await apiPost<{ status: string; warning?: string; requestId: string }>(`/api/v1/clusters/${clusterId}/inventory/request`, {
-        scope: 'namespaceResources',
+        scope: 'capabilities',
         namespace,
         includeDetails: true,
         reason: 'resource_modal_refresh',
@@ -955,7 +1003,7 @@ export default function ApplicationDrPage(props: {
       const namespace = app.namespace || app.name;
       if (!clusterId) throw new Error(`Missing cluster for ${namespace}`);
       return apiPost<{ status: string; warning?: string; requestId: string }>(`/api/v1/clusters/${clusterId}/inventory/request`, {
-        scope: 'namespaceResources',
+        scope: 'capabilities',
         namespace,
         includeDetails: true,
         reason: 'dr_support_precheck',
@@ -981,6 +1029,67 @@ export default function ApplicationDrPage(props: {
     await refreshPlatformData();
     const latest = await apiGet<ApiList<ApiApplication>>('/api/v1/applications');
     return latest.items;
+  };
+  const requestResourceCatalog = async (app: AppItem) => {
+    const clusterId = app.clusterId || currentClusterId;
+    const namespace = app.namespace || app.name;
+    if (!clusterId) throw new Error(`Missing cluster for ${namespace}`);
+    const key = `${clusterId}:${namespace}`;
+    const pending = resourceCatalogRequestsRef.current.get(key);
+    if (pending) return { ...pending, key };
+    const submitted = await apiPost<{ requestId: string }>(`/api/v1/clusters/${clusterId}/inventory/request`, {
+      scope: 'capabilities',
+      namespace,
+      includeDetails: true,
+      reason: 'dr_configuration_resource_catalog',
+      includeRecentVeleroObjects: false,
+    });
+    const request = { clusterId, requestId: submitted.requestId };
+    resourceCatalogRequestsRef.current.set(key, request);
+    return { ...request, key };
+  };
+  const refreshResourceCatalog = async (app: AppItem) => {
+    const submitted = await requestResourceCatalog(app);
+    for (let attempt = 0; attempt < 35; attempt += 1) {
+      await new Promise(resolve => window.setTimeout(resolve, 1000));
+      const status = await apiGet<{ status: string; message?: string; errorCode?: string }>(`/api/v1/clusters/${submitted.clusterId}/inventory/requests/${submitted.requestId}`);
+      if (status.status === 'succeeded') {
+        resourceCatalogRequestsRef.current.delete(submitted.key);
+        await refreshPlatformData();
+        return;
+      }
+      if (status.status === 'failed' || status.status === 'timeout') {
+        resourceCatalogRequestsRef.current.delete(submitted.key);
+        throw new Error(status.message || status.errorCode || 'Resource discovery failed');
+      }
+    }
+    resourceCatalogRequestsRef.current.delete(submitted.key);
+    throw new Error('Resource discovery timed out');
+  };
+  const loadWizardCustomResources = async () => {
+    const selection = protectWizardMode === 'modify'
+      ? selectedRunApps
+      : (configAppNames.length ? configAppNames : selectedConfigApps);
+    const targetRows = selection
+      .map(name => apps.find(item => item.name === name))
+      .filter((app): app is AppItem => Boolean(app));
+    const namespaces = new Set(targetRows.map(app => app.namespace || app.name));
+    if (namespaces.size !== 1 || !targetRows[0]) return false;
+    setResourceCatalogLoading(true);
+    try {
+      await refreshResourceCatalog(targetRows[0]);
+      setResourceCatalogLoaded(true);
+      return true;
+    } catch (error) {
+      toast('Failed to load namespace resource types: ' + (error instanceof Error ? error.message : 'unknown error'));
+      return false;
+    } finally {
+      setResourceCatalogLoading(false);
+    }
+  };
+  const hasCachedResourceCatalog = (targets: AppItem[]) => {
+    const namespaces = new Set(targets.map(app => app.namespace || app.name));
+    return namespaces.size === 1 && Boolean(currentCluster?.namespaceApis?.some(resource => resource.count > 0 && namespaces.has(resource.namespace)));
   };
   useEffect(() => {
     if (stage !== 'select') return;
@@ -1406,13 +1515,12 @@ export default function ApplicationDrPage(props: {
   const canStartSync = selectedRunApps.length > 0 && !syncSubmitting && !selectedRunHasRunningSync && !selectedRunHasCleanupRunning && selectedRunNotReadyRows.length === 0;
   const canStopSync = selectedRunCancelableSyncTasks.length > 0;
   const restorePointsForApp = (app: AppItem) => {
+    if (!app.protectionPlanId) return [];
     const realPoints = liveRestorePoints
       .filter(point => {
         if (point.status !== 'available') return false;
         if (point.sourceClusterId !== currentClusterId) return false;
-        if (app.apiId && point.appId) return point.appId === app.apiId;
-        if (app.protectionPlanId && point.protectionPlanId) return point.protectionPlanId === app.protectionPlanId;
-        return point.sourceClusterId === currentClusterId && point.sourceNamespace === (app.namespace || app.name);
+        return point.protectionPlanId === app.protectionPlanId;
       })
       .sort((a, b) => (b.time || '').localeCompare(a.time || ''))
       .map(point => ({
@@ -1466,6 +1574,7 @@ export default function ApplicationDrPage(props: {
       forceProceed: false,
       includedResources: [],
       excludedResources: [],
+      resourceSelection: { mode: 'all', namespaceScoped: [], clusterScoped: [] },
       storageClassMappings: {},
       imageMappings: {},
       waitForWorkloads: true,
@@ -1546,8 +1655,8 @@ export default function ApplicationDrPage(props: {
           excludedResources: action.config.excludedResources,
           storageClassMappings: action.config.storageClassMappings,
           imageMappings: action.config.imageMappings,
-          waitForWorkloads: action.config.waitForWorkloads,
-          runValidation: action.config.runValidation,
+          waitForWorkloads: action.mode === 'drill' ? true : action.config.waitForWorkloads,
+          runValidation: action.mode === 'drill' ? true : action.config.runValidation,
           forceStart: action.config.forceStart,
           contentCatalogLoaded: action.config.contentCatalogLoaded,
           persistentDataExpected: action.config.persistentDataExpected,
@@ -1842,6 +1951,15 @@ export default function ApplicationDrPage(props: {
       setSelectedSelectApps([]);
       await moveAppsToStage(names, 'config');
       setStage('config');
+      if (names.length === 1) {
+        const app = apps.find(item => item.name === names[0]);
+        if (app) {
+          // Warm the persisted namespace resource catalog in the background.
+          // Stage navigation remains immediate and Custom can use the cached
+          // result later without starting another scan.
+          void requestResourceCatalog(app).catch(() => undefined);
+        }
+      }
       return;
     }
 
@@ -1850,6 +1968,10 @@ export default function ApplicationDrPage(props: {
         toast('Select one application to configure protection');
         return;
       }
+      const selectedRows = selectedConfigApps
+        .map(name => apps.find(item => item.name === name))
+        .filter((app): app is AppItem => Boolean(app));
+      setResourceCatalogLoaded(hasCachedResourceCatalog(selectedRows));
       setProtectWizardMode('create');
       setProtectWizardStep(1);
       setProtectWizardOpen(true);
@@ -1971,11 +2093,12 @@ export default function ApplicationDrPage(props: {
       toast('Failed to cancel sync: ' + (error instanceof Error ? error.message : 'unknown error'));
     }
   };
-  const modifyProtection = () => {
+  const modifyProtection = async () => {
     if (selectedRunApps.length !== 1) {
       toast('Select one protected application to modify protection');
       return;
     }
+    setResourceCatalogLoaded(hasCachedResourceCatalog(selectedRunRows.flatMap(row => unitMembers(row))));
     setProtectWizardMode('modify');
     setProtectWizardStep(1);
     setProtectWizardOpen(true);
@@ -1998,7 +2121,7 @@ export default function ApplicationDrPage(props: {
       const appsWithoutPlan = targetApps.filter(app => !app.protectionPlanId && app.apiId);
       if (appsWithoutPlan.length > 0) {
         await Promise.all(appsWithoutPlan.map(app =>
-          apiPatch(`/api/v1/applications/${app.apiId}`, { protectionStatus: 'pending_protection' })
+          apiPatch(`/api/v1/applications/${app.apiId}`, { protectionStatus: 'unprotected' })
         ));
       }
     } catch (error) {
@@ -2039,8 +2162,8 @@ export default function ApplicationDrPage(props: {
                 const key = appOverrideKey(app);
                 next[key] = {
                   ...(next[key] || {}),
-                  stage: 'config',
-                  protectionStatus: 'pending_protection',
+                  stage: 'select',
+                  protectionStatus: 'unprotected',
                   isProtected: false,
                   status: mapApplicationStatus(app.status, false),
                   protectionPlanId: '',
@@ -2050,7 +2173,7 @@ export default function ApplicationDrPage(props: {
               return next;
             });
             setSelectedConfigApps([]);
-            setStage('config');
+            setStage('select');
           }
         } catch {
           if (remaining > 0) pollCleanup(remaining - 1);
@@ -2095,6 +2218,10 @@ export default function ApplicationDrPage(props: {
         .map(name => apps.find(item => item.name === name))
         .filter((app): app is AppItem => Boolean(app));
     const targetApps = Array.from(new Set(targetRows.flatMap(row => unitMembers(row).map(app => app.name))));
+    const targetNamespaces = new Set(targetRows.flatMap(row => unitMembers(row).map(app => app.namespace).filter(Boolean)));
+    const effectiveResourceSelection = targetNamespaces.size > 1
+      ? { mode: 'all' as const, namespaceScoped: [] as string[], clusterScoped: [] as string[] }
+      : protectConfig.resourceSelection;
     if (!currentClusterId) {
       toast('Select a source cluster first');
       return;
@@ -2126,6 +2253,7 @@ export default function ApplicationDrPage(props: {
           appIds: group.map(meta => meta.apiId),
           scopeType,
           includedResources: protectConfig.scope === 'filter' && !protectConfig.includeAllResources ? protectConfig.includedResources : [],
+          resourceSelection: effectiveResourceSelection,
           labelSelector: protectConfig.scope === 'filter' ? protectConfig.labelSelector : { matchLabels: {}, matchExpressions: [] },
           excludedResources: protectConfig.scope === 'filter' ? protectConfig.excludedResources : [],
           includeClusterScoped: false,
@@ -2412,7 +2540,7 @@ export default function ApplicationDrPage(props: {
                 >
                   Move Back
                 </button>
-                <button onClick={handlePrimaryAction} disabled={primaryDisabled} className="hbdr-dr-action-primary">DR Configuration</button>
+                <button onClick={handlePrimaryAction} disabled={primaryDisabled || resourceCatalogLoading} className="hbdr-dr-action-primary">{resourceCatalogLoading ? 'Loading resources…' : 'DR Configuration'}</button>
               </>
             )}
             {isRunStage && (
@@ -2451,11 +2579,11 @@ export default function ApplicationDrPage(props: {
                       {isRunStage && (
                         <>
                           <button
-                            disabled={selectedRunApps.length !== 1 || selectedRunHasCleanupRunning}
+                            disabled={selectedRunApps.length !== 1 || selectedRunHasCleanupRunning || resourceCatalogLoading}
                             title="Edit protection configuration"
                             onClick={() => {
                               setAppBulkMenuOpen(false);
-                              modifyProtection();
+                              void modifyProtection();
                             }}
                             className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"
                           >
@@ -2847,6 +2975,10 @@ export default function ApplicationDrPage(props: {
         wizardPolicyPageSize={wizardPolicyPageSize}
         targetClusterOptions={targetClusterOptions}
         labelOptions={wizardLabelOptions}
+        namespaceResourceOptions={discoveredResourceOptions.namespaceScoped}
+        clusterResourceOptions={discoveredResourceOptions.clusterScoped}
+        customResourcesLoaded={resourceCatalogLoaded}
+        onRequestCustomResources={loadWizardCustomResources}
         preScriptRef={preScriptRef}
         postScriptRef={postScriptRef}
         handleFileUpload={handleFileUpload}
@@ -2908,25 +3040,11 @@ export default function ApplicationDrPage(props: {
                 ['PVCs', String(selectedDetailApp.pvcCount || selectedDetailApp.resourceSummary?.pvcs || 0)],
                 ['Storage Request', formatBytes(capacityBytes)],
               ];
-          const detailMembers = selectedDetailApp.memberApps?.length ? selectedDetailApp.memberApps : [selectedDetailApp];
-          const detailAppIds = new Set(detailMembers.map(member => member.apiId).filter(Boolean));
-          const detailNamespaceSet = new Set(namespaces);
           const detailRestorePoints = liveRestorePoints
-            .filter(point => {
-              if (detailPlanId && point.protectionPlanId === detailPlanId) return true;
-              if (point.appId && detailAppIds.has(point.appId)) return true;
-              return point.sourceClusterId === (selectedDetailApp.clusterId || currentClusterId)
-                && [point.sourceNamespace, ...(point.includedNamespaces || [])].some(namespace => detailNamespaceSet.has(namespace));
-            })
+            .filter(point => Boolean(detailPlanId && point.protectionPlanId === detailPlanId))
             .sort((a, b) => (b.taskCreatedAt || b.createdAt || b.time || '').localeCompare(a.taskCreatedAt || a.createdAt || a.time || ''));
           const detailTasks = platformTasks
-            .filter(task => {
-              if (detailPlanId && task.protectionPlanId === detailPlanId) return true;
-              if (task.appId && detailAppIds.has(task.appId)) return true;
-              const taskNamespaces = namespacesFromPayload(task.payload || {});
-              return task.clusterId === (selectedDetailApp.clusterId || currentClusterId)
-                && taskNamespaces.some(namespace => detailNamespaceSet.has(namespace));
-            })
+            .filter(task => Boolean(detailPlanId && task.protectionPlanId === detailPlanId))
             .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
           const detailRepository = storage.find(repo => repo.id === detailPlan?.storageRepoId)
             || storage.find(repo => repo.name === selectedDetailApp.storage);

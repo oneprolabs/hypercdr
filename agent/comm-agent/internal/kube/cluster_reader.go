@@ -6,12 +6,14 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -181,6 +183,16 @@ func (r *KubernetesClusterReader) readAPIResources() []APIResource {
 		return nil
 	}
 	lists, err := r.discovery.ServerPreferredResources()
+	if len(lists) == 0 {
+		// Some discovery implementations (including lightweight proxies and
+		// test clients) do not calculate a preferred-resource view. The full
+		// discovery result is still sufficient because the key includes version.
+		_, allLists, allErr := r.discovery.ServerGroupsAndResources()
+		if len(allLists) > 0 {
+			lists = allLists
+			err = allErr
+		}
+	}
 	if err != nil && len(lists) == 0 {
 		return nil
 	}
@@ -219,56 +231,59 @@ func (r *KubernetesClusterReader) readAPIResources() []APIResource {
 	return items
 }
 
-// ReadNamespaceAPIs enumerates only custom resources defined by CRDs and only
-// in the requested namespace. This is used by an explicit DR capability scan,
-// never by the periodic summary upload.
+// ReadNamespaceAPIs enumerates every discoverable resource type that currently
+// has objects: namespaced resources are counted in the requested namespace and
+// cluster-scoped resources across the cluster. Discovery, rather than CRD
+// enumeration, is intentional: aggregated APIs such as Kasten are not backed
+// by CustomResourceDefinitions but are still valid Velero resource types. APIs
+// that cannot be listed and types with zero objects are deliberately omitted.
 func (r *KubernetesClusterReader) ReadNamespaceAPIs(ctx context.Context, namespace string) ([]NamespaceAPI, error) {
-	if r.dynamic == nil || namespace == "" {
+	if r.dynamic == nil || r.discovery == nil || namespace == "" {
 		return nil, nil
 	}
-	crds, err := r.dynamic.Resource(schema.GroupVersionResource{
-		Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions",
-	}).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, err
-	}
+	resources := r.readAPIResources()
 	items := make([]NamespaceAPI, 0)
-	for _, crd := range crds.Items {
-		scope, _, _ := unstructured.NestedString(crd.Object, "spec", "scope")
-		if scope != "Namespaced" {
-			continue
-		}
-		group, _, _ := unstructured.NestedString(crd.Object, "spec", "group")
-		resource, _, _ := unstructured.NestedString(crd.Object, "spec", "names", "plural")
-		kind, _, _ := unstructured.NestedString(crd.Object, "spec", "names", "kind")
-		versions, _, _ := unstructured.NestedSlice(crd.Object, "spec", "versions")
-		selectedVersion := ""
-		for _, rawVersion := range versions {
-			versionMap, _ := rawVersion.(map[string]any)
-			served, _ := versionMap["served"].(bool)
-			version, _ := versionMap["name"].(string)
-			storage, _ := versionMap["storage"].(bool)
-			if served && version != "" && selectedVersion == "" {
-				selectedVersion = version
+	var itemsMu sync.Mutex
+	var workers sync.WaitGroup
+	limit := make(chan struct{}, 8)
+	for _, resource := range resources {
+		resource := resource
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			select {
+			case limit <- struct{}{}:
+				defer func() { <-limit }()
+			case <-ctx.Done():
+				return
 			}
-			if served && storage && version != "" {
-				selectedVersion = version
-				break
+			client := r.dynamic.Resource(schema.GroupVersionResource{Group: resource.Group, Version: resource.Version, Resource: resource.Resource})
+			var list *unstructured.UnstructuredList
+			var listErr error
+			if resource.Namespaced {
+				list, listErr = client.Namespace(namespace).List(ctx, metav1.ListOptions{})
+			} else {
+				list, listErr = client.List(ctx, metav1.ListOptions{})
 			}
-		}
-		if group == "" || selectedVersion == "" || resource == "" {
-			continue
-		}
-		list, listErr := r.dynamic.Resource(schema.GroupVersionResource{Group: group, Version: selectedVersion, Resource: resource}).Namespace(namespace).List(ctx, metav1.ListOptions{})
-		if listErr != nil {
-			// A version can be served but unavailable through a broken webhook.
-			// API availability is reported separately; do not invent a count.
-			continue
-		}
-		if len(list.Items) > 0 {
-			items = append(items, NamespaceAPI{Namespace: namespace, Group: group, Version: selectedVersion, Resource: resource, Kind: kind, Count: len(list.Items)})
-		}
+			if listErr != nil {
+				// Some aggregated endpoints expose create-only resources or can be
+				// temporarily unavailable. Skip them rather than failing the catalog.
+				return
+			}
+			if len(list.Items) > 0 {
+				scope := "cluster"
+				resourceNamespace := ""
+				if resource.Namespaced {
+					scope = "namespace"
+					resourceNamespace = namespace
+				}
+				itemsMu.Lock()
+				items = append(items, NamespaceAPI{Scope: scope, Namespace: resourceNamespace, Group: resource.Group, Version: resource.Version, Resource: resource.Resource, Kind: resource.Kind, Count: len(list.Items)})
+				itemsMu.Unlock()
+			}
+		}()
 	}
+	workers.Wait()
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].Group != items[j].Group {
 			return items[i].Group < items[j].Group
@@ -279,6 +294,29 @@ func (r *KubernetesClusterReader) ReadNamespaceAPIs(ctx context.Context, namespa
 		return items[i].Resource < items[j].Resource
 	})
 	return items, nil
+}
+
+// EnsureResourceDiscoveryPermission adds a read-only wildcard rule so the
+// agent can count objects for APIs unknown when HyperCDR was installed. The
+// existing role already permits the agent to update its ClusterRole during
+// rolling component upgrades.
+func (r *KubernetesClusterReader) EnsureResourceDiscoveryPermission(ctx context.Context) error {
+	if r.clientset == nil {
+		return nil
+	}
+	roles := r.clientset.RbacV1().ClusterRoles()
+	role, err := roles.Get(ctx, "hypercdr-agent", metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	for _, rule := range role.Rules {
+		if containsString(rule.APIGroups, "*") && containsString(rule.Resources, "*") && containsString(rule.Verbs, "get") && containsString(rule.Verbs, "list") {
+			return nil
+		}
+	}
+	role.Rules = append(role.Rules, rbacv1.PolicyRule{APIGroups: []string{"*"}, Resources: []string{"*"}, Verbs: []string{"get", "list"}})
+	_, err = roles.Update(ctx, role, metav1.UpdateOptions{})
+	return err
 }
 
 func (r *KubernetesClusterReader) readNamespacedResources(ctx context.Context, state *ClusterState) error {

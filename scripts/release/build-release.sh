@@ -149,7 +149,9 @@ cp "${FRONTEND_SOURCE_DIR}/package.json" "${FRONTEND_SOURCE_DIR}/package-lock.js
 ln -s "${FRONTEND_DEPS_DIR}/node_modules" "${FRONTEND_SOURCE_DIR}/node_modules"
 (
   cd "${FRONTEND_SOURCE_DIR}"
-  VITE_HCDR_RELEASE_VERSION="${VERSION}" npm run build -- --outDir "${FRONTEND_DIST_DIR}" --emptyOutDir
+  VITE_HCDR_RELEASE_VERSION="${VERSION}" \
+    VITE_HCDR_RELEASE_DATE="$(date -u +%Y/%m/%d)" \
+    npm run build -- --outDir "${FRONTEND_DIST_DIR}" --emptyOutDir
 )
 restore_frontend_node_modules
 trap - EXIT

@@ -25092,3 +25092,80 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   text-transform: none;
   letter-spacing: normal;
 }
+
+/* Scope selector: shared by protection configuration and recovery. */
+.premium-app .hbdr-scoped-resource-selector { display: grid; gap: 12px; }
+.premium-app .hbdr-combined-scope-notice { display:flex; align-items:center; gap:10px; padding:12px; border:1px solid #dce5ef; border-radius:12px; color:#2767aa; background:linear-gradient(135deg,#fbfdff,#f5f8fc); }
+.premium-app .hbdr-combined-scope-notice > div { display:grid; min-width:0; gap:2px; }
+.premium-app .hbdr-combined-scope-notice strong { color:#25364b; font-size:13px; }
+.premium-app .hbdr-combined-scope-notice span { color:#718198; font-size:11px; }
+.premium-app .hbdr-combined-scope-notice em { margin-left:auto; border:1px solid #d6e5f2; border-radius:999px; padding:3px 7px; color:#4c759b; background:#fff; font-size:10px; font-style:normal; font-weight:700; white-space:nowrap; }
+.premium-app .hbdr-scoped-resource-summary { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid #dce5ef; border-radius: 12px; background: linear-gradient(135deg,#fbfdff,#f5f8fc); }
+.premium-app .hbdr-scoped-resource-summary-icon { display:grid; place-items:center; width:32px; height:32px; border-radius:9px; color:#2767aa; background:#eaf3ff; }
+.premium-app .hbdr-scoped-resource-summary > div:nth-child(2) { display:grid; gap:2px; min-width:0; }
+.premium-app .hbdr-scoped-resource-summary strong { color:#25364b; font-size:13px; }
+.premium-app .hbdr-scoped-resource-summary span { color:#718198; font-size:11px; }
+.premium-app .hbdr-scoped-resource-mode { display:flex; gap:2px; margin-left:auto; padding:3px; border:1px solid #dbe4ef; border-radius:8px; background:#fff; }
+.premium-app .hbdr-scoped-resource-mode button { min-width:54px; padding:5px 8px; border:0; border-radius:5px; color:#718198; background:transparent; font-size:11px; font-weight:700; }
+.premium-app .hbdr-scoped-resource-mode button.is-active { color:#215f9e; background:#eaf3ff; }
+.premium-app .hbdr-scoped-resource-scopes { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px; }
+.premium-app .hbdr-scoped-resource-card { overflow:hidden; border:1px solid #dce5ef; border-radius:12px; background:#fff; box-shadow:0 1px 2px rgba(33, 54, 77, .03); }
+.premium-app .hbdr-scoped-resource-card.is-clusterScoped { border-color:#e3e1ec; }
+.premium-app .hbdr-scoped-resource-card > header { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; padding:12px; border-bottom:1px solid #edf1f6; background:linear-gradient(135deg,#fbfdff,#f6f9fc); }
+.premium-app .hbdr-scoped-resource-card.is-clusterScoped > header { background:linear-gradient(135deg,#fdfcff,#f8f7fc); }
+.premium-app .hbdr-scoped-resource-card > header > div { display:grid; gap:2px; }
+.premium-app .hbdr-scoped-resource-card > header strong { color:#304258; font-size:12px; }
+.premium-app .hbdr-scoped-resource-card > header span { color:#8a98aa; font-size:10px; }
+.premium-app .hbdr-scoped-resource-card > header span.is-caution { display:flex; align-items:center; gap:4px; color:#a26b24; line-height:1.35; }
+.premium-app .hbdr-scoped-resource-card-actions { display:flex !important; align-items:center; justify-content:flex-end; gap:7px; }
+.premium-app .hbdr-scoped-resource-card-actions small { color:#8190a2; font-size:10px; font-weight:750; white-space:nowrap; }
+.premium-app .hbdr-scoped-resource-select-all { display:grid; place-items:center; width:16px; height:16px; border:1.5px solid #b8c5d3; border-radius:4px; padding:0; color:transparent; background:#fff; }
+.premium-app .hbdr-scoped-resource-select-all.is-selected { border-color:#286393; color:#fff; background:#286393; box-shadow:0 1px 2px rgba(25, 62, 96, .18); }
+.premium-app .hbdr-scoped-resource-select-all.is-partial { border-color:#7d9db9; color:#3d6f9f; background:#edf5fc; }
+.premium-app .hbdr-scoped-resource-select-all:hover { border-color:#286393; }
+.premium-app .hbdr-scoped-resource-grid { display:grid; grid-template-columns:1fr; height:262px; overflow-x:hidden; overflow-y:auto; scrollbar-gutter:stable; padding:6px; gap:2px; }
+.premium-app .hbdr-scoped-resource-grid button { display:flex; position:relative; align-items:center; justify-content:flex-start; gap:9px; width:100%; padding:8px 9px; border:1px solid transparent; border-radius:7px; color:#53657a; background:transparent; text-align:left; }
+.premium-app .hbdr-scoped-resource-grid button:hover { border-color:#d6e1eb; background:#f4f8fc; }
+.premium-app .hbdr-scoped-resource-grid button.is-selected { color:#304258; background:#f8fbfd; }
+.premium-app .hbdr-scoped-resource-grid button > span { display:grid; gap:2px; min-width:0; }
+.premium-app .hbdr-scoped-resource-grid button strong { overflow:hidden; text-overflow:ellipsis; color:inherit; font-size:11px; white-space:nowrap; }
+.premium-app .hbdr-scoped-resource-check { display:grid; place-items:center; flex:0 0 auto; width:16px; height:16px; border:1.5px solid #b8c5d3; border-radius:4px; color:transparent; background:#fff; transition:all .14s ease; }
+.premium-app .hbdr-scoped-resource-grid button.is-selected .hbdr-scoped-resource-check { border-color:#286393; color:#fff; background:#286393; box-shadow:0 1px 2px rgba(25, 62, 96, .18); }
+.premium-app .hbdr-scoped-resource-grid p { padding:8px; color:#8a98aa; font-size:11px; }
+.premium-app .hbdr-scoped-resource-loading { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; height:100%; padding:24px; color:#4f7398; text-align:center; }
+.premium-app .hbdr-scoped-resource-loading strong { color:#40566e; font-size:11px; }
+.premium-app .hbdr-scoped-resource-loading span { max-width:220px; color:#8a98aa; font-size:10px; line-height:1.5; }
+@media (max-width:760px) { .premium-app .hbdr-scoped-resource-scopes { grid-template-columns:1fr; } .premium-app .hbdr-scoped-resource-summary { align-items:flex-start; } .premium-app .hbdr-scoped-resource-mode { margin-left:0; } }
+
+.premium-app .hbdr-release-notes-unread { width:7px; height:7px; margin-left:auto; border-radius:999px; background:#2b72b8; box-shadow:0 0 0 3px #e8f2fc; }
+.premium-app .hbdr-release-notes-layer { position:fixed; inset:0; z-index:300; display:grid; place-items:center; padding:24px; }
+.premium-app .hbdr-release-notes-backdrop { position:absolute; inset:0; width:100%; height:100%; border:0; background:rgba(18,30,45,.42); backdrop-filter:blur(3px); }
+.premium-app .hbdr-release-notes-modal { position:relative; display:flex; flex-direction:column; width:min(680px,100%); max-height:min(760px,88vh); overflow:hidden; border:1px solid rgba(219,228,238,.95); border-radius:18px; background:#fff; box-shadow:0 28px 80px rgba(18,37,57,.24); }
+.premium-app .hbdr-release-notes-modal > header { display:flex; align-items:center; gap:11px; padding:20px 22px 16px; border-bottom:1px solid #e9eef4; background:linear-gradient(135deg,#fbfdff,#f3f7fb); }
+.premium-app .hbdr-release-notes-mark { display:grid; place-items:center; width:38px; height:38px; border-radius:11px; color:#286ca9; background:#e8f3fd; box-shadow:inset 0 0 0 1px #d6e8f8; }
+.premium-app .hbdr-release-notes-modal > header > div:nth-child(2) { display:grid; gap:1px; }
+.premium-app .hbdr-release-notes-modal > header span { color:#7890a8; font-size:9px; font-weight:800; letter-spacing:.16em; }
+.premium-app .hbdr-release-notes-modal > header h2 { margin:0; color:#24364a; font-size:17px; font-weight:800; }
+.premium-app .hbdr-release-notes-modal > header > button { display:grid; place-items:center; width:31px; height:31px; margin-left:auto; border:0; border-radius:8px; color:#7c8b9b; background:transparent; }
+.premium-app .hbdr-release-notes-modal > header > button:hover { color:#34495e; background:#e9eff5; }
+.premium-app .hbdr-release-notes-version { display:flex; justify-content:space-between; gap:20px; margin:18px 22px 4px; padding:14px 16px; border:1px solid #e1e8f0; border-radius:12px; background:#f8fafc; }
+.premium-app .hbdr-release-notes-version > div { display:grid; gap:3px; }
+.premium-app .hbdr-release-notes-version > div:last-child { text-align:right; }
+.premium-app .hbdr-release-notes-version small { color:#8493a4; font-size:9px; font-weight:750; text-transform:uppercase; letter-spacing:.08em; }
+.premium-app .hbdr-release-notes-version strong { color:#34485e; font-size:12px; }
+.premium-app .hbdr-release-notes-content { display:grid; gap:20px; overflow-y:auto; padding:18px 22px 24px; }
+.premium-app .hbdr-release-notes-content > section { display:grid; gap:8px; }
+.premium-app .hbdr-release-notes-category { display:flex; align-items:center; justify-content:space-between; }
+.premium-app .hbdr-release-notes-category > span { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:6px; color:#386f9e; background:#edf5fc; font-size:10px; font-weight:800; }
+.premium-app .hbdr-release-notes-content .is-feature .hbdr-release-notes-category > span { color:#21755b; background:#eaf8f2; }
+.premium-app .hbdr-release-notes-content .is-fix .hbdr-release-notes-category > span { color:#9b6821; background:#fdf6e8; }
+.premium-app .hbdr-release-notes-category em { color:#9aa7b5; font-size:10px; font-style:normal; font-weight:700; }
+.premium-app .hbdr-release-notes-content ul { display:grid; gap:3px; margin:0; padding:0; list-style:none; }
+.premium-app .hbdr-release-notes-content li { display:flex; align-items:flex-start; gap:9px; padding:9px 10px; border-left:2px solid #b7d2ea; color:#536579; background:#fbfcfd; font-size:11px; line-height:1.55; }
+.premium-app .hbdr-release-notes-content .is-feature li { border-left-color:#9ed8c2; }
+.premium-app .hbdr-release-notes-content .is-fix li { border-left-color:#e8ca8e; }
+.premium-app .hbdr-release-notes-content li > svg { flex:0 0 auto; margin-top:2px; color:#7190ad; }
+.premium-app .hbdr-release-notes-content li > div { display:flex; align-items:flex-start; gap:7px; }
+.premium-app .hbdr-release-notes-content li small { flex:0 0 auto; padding:1px 4px; border-radius:4px; color:#65768a; background:#e9eef3; font-size:8px; font-weight:850; }
+.premium-app .hbdr-release-notes-empty { padding:40px; border:1px dashed #dbe3ec; border-radius:12px; color:#8795a5; text-align:center; font-size:11px; }
+@media (max-width:640px) { .premium-app .hbdr-release-notes-layer { padding:12px; } .premium-app .hbdr-release-notes-version { flex-direction:column; } .premium-app .hbdr-release-notes-version > div:last-child { text-align:left; } }

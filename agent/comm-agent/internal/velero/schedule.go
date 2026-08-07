@@ -96,13 +96,20 @@ func BuildScheduleManifest(input ScheduleBuildInput) (ScheduleManifest, error) {
 		},
 		IncludedNamespaces:       sourceNamespaces,
 		StorageLocation:          input.Command.StorageRepo,
-		IncludeClusterResources:  input.Command.IncludeClusterResources,
+		IncludeClusterResources:  boolPtr(input.Command.IncludeClusterResources),
 		SnapshotVolumes:          boolPtr(false),
 		DefaultVolumesToFsBackup: boolPtr(true),
 		ExcludedResources:        convertExcludeRules(input.Command.ExcludeResources),
 	}
 	if input.Command.LabelSelector != "" {
 		template.LabelSelector = parseLegacyScheduleLabelSelector(input.Command.LabelSelector)
+	}
+	if input.Command.ResourceSelection.Mode == "custom" {
+		template.IncludedResources = nil
+		template.ExcludedResources = nil
+		template.IncludedNamespaceScopedResources = input.Command.ResourceSelection.NamespaceScoped
+		template.IncludedClusterScopedResources = input.Command.ResourceSelection.ClusterScoped
+		template.IncludeClusterResources = nil
 	}
 	return ScheduleManifest{
 		APIVersion: "velero.io/v1",

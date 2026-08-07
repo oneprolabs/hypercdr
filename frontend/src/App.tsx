@@ -5,6 +5,7 @@ import { HyperTable, type HyperTableColumn } from './components/table';
 import { SearchBar } from './components/search-bar';
 import { EditField } from './components/edit-field';
 import ListToolbarControls from './components/list-toolbar-controls';
+import { ReleaseNotesModal } from './components/release-notes-modal';
 import {
   Activity,
   AlertCircle,
@@ -67,6 +68,7 @@ import { apiDelete, apiGet, apiHeaders, apiPatch, apiPost, apiPut, ensureApiResp
 import { AUTH_EXPIRED_EVENT, clearStoredAuthSession, readStoredAuthSession, writeStoredAuthSession } from './auth/session';
 import type { ApiLoginResponse, AuthSession } from './auth/types';
 import { setUserTimeZone as setSharedUserTimeZone } from './lib/date-time';
+import { hasUnreadReleaseNotes, markReleaseNotesViewed } from './lib/release-notes';
 import type {
   AppItem,
   Cluster,
@@ -465,25 +467,16 @@ function buildAppTaskMap(tasks: ApiTask[], apps: ApiApplication[], taskTypes?: s
   });
   const allowedTypes = taskTypes ? new Set(taskTypes) : null;
   for (const app of apps) {
+    const appPlan = plans.find(item => planIncludesApp(item, app.id));
+    if (!appPlan?.id) continue;
     const match = sorted.find(t => {
       if (allowedTypes && !allowedTypes.has(t.type)) return false;
       if (t.payload?.archivedClusterId || t.payload?.archivedAppId || t.payload?.archivedProtectionPlanId) return false;
       if (['restore', 'drill', 'takeover'].includes(t.type)) return recoveryTaskMatchesApp(t, app, plans, restorePoints);
+      if (taskPlanId(t) !== appPlan.id) return false;
       if (!t.clusterId || t.clusterId !== app.clusterId) return false;
       const taskNamespaces = namespacesFromPayload(t.payload);
-      if (t.protectionPlanId && taskNamespaces.length > 0) {
-        return taskNamespaces.includes(app.namespace);
-      }
-      if (t.appId === app.id) return true;
-      if (t.restorePointId) {
-        const point = restorePoints.find(item => item.id === t.restorePointId);
-        if (point) {
-          if (point.sourceClusterId && point.sourceClusterId !== app.clusterId) return false;
-          if (point.appId) return point.appId === app.id;
-          return point.sourceClusterId === app.clusterId && point.sourceNamespace === app.namespace;
-        }
-      }
-      return t.payload && t.payload.sourceNamespace === app.namespace;
+      return taskNamespaces.length === 0 || taskNamespaces.includes(app.namespace);
     });
     if (match) byNamespace[app.namespace] = match;
   }
@@ -545,6 +538,8 @@ function mapCluster(cluster: ApiCluster, apps: AppItem[] = []): Cluster {
     nodes: cluster.nodeCount,
     nodeDetails: cluster.nodes || [],
     storageClasses: cluster.storageClasses || [],
+    apiResources: cluster.apiResources || [],
+    namespaceApis: cluster.namespaceAPIs || [],
     namespaces: cluster.namespaceCount || appCount,
     applications: appCount,
     agentVersion: cluster.agentVersion || 'pending',
@@ -955,7 +950,18 @@ export default function App() {
   const [resetToken, setResetToken] = useState('');
   const [locale, setLocale] = useState<LocaleCode>('en');
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [releaseNotesOpen, setReleaseNotesOpen] = useState(false);
+  const [releaseNotesUnread, setReleaseNotesUnread] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
+  const releaseNotesAdminAudience = authSession?.user.role === 'admin';
+
+  useEffect(() => {
+    if (!authSession) {
+      setReleaseNotesUnread(false);
+      return;
+    }
+    setReleaseNotesUnread(hasUnreadReleaseNotes(releaseNotesAdminAudience));
+  }, [authSession, releaseNotesAdminAudience]);
   const [clusters, setClusters] = useState<Cluster[]>(initialClusters);
   const [liveClusters, setLiveClusters] = useState<Cluster[] | null>(null);
   const [storage, setStorage] = useState<StorageRepo[]>(initialStorage);
@@ -2001,6 +2007,16 @@ export default function App() {
                   <Settings size={16} />
                   <span>Basic Information</span>
                 </button>
+                <button type="button" role="menuitem" onClick={() => {
+                  setAccountMenuOpen(false);
+                  setReleaseNotesOpen(true);
+                  markReleaseNotesViewed(releaseNotesAdminAudience);
+                  setReleaseNotesUnread(false);
+                }}>
+                  <Bell size={16} />
+                  <span>Release notes</span>
+                  {releaseNotesUnread && <i className="hbdr-release-notes-unread" aria-label="Unread release notes" />}
+                </button>
                 <button type="button" role="menuitem" className="hbdr-account-signout" onClick={signOut}>
                   <LogOut size={16} />
                   <span>Sign out</span>
@@ -2270,6 +2286,8 @@ export default function App() {
           </>
         )}
       </AnimatePresence>
+
+      <ReleaseNotesModal open={releaseNotesOpen} isAdmin={releaseNotesAdminAudience} onClose={() => setReleaseNotesOpen(false)} />
 
       {toast && (
         <div className="fixed right-5 top-20 z-50 rounded border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 shadow-xl">

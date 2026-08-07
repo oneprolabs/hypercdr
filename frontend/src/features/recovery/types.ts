@@ -92,6 +92,11 @@ export type ApiProtectionPlan = {
   storageRepoId?: string;
   targetClusterId?: string;
   includedResources?: string[];
+  resourceSelection?: {
+    mode: 'all' | 'custom';
+    namespaceScoped?: string[];
+    clusterScoped?: string[];
+  };
   labelSelector?: { matchLabels?: Record<string, string>; matchExpressions?: Array<{ key: string; operator: string; values?: string[] }> };
   excludedResources?: string[];
   status?: string;

@@ -165,6 +165,7 @@ type NamedCapabilityInventory struct {
 }
 
 type NamespaceAPIInventory struct {
+	Scope     string `json:"scope,omitempty"`
 	Namespace string `json:"namespace"`
 	Group     string `json:"group"`
 	Version   string `json:"version"`
@@ -443,19 +444,26 @@ type UnregisterCommand struct {
 }
 
 type BackupCommand struct {
-	PlanID                  string        `json:"planId,omitempty"`
-	Trigger                 string        `json:"trigger,omitempty"`
-	SourceClusterID         string        `json:"sourceClusterId,omitempty"`
-	SourceNamespace         string        `json:"sourceNamespace"`
-	SourceNamespaces        []string      `json:"sourceNamespaces,omitempty"`
-	VeleroBackupName        string        `json:"veleroBackupName,omitempty"`
-	Scope                   string        `json:"scope"`
-	IncludedResources       []string      `json:"includedResources,omitempty"`
-	LabelSelector           LabelSelector `json:"labelSelector,omitempty"`
-	StorageRepo             string        `json:"storageRepo"`
-	IncludeClusterResources bool          `json:"includeClusterResources"`
-	ExcludedResources       []string      `json:"excludedResources,omitempty"`
-	Hooks                   HookSet       `json:"hooks"`
+	PlanID                  string            `json:"planId,omitempty"`
+	Trigger                 string            `json:"trigger,omitempty"`
+	SourceClusterID         string            `json:"sourceClusterId,omitempty"`
+	SourceNamespace         string            `json:"sourceNamespace"`
+	SourceNamespaces        []string          `json:"sourceNamespaces,omitempty"`
+	VeleroBackupName        string            `json:"veleroBackupName,omitempty"`
+	Scope                   string            `json:"scope"`
+	IncludedResources       []string          `json:"includedResources,omitempty"`
+	LabelSelector           LabelSelector     `json:"labelSelector,omitempty"`
+	StorageRepo             string            `json:"storageRepo"`
+	IncludeClusterResources bool              `json:"includeClusterResources"`
+	ExcludedResources       []string          `json:"excludedResources,omitempty"`
+	ResourceSelection       ResourceSelection `json:"resourceSelection,omitempty"`
+	Hooks                   HookSet           `json:"hooks"`
+}
+
+type ResourceSelection struct {
+	Mode            string   `json:"mode,omitempty"`
+	NamespaceScoped []string `json:"namespaceScoped,omitempty"`
+	ClusterScoped   []string `json:"clusterScoped,omitempty"`
 }
 
 type LabelSelector struct {
@@ -477,17 +485,18 @@ type BackupCancelCommand struct {
 }
 
 type ScheduleSyncCommand struct {
-	PlanID                  string        `json:"planId"`
-	ScheduleName            string        `json:"scheduleName"`
-	Cron                    string        `json:"cron"`
-	SourceNamespace         string        `json:"sourceNamespace"`
-	SourceNamespaces        []string      `json:"sourceNamespaces,omitempty"`
-	Scope                   string        `json:"scope"`
-	LabelSelector           string        `json:"labelSelector,omitempty"`
-	StorageRepo             string        `json:"storageRepo"`
-	IncludeClusterResources bool          `json:"includeClusterResources"`
-	ExcludeResources        []ExcludeRule `json:"excludeResources"`
-	Hooks                   HookSet       `json:"hooks"`
+	PlanID                  string            `json:"planId"`
+	ScheduleName            string            `json:"scheduleName"`
+	Cron                    string            `json:"cron"`
+	SourceNamespace         string            `json:"sourceNamespace"`
+	SourceNamespaces        []string          `json:"sourceNamespaces,omitempty"`
+	Scope                   string            `json:"scope"`
+	LabelSelector           string            `json:"labelSelector,omitempty"`
+	StorageRepo             string            `json:"storageRepo"`
+	IncludeClusterResources bool              `json:"includeClusterResources"`
+	ExcludeResources        []ExcludeRule     `json:"excludeResources"`
+	ResourceSelection       ResourceSelection `json:"resourceSelection,omitempty"`
+	Hooks                   HookSet           `json:"hooks"`
 }
 
 type RetentionCleanupCommand struct {

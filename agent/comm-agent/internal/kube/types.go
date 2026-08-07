@@ -13,7 +13,12 @@ type CapabilityReader interface {
 	ReadNamespaceAPIs(ctx context.Context, namespace string) ([]NamespaceAPI, error)
 }
 
+type ResourceDiscoveryPreparer interface {
+	EnsureResourceDiscoveryPermission(ctx context.Context) error
+}
+
 type NamespaceAPI struct {
+	Scope     string
 	Namespace string
 	Group     string
 	Version   string

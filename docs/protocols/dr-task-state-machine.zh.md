@@ -1624,6 +1624,14 @@ agent.task.failed     response 或 event：接收失败时是 response，执行�
 
 ### 10.3 标准 Velero Payload
 
+#### 资源范围选择（Velero v1.18+）
+
+保护计划的 `resourceSelection` 是新的用户配置：`mode=all` 表示不传资源过滤字段；`mode=custom` 将 namespace-scoped 与 cluster-scoped 类型分别下发到 Backup/Schedule 的 `includedNamespaceScopedResources` 与 `includedClusterScopedResources`。`custom` 时不得同时下发旧的 `includedResources`、`excludedResources` 或 `includeClusterResources`。
+
+Restore CR 没有上述按范围拆分的字段。恢复向导仍按两个范围展示资源类型，但在下发 Restore 时合并为 `includedResources`，并在选择了 cluster-scoped 类型时设置 `includeClusterResources=true`。
+
+历史 Filter 计划迁移为 `mode=custom`：原 `includedResources` 归入 namespace-scoped 类型。旧 `excludedResources` 与标签过滤不再保留，避免与 Velero v1.18 的 scoped 字段混用。
+
 `velero` 字段用于描述 agent 观测到的 Velero 对象状态。目标上应逐步从 `map` 收敛为稳定结构。
 
 ```json

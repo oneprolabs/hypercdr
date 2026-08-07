@@ -11,6 +11,7 @@ import {
   Target,
   X,
 } from 'lucide-react';
+import { ScopedResourceSelector, type ScopedResourceSelection } from './components/scoped-resource-selector';
 
 export type RecoveryWizardMode = 'drill' | 'takeover';
 
@@ -35,7 +36,8 @@ export type RecoveryWizardConfig = {
   notes: string;
   forceProceed: boolean;
   includedResources: string[];
-  excludedResources: string[];
+	excludedResources: string[];
+	resourceSelection: ScopedResourceSelection;
   storageClassMappings: Record<string, string>;
   imageMappings: Record<string, string>;
   waitForWorkloads: boolean;
@@ -254,10 +256,15 @@ export function RecoveryWizardModal(props: Props) {
     current.count += 1; groups.set(key, current); return groups;
   }, new Map<string, { key: string; resourceKey: string; apiVersion: string; kind: string; clusterScoped: boolean; count: number }>()).values()).sort((a, b) => a.kind.localeCompare(b.kind));
 
-  const toggleResourceGroup = (resourceKey: string, enabled: boolean) => {
-    const excluded = new Set(config.excludedResources || []);
-    if (enabled) excluded.delete(resourceKey); else excluded.add(resourceKey);
-    updateConfig({ excludedResources: Array.from(excluded).sort() });
+  const restoreSelection: ScopedResourceSelection = config.resourceSelection || { mode: 'all', namespaceScoped: [], clusterScoped: [] };
+  const updateRestoreSelection = (selection: ScopedResourceSelection) => {
+    const selected = [...selection.namespaceScoped, ...selection.clusterScoped];
+    updateConfig({
+      resourceSelection: selection,
+      includedResources: selection.mode === 'custom' ? selected : [],
+      excludedResources: [],
+      includeClusterScoped: selection.mode === 'custom' && selection.clusterScoped.length > 0,
+    });
   };
 
   const updateMapping = (field: 'storageClassMappings' | 'imageMappings', source: string, target: string) => {
@@ -398,28 +405,25 @@ export function RecoveryWizardModal(props: Props) {
                   </div>
 
                   <div className="hbdr-recovery-point-picker">
-                    <label>
+                    {mode !== 'drill' && <label>
                       <span>Snapshot type</span>
                       <div className="hbdr-recovery-source-tabs">
                         {(['export', 'snapshot'] as const).map(sourceType => {
                           const meta = sourceMeta(sourceType);
-                          const unsupported = mode === 'drill' && sourceType === 'snapshot';
                           return (
                             <button
                               key={sourceType}
                               type="button"
                               className={config.sourceType === sourceType ? 'is-active' : ''}
-                              disabled={unsupported}
-                              aria-label={unsupported ? `${meta.title}, not supported yet` : meta.title}
+                              aria-label={meta.title}
                               onClick={() => chooseSourceType(sourceType)}
                             >
                               <span>{meta.title}</span>
-                              {unsupported && <em>Not supported yet</em>}
                             </button>
                           );
                         })}
                       </div>
-                    </label>
+                    </label>}
                     <label>
                       <select
                         value={config.pointId}
@@ -513,36 +517,37 @@ export function RecoveryWizardModal(props: Props) {
                   </div>
                 </div>
 
+                <div className="hbdr-protect-section hbdr-recovery-scope-section">
+                  <div className="hbdr-protect-section-title">
+                    <strong>Restore scope</strong>
+                    <span>Choose the Kubernetes resource types restored from this point.</span>
+                  </div>
+                  <ScopedResourceSelector
+                    purpose="restore"
+                    value={restoreSelection}
+                    onChange={updateRestoreSelection}
+                    disabled={contentsLoading || Boolean(contentsError)}
+                    namespaceResources={resourceGroups.filter(group => !group.clusterScoped).map(group => ({ key: group.resourceKey, label: group.kind, detail: group.apiVersion, count: group.count }))}
+                    clusterResources={resourceGroups.filter(group => group.clusterScoped).map(group => ({ key: group.resourceKey, label: group.kind, detail: group.apiVersion, count: group.count }))}
+                  />
+                  {contentsLoading && <p className="hbdr-recovery-inline-status"><RefreshCw size={13} className="animate-spin" /> Reading the selected restore point…</p>}
+                  {contentsError && (
+                    <div className="hbdr-recovery-content-failure">
+                      <p className="hbdr-recovery-inline-error">{restorePointUnavailable
+                        ? 'Selected restore point is no longer available. Refresh the restore point list and select another restore point.'
+                        : `Restore scope unavailable: ${contentsError}.`}</p>
+                      {!restorePointUnavailable && <button type="button" onClick={() => setContentsReload(value => value + 1)}><RefreshCw size={12} />Retry content inspection</button>}
+                    </div>
+                  )}
+                </div>
+
                 <div className="hbdr-protect-section hbdr-recovery-advanced">
                   <button type="button" className="hbdr-recovery-advanced-toggle" onClick={() => setAdvancedOpen(value => !value)}>
-                    <span><strong>Advanced options</strong><em>Content, mappings, validation, and conflict handling</em></span>
+                    <span><strong>Advanced options</strong><em>Mappings and conflict handling</em></span>
                     <b>{advancedOpen ? 'Hide' : 'Show'}</b>
                   </button>
                   {advancedOpen && (
                     <div className="hbdr-recovery-advanced-content">
-                      <section>
-                        <header><strong>Restore content</strong><span>Namespace resources and custom resources are included by default.</span></header>
-                        {contentsLoading && <p className="hbdr-recovery-inline-status"><RefreshCw size={13} className="animate-spin" /> Reading the selected Velero backup…</p>}
-                        {contentsError && (
-                          <div className="hbdr-recovery-content-failure">
-                            <p className="hbdr-recovery-inline-error">{restorePointUnavailable
-                              ? 'Selected restore point is no longer available. Refresh the restore point list and select another restore point.'
-                              : `Content preview unavailable: ${contentsError}.`}</p>
-                            {!restorePointUnavailable && <button type="button" onClick={() => setContentsReload(value => value + 1)}><RefreshCw size={12} />Retry content inspection</button>}
-                          </div>
-                        )}
-                        {!contentsLoading && !contentsError && <div className="hbdr-recovery-resource-list">
-                          {resourceGroups.map(group => {
-                            const enabled = !config.excludedResources?.includes(group.resourceKey);
-                            return <label key={group.key}>
-                              <input type="checkbox" checked={enabled} onChange={event => toggleResourceGroup(group.resourceKey, event.target.checked)} />
-                              <span><strong>{group.kind}</strong><em>{group.apiVersion} · {group.count} · {group.clusterScoped ? 'Cluster-scoped' : 'Namespace-scoped'}</em></span>
-                            </label>;
-                          })}
-                          {resourceGroups.length === 0 && <p>No resource catalog was returned.</p>}
-                        </div>}
-                        <label className="hbdr-recovery-confirm-check"><input type="checkbox" checked={config.includeClusterScoped} onChange={event => updateConfig({ includeClusterScoped: event.target.checked })} /><span>Include cluster-scoped resources from this backup</span></label>
-                      </section>
                       <section>
                         <header><strong>Environment mappings</strong><span>Leave blank to preserve the value stored in the backup.</span></header>
                         {backupStorageClasses.map(source => <label className="hbdr-recovery-mapping" key={`sc-${source}`}><span>StorageClass <b>{source}</b></span><select value={config.storageClassMappings?.[source] || ''} onChange={event => updateMapping('storageClassMappings', source, event.target.value)}><option value="">Keep original</option>{(targetClusterOption?.storageClasses || []).map(item => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label>)}
@@ -553,11 +558,11 @@ export function RecoveryWizardModal(props: Props) {
                         {config.contentCatalogLoaded && backupStorageClasses.length === 0 && backupImages.length === 0 && <p className="hbdr-recovery-muted">No StorageClass or container image references were found in the inspected backup.</p>}
                         {!config.contentCatalogLoaded && <p className="hbdr-recovery-muted">Mappings are unavailable until restore point content inspection succeeds.</p>}
                       </section>
-                      <section>
+                      {mode !== 'drill' && <section>
                         <header><strong>Validation</strong><span>These checks run after Kubernetes resources and persistent data are restored.</span></header>
                         <label className="hbdr-recovery-confirm-check"><input type="checkbox" checked={config.waitForWorkloads} onChange={event => updateConfig({ waitForWorkloads: event.target.checked })} /><span>Wait for workloads and pods to become ready</span></label>
                         <label className="hbdr-recovery-confirm-check"><input type="checkbox" checked={config.runValidation} onChange={event => updateConfig({ runValidation: event.target.checked })} /><span>Run application validation</span></label>
-                      </section>
+                      </section>}
                     </div>
                   )}
                 </div>

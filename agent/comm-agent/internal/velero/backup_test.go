@@ -92,6 +92,39 @@ func TestBuildBackupManifestAddsSourceClusterLabel(t *testing.T) {
 	}
 }
 
+func TestBuildBackupManifestUsesVeleroScopedResourceFields(t *testing.T) {
+	manifest, err := BuildBackupManifest(BackupBuildInput{
+		TaskID: "task-scoped",
+		Command: protocol.BackupCommand{
+			SourceNamespace:         "demo",
+			StorageRepo:             "my-minio",
+			IncludedResources:       []string{"deployments.apps"},
+			ExcludedResources:       []string{"secrets"},
+			IncludeClusterResources: true,
+			ResourceSelection: protocol.ResourceSelection{
+				Mode:            "custom",
+				NamespaceScoped: []string{"deployments.apps", "persistentvolumeclaims"},
+				ClusterScoped:   []string{"persistentvolumes"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildBackupManifest failed: %v", err)
+	}
+	if len(manifest.Spec.IncludedResources) != 0 || len(manifest.Spec.ExcludedResources) != 0 {
+		t.Fatalf("legacy filters must be omitted for scoped selection: %#v", manifest.Spec)
+	}
+	if manifest.Spec.IncludeClusterResources != nil {
+		t.Fatal("legacy includeClusterResources must be omitted for scoped selection")
+	}
+	if got := manifest.Spec.IncludedNamespaceScopedResources; len(got) != 2 || got[0] != "deployments.apps" {
+		t.Fatalf("namespace scoped resources = %v", got)
+	}
+	if got := manifest.Spec.IncludedClusterScopedResources; len(got) != 1 || got[0] != "persistentvolumes" {
+		t.Fatalf("cluster scoped resources = %v", got)
+	}
+}
+
 func TestBuildScheduleManifestAddsSourceClusterLabel(t *testing.T) {
 	manifest, err := BuildScheduleManifest(ScheduleBuildInput{
 		TaskID:          "task-schedule",
@@ -112,6 +145,38 @@ func TestBuildScheduleManifestAddsSourceClusterLabel(t *testing.T) {
 	}
 	if got := manifest.Spec.Template.Metadata.Labels["hypercdr.io/source-cluster-id"]; got != "cluster-source" {
 		t.Fatalf("template source cluster label = %q, want cluster-source", got)
+	}
+}
+
+func TestBuildScheduleManifestUsesVeleroScopedResourceFields(t *testing.T) {
+	manifest, err := BuildScheduleManifest(ScheduleBuildInput{
+		TaskID: "task-scoped-schedule",
+		Command: protocol.ScheduleSyncCommand{
+			PlanID:                  "plan-scoped",
+			Cron:                    "0 * * * *",
+			SourceNamespaces:        []string{"demo"},
+			StorageRepo:             "my-minio",
+			IncludeClusterResources: true,
+			ExcludeResources:        []protocol.ExcludeRule{{Resource: "secrets"}},
+			ResourceSelection: protocol.ResourceSelection{
+				Mode:            "custom",
+				NamespaceScoped: []string{"deployments.apps"},
+				ClusterScoped:   []string{"persistentvolumes"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildScheduleManifest failed: %v", err)
+	}
+	template := manifest.Spec.Template
+	if len(template.IncludedResources) != 0 || len(template.ExcludedResources) != 0 || template.IncludeClusterResources != nil {
+		t.Fatalf("legacy fields must be omitted for scoped selection: %#v", template)
+	}
+	if got := template.IncludedNamespaceScopedResources; len(got) != 1 || got[0] != "deployments.apps" {
+		t.Fatalf("namespace scoped resources = %v", got)
+	}
+	if got := template.IncludedClusterScopedResources; len(got) != 1 || got[0] != "persistentvolumes" {
+		t.Fatalf("cluster scoped resources = %v", got)
 	}
 }
 

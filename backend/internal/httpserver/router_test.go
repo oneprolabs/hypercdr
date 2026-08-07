@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -273,6 +274,11 @@ func TestSchedulerCreatesSingleBackupTaskPerPlan(t *testing.T) {
 	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{
 		SourceClusterID: clusterID, AppID: app.ID, AppIDs: []string{app.ID}, StorageRepoID: storage.ID,
 		PolicyID: policy.ID, ScopeType: "all", Status: "active",
+		ResourceSelection: store.ResourceSelection{
+			Mode:            "custom",
+			NamespaceScoped: []string{"deployments.apps", "persistentvolumeclaims"},
+			ClusterScoped:   []string{"storageclasses.storage.k8s.io"},
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -300,6 +306,9 @@ func TestSchedulerCreatesSingleBackupTaskPerPlan(t *testing.T) {
 		}
 		if got := taskPayloadString(task.Payload, "trigger"); got != "scheduled" {
 			t.Fatalf("scheduled backup trigger = %q, want scheduled", got)
+		}
+		if got := resourceSelectionPayload(task.Payload); !reflect.DeepEqual(got, plan.ResourceSelection) {
+			t.Fatalf("scheduled backup resource selection = %#v, want %#v", got, plan.ResourceSelection)
 		}
 	}
 	if backupCount != 1 {
@@ -1697,6 +1706,29 @@ func TestUpgradeTargetIsNewer(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			if actual := upgradeTargetIsNewer(test.current, test.target, test.digestMismatch); actual != test.upgrade {
 				t.Fatalf("upgradeTargetIsNewer(%q, %q, %v) = %v, want %v", test.current, test.target, test.digestMismatch, actual, test.upgrade)
+			}
+		})
+	}
+}
+
+func TestResourceSelectionPayloadAcceptsInMemoryAndJSONShapes(t *testing.T) {
+	want := store.ResourceSelection{
+		Mode:            "custom",
+		NamespaceScoped: []string{"pods", "configmaps"},
+		ClusterScoped:   []string{"persistentvolumes"},
+	}
+	for name, payload := range map[string]map[string]any{
+		"in-memory task": {"resourceSelection": want},
+		"database task": {"resourceSelection": map[string]any{
+			"mode":            "custom",
+			"namespaceScoped": []any{"pods", "configmaps"},
+			"clusterScoped":   []any{"persistentvolumes"},
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := resourceSelectionPayload(payload)
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("resourceSelectionPayload() = %#v, want %#v", got, want)
 			}
 		})
 	}

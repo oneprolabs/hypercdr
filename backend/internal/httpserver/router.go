@@ -206,19 +206,20 @@ func requiresSystemAdmin(req *http.Request) bool {
 }
 
 type backupTaskRequest struct {
-	ClusterID               string              `json:"clusterId"`
-	AppID                   string              `json:"appId"`
-	ProtectionPlanID        string              `json:"protectionPlanId"`
-	SourceNamespace         string              `json:"sourceNamespace"`
-	SourceNamespaces        []string            `json:"sourceNamespaces"`
-	Scope                   string              `json:"scope"`
-	IncludedResources       []string            `json:"includedResources"`
-	LabelSelector           store.LabelSelector `json:"labelSelector"`
-	StorageRepo             string              `json:"storageRepo"`
-	ExcludedResources       []string            `json:"excludedResources"`
-	IncludeClusterResources bool                `json:"includeClusterResources"`
-	Trigger                 string              `json:"trigger"`
-	RequestedBy             string              `json:"-"`
+	ClusterID               string                  `json:"clusterId"`
+	AppID                   string                  `json:"appId"`
+	ProtectionPlanID        string                  `json:"protectionPlanId"`
+	SourceNamespace         string                  `json:"sourceNamespace"`
+	SourceNamespaces        []string                `json:"sourceNamespaces"`
+	Scope                   string                  `json:"scope"`
+	IncludedResources       []string                `json:"includedResources"`
+	LabelSelector           store.LabelSelector     `json:"labelSelector"`
+	StorageRepo             string                  `json:"storageRepo"`
+	ExcludedResources       []string                `json:"excludedResources"`
+	ResourceSelection       store.ResourceSelection `json:"resourceSelection"`
+	IncludeClusterResources bool                    `json:"includeClusterResources"`
+	Trigger                 string                  `json:"trigger"`
+	RequestedBy             string                  `json:"-"`
 }
 
 func requestActor(req *http.Request) string {
@@ -2370,6 +2371,11 @@ func (r *Router) requestClusterInventory(w http.ResponseWriter, req *http.Reques
 	}
 	if body.Scope == "" {
 		body.Scope = "summary"
+	}
+	// The UI-facing name describes the user action; the agent protocol uses
+	// capabilities for the scoped, dynamic API object-count scan.
+	if body.Scope == "namespaceResources" {
+		body.Scope = "capabilities"
 	}
 	if body.Reason == "" {
 		body.Reason = "user_refresh"
@@ -4536,6 +4542,7 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 			VeleroBackupName:        stringPayload(task.Payload, "veleroBackupName"),
 			Scope:                   stringPayload(task.Payload, "scope"),
 			IncludedResources:       stringSlicePayload(task.Payload, "includedResources"),
+			ResourceSelection:       protocolResourceSelection(resourceSelectionPayload(task.Payload)),
 			LabelSelector:           protocolLabelSelector(labelSelectorPayload(task.Payload)),
 			StorageRepo:             stringPayload(task.Payload, "storageRepo"),
 			IncludeClusterResources: boolPayload(task.Payload, "includeClusterResources"),
@@ -4693,6 +4700,32 @@ func stringSlicePayload(payload map[string]any, key string) []string {
 	return values
 }
 
+func resourceSelectionPayload(payload map[string]any) store.ResourceSelection {
+	switch raw := payload["resourceSelection"].(type) {
+	case store.ResourceSelection:
+		if raw.Mode == "" {
+			raw.Mode = "all"
+		}
+		return raw
+	case map[string]any:
+		return store.ResourceSelection{
+			Mode:            firstNonEmptyString(stringFromMap(raw, "mode"), "all"),
+			NamespaceScoped: stringSlicePayload(raw, "namespaceScoped"),
+			ClusterScoped:   stringSlicePayload(raw, "clusterScoped"),
+		}
+	default:
+		return store.ResourceSelection{Mode: "all"}
+	}
+}
+
+func protocolResourceSelection(selection store.ResourceSelection) protocol.ResourceSelection {
+	return protocol.ResourceSelection{
+		Mode:            selection.Mode,
+		NamespaceScoped: selection.NamespaceScoped,
+		ClusterScoped:   selection.ClusterScoped,
+	}
+}
+
 func labelSelectorPayload(payload map[string]any) store.LabelSelector {
 	raw, ok := payload["labelSelector"]
 	if !ok || raw == nil {
@@ -4836,6 +4869,7 @@ func (r *Router) scheduleSyncCommandFromPayload(payload map[string]any) (*protoc
 		StorageRepo:             repoName,
 		IncludeClusterResources: boolPayload(payload, "includeClusterResources"),
 		ExcludeResources:        excludeRules,
+		ResourceSelection:       protocolResourceSelection(resourceSelectionPayload(payload)),
 		Hooks:                   protocol.HookSet{},
 	}, nil
 }
@@ -5144,6 +5178,42 @@ func (r *Router) createProtectionPlan(w http.ResponseWriter, req *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_scope_type", "allowed": []string{"all", "filtered"}})
 		return
 	}
+	// A resource-type selection is meaningful only for one namespace. For a
+	// multi-namespace plan, always retain Velero's unfiltered semantics even if
+	// an older client submits a custom selection.
+	selectedNamespaces := map[string]struct{}{}
+	seenAppIDs := map[string]struct{}{}
+	for _, appID := range append(append([]string{}, input.AppIDs...), input.AppID) {
+		if appID == "" {
+			continue
+		}
+		if _, seen := seenAppIDs[appID]; seen {
+			continue
+		}
+		seenAppIDs[appID] = struct{}{}
+		if app, found, _ := r.store.GetApplication(appID); found && app.Namespace != "" {
+			selectedNamespaces[app.Namespace] = struct{}{}
+		}
+	}
+	if len(selectedNamespaces) > 1 {
+		input.ScopeType = "all"
+		input.IncludedResources = nil
+		input.ExcludedResources = nil
+		input.LabelSelector = store.LabelSelector{}
+		input.IncludeClusterScoped = false
+		input.ResourceSelection = store.ResourceSelection{Mode: "all"}
+	}
+	if input.ResourceSelection.Mode == "" {
+		input.ResourceSelection.Mode = "all"
+	}
+	if input.ResourceSelection.Mode != "all" && input.ResourceSelection.Mode != "custom" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_resource_selection_mode", "allowed": []string{"all", "custom"}})
+		return
+	}
+	if input.ResourceSelection.Mode == "custom" && len(input.ResourceSelection.NamespaceScoped) == 0 && len(input.ResourceSelection.ClusterScoped) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "resource_selection_required", "message": "Select at least one namespace-scoped or cluster-scoped resource type."})
+		return
+	}
 	if input.AppID == "" && len(input.AppIDs) > 0 {
 		input.AppID = input.AppIDs[0]
 	}
@@ -5409,6 +5479,7 @@ func protectionPlanActivationResponse(item store.ProtectionPlan, activationTask 
 		"appIds":               nonNilSlice(item.AppIDs),
 		"scopeType":            item.ScopeType,
 		"includedResources":    nonNilSlice(item.IncludedResources),
+		"resourceSelection":    item.ResourceSelection,
 		"labelSelector":        item.LabelSelector,
 		"includeClusterScoped": item.IncludeClusterScoped,
 		"storageRepoId":        item.StorageRepoID,
@@ -5519,6 +5590,7 @@ func (r *Router) dispatchScheduleSyncTask(plan store.ProtectionPlan) (store.Task
 		"sourceNamespaces":        sourceNamespaces,
 		"scope":                   plan.ScopeType,
 		"includedResources":       plan.IncludedResources,
+		"resourceSelection":       plan.ResourceSelection,
 		"labelSelector":           plan.LabelSelector,
 		"storageRepoId":           repo.ID,
 		"storageRepo":             storageName,
@@ -6069,6 +6141,7 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 		storageRepoID           string
 		scope                   string
 		includedResources       []string
+		resourceSelection       store.ResourceSelection
 		labelSelector           store.LabelSelector
 		excludedResources       []string
 		includeClusterResources bool
@@ -6172,6 +6245,7 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 				storageRepoID:           plan.StorageRepoID,
 				scope:                   plan.ScopeType,
 				includedResources:       plan.IncludedResources,
+				resourceSelection:       plan.ResourceSelection,
 				labelSelector:           plan.LabelSelector,
 				excludedResources:       plan.ExcludedResources,
 				includeClusterResources: plan.IncludeClusterScoped,
@@ -6228,6 +6302,7 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 				storageRepoID:           plan.StorageRepoID,
 				scope:                   plan.ScopeType,
 				includedResources:       plan.IncludedResources,
+				resourceSelection:       plan.ResourceSelection,
 				labelSelector:           plan.LabelSelector,
 				excludedResources:       plan.ExcludedResources,
 				includeClusterResources: plan.IncludeClusterScoped,
@@ -6246,6 +6321,7 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 		body.StorageRepo = tgt.storage
 		body.Scope = tgt.scope
 		body.IncludedResources = tgt.includedResources
+		body.ResourceSelection = tgt.resourceSelection
 		body.LabelSelector = tgt.labelSelector
 		body.ExcludedResources = tgt.excludedResources
 		body.IncludeClusterResources = tgt.includeClusterResources
@@ -6401,6 +6477,9 @@ func (r *Router) findActiveBackupTask(clusterID string, protectionPlanID string,
 }
 
 func (r *Router) createPendingBackupTask(body backupTaskRequest, appID string) (store.Task, error) {
+	if body.ProtectionPlanID == "" {
+		return store.Task{}, errors.New("backup task requires protection plan id")
+	}
 	commandID := store.NewPublicID()
 	veleroBackupName := ""
 	if body.ProtectionPlanID != "" {
@@ -6418,6 +6497,7 @@ func (r *Router) createPendingBackupTask(body backupTaskRequest, appID string) (
 			"sourceNamespaces":        body.SourceNamespaces,
 			"scope":                   body.Scope,
 			"includedResources":       body.IncludedResources,
+			"resourceSelection":       body.ResourceSelection,
 			"labelSelector":           body.LabelSelector,
 			"storageRepo":             body.StorageRepo,
 			"excludedResources":       body.ExcludedResources,
@@ -7292,6 +7372,7 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 				NamespaceAPIs:        mapInventoryNamespaceAPIs(inventory.Payload.NamespaceAPIs),
 				Capabilities:         mapInventoryCapabilities(inventory.Payload.Capabilities),
 				CapabilityScan:       inventory.Payload.Scope == "capabilities",
+				CapabilityNamespace:  inventory.Payload.Namespace,
 				CapabilitiesComplete: inventory.Payload.CapabilitiesComplete,
 				Apps:                 apps,
 				CollectedAt:          inventory.Payload.CollectedAt,
@@ -8470,7 +8551,7 @@ func mapInventoryNamespaceAPIs(resources []protocol.NamespaceAPIInventory) []sto
 	items := make([]store.ClusterNamespaceAPI, 0, len(resources))
 	for _, resource := range resources {
 		items = append(items, store.ClusterNamespaceAPI{
-			Namespace: resource.Namespace, Group: resource.Group, Version: resource.Version,
+			Scope: resource.Scope, Namespace: resource.Namespace, Group: resource.Group, Version: resource.Version,
 			Resource: resource.Resource, Kind: resource.Kind, Count: resource.Count,
 		})
 	}
@@ -9302,6 +9383,9 @@ func (r *Router) createRestorePointFromVeleroEvent(clusterID string, plan store.
 }
 
 func (r *Router) createRestorePointFromBackup(task store.Task, veleroPayload map[string]any) (store.RestorePoint, error) {
+	if task.ProtectionPlanID == "" {
+		return store.RestorePoint{}, errors.New("backup restore point requires protection plan id")
+	}
 	kind, _ := veleroPayload["kind"].(string)
 	if kind != "Backup" {
 		return store.RestorePoint{}, nil
@@ -11956,6 +12040,9 @@ kind: ClusterRole
 metadata:
   name: hypercdr-agent
 rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["get", "list"]
   - apiGroups: [""]
     resources: ["namespaces", "nodes", "pods", "services", "configmaps", "serviceaccounts", "persistentvolumeclaims", "persistentvolumes", "resourcequotas", "limitranges"]
     verbs: ["get", "list", "watch"]

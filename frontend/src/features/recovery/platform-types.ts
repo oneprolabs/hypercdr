@@ -10,6 +10,21 @@ export type ApiCluster = {
   nodeCount: number;
   nodes?: ClusterNode[];
   storageClasses?: ClusterStorageClass[];
+  apiResources?: Array<{
+    group?: string;
+    version: string;
+    resource: string;
+    kind: string;
+    namespaced: boolean;
+  }>;
+  namespaceAPIs?: Array<{
+    namespace: string;
+    group?: string;
+    version: string;
+    resource: string;
+    kind: string;
+    count: number;
+  }>;
   namespaceCount: number;
   applicationCount: number;
   complianceScore?: number;

@@ -26,16 +26,18 @@ type ManifestMetadata struct {
 // intentionally close to upstream so future fields can be added without
 // protocol changes on the platform side.
 type BackupManifestSpec struct {
-	Metadata                 *BackupTemplateMetadata `json:"metadata,omitempty"`
-	IncludedNamespaces       []string                `json:"includedNamespaces"`
-	IncludedResources        []string                `json:"includedResources,omitempty"`
-	ExcludedNamespaces       []string                `json:"excludedNamespaces,omitempty"`
-	ExcludedResources        []string                `json:"excludedResources,omitempty"`
-	LabelSelector            *protocol.LabelSelector `json:"labelSelector,omitempty"`
-	StorageLocation          string                  `json:"storageLocation,omitempty"`
-	IncludeClusterResources  bool                    `json:"includeClusterResources"`
-	SnapshotVolumes          *bool                   `json:"snapshotVolumes,omitempty"`
-	DefaultVolumesToFsBackup *bool                   `json:"defaultVolumesToFsBackup,omitempty"`
+	Metadata                         *BackupTemplateMetadata `json:"metadata,omitempty"`
+	IncludedNamespaces               []string                `json:"includedNamespaces"`
+	IncludedResources                []string                `json:"includedResources,omitempty"`
+	ExcludedNamespaces               []string                `json:"excludedNamespaces,omitempty"`
+	ExcludedResources                []string                `json:"excludedResources,omitempty"`
+	IncludedClusterScopedResources   []string                `json:"includedClusterScopedResources,omitempty"`
+	IncludedNamespaceScopedResources []string                `json:"includedNamespaceScopedResources,omitempty"`
+	LabelSelector                    *protocol.LabelSelector `json:"labelSelector,omitempty"`
+	StorageLocation                  string                  `json:"storageLocation,omitempty"`
+	IncludeClusterResources          *bool                   `json:"includeClusterResources,omitempty"`
+	SnapshotVolumes                  *bool                   `json:"snapshotVolumes,omitempty"`
+	DefaultVolumesToFsBackup         *bool                   `json:"defaultVolumesToFsBackup,omitempty"`
 }
 
 type BackupTemplateMetadata struct {
@@ -89,11 +91,21 @@ func BuildBackupManifest(input BackupBuildInput) (BackupManifest, error) {
 			IncludedNamespaces:       sourceNamespaces,
 			IncludedResources:        input.Command.IncludedResources,
 			StorageLocation:          input.Command.StorageRepo,
-			IncludeClusterResources:  input.Command.IncludeClusterResources,
+			IncludeClusterResources:  boolPtr(input.Command.IncludeClusterResources),
 			SnapshotVolumes:          boolPtr(false),
 			DefaultVolumesToFsBackup: boolPtr(true),
 			ExcludedResources:        input.Command.ExcludedResources,
 		},
+	}
+	// Velero v1.18's scoped resource fields must never be mixed with the
+	// legacy generic fields. Only custom selections use them; the all mode
+	// intentionally leaves every filter absent to preserve native defaults.
+	if input.Command.ResourceSelection.Mode == "custom" {
+		manifest.Spec.IncludedResources = nil
+		manifest.Spec.ExcludedResources = nil
+		manifest.Spec.IncludedNamespaceScopedResources = input.Command.ResourceSelection.NamespaceScoped
+		manifest.Spec.IncludedClusterScopedResources = input.Command.ResourceSelection.ClusterScoped
+		manifest.Spec.IncludeClusterResources = nil
 	}
 	if len(input.Command.LabelSelector.MatchLabels) > 0 || len(input.Command.LabelSelector.MatchExpressions) > 0 {
 		selector := input.Command.LabelSelector

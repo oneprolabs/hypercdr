@@ -1,0 +1,4 @@
+type: feature
+audience: user
+en: DR Configuration and Drill now provide consistent namespace-scoped and cluster-scoped resource selection.
+zh-CN: DR Configuration 与 Drill 现在提供一致的命名空间级和集群级资源选择。

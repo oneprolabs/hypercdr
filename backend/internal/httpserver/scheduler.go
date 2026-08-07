@@ -202,6 +202,7 @@ func (r *Router) createScheduledBackupTask(plan store.ProtectionPlan, policy sto
 		SourceNamespaces:  sourceNamespaces,
 		Scope:             plan.ScopeType,
 		IncludedResources: plan.IncludedResources,
+		ResourceSelection: plan.ResourceSelection,
 		LabelSelector:     plan.LabelSelector,
 		StorageRepo:       storageName,
 		ExcludedResources: plan.ExcludedResources,

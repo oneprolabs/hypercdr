@@ -251,6 +251,7 @@ export function formatPolicyRetention(policy: Pick<PolicyItem, 'composition' | '
 export function formatScopeLabel(scope: string | undefined) {
   const value = (scope || '').toLowerCase();
   if (value === 'all') return 'All';
+  if (value === 'custom') return 'Custom';
   if (value === 'filtered') return 'Filtered';
   return scope || 'Not configured';
 }

@@ -461,6 +461,7 @@ export default function RealRestorePointPage({
       forceProceed: false,
       includedResources: [],
       excludedResources: [],
+	  resourceSelection: { mode: 'all', namespaceScoped: [], clusterScoped: [] },
       storageClassMappings: {},
       imageMappings: {},
       waitForWorkloads: true,

@@ -130,6 +130,8 @@ export interface Cluster {
   nodes: number;
   nodeDetails?: ClusterNode[];
   storageClasses?: ClusterStorageClass[];
+  apiResources?: ClusterAPIResource[];
+  namespaceApis?: ClusterNamespaceAPI[];
   namespaces: number;
   applications: number;
   agentVersion: string;
@@ -160,6 +162,24 @@ export interface Cluster {
   isDefault?: boolean;
   apps: AppItem[];
 }
+
+export type ClusterAPIResource = {
+  group?: string;
+  version: string;
+  resource: string;
+  kind: string;
+  namespaced: boolean;
+};
+
+export type ClusterNamespaceAPI = {
+  scope?: 'namespace' | 'cluster';
+  namespace: string;
+  group?: string;
+  version: string;
+  resource: string;
+  kind: string;
+  count: number;
+};
 
 export type ClusterNode = {
   name: string;

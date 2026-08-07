@@ -1,0 +1,26 @@
+{
+  "version": "dev",
+  "releaseDate": "",
+  "categories": {
+    "feature": [
+      {
+        "audience": "user",
+        "en": "DR Configuration and Drill now provide consistent namespace-scoped and cluster-scoped resource selection.",
+        "zh-CN": "DR Configuration 与 Drill 现在提供一致的命名空间级和集群级资源选择。"
+      }
+    ],
+    "improvement": [
+      {
+        "audience": "user",
+        "en": "Custom resource catalogs are prefetched and cached per namespace, while configuration dialogs open immediately.",
+        "zh-CN": "自定义资源清单现在按命名空间预取并缓存，同时配置弹窗可以立即打开。"
+      },
+      {
+        "audience": "admin",
+        "en": "Velero and Comm Agent component upgrades now use published component releases and report progress in Recent Tasks.",
+        "zh-CN": "Velero 与 Comm Agent 组件升级现在使用已发布的组件版本，并在 Recent Tasks 中报告进度。"
+      }
+    ],
+    "fix": []
+  }
+}

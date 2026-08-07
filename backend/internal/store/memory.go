@@ -1022,7 +1022,7 @@ func (s *MemoryStore) ApplyInventory(input InventoryInput) (Cluster, bool, error
 	cluster.StorageClasses = input.StorageClasses
 	if input.CapabilityScan {
 		cluster.APIResources = input.APIResources
-		cluster.NamespaceAPIs = input.NamespaceAPIs
+		cluster.NamespaceAPIs = mergeNamespaceAPIs(cluster.NamespaceAPIs, input.NamespaceAPIs, input.CapabilityNamespace)
 		cluster.Capabilities = input.Capabilities
 		cluster.CapabilitiesCollectedAt = input.CollectedAt
 		cluster.CapabilitiesComplete = input.CapabilitiesComplete
@@ -1413,6 +1413,9 @@ func (s *MemoryStore) CreateProtectionPlan(input ProtectionPlanInput) (Protectio
 	if input.Status == "" {
 		input.Status = "active"
 	}
+	if input.ResourceSelection.Mode == "" {
+		input.ResourceSelection.Mode = "all"
+	}
 	appIDs := dedupNonEmpty(append([]string{}, input.AppIDs...))
 	if input.AppID != "" {
 		appIDs = dedupNonEmpty(append(appIDs, input.AppID))
@@ -1429,6 +1432,7 @@ func (s *MemoryStore) CreateProtectionPlan(input ProtectionPlanInput) (Protectio
 		AppIDs:               appIDs,
 		ScopeType:            input.ScopeType,
 		IncludedResources:    input.IncludedResources,
+		ResourceSelection:    input.ResourceSelection,
 		LabelSelector:        input.LabelSelector,
 		IncludeClusterScoped: input.IncludeClusterScoped,
 		StorageRepoID:        input.StorageRepoID,
@@ -1591,7 +1595,7 @@ func (s *MemoryStore) DeleteProtectionPlan(id string) (ProtectionPlan, bool, err
 		if !ok {
 			continue
 		}
-		app.ProtectionStatus = "pending_protection"
+		app.ProtectionStatus = "unprotected"
 		s.applications[appID] = app
 	}
 	for taskID, task := range s.tasks {
@@ -1662,7 +1666,7 @@ func (s *MemoryStore) CleanupProtectionPlanRecords(id string) (ProtectionPlan, b
 		if !ok {
 			continue
 		}
-		app.ProtectionStatus = "pending_protection"
+		app.ProtectionStatus = "unprotected"
 		s.applications[appID] = app
 	}
 	return plan, true, nil

@@ -83,13 +83,18 @@ func (c *KubernetesCollector) CollectCapabilities(namespace string) (Snapshot, e
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	if preparer, ok := c.reader.(kube.ResourceDiscoveryPreparer); ok {
+		if err := preparer.EnsureResourceDiscoveryPermission(ctx); err != nil {
+			return Snapshot{}, err
+		}
+	}
 	resources, err := reader.ReadNamespaceAPIs(ctx, namespace)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	for _, resource := range resources {
 		snapshot.Report.NamespaceAPIs = append(snapshot.Report.NamespaceAPIs, protocol.NamespaceAPIInventory{
-			Namespace: resource.Namespace, Group: resource.Group, Version: resource.Version,
+			Scope: resource.Scope, Namespace: resource.Namespace, Group: resource.Group, Version: resource.Version,
 			Resource: resource.Resource, Kind: resource.Kind, Count: resource.Count,
 		})
 	}

@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   X,
 } from 'lucide-react';
+import { ScopedResourceSelector, type ScopedResourceOption, type ScopedResourceSelection } from './components/scoped-resource-selector';
 
 type ProtectWizardStep = 1 | 2 | 3 | 4 | 5 | 6;
 
@@ -92,6 +93,7 @@ type ProtectConfig = {
   labelConditions: LabelCondition[];
   includeRules: ExcludeRule[];
   includedResources: string[];
+  resourceSelection: ScopedResourceSelection;
   includeAllResources: boolean;
   labelSelector: {
     matchLabels: Record<string, string>;
@@ -139,6 +141,10 @@ type Props = {
   wizardPolicyPageSize: number;
   targetClusterOptions: TargetClusterOption[];
   labelOptions: LabelSelectorOption[];
+  namespaceResourceOptions?: ScopedResourceOption[];
+  clusterResourceOptions?: ScopedResourceOption[];
+  customResourcesLoaded?: boolean;
+  onRequestCustomResources?: () => Promise<boolean>;
   preScriptRef: React.RefObject<HTMLInputElement | null>;
   postScriptRef: React.RefObject<HTMLInputElement | null>;
   handleFileUpload: (type: 'preScripts' | 'postScripts', event: React.ChangeEvent<HTMLInputElement>) => void;
@@ -150,12 +156,7 @@ type Props = {
   onCreatePolicy?: () => void;
 };
 
-const SCOPE_OPTIONS = [
-  { id: 'all', title: 'All resources', desc: 'Full namespace scope', icon: Grid3X3 },
-  { id: 'filter', title: 'Filtered resources', desc: 'Include / exclude rules', icon: Filter },
-];
-
-const RESOURCE_OPTIONS = [
+const NAMESPACE_RESOURCE_OPTIONS = [
   'deployments.apps',
   'statefulsets.apps',
   'daemonsets.apps',
@@ -172,6 +173,17 @@ const RESOURCE_OPTIONS = [
   'rolebindings.rbac.authorization.k8s.io',
   'persistentvolumeclaims',
 ];
+const CLUSTER_RESOURCE_OPTIONS = [
+  'persistentvolumes',
+  'storageclasses.storage.k8s.io',
+  'customresourcedefinitions.apiextensions.k8s.io',
+  'clusterroles.rbac.authorization.k8s.io',
+  'clusterrolebindings.rbac.authorization.k8s.io',
+  'volumesnapshotclasses.snapshot.storage.k8s.io',
+];
+// Retained for legacy filter-plan rendering and migration summaries. New plans
+// use NAMESPACE_RESOURCE_OPTIONS through the scoped selector below.
+const RESOURCE_OPTIONS = NAMESPACE_RESOURCE_OPTIONS;
 const RESOURCE_KIND_ALIASES: Record<string, string> = {
   'deployments.apps': 'deployment',
   'statefulsets.apps': 'statefulset',
@@ -308,6 +320,10 @@ export function DrConfigurationModal(props: Props) {
     wizardPolicyTotalPages,
     targetClusterOptions,
     labelOptions,
+    namespaceResourceOptions,
+    clusterResourceOptions,
+    customResourcesLoaded,
+    onRequestCustomResources,
     onCreateStorage,
     onRegisterCluster,
     onCreatePolicy,
@@ -332,11 +348,19 @@ export function DrConfigurationModal(props: Props) {
     });
   }, [firstLabelKey, firstLabelValue, labelValueMap]);
   React.useEffect(() => {
-    if (!multiNamespaceFilterDisabled || protectConfig.scope !== 'filter') return;
-    setProtectConfig(prev => ({ ...prev, scope: 'all' }));
-  }, [multiNamespaceFilterDisabled, protectConfig.scope, setProtectConfig]);
+    if (!multiNamespaceFilterDisabled || protectConfig.resourceSelection.mode === 'all') return;
+    setProtectConfig(prev => ({
+      ...prev,
+      scope: 'all',
+      includeAllResources: true,
+      includedResources: [],
+      excludedResources: [],
+      labelSelector: { matchLabels: {}, matchExpressions: [] },
+      resourceSelection: { mode: 'all', namespaceScoped: [], clusterScoped: [] },
+    }));
+  }, [multiNamespaceFilterDisabled, protectConfig.resourceSelection.mode, setProtectConfig]);
 
-  const resourceSelectionValid = protectConfig.scope !== 'filter' || protectConfig.includeAllResources || protectConfig.includedResources.length > 0;
+  const resourceSelectionValid = protectConfig.resourceSelection.mode !== 'custom' || protectConfig.resourceSelection.namespaceScoped.length + protectConfig.resourceSelection.clusterScoped.length > 0;
   const canSave = Boolean(resourceSelectionValid && protectConfig.storageId && (protectConfig.targetCluster || targetClusterOptions.length === 0));
   void filteredPolicyOptions;
   void paginatedPolicyOptions;
@@ -520,12 +544,6 @@ export function DrConfigurationModal(props: Props) {
     return includeResources || excludeResources || includeLabelConditions.length > 0;
   }, [includeLabelConditions.length, protectConfig.excludeRules, protectConfig.includeRules]);
 
-  const updateScope = (scope: string) => {
-    if (scope === 'filter' && multiNamespaceFilterDisabled) return;
-    setStep(1);
-    setProtectConfig(prev => ({ ...prev, scope }));
-  };
-
   const closeIncludeFilter = () => {
     setIncludeFilterOpen(false);
     setEditingIncludeIndex(null);
@@ -632,7 +650,16 @@ export function DrConfigurationModal(props: Props) {
                         <input
                           type="checkbox"
                           checked={Boolean(protectConfig.mergeNamespaces)}
-                          onChange={() => setProtectConfig(prev => ({ ...prev, mergeNamespaces: true, scope: prev.scope === 'filter' ? 'all' : prev.scope }))}
+                          onChange={() => setProtectConfig(prev => ({
+                            ...prev,
+                            mergeNamespaces: true,
+                            scope: 'all',
+                            includeAllResources: true,
+                            includedResources: [],
+                            excludedResources: [],
+                            labelSelector: { matchLabels: {}, matchExpressions: [] },
+                            resourceSelection: { mode: 'all', namespaceScoped: [], clusterScoped: [] },
+                          }))}
                         />
                         <span>Merge DR</span>
                       </label>
@@ -643,29 +670,31 @@ export function DrConfigurationModal(props: Props) {
                   <div className="hbdr-config-section-head">
                     <ShieldCheck size={17} />
                     <div>
-                      <strong>Protection scope</strong>
+                      <strong>Resource selection</strong>
                     </div>
                   </div>
-                  <div className="hbdr-config-scope-grid">
-                    {SCOPE_OPTIONS.map(option => {
-                      const Icon = option.icon;
-                      const active = protectConfig.scope === option.id;
-                      const disabled = option.id === 'filter' && multiNamespaceFilterDisabled;
-                      return (
-                        <button
-                          key={option.id}
-                          type="button"
-                          className={`${active ? 'is-active' : ''} ${disabled ? 'is-disabled' : ''}`}
-                          disabled={disabled}
-                          title={disabled ? 'Filtered resources are not available when multiple namespaces are selected.' : undefined}
-                          onClick={() => updateScope(option.id)}
-                        >
-                          <Icon size={16} />
-                          <strong>{option.title}</strong>
-                          <span>{disabled ? 'Not available for multiple namespaces' : option.desc}</span>
-                        </button>
-                      );
-                    })}
+                  <div className="hbdr-config-inline-panel">
+                    {multiNamespaceFilterDisabled ? <div className="hbdr-combined-scope-notice">
+                      <ShieldCheck size={17} />
+                      <div><strong>All application resources</strong><span>Multi-namespace protection always uses the complete resource scope. Custom selection is available only for a single namespace.</span></div>
+                      <em>Full backup</em>
+                    </div> : <ScopedResourceSelector
+                      purpose="backup"
+                      value={protectConfig.resourceSelection}
+                      onChange={resourceSelection => setProtectConfig(prev => ({
+                        ...prev,
+                        scope: 'all',
+                        includeAllResources: resourceSelection.mode === 'all',
+                        includedResources: [],
+                        excludedResources: [],
+                        labelSelector: { matchLabels: {}, matchExpressions: [] },
+                        resourceSelection,
+                      }))}
+                      namespaceResources={namespaceResourceOptions || []}
+                      clusterResources={clusterResourceOptions || []}
+                      customResourcesLoaded={customResourcesLoaded}
+                      onRequestCustomResources={onRequestCustomResources}
+                    />}
                   </div>
                   {protectConfig.scope === 'filter' && (
                     <div className="hbdr-config-inline-panel">
