@@ -250,9 +250,10 @@ export function formatPolicyRetention(policy: Pick<PolicyItem, 'composition' | '
 
 export function formatScopeLabel(scope: string | undefined) {
   const value = (scope || '').toLowerCase();
-  if (value === 'all') return 'All';
-  if (value === 'custom') return 'Custom';
-  if (value === 'filtered') return 'Filtered';
+	// all/exclude are Velero request semantics. The product exposes only the
+	// user-facing Default and Custom modes.
+	if (value === 'all') return 'Default';
+	if (value === 'custom' || value === 'exclude' || value === 'filtered' || value === 'filter') return 'Custom';
   return scope || 'Not configured';
 }
 

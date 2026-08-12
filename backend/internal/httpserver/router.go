@@ -1902,6 +1902,7 @@ func (r *Router) listClusters(w http.ResponseWriter, req *http.Request) {
 		r.logger.Warn("failed to load agent upgrade status", "error", taskErr)
 	}
 	for i := range clusters {
+		clusters[i].RestoreCachePolicy = deriveRestoreCachePolicy(clusters[i].StorageClasses)
 		if r.hub.has(clusters[i].ID) {
 			clusters[i].ConnectionStatus = "online"
 		} else {
@@ -1938,6 +1939,29 @@ func (r *Router) listClusters(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items": nonNilSlice(clusters),
 	})
+}
+
+func deriveRestoreCachePolicy(storageClasses []store.ClusterStorageClass) store.RestoreCachePolicy {
+	policy := store.RestoreCachePolicy{Mode: "automatic", ResidentThresholdMB: 1024, CacheLimitMB: 5120}
+	for _, storageClass := range storageClasses {
+		if !storageClass.Default {
+			continue
+		}
+		if strings.TrimSpace(storageClass.Provisioner) == "" {
+			policy.Reason = "Default StorageClass has no dynamic provisioner. Velero uses data mover ephemeral storage."
+			return policy
+		}
+		if !strings.EqualFold(firstNonEmptyString(storageClass.ReclaimPolicy, "Delete"), "Delete") {
+			policy.Reason = "Default StorageClass does not use reclaimPolicy Delete. Velero uses data mover ephemeral storage."
+			return policy
+		}
+		policy.Enabled = true
+		policy.StorageClass = storageClass.Name
+		policy.Reason = "A compatible default StorageClass was selected automatically."
+		return policy
+	}
+	policy.Reason = "No compatible default StorageClass was detected. Velero uses data mover ephemeral storage."
+	return policy
 }
 
 func upgradeTargetIsNewer(currentVersion, targetVersion string, digestMismatch bool) bool {
@@ -3052,7 +3076,7 @@ func (r *Router) upgradeClusterVelero(w http.ResponseWriter, req *http.Request) 
 	}
 	cacheStorageClass := ""
 	for _, storageClass := range cluster.StorageClasses {
-		if storageClass.Default {
+		if storageClass.Default && strings.TrimSpace(storageClass.Provisioner) != "" && strings.EqualFold(firstNonEmptyString(storageClass.ReclaimPolicy, "Delete"), "Delete") {
 			cacheStorageClass = storageClass.Name
 			break
 		}
@@ -3064,7 +3088,7 @@ func (r *Router) upgradeClusterVelero(w http.ResponseWriter, req *http.Request) 
 		"expectedDigest": targetDigest, "deploymentName": "velero", "daemonSetName": "node-agent",
 		"awsPluginImage": r.cfg.VeleroAWSPlugin, "azurePluginImage": r.cfg.VeleroAzurePlugin, "gcpPluginImage": r.cfg.VeleroGCPPlugin,
 		"concurrentBackups": 2, "nodeAgentConcurrency": 2, "prepareQueueLength": 4,
-		"cacheStorageClass": cacheStorageClass, "cacheResidentThresholdMB": 1024,
+		"cacheStorageClass": cacheStorageClass, "cacheResidentThresholdMB": 1024, "cacheLimitMB": 5120,
 		"crdsUrl": strings.TrimRight(r.cfg.PublicBaseURL, "/") + veleroCRDsPath,
 	}})
 	if err != nil {
@@ -4606,6 +4630,7 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 			ConcurrentBackups: int(int64FromAny(task.Payload["concurrentBackups"])), NodeAgentConcurrency: int(int64FromAny(task.Payload["nodeAgentConcurrency"])),
 			PrepareQueueLength: int(int64FromAny(task.Payload["prepareQueueLength"])), CacheStorageClass: stringPayload(task.Payload, "cacheStorageClass"),
 			CacheResidentThresholdMB: int(int64FromAny(task.Payload["cacheResidentThresholdMB"])),
+			CacheLimitMB:             int(int64FromAny(task.Payload["cacheLimitMB"])),
 			CRDsURL:                  stringPayload(task.Payload, "crdsUrl"),
 		}
 		if payload.VeleroUpgrade.Image == "" {
@@ -5109,7 +5134,29 @@ func (r *Router) listProtectionPlans(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 	items = visible
+	for index := range items {
+		items[index].Status = protectionPlanBusinessStatus(items[index].Status)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": nonNilSlice(items)})
+}
+
+func protectionPlanBusinessStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "pending_activation", "activating_storage", "activating_schedule", "configuring":
+		return "configuring"
+	case "active", "ready":
+		return "ready"
+	case "active_with_warning", "ready_with_warning":
+		return "ready_with_warning"
+	case "storage_failed", "schedule_failed", "configuration_failed":
+		return "configuration_failed"
+	case "cleanup_running", "cleaning":
+		return "cleaning"
+	case "cleanup_failed":
+		return "cleanup_failed"
+	default:
+		return "configuring"
+	}
 }
 
 func (r *Router) createProtectionPlan(w http.ResponseWriter, req *http.Request) {
@@ -5232,43 +5279,38 @@ func (r *Router) createProtectionPlan(w http.ResponseWriter, req *http.Request) 
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "create_protection_plan_failed"})
 		return
 	}
-	var activationTask *store.Task
-	var activationWarning string
+	// Creation is the transaction boundary: return the persisted Configuring
+	// plan immediately. Storage and schedule activation must not mutate it to
+	// Ready inside the Save request, otherwise the UI can never present a
+	// truthful, monotonic Configuring -> Ready/Failed state transition.
+	writeJSON(w, http.StatusCreated, protectionPlanActivationResponse(item, nil, ""))
+	go r.activateNewProtectionPlan(item)
+}
+
+func (r *Router) activateNewProtectionPlan(item store.ProtectionPlan) {
 	tasks, warning, err := r.dispatchProtectionPlanStorageActivation(item)
 	if err != nil {
-		r.logger.Error("failed to sync storage repository for protection plan", "cluster_id", input.SourceClusterID, "repository_id", input.StorageRepoID, "error", err)
-		item, _, _ = r.store.UpdateProtectionPlanStatus(item.ID, "storage_failed")
-		writeJSON(w, http.StatusCreated, protectionPlanActivationResponse(item, nil, "storage sync dispatch failed: "+err.Error()))
+		r.logger.Error("failed to sync storage repository for protection plan", "plan_id", item.ID, "cluster_id", item.SourceClusterID, "repository_id", item.StorageRepoID, "error", err)
+		_, _, _ = r.store.UpdateProtectionPlanStatus(item.ID, "storage_failed")
 		return
-	} else if warning != "" {
-		r.logger.Warn("storage repository sync queued with warning", "cluster_id", input.SourceClusterID, "repository_id", input.StorageRepoID, "warning", warning)
-		activationWarning = warning
+	}
+	if warning != "" {
+		r.logger.Warn("storage repository sync queued with warning", "plan_id", item.ID, "cluster_id", item.SourceClusterID, "repository_id", item.StorageRepoID, "warning", warning)
 	}
 	if len(tasks) > 0 {
-		activationTask = &tasks[0]
-		if !storageActivationTasksIncludeSource(tasks) {
-			r.continueProtectionPlanActivationAfterStorage(store.Task{
-				ID:               "source-storage-already-synced",
-				ProtectionPlanID: item.ID,
-				Status:           "succeeded",
-				CreatedAt:        time.Now().UTC(),
-			})
-			if refreshed, ok, err := r.store.GetProtectionPlan(item.ID); err == nil && ok {
-				item = refreshed
-			}
-		}
-	} else {
-		r.continueProtectionPlanActivationAfterStorage(store.Task{
-			ID:               "storage-already-synced",
-			ProtectionPlanID: item.ID,
-			Status:           "succeeded",
-			CreatedAt:        time.Now().UTC(),
+		_ = r.store.AddTaskEvent(store.TaskEventInput{
+			TaskID: tasks[0].ID, Level: "info", Reason: "protection_plan_saved",
+			Message: "DR configuration was saved. Background configuration started.",
+			Payload: map[string]any{"planId": item.ID},
 		})
-		if refreshed, ok, err := r.store.GetProtectionPlan(item.ID); err == nil && ok {
-			item = refreshed
+		if storageActivationTasksIncludeSource(tasks) {
+			return
 		}
 	}
-	writeJSON(w, http.StatusCreated, protectionPlanActivationResponse(item, activationTask, activationWarning))
+	r.continueProtectionPlanActivationAfterStorage(store.Task{
+		ID: "storage-already-synced", ProtectionPlanID: item.ID,
+		Status: "succeeded", CreatedAt: time.Now().UTC(),
+	})
 }
 
 func (r *Router) activateProtectionPlan(w http.ResponseWriter, req *http.Request) {
@@ -5496,7 +5538,7 @@ func protectionPlanActivationResponse(item store.ProtectionPlan, activationTask 
 		"excludedResources":    nonNilSlice(item.ExcludedResources),
 		"preHooks":             nonNilSlice(item.PreHooks),
 		"postHooks":            nonNilSlice(item.PostHooks),
-		"status":               item.Status,
+		"status":               protectionPlanBusinessStatus(item.Status),
 		"createdAt":            item.CreatedAt,
 		"updatedAt":            item.UpdatedAt,
 	}
@@ -7502,7 +7544,26 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 				r.logger.Warn("failed to decode task progress", "cluster_id", clusterID, "error", err)
 				return
 			}
-			_, _, err := r.store.UpdateTaskStatus(store.TaskStatusInput{
+			existing, ok, err := r.findTaskByID(clusterID, progress.Payload.TaskID)
+			if err != nil || !ok {
+				r.logger.Warn("ignored progress for unknown task", "cluster_id", clusterID, "task_id", progress.Payload.TaskID, "error", err)
+				continue
+			}
+			if !existing.CompletedAt.IsZero() || !isActiveTaskStatus(existing.Status) {
+				r.logger.Info("ignored late progress for terminal task", "task_id", existing.ID, "status", existing.Status)
+				continue
+			}
+			if progress.Payload.CommandID != "" && existing.CommandID != "" && progress.Payload.CommandID != existing.CommandID {
+				r.logger.Warn("ignored progress with mismatched command", "task_id", existing.ID, "command_id", progress.Payload.CommandID)
+				continue
+			}
+			if incoming := progress.Payload.SizeProgressV2; incoming != nil {
+				current := mapFromAny(existing.Payload["sizeProgressV2"])
+				if currentSequence := int64FromAny(current["sequence"]); currentSequence > 0 && incoming.Sequence > 0 && incoming.Sequence <= currentSequence {
+					continue
+				}
+			}
+			_, _, err = r.store.UpdateTaskStatus(store.TaskStatusInput{
 				TaskID:      progress.Payload.TaskID,
 				Status:      progress.Payload.Status,
 				Progress:    progress.Payload.Progress,
@@ -8875,6 +8936,24 @@ func mapFromAny(value any) map[string]any {
 	}
 }
 
+func mapFromAnyJSON(value any) map[string]any {
+	if mapped := mapFromAny(value); len(mapped) > 0 {
+		return mapped
+	}
+	if value == nil {
+		return map[string]any{}
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return map[string]any{}
+	}
+	var mapped map[string]any
+	if json.Unmarshal(raw, &mapped) != nil {
+		return map[string]any{}
+	}
+	return mapped
+}
+
 func firstNonEmptyMap(values ...map[string]any) map[string]any {
 	for _, value := range values {
 		if len(value) > 0 {
@@ -8927,10 +9006,10 @@ func detailedTaskFailureMessage(fallback string, details map[string]any) string 
 }
 
 func taskFailurePayloadPatch(details map[string]any) map[string]any {
-	if len(details) == 0 {
-		return nil
-	}
-	patch := map[string]any{}
+	// A terminal failure must not retain the last running size sample. Task
+	// payload updates merge recursively, so the explicit nil is required even
+	// when the agent has no additional failure details.
+	patch := map[string]any{"sizeProgressV2": nil}
 	if velero := mapFromAny(details["velero"]); len(velero) > 0 {
 		if stages := sliceFromAny(velero["recoveryStages"]); len(stages) > 0 {
 			patch["recoveryStages"] = stages
@@ -9077,6 +9156,9 @@ func taskProgressPayloadPatch(payload protocol.TaskProgressPayload) map[string]a
 	if len(progress) > 0 {
 		patch["progressMetrics"] = progress
 	}
+	if payload.SizeProgressV2 != nil {
+		patch["sizeProgressV2"] = payload.SizeProgressV2
+	}
 	volumeProgress := mapFromAny(payload.Velero["volumeProgress"])
 	if len(volumeProgress) > 0 {
 		patch["volumeProgress"] = volumeProgress
@@ -9110,6 +9192,12 @@ func taskCompletedPayloadPatch(payload protocol.TaskCompletedPayload) map[string
 	if planStorageSize := mapFromAny(payload.Velero["planStorageSize"]); len(planStorageSize) > 0 {
 		patch["planStorageSize"] = planStorageSize
 	}
+	if payload.SizeMetricsV2 != nil {
+		patch["sizeMetricsV2"] = payload.SizeMetricsV2
+	}
+	// Final metrics supersede the running sample. Keeping an InProgress phase
+	// beside a succeeded task is misleading and can make clients appear stuck.
+	patch["sizeProgressV2"] = nil
 	if sizeStatus := stringFromMap(payload.Velero, "sizeStatus"); sizeStatus != "" {
 		patch["sizeStatus"] = sizeStatus
 	}
@@ -9448,12 +9536,14 @@ func (r *Router) createRestorePointFromBackup(task store.Task, veleroPayload map
 		BackupStorageName: storageName,
 		Metadata: map[string]any{
 			"velero":           veleroPayload,
+			"sizeMetricsV2":    task.Payload["sizeMetricsV2"],
 			"size":             firstNonEmptyMap(mapFromAny(veleroPayload["restorePointSize"]), mapFromAny(veleroPayload["size"])),
 			"sizeStatus":       veleroPayload["sizeStatus"],
 			"sizeWarnings":     sliceFromAny(veleroPayload["sizeWarnings"]),
 			"restorePointSize": firstNonEmptyMap(mapFromAny(veleroPayload["restorePointSize"]), mapFromAny(veleroPayload["size"])),
 			"planStorageSize":  mapFromAny(veleroPayload["planStorageSize"]),
 		},
+		SizeMetricsV2: mapFromAnyJSON(task.Payload["sizeMetricsV2"]),
 	})
 	if err != nil {
 		return store.RestorePoint{}, err
@@ -9782,8 +9872,10 @@ func (r *Router) createProtectionCleanupTask(plan store.ProtectionPlan) (store.T
 	if err != nil {
 		return store.Task{}, "", err
 	}
+	cleanupRunID := store.NewPublicID()
 	sourcePayload := map[string]any{
 		"planId":                 plan.ID,
+		"cleanupRunId":           cleanupRunID,
 		"cleanupMode":            "source",
 		"scheduleName":           scheduleNameForPlan(plan.ID),
 		"backupNamePrefix":       scheduleNameForPlan(plan.ID),
@@ -9808,6 +9900,7 @@ func (r *Router) createProtectionCleanupTask(plan store.ProtectionPlan) (store.T
 	if plan.TargetClusterID != "" && plan.TargetClusterID != plan.SourceClusterID {
 		targetPayload := map[string]any{
 			"planId":                 plan.ID,
+			"cleanupRunId":           cleanupRunID,
 			"cleanupMode":            "target",
 			"backupNamePrefix":       scheduleNameForPlan(plan.ID),
 			"namespace":              r.agentNamespace(),
@@ -9970,7 +10063,8 @@ func (r *Router) finishProtectionCleanupTask(task store.Task, veleroPayload map[
 		r.logger.Warn("protection cleanup completed for missing plan", "plan_id", planID, "task_id", task.ID)
 		return
 	}
-	complete, err := r.protectionCleanupTasksComplete(plan)
+	cleanupRunID := stringPayload(task.Payload, "cleanupRunId")
+	complete, err := r.protectionCleanupTasksComplete(plan, cleanupRunID)
 	if err != nil {
 		r.logger.Error("failed to inspect protection cleanup task completion", "plan_id", planID, "task_id", task.ID, "error", err)
 		return
@@ -9988,7 +10082,7 @@ func (r *Router) finishProtectionCleanupTask(task store.Task, veleroPayload map[
 			if err != nil || !ok {
 				return
 			}
-			complete, err := r.protectionCleanupTasksComplete(plan)
+			complete, err := r.protectionCleanupTasksComplete(plan, cleanupRunID)
 			if err != nil || !complete {
 				return
 			}
@@ -10009,7 +10103,7 @@ func (r *Router) finishProtectionCleanupTask(task store.Task, veleroPayload map[
 	}
 }
 
-func (r *Router) protectionCleanupTasksComplete(plan store.ProtectionPlan) (bool, error) {
+func (r *Router) protectionCleanupTasksComplete(plan store.ProtectionPlan, cleanupRunID string) (bool, error) {
 	tasks, err := r.store.ListTasks("")
 	if err != nil {
 		return false, err
@@ -10017,13 +10111,30 @@ func (r *Router) protectionCleanupTasksComplete(plan store.ProtectionPlan) (bool
 	expectTarget := plan.TargetClusterID != "" && plan.TargetClusterID != plan.SourceClusterID
 	sourceDone := false
 	targetDone := !expectTarget
+	var latestSource, latestTarget *store.Task
 	for _, item := range tasks {
 		if item.ProtectionPlanID != plan.ID || item.Type != "protection-cleanup" {
+			continue
+		}
+		// Retries create a new cleanup run. Historical failed tasks must not
+		// prevent a later successful run from finalizing the plan.
+		if cleanupRunID != "" && stringPayload(item.Payload, "cleanupRunId") != cleanupRunID {
 			continue
 		}
 		mode := stringPayload(item.Payload, "cleanupMode")
 		if mode == "" {
 			mode = "source"
+		}
+		if cleanupRunID == "" {
+			candidate := item
+			if mode == "target" {
+				if latestTarget == nil || candidate.CreatedAt.After(latestTarget.CreatedAt) {
+					latestTarget = &candidate
+				}
+			} else if latestSource == nil || candidate.CreatedAt.After(latestSource.CreatedAt) {
+				latestSource = &candidate
+			}
+			continue
 		}
 		if item.Status != "succeeded" {
 			return false, nil
@@ -10033,6 +10144,10 @@ func (r *Router) protectionCleanupTasksComplete(plan store.ProtectionPlan) (bool
 		} else {
 			sourceDone = true
 		}
+	}
+	if cleanupRunID == "" {
+		sourceDone = latestSource != nil && latestSource.Status == "succeeded"
+		targetDone = !expectTarget || (latestTarget != nil && latestTarget.Status == "succeeded")
 	}
 	return sourceDone && targetDone, nil
 }
@@ -11265,6 +11380,23 @@ select_agent_storage_class() {
 
 select_agent_storage_class
 
+select_velero_cache_storage_class() {
+  CACHE_STORAGE_CLASS=""
+  CACHE_PVC_CONFIG='"cachePVC": null'
+  local reclaim_policy provisioner
+  reclaim_policy="$(kubectl get storageclass "$STORAGE_CLASS" -o jsonpath='{.reclaimPolicy}' 2>/dev/null || true)"
+  provisioner="$(kubectl get storageclass "$STORAGE_CLASS" -o jsonpath='{.provisioner}' 2>/dev/null || true)"
+  if [[ -n "$provisioner" && "${reclaim_policy:-Delete}" == "Delete" ]]; then
+    CACHE_STORAGE_CLASS="$STORAGE_CLASS"
+    CACHE_PVC_CONFIG='"cachePVC": {"storageClass": "'"${CACHE_STORAGE_CLASS}"'", "residentThresholdInMB": 1024}'
+    log_ok "Velero restore cache enabled automatically with StorageClass: ${CACHE_STORAGE_CLASS}"
+  else
+    log_warn "Velero restore cache disabled: StorageClass ${STORAGE_CLASS} must support dynamic provisioning and use reclaimPolicy Delete"
+  fi
+}
+
+select_velero_cache_storage_class
+
 image_registry_host() {
   local image="$1"
   local first="${image%%/*}"
@@ -11879,10 +12011,18 @@ data:
         "globalConfig": 2,
         "prepareQueueLength": 4
       },
-      "cachePVC": {
-        "storageClass": "${STORAGE_CLASS}",
-        "residentThresholdInMB": 1024
-      }
+      ${CACHE_PVC_CONFIG}
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backup-repository-config
+  namespace: ${NAMESPACE}
+data:
+  kopia: |
+    {
+      "cacheLimitMB": 5120
     }
 ---
 apiVersion: apps/v1
@@ -12001,6 +12141,7 @@ ${IMAGE_PULL_SECRETS_BLOCK}
             - node-agent
             - server
             - --node-agent-configmap=node-agent-config
+            - --backup-repository-configmap=backup-repository-config
           env:
             - name: NODE_NAME
               valueFrom:

@@ -435,6 +435,8 @@ function mapRestorePoint(raw: any): ApiRestorePointView {
     backupStorageName: raw?.backupStorageName || raw?.metadata?.backupStorageName || '',
     veleroBackupName: raw?.veleroBackupName || '',
     includedNamespaces,
+	metadata: raw?.metadata || {},
+	sizeMetricsV2: raw?.sizeMetricsV2 || raw?.metadata?.sizeMetricsV2,
   };
 }
 

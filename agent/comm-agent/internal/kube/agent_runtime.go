@@ -48,6 +48,19 @@ type VeleroRuntimeStatus struct {
 	NodeAgentImageDigest string
 }
 
+type RestoreCachePreflightResult struct {
+	Enabled             bool
+	Usable              bool
+	StorageClass        string
+	ResidentThresholdMB int64
+	CacheLimitMB        int64
+	Message             string
+}
+
+type RestoreCachePreflighter interface {
+	PreflightRestoreCache(ctx context.Context, namespace string) (RestoreCachePreflightResult, error)
+}
+
 type VeleroUpgradeOptions struct {
 	Namespace                string
 	Image                    string
@@ -61,6 +74,7 @@ type VeleroUpgradeOptions struct {
 	PrepareQueueLength       int
 	CacheStorageClass        string
 	CacheResidentThresholdMB int
+	CacheLimitMB             int
 }
 
 type AgentUpgradeOptions struct {
@@ -74,6 +88,65 @@ type AgentUpgradeOptions struct {
 
 type KubernetesAgentRuntime struct {
 	client kubernetes.Interface
+}
+
+func (r *KubernetesAgentRuntime) PreflightRestoreCache(ctx context.Context, namespace string) (RestoreCachePreflightResult, error) {
+	namespace = firstNonEmpty(namespace, "hypercdr-agent")
+	result := RestoreCachePreflightResult{Usable: true, Message: "Restore cache is not enabled; Velero will use data mover ephemeral storage."}
+	configMap, err := r.client.CoreV1().ConfigMaps(namespace).Get(ctx, "node-agent-config", metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return result, nil
+	}
+	if err != nil {
+		return result, fmt.Errorf("read node-agent cache configuration: %w", err)
+	}
+	var config struct {
+		CachePVC *struct {
+			StorageClass          string `json:"storageClass"`
+			ResidentThresholdInMB int64  `json:"residentThresholdInMB"`
+		} `json:"cachePVC"`
+	}
+	if err := json.Unmarshal([]byte(configMap.Data["node-agent-config.json"]), &config); err != nil {
+		return result, fmt.Errorf("parse node-agent cache configuration: %w", err)
+	}
+	if config.CachePVC == nil || strings.TrimSpace(config.CachePVC.StorageClass) == "" {
+		return result, nil
+	}
+	result.Enabled = true
+	result.Usable = false
+	result.StorageClass = strings.TrimSpace(config.CachePVC.StorageClass)
+	result.ResidentThresholdMB = config.CachePVC.ResidentThresholdInMB
+	storageClass, err := r.client.StorageV1().StorageClasses().Get(ctx, result.StorageClass, metav1.GetOptions{})
+	if err != nil {
+		return result, fmt.Errorf("restore cache StorageClass %q is unavailable: %w", result.StorageClass, err)
+	}
+	if strings.TrimSpace(storageClass.Provisioner) == "" {
+		return result, fmt.Errorf("restore cache StorageClass %q has no dynamic provisioner", result.StorageClass)
+	}
+	if storageClass.ReclaimPolicy != nil && *storageClass.ReclaimPolicy != corev1.PersistentVolumeReclaimDelete {
+		return result, fmt.Errorf("restore cache StorageClass %q must use reclaimPolicy Delete", result.StorageClass)
+	}
+	repositoryConfig, err := r.client.CoreV1().ConfigMaps(namespace).Get(ctx, "backup-repository-config", metav1.GetOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return result, fmt.Errorf("read backup repository cache configuration: %w", err)
+	}
+	result.CacheLimitMB = 5120
+	if err == nil {
+		var repository struct {
+			CacheLimitMB int64 `json:"cacheLimitMB"`
+		}
+		if raw := strings.TrimSpace(repositoryConfig.Data["kopia"]); raw != "" {
+			if err := json.Unmarshal([]byte(raw), &repository); err != nil {
+				return result, fmt.Errorf("parse Kopia cache configuration: %w", err)
+			}
+			if repository.CacheLimitMB > 0 {
+				result.CacheLimitMB = repository.CacheLimitMB
+			}
+		}
+	}
+	result.Usable = true
+	result.Message = fmt.Sprintf("Restore cache is ready with StorageClass %s (threshold %d MiB, cache limit %d MiB).", result.StorageClass, result.ResidentThresholdMB, result.CacheLimitMB)
+	return result, nil
 }
 
 func NewKubernetesAgentRuntime(kubeconfigPath string) (*KubernetesAgentRuntime, error) {
@@ -284,7 +357,7 @@ func (r *KubernetesAgentRuntime) UpgradeVelero(ctx context.Context, options Vele
 	}
 	nodeAgentContainer := map[string]any{"name": "node-agent", "image": options.Image}
 	if options.NodeAgentConcurrency > 0 {
-		nodeAgentContainer["args"] = []string{"node-agent", "server", "--node-agent-configmap=node-agent-config"}
+		nodeAgentContainer["args"] = []string{"node-agent", "server", "--node-agent-configmap=node-agent-config", "--backup-repository-configmap=backup-repository-config"}
 	}
 	daemonSetPatch, _ := json.Marshal(map[string]any{"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"annotations": map[string]string{"hypercdr.io/velero-upgrade-at": time.Now().UTC().Format(time.RFC3339Nano)}}, "spec": map[string]any{"containers": []map[string]any{nodeAgentContainer}}}}})
 	if _, err := r.client.AppsV1().DaemonSets(namespace).Patch(ctx, daemonSetName, types.StrategicMergePatchType, daemonSetPatch, metav1.PatchOptions{}); err != nil {
@@ -335,8 +408,15 @@ func (r *KubernetesAgentRuntime) ensureVeleroPerformanceConfig(ctx context.Conte
 		},
 	}
 	if strings.TrimSpace(options.CacheStorageClass) != "" {
-		if _, err := r.client.StorageV1().StorageClasses().Get(ctx, options.CacheStorageClass, metav1.GetOptions{}); err != nil {
+		storageClass, err := r.client.StorageV1().StorageClasses().Get(ctx, options.CacheStorageClass, metav1.GetOptions{})
+		if err != nil {
 			return fmt.Errorf("cache storage class %q is unavailable: %w", options.CacheStorageClass, err)
+		}
+		if strings.TrimSpace(storageClass.Provisioner) == "" {
+			return fmt.Errorf("cache storage class %q does not define a dynamic provisioner", options.CacheStorageClass)
+		}
+		if storageClass.ReclaimPolicy != nil && *storageClass.ReclaimPolicy != corev1.PersistentVolumeReclaimDelete {
+			return fmt.Errorf("cache storage class %q must use reclaimPolicy Delete", options.CacheStorageClass)
 		}
 		config["cachePVC"] = map[string]any{
 			"storageClass":          options.CacheStorageClass,
@@ -354,13 +434,33 @@ func (r *KubernetesAgentRuntime) ensureVeleroPerformanceConfig(ctx context.Conte
 			ObjectMeta: metav1.ObjectMeta{Name: "node-agent-config", Namespace: namespace},
 			Data:       map[string]string{"node-agent-config.json": string(data)},
 		}, metav1.CreateOptions{})
+	} else if err != nil {
+		return err
+	} else {
+		current.Data = map[string]string{"node-agent-config.json": string(data)}
+		_, err = configMaps.Update(ctx, current, metav1.UpdateOptions{})
+	}
+	if err != nil {
+		return err
+	}
+	cacheLimitMB := options.CacheLimitMB
+	if cacheLimitMB <= 0 {
+		cacheLimitMB = 5120
+	}
+	repositoryData, err := json.Marshal(map[string]any{"cacheLimitMB": cacheLimitMB})
+	if err != nil {
+		return err
+	}
+	repositoryConfig, err := configMaps.Get(ctx, "backup-repository-config", metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		_, err = configMaps.Create(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "backup-repository-config", Namespace: namespace}, Data: map[string]string{"kopia": string(repositoryData)}}, metav1.CreateOptions{})
 		return err
 	}
 	if err != nil {
 		return err
 	}
-	current.Data = map[string]string{"node-agent-config.json": string(data)}
-	_, err = configMaps.Update(ctx, current, metav1.UpdateOptions{})
+	repositoryConfig.Data = map[string]string{"kopia": string(repositoryData)}
+	_, err = configMaps.Update(ctx, repositoryConfig, metav1.UpdateOptions{})
 	return err
 }
 

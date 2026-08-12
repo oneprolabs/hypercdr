@@ -1737,6 +1737,7 @@ func (s *MemoryStore) CreateRestorePoint(input RestorePointInput) (RestorePoint,
 		BackupStorageName: input.BackupStorageName,
 		TaskCreatedAt:     input.TaskCreatedAt,
 		Metadata:          input.Metadata,
+		SizeMetricsV2:     input.SizeMetricsV2,
 		CreatedAt:         now,
 	}
 	if point.TaskCreatedAt.IsZero() {
@@ -1762,6 +1763,9 @@ func (s *MemoryStore) CreateRestorePoint(input RestorePointInput) (RestorePoint,
 			}
 			for key, value := range point.Metadata {
 				existing.Metadata[key] = value
+			}
+			if len(point.SizeMetricsV2) > 0 {
+				existing.SizeMetricsV2 = point.SizeMetricsV2
 			}
 			s.restorePoints[id] = existing
 			return existing, nil

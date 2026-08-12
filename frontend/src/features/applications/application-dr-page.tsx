@@ -75,6 +75,10 @@ export default function ApplicationDrPage(props: {
   const [recoverySubmitting, setRecoverySubmitting] = useState(false);
   const [protectSubmitting, setProtectSubmitting] = useState(false);
   const protectSubmittingRef = useRef(false);
+	const cleanupSubmittingRef = useRef(false);
+	const [cleaningPlanIds, setCleaningPlanIds] = useState<string[]>([]);
+	const [configuringPlanIds, setConfiguringPlanIds] = useState<string[]>([]);
+	const [configuringAppNames, setConfiguringAppNames] = useState<string[]>([]);
   const [resourceCatalogLoading, setResourceCatalogLoading] = useState(false);
   const [resourceCatalogLoaded, setResourceCatalogLoaded] = useState(false);
   const resourceCatalogRequestsRef = useRef(new Map<string, { clusterId: string; requestId: string }>());
@@ -180,6 +184,7 @@ export default function ApplicationDrPage(props: {
   const [namespaceDetailTab, setNamespaceDetailTab] = useState<'overview' | 'restorePoints' | 'tasks' | 'storage'>('overview');
   const [namespaceDetailTaskId, setNamespaceDetailTaskId] = useState('');
   const [namespaceRestorePointPage, setNamespaceRestorePointPage] = useState(1);
+	const [restorePointMenuId, setRestorePointMenuId] = useState('');
   const [namespaceTaskPage, setNamespaceTaskPage] = useState(1);
   const [drSupportErrorDetail, setDrSupportErrorDetail] = useState<AppItem | null>(null);
   const openNamespaceDetail = (app: AppItem, tab: 'overview' | 'restorePoints' | 'tasks' | 'storage' = 'overview') => {
@@ -212,6 +217,10 @@ export default function ApplicationDrPage(props: {
     setSubmittingSyncTasks({});
     setSyncSubmitting(false);
     setRecoverySubmitting(false);
+	setCleaningPlanIds([]);
+	setConfiguringPlanIds([]);
+	setConfiguringAppNames([]);
+	cleanupSubmittingRef.current = false;
     setRestoreAction(null);
     setTagAction(null);
     setShowAddRuleForm(false);
@@ -220,7 +229,11 @@ export default function ApplicationDrPage(props: {
     drSupportAutoRequestedRef.current.clear();
     setSyncTasks({});
     setAppBulkMenuOpen(false);
-  }, [currentClusterId, apps]);
+  // Transaction-owned UI state must only be reset when the operator actually
+  // changes clusters. `apps` is refreshed while configuration and cleanup are
+  // running; depending on it here used to clear `cleaningPlanIds` on every
+  // poll, allowing a stale plan snapshot to flash Ready/Pending mid-cleanup.
+  }, [currentClusterId]);
 
   const [restoreAction, setRestoreAction] = useState<{ mode: 'drill' | 'takeover'; app: AppItem; config: RecoveryWizardConfig } | null>(null);
   const [tagAction, setTagAction] = useState<'attach' | 'detach' | null>(null);
@@ -333,7 +346,14 @@ export default function ApplicationDrPage(props: {
   const activeDrTaskKey = Array.from(new Set(activeDrTaskIds)).sort().join('|');
   const protectionPlanForApp = (app: AppItem) => {
     if (!app.protectionPlanId) return undefined;
-    return protectionPlans.find(plan => plan.id === app.protectionPlanId);
+	const plan = protectionPlans.find(plan => plan.id === app.protectionPlanId);
+	if (cleaningPlanIds.includes(app.protectionPlanId)) {
+		return { ...(plan || { id: app.protectionPlanId }), status: 'cleaning' } as ApiProtectionPlan;
+	}
+	if (configuringPlanIds.includes(app.protectionPlanId) || unitMembers(app).some(member => configuringAppNames.includes(member.name))) {
+		return { ...(plan || { id: app.protectionPlanId }), status: 'configuring' } as ApiProtectionPlan;
+	}
+	return plan;
   };
   const planStorageSizeForApp = (app: AppItem) => {
     const size = recordFromUnknown(protectionPlanForApp(app)?.planStorageSize);
@@ -373,6 +393,25 @@ export default function ApplicationDrPage(props: {
     const presentation = storageFailurePresentation(task);
     return task && presentation ? { task, presentation } : null;
   };
+  const cleanupFailureForApp = (app: AppItem) => {
+		const plan = protectionPlanForApp(app);
+		if (!plan || (plan.status || '').toLowerCase() !== 'cleanup_failed') return null;
+		const task = platformTasks
+			.filter(item => item.type === 'protection-cleanup' && item.protectionPlanId === plan.id && item.status.toLowerCase() === 'failed')
+			.sort((a, b) => (b.completedAt || b.createdAt || '').localeCompare(a.completedAt || a.createdAt || ''))[0];
+		if (!task) return null;
+		const raw = (task.errorMessage || task.errorCode || '').trim();
+		const transient = /etcdserver: request timed out|context deadline exceeded|temporarily unavailable|connection refused|connection reset|unexpected eof/i.test(raw);
+		return {
+			task,
+			message: transient
+				? `Source cluster Kubernetes API/etcd temporarily timed out: ${raw}`
+				: raw || 'Protection resource cleanup failed.',
+			solution: transient
+				? 'The cleanup is safe to retry. Check source-cluster API health if it fails repeatedly.'
+				: 'Open task details, correct the reported cluster, permission, or storage problem, then retry cleanup.',
+		};
+	};
   const retryDrActivation = async (app: AppItem) => {
     const plan = protectionPlanForApp(app);
     if (!plan) {
@@ -394,6 +433,18 @@ export default function ApplicationDrPage(props: {
       toast('Failed to retry activation: ' + (error instanceof Error ? error.message : 'unknown error'));
     }
   };
+	const operationTaskForApp = (app: AppItem) => {
+		const plan = protectionPlanForApp(app);
+		if (!plan) return null;
+		return platformTasks
+			.filter(task => task.protectionPlanId === plan.id && ['storage-sync', 'schedule-sync', 'protection-cleanup'].includes(task.type))
+			.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0] || null;
+	};
+	const openPlanExecutionLog = (app: AppItem) => {
+		const task = operationTaskForApp(app);
+		if (task) setSyncTaskDetail({ app, task, failure: isFailedStatus(task.status) ? taskFailureSummary(task) : undefined });
+		else toast('Execution log is not available yet. Configuration has been saved and background work is starting.');
+	};
   const reconfigureDrStorage = async (app: AppItem) => {
     const plan = protectionPlanForApp(app);
     if (!plan) {
@@ -1296,16 +1347,26 @@ export default function ApplicationDrPage(props: {
           const app = info.row.original;
           const plan = protectionPlanForApp(app);
           const meta = drStatusForPlan(plan?.status);
-          const retryable = canRetryDrActivation(plan?.status);
+		  const retryable = canRetryDrActivation(plan?.status);
           const normalizedPlanStatus = (plan?.status || '').toLowerCase();
-          const canReconfigureStorage = normalizedPlanStatus === 'storage_failed' || normalizedPlanStatus === 'active_with_warning';
+		  const canReconfigureStorage = ['configuration_failed', 'storage_failed', 'ready_with_warning', 'active_with_warning'].includes(normalizedPlanStatus);
           const reconfigureTitle = normalizedPlanStatus === 'active_with_warning'
             ? 'Retry target BackupStorageLocation configuration'
             : 'Reconfigure BackupStorageLocation';
           const storageFailure = canReconfigureStorage ? storageFailureForApp(app) : null;
+		  const cleanupFailure = normalizedPlanStatus === 'cleanup_failed' ? cleanupFailureForApp(app) : null;
           return (
-            <span className={`hbdr-dr-status-cell ${storageFailure ? 'is-storage-failure' : ''}`}>
-              {storageFailure ? (
+			<span className={`hbdr-dr-status-cell ${storageFailure || cleanupFailure ? 'is-storage-failure' : ''}`}>
+			  {cleanupFailure ? (
+				<span className="hbdr-dr-storage-failure">
+				  <TaskErrorStatus
+					code={cleanupFailure.task.errorCode}
+					title={cleanupFailure.message}
+					onClick={() => setSyncTaskDetail({ app, task: cleanupFailure.task, failure: taskFailureSummary(cleanupFailure.task) })}
+				  />
+				  <span className="hbdr-dr-storage-failure-help">{cleanupFailure.solution}</span>
+				</span>
+			  ) : storageFailure ? (
                 <span className="hbdr-dr-storage-failure">
                   <TaskErrorStatus
                     code={storageFailure.task.errorCode}
@@ -1314,13 +1375,13 @@ export default function ApplicationDrPage(props: {
                   />
                   <span className="hbdr-dr-storage-failure-help">{storageFailure.presentation.solution}</span>
                 </span>
-              ) : <span className="hbdr-dr-status-line">
-                <span className={`hbdr-dr-status hbdr-dr-status-${meta.tone}`} title={meta.title}>
+			  ) : <span className="hbdr-dr-status-line">
+				<button type="button" className={`hbdr-dr-status hbdr-dr-status-${meta.tone}`} title={`${meta.title}. Click to view execution log.`} onClick={event => { event.stopPropagation(); openPlanExecutionLog(app); }}>
                   {meta.tone === 'ok' && <CheckCircle2 size={14} />}
                   {meta.tone === 'progress' && <RefreshCw size={14} />}
                   {meta.tone === 'warn' && <AlertTriangle size={14} />}
                   {meta.label}
-                </span>
+				</button>
               </span>}
               {retryable && (
                 <span className="hbdr-dr-status-actions">
@@ -1615,6 +1676,14 @@ export default function ApplicationDrPage(props: {
     }
     setRestoreAction({ mode, app: selectedRunRows[0], config: buildRecoveryDraft(mode, selectedRunRows[0], points[0].id) });
   };
+	const openRestorePointAction = (mode: 'drill' | 'takeover', app: AppItem, pointId: string) => {
+		const activeTask = recoveryTaskForUnit(app);
+		if (isActiveTaskStatus(activeTask?.status)) {
+			toast('A recovery task is already running for this namespace');
+			return;
+		}
+		setRestoreAction({ mode, app, config: buildRecoveryDraft(mode, app, pointId) });
+	};
   const confirmRestoreAction = async () => {
     if (!restoreAction) return;
     const point = restorePointsForApp(restoreAction.app).find(item => item.id === restoreAction.config.pointId);
@@ -2131,6 +2200,7 @@ export default function ApplicationDrPage(props: {
     warmWizardResourceCatalog(apps.find(item => item.name === selectedRunApps[0]));
   };
   const deleteDrConfiguration = async () => {
+	if (cleanupSubmittingRef.current) return;
     if (selectedRunApps.length === 0) {
       toast('Select applications to cleanup resources');
       return;
@@ -2143,6 +2213,12 @@ export default function ApplicationDrPage(props: {
       toast('Selected resources are already being cleaned');
       return;
     }
+	cleanupSubmittingRef.current = true;
+	setCleaningPlanIds(prev => Array.from(new Set([...prev, ...planIds])));
+	// Persist the cleanup state in the local plan model before dispatch. An
+	// inventory refresh must never briefly render an active plan as Ready while
+	// the DELETE request and the persisted cleanup state are converging.
+	setProtectionPlans(prev => prev.map(plan => planIds.includes(plan.id) ? { ...plan, status: 'cleaning' } : plan));
     try {
       await Promise.all(planIds.map(planId => apiDelete<ApiProtectionPlan>(`/api/v1/protection-plans/${planId}`)));
       const appsWithoutPlan = targetApps.filter(app => !app.protectionPlanId && app.apiId);
@@ -2152,10 +2228,12 @@ export default function ApplicationDrPage(props: {
         ));
       }
     } catch (error) {
+		await refreshPlatformData();
       toast('Failed to cleanup resources: ' + (error instanceof Error ? error.message : 'unknown error'));
+		setCleaningPlanIds(prev => prev.filter(id => !planIds.includes(id)));
+		cleanupSubmittingRef.current = false;
       return;
     }
-    setProtectionPlans(prev => prev.map(plan => planIds.includes(plan.id) ? { ...plan, status: 'cleanup_running' } : plan));
     setAppUiOverrides(prev => {
       const next = { ...prev };
       targetApps.forEach(app => {
@@ -2175,14 +2253,12 @@ export default function ApplicationDrPage(props: {
     const pollCleanup = (remaining: number) => {
       window.setTimeout(async () => {
         try {
-          await refreshPlatformData();
           const response = await apiGet<ApiList<ApiProtectionPlan>>('/api/v1/protection-plans');
           const remainingPlans = listItems(response).filter(plan => planIds.includes(plan.id));
           if (remainingPlans.length > 0 && remaining > 0) {
             pollCleanup(remaining - 1);
           } else if (remainingPlans.length === 0) {
             setProtectionPlans(prev => prev.filter(plan => !planIds.includes(plan.id)));
-            await refreshPlatformData();
             setAppUiOverrides(prev => {
               const next = { ...prev };
               targetApps.forEach(app => {
@@ -2200,18 +2276,30 @@ export default function ApplicationDrPage(props: {
               return next;
             });
             setSelectedConfigApps([]);
-            setStage('config');
+			setStage('config');
+			setCleaningPlanIds(prev => prev.filter(id => !planIds.includes(id)));
+			cleanupSubmittingRef.current = false;
+			await refreshPlatformData();
             toast('Cleanup completed. Application returned to Setup DR.');
+		  } else {
+			// Polling exhausted while the persisted cleanup task still owns the
+			// operation. Release the click guard, but retain the Cleaning display;
+			// the server-side plan status remains the source of truth.
+			cleanupSubmittingRef.current = false;
           }
         } catch {
-          if (remaining > 0) pollCleanup(remaining - 1);
+		  if (remaining > 0) {
+			pollCleanup(remaining - 1);
+		  } else {
+			cleanupSubmittingRef.current = false;
+		  }
         }
       }, 3000);
     };
     void refreshPlatformData();
     pollCleanup(40);
   };
-  const pollProtectionPlanActivation = (planIds: string[], remaining: number) => {
+  const pollProtectionPlanActivation = (planIds: string[], appNames: string[], remaining: number) => {
     if (planIds.length === 0 || remaining <= 0) return;
     window.setTimeout(async () => {
       try {
@@ -2227,15 +2315,17 @@ export default function ApplicationDrPage(props: {
           return Array.from(byId.values()).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
         });
         const done = watched.length === planIds.length && watched.every(plan =>
-          ['active', 'active_with_warning', 'storage_failed', 'schedule_failed', 'cleanup_failed'].includes((plan.status || '').toLowerCase())
+		  ['ready', 'ready_with_warning', 'configuration_failed', 'cleanup_failed'].includes((plan.status || '').toLowerCase())
         );
         if (!done) {
-          pollProtectionPlanActivation(planIds, remaining - 1);
+          pollProtectionPlanActivation(planIds, appNames, remaining - 1);
         } else {
+		  setConfiguringPlanIds(prev => prev.filter(id => !planIds.includes(id)));
+		  setConfiguringAppNames(prev => prev.filter(name => !appNames.includes(name)));
           void refreshPlatformData();
         }
       } catch {
-        pollProtectionPlanActivation(planIds, remaining - 1);
+        pollProtectionPlanActivation(planIds, appNames, remaining - 1);
       }
     }, 1500);
   };
@@ -2283,6 +2373,10 @@ export default function ApplicationDrPage(props: {
       : targetAppMeta.map(meta => [meta]);
     const createdPlans: ApiProtectionPlan[] = [];
     const planIdByAppName: Record<string, string> = {};
+	// Own the visible transaction before the first POST. Platform refreshes can
+	// otherwise promote an application with a very fast activation to Ready
+	// before the create response gives this component a plan ID.
+	setConfiguringAppNames(prev => Array.from(new Set([...prev, ...targetApps])));
     try {
       for (const group of planGroups) {
         const createdPlan = await apiPost<ApiProtectionPlan>('/api/v1/protection-plans', {
@@ -2305,12 +2399,32 @@ export default function ApplicationDrPage(props: {
           planIdByAppName[meta.name] = createdPlan.id;
         });
       }
+	  // A persisted plan is enough to enter stage 3. Do this before auxiliary
+	  // application-state and capability requests so the user sees one clear,
+	  // continuous Configuring state immediately after Save succeeds.
+	  setConfiguringPlanIds(prev => Array.from(new Set([...prev, ...createdPlans.map(plan => plan.id)])));
+	  setProtectionPlans(prev => {
+		const byId = new Map(prev.map(plan => [plan.id, plan]));
+		createdPlans.forEach(plan => byId.set(plan.id, { ...(byId.get(plan.id) || {}), ...plan }));
+		return Array.from(byId.values()).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+	  });
+	  setAppUiOverrides(prev => {
+		const next = { ...prev };
+		targetAppMeta.forEach(meta => {
+		  const app = apps.find(item => item.name === meta.name);
+		  const key = app ? appOverrideKey(app) : `${currentClusterId}::${meta.name}`;
+		  next[key] = { ...(next[key] || {}), stage: 'run', protectionStatus: 'protected', protectionPlanId: planIdByAppName[meta.name], isProtected: true, status: 'Protected' };
+		});
+		return next;
+	  });
+	  setProtectWizardOpen(false);
+	  setStage('run');
       // Promote the applications to "protected" so the protection_status in
       // the database matches the stage-3 UI state, and a fresh page load
       // still shows these apps in stage 3.
-      await Promise.all(targetAppMeta.map(meta =>
-        apiPatch(`/api/v1/applications/${meta.apiId}`, { protectionStatus: 'protected' })
-      ));
+	  void Promise.allSettled(targetAppMeta.map(meta =>
+		apiPatch(`/api/v1/applications/${meta.apiId}`, { protectionStatus: 'protected' })
+	  )).then(() => refreshPlatformData());
 	  // Capability evidence is collected on demand after DR configuration.
 	  // Periodic inventory intentionally does not upload cluster-wide API data.
 	  void Promise.allSettled(targetAppMeta.flatMap(meta => {
@@ -2353,6 +2467,8 @@ export default function ApplicationDrPage(props: {
         return next;
       });
     } catch (error) {
+	  setConfiguringAppNames(prev => prev.filter(name => !targetApps.includes(name)));
+	  setConfiguringPlanIds(prev => prev.filter(id => !createdPlans.some(plan => plan.id === id)));
       toast('Failed to create protection plan: ' + (error instanceof Error ? error.message : 'unknown error'));
       protectSubmittingRef.current = false;
       setProtectSubmitting(false);
@@ -2364,16 +2480,16 @@ export default function ApplicationDrPage(props: {
     }
     setSelectedRunApps(protectConfig.mergeNamespaces && createdPlans.length === 1 ? [`plan:${createdPlans[0].id}`] : targetApps);
     setSelectedConfigApps([]);
-    setProtectWizardOpen(false);
+	setProtectWizardOpen(false);
     setProtectWizardMode('create');
     setProtectWizardStep(1);
     setStage('run');
     void refreshPlatformData();
-    pollProtectionPlanActivation(createdPlans.map(plan => plan.id), 40);
+    pollProtectionPlanActivation(createdPlans.map(plan => plan.id), targetApps, 40);
     const warning = createdPlans.map(plan => plan.warning).find(Boolean);
     const activating = createdPlans.some(plan => plan.status && plan.status !== 'active');
     if (warning) {
-      toast(`DR configuration saved, activation pending: ${warning}`);
+      toast(`DR configuration saved. Configuration is in progress: ${warning}`);
     } else if (activating) {
       toast('DR configuration saved. Protection plan activation is in progress.');
     } else {
@@ -3306,19 +3422,51 @@ export default function ApplicationDrPage(props: {
                       </div>
                       {detailRestorePoints.length > 0 ? (
                         <div className="hbdr-namespace-detail-list">
-                          {pagedDetailRestorePoints.map(point => (
+                          {pagedDetailRestorePoints.map(point => {
+							const metrics = recordFromUnknown(point.sizeMetricsV2 || point.metadata?.sizeMetricsV2);
+							const logical = recordFromUnknown(metrics.logical);
+							const newData = recordFromUnknown(metrics.newData);
+							const reuse = recordFromUnknown(metrics.reuse);
+							const logicalKnown = Boolean(logical.known) || Number(logical.totalBytes || 0) > 0;
+							const metadataOnly = Number(logical.metadataBytes || 0) > 0
+								&& Number(newData.metadataBytes || 0) > 0
+								&& Number(logical.volumeBytes || 0) === 0
+								&& Number(logical.metadataBytes || 0) === Number(logical.totalBytes || 0)
+								&& Number(newData.metadataBytes || 0) === Number(newData.totalBytes || 0);
+							const newDataKnown = Boolean(newData.known) || metadataOnly;
+							const reuseStatus = String(reuse.status || 'unavailable');
+							const logicalBytes = Number(logical.totalBytes || 0);
+							const newDataBytes = Number(newData.totalBytes || 0);
+							// Derive the card value from the two displayed overall totals. This
+							// keeps historical V2 points consistent even when their persisted
+							// reuse ratio was produced by the former volume-only definition.
+							const overallReuseRatio = logicalKnown && newDataKnown && logicalBytes > 0
+								? Math.max(0, Math.min(1, 1 - newDataBytes / logicalBytes))
+								: null;
+							const reuseRatio = overallReuseRatio ?? Number(reuse.ratio || 0);
+							const reuseLabel = `${Number((reuseRatio * 100).toFixed(2))}%`;
+							return (
                             <section key={point.id} className="hbdr-namespace-rp-row">
                               <div className="hbdr-namespace-rp-icon" title="Stored recovery point"><DatabaseBackup size={17} /></div>
                               <div className="min-w-0">
                                 <strong title={restorePointDisplayLabel(point)}>{restorePointDisplayLabel(point)}</strong>
                                 <span>{formatLocalDateTime(point.taskCreatedAt || point.createdAt) || '-'} · {point.pointType === 'local' ? 'Local Snapshot' : 'Remote Snapshot'}</span>
                               </div>
-                              <div className="hbdr-namespace-rp-meta">
-                                <em className={`is-${(point.status || 'unknown').toLowerCase()}`}>{point.status || 'Unknown'}</em>
-                                <span>{point.sizeBytes ? formatBytes(point.sizeBytes) : '-'}</span>
+                              <div className="hbdr-namespace-rp-metrics">
+								<div title="Complete data represented by this recovery point"><small>Logical size</small><strong>{logicalKnown ? formatBytes(Number(logical.totalBytes || point.sizeBytes || 0)) : (point.sizeBytes ? formatBytes(point.sizeBytes) : '—')}</strong></div>
+								<div title="New or changed data recorded by this backup"><small>New data</small><strong>{newDataKnown ? formatBytes(Number(newData.totalBytes || 0)) : '—'}</strong></div>
+								<div title="Percentage of the complete recovery-point data reused from existing repository content"><small>Reuse</small><strong>{overallReuseRatio !== null || reuseStatus === 'available' ? reuseLabel : reuseStatus === 'baseline' ? 'Baseline' : reuseStatus === 'not_applicable' ? 'N/A' : '—'}</strong></div>
+							  </div>
+							  <div className="hbdr-namespace-rp-meta">
+								<button type="button" className="hbdr-namespace-rp-menu-button" aria-label="Recovery point actions" onClick={event => { event.stopPropagation(); setRestorePointMenuId(current => current === point.id ? '' : point.id); }}><MoreVertical size={15} /></button>
+								{restorePointMenuId === point.id && <div className="hbdr-namespace-rp-menu">
+								  <button type="button" onClick={() => { setRestorePointMenuId(''); openNamespaceDetail(selectedDetailApp, 'restorePoints'); }}>View details</button>
+								  <button type="button" onClick={() => { setRestorePointMenuId(''); openRestorePointAction('drill', selectedDetailApp, point.id); }}>Drill</button>
+								  <button type="button" onClick={() => { setRestorePointMenuId(''); openRestorePointAction('takeover', selectedDetailApp, point.id); }}>Takeover</button>
+								</div>}
                               </div>
                             </section>
-                          ))}
+						  );})}
                           <div className="hbdr-namespace-detail-pagination">
                             <span>{(activeRestorePointPage - 1) * namespaceDetailPageSize + 1}-{Math.min(activeRestorePointPage * namespaceDetailPageSize, detailRestorePoints.length)} of {detailRestorePoints.length}</span>
                             <div>

@@ -414,6 +414,7 @@ type VeleroUpgradeCommand struct {
 	PrepareQueueLength       int    `json:"prepareQueueLength,omitempty"`
 	CacheStorageClass        string `json:"cacheStorageClass,omitempty"`
 	CacheResidentThresholdMB int    `json:"cacheResidentThresholdMB,omitempty"`
+	CacheLimitMB             int    `json:"cacheLimitMB,omitempty"`
 	CRDsURL                  string `json:"crdsUrl,omitempty"`
 }
 
@@ -585,30 +586,99 @@ type TaskAcceptedPayload struct {
 }
 
 type TaskProgressPayload struct {
-	AckRequired         bool           `json:"ackRequired,omitempty"`
-	TaskID              string         `json:"taskId"`
-	CommandID           string         `json:"commandId,omitempty"`
-	Status              string         `json:"status"`
-	Progress            int            `json:"progress"`
-	TotalBytes          int64          `json:"totalBytes,omitempty"`
-	SyncedBytes         int64          `json:"syncedBytes,omitempty"`
-	SpeedBytesPerSecond float64        `json:"speedBytesPerSecond,omitempty"`
-	Percent             float64        `json:"percent,omitempty"`
-	EtaSeconds          int64          `json:"etaSeconds,omitempty"`
-	Message             string         `json:"message"`
-	Velero              map[string]any `json:"velero,omitempty"`
+	AckRequired         bool            `json:"ackRequired,omitempty"`
+	TaskID              string          `json:"taskId"`
+	CommandID           string          `json:"commandId,omitempty"`
+	Status              string          `json:"status"`
+	Progress            int             `json:"progress"`
+	TotalBytes          int64           `json:"totalBytes,omitempty"`
+	SyncedBytes         int64           `json:"syncedBytes,omitempty"`
+	SpeedBytesPerSecond float64         `json:"speedBytesPerSecond,omitempty"`
+	Percent             float64         `json:"percent,omitempty"`
+	EtaSeconds          int64           `json:"etaSeconds,omitempty"`
+	Message             string          `json:"message"`
+	Velero              map[string]any  `json:"velero,omitempty"`
+	SizeProgressV2      *SizeProgressV2 `json:"sizeProgressV2,omitempty"`
 }
 
 type TaskCompletedPayload struct {
-	AckRequired bool           `json:"ackRequired,omitempty"`
-	TaskID      string         `json:"taskId"`
-	CommandID   string         `json:"commandId,omitempty"`
-	Status      string         `json:"status"`
-	Operation   string         `json:"operation,omitempty"`
-	Progress    int            `json:"progress"`
-	Message     string         `json:"message"`
-	Size        map[string]any `json:"size,omitempty"`
-	Velero      map[string]any `json:"velero,omitempty"`
+	AckRequired   bool           `json:"ackRequired,omitempty"`
+	TaskID        string         `json:"taskId"`
+	CommandID     string         `json:"commandId,omitempty"`
+	Status        string         `json:"status"`
+	Operation     string         `json:"operation,omitempty"`
+	Progress      int            `json:"progress"`
+	Message       string         `json:"message"`
+	Size          map[string]any `json:"size,omitempty"`
+	Velero        map[string]any `json:"velero,omitempty"`
+	SizeMetricsV2 *SizeMetricsV2 `json:"sizeMetricsV2,omitempty"`
+}
+
+type SizeProgressV2 struct {
+	SchemaVersion    int       `json:"schemaVersion"`
+	Operation        string    `json:"operation"`
+	Phase            string    `json:"phase,omitempty"`
+	ProcessedBytes   int64     `json:"processedBytes,omitempty"`
+	TotalBytes       int64     `json:"totalBytes,omitempty"`
+	TotalKnown       bool      `json:"totalKnown"`
+	BytesPerSecond   float64   `json:"bytesPerSecond,omitempty"`
+	EtaSeconds       int64     `json:"etaSeconds,omitempty"`
+	TotalVolumes     int       `json:"totalVolumes,omitempty"`
+	RunningVolumes   int       `json:"runningVolumes,omitempty"`
+	CompletedVolumes int       `json:"completedVolumes,omitempty"`
+	FailedVolumes    int       `json:"failedVolumes,omitempty"`
+	Sequence         int64     `json:"sequence,omitempty"`
+	ObservedAt       time.Time `json:"observedAt"`
+}
+type SizeValueV2 struct {
+	TotalBytes    int64 `json:"totalBytes,omitempty"`
+	MetadataBytes int64 `json:"metadataBytes,omitempty"`
+	VolumeBytes   int64 `json:"volumeBytes,omitempty"`
+	Known         bool  `json:"known"`
+}
+type SizeReuseV2 struct {
+	Ratio  float64 `json:"ratio,omitempty"`
+	Status string  `json:"status"`
+}
+type SizeRepositoryV2 struct {
+	StoredBytes   int64     `json:"storedBytes,omitempty"`
+	MetadataBytes int64     `json:"metadataBytes,omitempty"`
+	KopiaBytes    int64     `json:"kopiaBytes,omitempty"`
+	Known         bool      `json:"known"`
+	MeasuredAt    time.Time `json:"measuredAt,omitempty"`
+}
+type SizeQualityV2 struct {
+	LogicalVolumeSource string `json:"logicalVolumeSource,omitempty"`
+	NewVolumeDataSource string `json:"newVolumeDataSource,omitempty"`
+	RepositorySource    string `json:"repositorySource,omitempty"`
+	LogicalAccuracy     string `json:"logicalAccuracy,omitempty"`
+	NewDataAccuracy     string `json:"newDataAccuracy,omitempty"`
+	RepositoryAccuracy  string `json:"repositoryAccuracy,omitempty"`
+}
+type VolumeSizeMetricV2 struct {
+	Namespace    string `json:"namespace,omitempty"`
+	PVCName      string `json:"pvcName,omitempty"`
+	Method       string `json:"method,omitempty"`
+	LogicalBytes int64  `json:"logicalBytes,omitempty"`
+	LogicalKnown bool   `json:"logicalKnown"`
+	NewDataBytes int64  `json:"newDataBytes,omitempty"`
+	NewDataKnown bool   `json:"newDataKnown"`
+	SnapshotID   string `json:"snapshotId,omitempty"`
+	Phase        string `json:"phase,omitempty"`
+	Source       string `json:"source,omitempty"`
+}
+type SizeMetricsV2 struct {
+	SchemaVersion     int                  `json:"schemaVersion"`
+	Operation         string               `json:"operation"`
+	MeasurementStatus string               `json:"measurementStatus"`
+	Logical           SizeValueV2          `json:"logical"`
+	NewData           SizeValueV2          `json:"newData"`
+	AllVolumesKnown   bool                 `json:"allVolumesKnown"`
+	Reuse             SizeReuseV2          `json:"reuse"`
+	Repository        SizeRepositoryV2     `json:"repository"`
+	Quality           SizeQualityV2        `json:"quality"`
+	Volumes           []VolumeSizeMetricV2 `json:"volumes,omitempty"`
+	MeasuredAt        time.Time            `json:"measuredAt"`
 }
 
 type TaskFailedPayload struct {

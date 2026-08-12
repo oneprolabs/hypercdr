@@ -367,6 +367,7 @@ type Cluster struct {
 	InventoryHash              string                `json:"inventoryHash,omitempty"`
 	Nodes                      []ClusterNode         `json:"nodes,omitempty"`
 	StorageClasses             []ClusterStorageClass `json:"storageClasses,omitempty"`
+	RestoreCachePolicy         RestoreCachePolicy    `json:"restoreCachePolicy"`
 	APIResources               []ClusterAPIResource  `json:"apiResources,omitempty"`
 	NamespaceAPIs              []ClusterNamespaceAPI `json:"namespaceAPIs,omitempty"`
 	Capabilities               []ClusterCapability   `json:"capabilities,omitempty"`
@@ -376,6 +377,15 @@ type Cluster struct {
 	IsDefault                  bool                  `json:"isDefault"`
 	RegisteredAt               time.Time             `json:"registeredAt"`
 	LastSeenAt                 time.Time             `json:"lastSeenAt"`
+}
+
+type RestoreCachePolicy struct {
+	Mode                string `json:"mode"`
+	Enabled             bool   `json:"enabled"`
+	StorageClass        string `json:"storageClass,omitempty"`
+	ResidentThresholdMB int    `json:"residentThresholdMB,omitempty"`
+	CacheLimitMB        int    `json:"cacheLimitMB,omitempty"`
+	Reason              string `json:"reason,omitempty"`
 }
 
 func applyClusterConnectionFreshness(cluster *Cluster) {
@@ -788,6 +798,7 @@ type RestorePoint struct {
 	BackupStorageName string         `json:"backupStorageName,omitempty"`
 	TaskCreatedAt     time.Time      `json:"taskCreatedAt,omitempty"`
 	Metadata          map[string]any `json:"metadata,omitempty"`
+	SizeMetricsV2     map[string]any `json:"sizeMetricsV2,omitempty"`
 	CreatedAt         time.Time      `json:"createdAt"`
 }
 
@@ -810,6 +821,7 @@ type RestorePointInput struct {
 	BackupTaskID      string
 	BackupStorageName string
 	Metadata          map[string]any
+	SizeMetricsV2     map[string]any
 }
 
 type RestorePointStateInput struct {

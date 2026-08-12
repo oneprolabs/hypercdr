@@ -74,6 +74,8 @@ type Client struct {
 	backupCommandIDs  map[string]struct{}
 	activeBackupMu    sync.Mutex
 	activeBackupPlans map[string]string
+	progressMu        sync.Mutex
+	progressSequence  map[string]int64
 }
 
 type volumeProgressSample struct {
@@ -145,6 +147,7 @@ func NewWithRuntimeDependencies(cfg config.Config, logger *slog.Logger, applier 
 		backupTaskIDs:     map[string]struct{}{},
 		backupCommandIDs:  map[string]struct{}{},
 		activeBackupPlans: map[string]string{},
+		progressSequence:  map[string]int64{},
 		backupExec: executor.NewBackupExecutor(executor.Config{
 			Mode:           cfg.ExecutorMode,
 			AgentNamespace: cfg.Namespace,
@@ -673,7 +676,7 @@ func (c *Client) executeVeleroUpgradeTask(task protocol.TaskDispatchPayload) {
 		AWSPluginImage: command.AWSPluginImage, AzurePluginImage: command.AzurePluginImage, GCPPluginImage: command.GCPPluginImage,
 		ConcurrentBackups: command.ConcurrentBackups, NodeAgentConcurrency: command.NodeAgentConcurrency,
 		PrepareQueueLength: command.PrepareQueueLength, CacheStorageClass: command.CacheStorageClass,
-		CacheResidentThresholdMB: command.CacheResidentThresholdMB,
+		CacheResidentThresholdMB: command.CacheResidentThresholdMB, CacheLimitMB: command.CacheLimitMB,
 	}); err != nil {
 		_ = c.sendTaskFailedWithDetails(task, "VELERO_UPGRADE_FAILED", "velero rollout failed", map[string]any{"error": err.Error(), "image": command.Image})
 		return
@@ -1124,6 +1127,23 @@ func (c *Client) executeRestoreTask(task protocol.TaskDispatchPayload) {
 		c.logger.Error("failed to send task accepted", "task_id", task.TaskID, "error", err)
 		return
 	}
+	if preflighter, ok := c.agentRuntime.(kube.RestoreCachePreflighter); ok {
+		preflightCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		cache, preflightErr := preflighter.PreflightRestoreCache(preflightCtx, manifest.Metadata.Namespace)
+		cancel()
+		if preflightErr != nil {
+			_ = c.sendTaskFailedWithDetails(task, "RESTORE_CACHE_PREFLIGHT_FAILED", preflightErr.Error(), map[string]any{
+				"cacheEnabled": cache.Enabled, "cacheStorageClass": cache.StorageClass,
+			})
+			return
+		}
+		_ = c.sendTaskProgress(task, map[string]any{
+			"restoreCache": map[string]any{
+				"enabled": cache.Enabled, "usable": cache.Usable, "storageClass": cache.StorageClass,
+				"residentThresholdMB": cache.ResidentThresholdMB, "cacheLimitMB": cache.CacheLimitMB,
+			},
+		}, 2, cache.Message)
+	}
 	if err := c.restoreExec.SubmitRestore(context.Background(), manifest); err != nil {
 		_ = c.sendTaskFailed(task, restoreSubmitErrorCode(err), err.Error())
 		return
@@ -1462,7 +1482,12 @@ func (c *Client) executeProtectionCleanupTask(task protocol.TaskDispatchPayload)
 				})
 				return
 			}
-			deletedRestoreObjects, err = cleaner.DeleteRestoreObjects(context.Background(), namespace, task.ProtectionCleanup.StorageRepo, task.ProtectionCleanup.RestoreNames)
+			deletedRestoreObjects, err = retryProtectionCleanup(
+				context.Background(), c.logger, "restore objects", 3, 500*time.Millisecond,
+				func(ctx context.Context) ([]string, error) {
+					return cleaner.DeleteRestoreObjects(ctx, namespace, task.ProtectionCleanup.StorageRepo, task.ProtectionCleanup.RestoreNames)
+				},
+			)
 			if err != nil {
 				_ = c.sendTaskFailedWithDetails(task, "PROTECTION_CLEANUP_RESTORE_OBJECT_DELETE_FAILED", err.Error(), map[string]any{
 					"storageRepo":  task.ProtectionCleanup.StorageRepo,
@@ -1494,6 +1519,39 @@ func (c *Client) executeProtectionCleanupTask(task protocol.TaskDispatchPayload)
 	}, "protection resources cleaned"); err != nil {
 		c.logger.Error("failed to send protection cleanup completed", "task_id", task.TaskID, "error", err)
 	}
+}
+
+func retryProtectionCleanup(
+	ctx context.Context,
+	logger *slog.Logger,
+	operation string,
+	retryCount int,
+	baseDelay time.Duration,
+	fn func(context.Context) ([]string, error),
+) ([]string, error) {
+	var result []string
+	var err error
+	for attempt := 0; attempt <= retryCount; attempt++ {
+		result, err = fn(ctx)
+		if err == nil || !isUncertainKubernetesSubmitError(err) {
+			return result, err
+		}
+		if attempt == retryCount {
+			return result, fmt.Errorf("%s failed because the Kubernetes API remained temporarily unavailable after %d retries: %w", operation, retryCount, err)
+		}
+		delay := baseDelay * time.Duration(attempt+1)
+		if logger != nil {
+			logger.Warn("temporary Kubernetes API error during protection cleanup; retrying", "operation", operation, "attempt", attempt+1, "retry_in", delay, "error", err)
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return result, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return result, err
 }
 
 func retentionCleanupProgress(done int, total int) int {
@@ -2159,7 +2217,17 @@ func (c *Client) attachBackupSizeStats(ctx context.Context, object kube.AppliedO
 	metadataBytes := objectStats.MetadataPackageBytes
 	uploadedMetadataBytes := metadataBytes
 	uploadedVolumeBytes := volumeBytes
-	if int64FromAny(volumeProgress["incrementalCount"]) > 0 {
+	volumeCount := int64FromAny(volumeProgress["itemCount"])
+	incrementalKnownCount := int64FromAny(volumeProgress["incrementalCount"])
+	_, volumeCountReported := volumeProgress["itemCount"]
+	metadataOnly := volumeCountReported && volumeCount == 0 && volumeBytes == 0
+	if metadataOnly {
+		// A metadata-only backup has an exact logical volume size and volume
+		// increment of zero; absence of volumes is not an unknown measurement.
+		volumeBytes = 0
+		uploadedVolumeBytes = 0
+		volumeAccuracy = "accurate"
+	} else if incrementalKnownCount > 0 {
 		uploadedVolumeBytes = int64FromAny(volumeProgress["incrementalBytes"])
 		if uploadedVolumeBytes < 0 {
 			uploadedVolumeBytes = 0
@@ -2201,6 +2269,9 @@ func (c *Client) attachBackupSizeStats(ctx context.Context, object kube.AppliedO
 		"uploadedBytes":         uploadedBytes,
 		"uploadedMetadataBytes": uploadedMetadataBytes,
 		"uploadedVolumeBytes":   uploadedVolumeBytes,
+		"volumeCount":           volumeCount,
+		"incrementalKnownCount": incrementalKnownCount,
+		"allIncrementalKnown":   metadataOnly || (volumeCount > 0 && incrementalKnownCount == volumeCount),
 	}
 	_ = objectStats
 	payload["sizeStatus"] = sizeStatus
@@ -2951,6 +3022,13 @@ func (c *Client) sendTaskAccepted(task protocol.TaskDispatchPayload) error {
 func (c *Client) sendTaskProgress(task protocol.TaskDispatchPayload, veleroPayload map[string]any, progress int, text string) error {
 	veleroPayload = withRecoveryStages(task, veleroPayload, progress, "running", "", text)
 	metrics := taskProgressMetrics(veleroPayload)
+	sizeProgress := sizeProgressV2(task, veleroPayload, metrics)
+	if sizeProgress != nil {
+		c.progressMu.Lock()
+		c.progressSequence[task.TaskID]++
+		sizeProgress.Sequence = c.progressSequence[task.TaskID]
+		c.progressMu.Unlock()
+	}
 	message := protocol.NewMessage(protocol.MessageKindEvent, protocol.MessageAgentTaskProgress, c.cfg.ClusterID, c.cfg.AgentID, protocol.TaskProgressPayload{
 		AckRequired:         false,
 		TaskID:              task.TaskID,
@@ -2964,8 +3042,36 @@ func (c *Client) sendTaskProgress(task protocol.TaskDispatchPayload, veleroPaylo
 		EtaSeconds:          metrics.etaSeconds,
 		Message:             text,
 		Velero:              veleroPayload,
+		SizeProgressV2:      sizeProgress,
 	})
 	return c.writeJSON(message)
+}
+
+func sizeProgressV2(task protocol.TaskDispatchPayload, veleroPayload map[string]any, metrics taskProgressMetricSet) *protocol.SizeProgressV2 {
+	volume := wsMapFromAny(veleroPayload["volumeProgress"])
+	if len(volume) == 0 {
+		return nil
+	}
+	operation := "backup"
+	if isRecoveryTask(task.Type) {
+		operation = "restore"
+	}
+	phase := ""
+	if value, ok := veleroPayload["phase"].(string); ok {
+		phase = strings.TrimSpace(value)
+	}
+	if phase == "" {
+		status := wsMapFromAny(veleroPayload["status"])
+		phase, _ = status["phase"].(string)
+	}
+	return &protocol.SizeProgressV2{
+		SchemaVersion: 2, Operation: operation, Phase: phase,
+		ProcessedBytes: metrics.syncedBytes, TotalBytes: metrics.totalBytes, TotalKnown: metrics.totalBytes > 0,
+		BytesPerSecond: metrics.speedBytesPerSecond, EtaSeconds: metrics.etaSeconds,
+		TotalVolumes: intFromAny(volume["itemCount"]), RunningVolumes: intFromAny(volume["runningCount"]),
+		CompletedVolumes: intFromAny(volume["completedCount"]), FailedVolumes: intFromAny(volume["failedCount"]),
+		ObservedAt: time.Now().UTC(),
+	}
 }
 
 type taskProgressMetricSet struct {
@@ -2974,6 +3080,14 @@ type taskProgressMetricSet struct {
 	speedBytesPerSecond float64
 	percent             float64
 	etaSeconds          int64
+}
+
+func intFromAny(value any) int {
+	return int(int64FromAny(value))
+}
+
+func isBackupTask(taskType string) bool {
+	return strings.EqualFold(strings.TrimSpace(taskType), "backup")
 }
 
 func taskProgressMetrics(veleroPayload map[string]any) taskProgressMetricSet {
@@ -3007,16 +3121,70 @@ func taskProgressMetrics(veleroPayload map[string]any) taskProgressMetricSet {
 func (c *Client) sendTaskCompleted(task protocol.TaskDispatchPayload, veleroPayload map[string]any, text string) error {
 	veleroPayload = withRecoveryStages(task, veleroPayload, 100, "succeeded", "", text)
 	message := protocol.NewMessage(protocol.MessageKindEvent, protocol.MessageAgentTaskCompleted, c.cfg.ClusterID, c.cfg.AgentID, protocol.TaskCompletedPayload{
-		AckRequired: true,
-		TaskID:      task.TaskID,
-		CommandID:   task.CommandID,
-		Status:      "succeeded",
-		Operation:   task.Type,
-		Progress:    100,
-		Message:     text,
-		Velero:      veleroPayload,
+		AckRequired:   true,
+		TaskID:        task.TaskID,
+		CommandID:     task.CommandID,
+		Status:        "succeeded",
+		Operation:     task.Type,
+		Progress:      100,
+		Message:       text,
+		Velero:        veleroPayload,
+		SizeMetricsV2: sizeMetricsV2(task, veleroPayload),
 	})
 	return c.sendReliableEvent(message)
+}
+
+func sizeMetricsV2(task protocol.TaskDispatchPayload, veleroPayload map[string]any) *protocol.SizeMetricsV2 {
+	if !isBackupTask(task.Type) {
+		return nil
+	}
+	size := wsMapFromAny(veleroPayload["restorePointSize"])
+	if len(size) == 0 {
+		size = wsMapFromAny(veleroPayload["size"])
+	}
+	if len(size) == 0 {
+		return nil
+	}
+	logicalVolume := int64FromAny(size["volumeBytes"])
+	newVolume := int64FromAny(size["uploadedVolumeBytes"])
+	logicalTotal := int64FromAny(size["totalBytes"])
+	newTotal := int64FromAny(size["uploadedBytes"])
+	itemCount := intFromAny(size["volumeCount"])
+	knownCount := intFromAny(size["incrementalKnownCount"])
+	allKnown, hasAllKnown := size["allIncrementalKnown"].(bool)
+	if !hasAllKnown {
+		allKnown = itemCount == 0 || knownCount == itemCount
+	}
+	reuse := protocol.SizeReuseV2{Status: "unavailable"}
+	if allKnown && logicalTotal > 0 {
+		reuse.Status = "available"
+		// Reuse is an end-user recovery-point metric, so its numerator and
+		// denominator use the same overall-data scope: Kubernetes metadata plus
+		// persistent volume data. Volume-only reuse remains available through
+		// Logical.VolumeBytes and NewData.VolumeBytes when deeper diagnosis is
+		// needed.
+		reuse.Ratio = 1 - float64(newTotal)/float64(logicalTotal)
+		if reuse.Ratio < 0 {
+			reuse.Ratio = 0
+		}
+		if reuse.Ratio > 1 {
+			reuse.Ratio = 1
+		}
+	}
+	repository := wsMapFromAny(veleroPayload["planStorageSize"])
+	status := strings.TrimSpace(fmt.Sprint(veleroPayload["sizeStatus"]))
+	if status == "" {
+		status = "complete"
+	}
+	return &protocol.SizeMetricsV2{
+		SchemaVersion: 2, Operation: "backup", MeasurementStatus: status,
+		Logical:         protocol.SizeValueV2{TotalBytes: logicalTotal, MetadataBytes: int64FromAny(size["metadataBytes"]), VolumeBytes: logicalVolume, Known: logicalTotal > 0},
+		NewData:         protocol.SizeValueV2{TotalBytes: newTotal, MetadataBytes: int64FromAny(size["uploadedMetadataBytes"]), VolumeBytes: newVolume, Known: allKnown},
+		AllVolumesKnown: allKnown, Reuse: reuse,
+		Repository: protocol.SizeRepositoryV2{StoredBytes: int64FromAny(repository["totalBytes"]), MetadataBytes: int64FromAny(repository["metadataBytes"]), KopiaBytes: int64FromAny(repository["kopiaBytes"]), Known: int64FromAny(repository["totalBytes"]) > 0, MeasuredAt: time.Now().UTC()},
+		Quality:    protocol.SizeQualityV2{LogicalVolumeSource: "veleroBackupVolumeInfo", NewVolumeDataSource: "veleroIncrementalBytes", RepositorySource: "objectStorePrefixScan", LogicalAccuracy: "exact", NewDataAccuracy: map[bool]string{true: "exact", false: "unavailable"}[allKnown], RepositoryAccuracy: "measured"},
+		MeasuredAt: time.Now().UTC(),
+	}
 }
 
 func (c *Client) sendTaskFailed(task protocol.TaskDispatchPayload, code string, text string) error {

@@ -116,6 +116,7 @@ dev_log "Type-checking frontend source"
 (
   cd "${FRONTEND_SOURCE_DIR}"
   "${FRONTEND_DIR}/node_modules/.bin/tsc" --noEmit
+	"${FRONTEND_DIR}/node_modules/.bin/vite" build --outDir "${FRONTEND_DIR}/dist" --emptyOutDir
 )
 
 cat > "${HCDR_DEV_DIR}/run-api.sh" <<EOF
@@ -146,7 +147,7 @@ export HCDR_API_PROXY="http://127.0.0.1:${HCDR_DEV_API_PORT}"
 export HCDR_DEV_TLS_CERT_FILE="${HCDR_DEV_TLS_CERT_FILE}"
 export HCDR_DEV_TLS_KEY_FILE="${HCDR_DEV_TLS_KEY_FILE}"
 cd "${FRONTEND_SOURCE_DIR}"
-exec "${FRONTEND_DIR}/node_modules/.bin/vite" --host 0.0.0.0 --port "${HCDR_DEV_FRONTEND_PORT}" >> "${LOG_DIR}/platform-frontend.log" 2>&1
+exec "${FRONTEND_DIR}/node_modules/.bin/vite" preview --outDir "${FRONTEND_DIR}/dist" --host 0.0.0.0 --port "${HCDR_DEV_FRONTEND_PORT}" >> "${LOG_DIR}/platform-frontend.log" 2>&1
 EOF
 chmod 700 "${HCDR_DEV_DIR}/run-api.sh" "${HCDR_DEV_DIR}/run-frontend.sh"
 : > "${LOG_DIR}/platform-api.log"
@@ -157,7 +158,7 @@ dev_log "Starting backend HTTPS transient service"
 systemd-run --unit=hypercdr-dev-api --property=Restart=on-failure \
   --property=RestartSec=2s "${HCDR_DEV_DIR}/run-api.sh" >/dev/null
 
-dev_log "Starting frontend HTTPS development service with HMR"
+dev_log "Starting prebuilt frontend preview service"
 systemd-run --unit=hypercdr-dev-frontend --property=Restart=on-failure \
   --property=RestartSec=2s "${HCDR_DEV_DIR}/run-frontend.sh" >/dev/null
 
@@ -165,10 +166,10 @@ sleep 2
 systemctl is-active --quiet hypercdr-dev-api.service || dev_die "backend failed; see ${LOG_DIR}/platform-api.log"
 systemctl is-active --quiet hypercdr-dev-frontend.service || dev_die "frontend failed; see ${LOG_DIR}/platform-frontend.log"
 
-dev_log "Warming frontend module graph"
+dev_log "Checking prebuilt frontend"
 frontend_ready="false"
 for _ in {1..60}; do
-  if curl -kfsS "https://127.0.0.1:${HCDR_DEV_FRONTEND_PORT}/src/App.tsx" >/dev/null; then
+  if curl -kfsS "https://127.0.0.1:${HCDR_DEV_FRONTEND_PORT}/" >/dev/null; then
     frontend_ready="true"
     break
   fi

@@ -1006,18 +1006,23 @@ export function stageOfApp(protectionStatus: string | undefined, isProtected: bo
 export function drStatusForPlan(status: string | undefined): { label: string; tone: 'ok' | 'progress' | 'warn' | 'muted'; title: string } {
   const normalized = (status || '').trim().toLowerCase();
   switch (normalized) {
+	case 'ready':
     case 'active':
       return { label: 'Ready', tone: 'ok', title: 'Storage location and backup schedule are active' };
+	case 'ready_with_warning':
     case 'active_with_warning':
       return { label: 'Ready', tone: 'warn', title: 'Source backup schedule is active. Target cluster storage needs attention; restore, drill, and takeover may be unavailable until BSL is reconfigured.' };
+	case 'configuring':
     case 'activating_storage':
-      return { label: 'Configuring storage', tone: 'progress', title: 'BackupStorageLocation is being configured. Failed attempts are retried automatically up to 3 times.' };
+      return { label: 'Configuring...', tone: 'progress', title: 'DR configuration is being applied. Storage and schedule setup continue automatically.' };
+	case 'configuration_failed':
     case 'storage_failed':
-      return { label: 'Storage failed', tone: 'warn', title: 'BackupStorageLocation configuration failed' };
+	  return { label: 'Configuration failed', tone: 'warn', title: 'DR configuration failed while preparing storage. Open error details to review the cause and retry.' };
     case 'activating_schedule':
-      return { label: 'Configuring schedule', tone: 'progress', title: 'Velero backup schedule is being configured' };
+      return { label: 'Configuring...', tone: 'progress', title: 'DR configuration is being applied. Storage is ready and schedule setup is continuing automatically.' };
     case 'schedule_failed':
-      return { label: 'Schedule failed', tone: 'warn', title: 'Velero backup schedule configuration failed' };
+	  return { label: 'Configuration failed', tone: 'warn', title: 'DR configuration failed while preparing the schedule. Open error details to review the cause and retry.' };
+	case 'cleaning':
     case 'cleanup_running':
       return { label: 'Cleaning...', tone: 'progress', title: 'Protection resources are being cleaned. Restore points, task records, schedule, and backup data are being removed.' };
     case 'cleanup_failed':
@@ -1026,9 +1031,9 @@ export function drStatusForPlan(status: string | undefined): { label: string; to
       return { label: 'Disabled', tone: 'muted', title: 'Protection plan is disabled' };
     case 'pending_activation':
     case '':
-      return { label: 'Pending activation', tone: 'muted', title: 'Protection plan is saved but not active yet' };
+      return { label: 'Configuring...', tone: 'progress', title: 'DR configuration has been saved and is being applied.' };
     default:
-      return { label: status || 'Pending activation', tone: 'muted', title: status || 'Pending activation' };
+      return { label: 'Configuring...', tone: 'progress', title: status ? `DR configuration is being applied (${status}).` : 'DR configuration is being applied.' };
   }
 }
 
@@ -1056,15 +1061,15 @@ export function storageFailurePresentation(task: ApiTask | undefined): { message
 }
 
 export function isProtectionPlanReady(status: string | undefined): boolean {
-  return ['active', 'active_with_warning'].includes((status || '').trim().toLowerCase());
+	return ['ready', 'ready_with_warning', 'active', 'active_with_warning'].includes((status || '').trim().toLowerCase());
 }
 
 export function canRetryDrActivation(status: string | undefined): boolean {
-  return ['pending_activation', 'schedule_failed'].includes((status || '').trim().toLowerCase());
+	return ['configuration_failed', 'pending_activation', 'storage_failed', 'schedule_failed'].includes((status || '').trim().toLowerCase());
 }
 
 export function isProtectionPlanCleaning(status: string | undefined): boolean {
-  return (status || '').trim().toLowerCase() === 'cleanup_running';
+	return ['cleaning', 'cleanup_running'].includes((status || '').trim().toLowerCase());
 }
 
 export const resourceCategoryMeta: Array<{ key: ResourceCategoryKey; label: string }> = [

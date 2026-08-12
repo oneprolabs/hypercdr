@@ -27,6 +27,7 @@ func (r *Router) schedulerLoop() {
 func (r *Router) runSchedulerTick(now time.Time) {
 	r.scheduleLogMaintenance(now)
 	r.reconcileComponentUpgradeTimeouts(now)
+	r.reconcileProtectionCleanupPlans(now)
 	if jobs, err := r.store.ListPlatformUpgradeJobs(); err == nil {
 		for _, job := range jobs {
 			if !isTerminalPlatformUpgradeStatus(job.Status) {
@@ -42,6 +43,37 @@ func (r *Router) runSchedulerTick(now time.Time) {
 	}
 	for _, schedule := range due {
 		r.fireProtectionPlanSchedule(schedule, now)
+	}
+}
+
+func (r *Router) reconcileProtectionCleanupPlans(now time.Time) {
+	plans, err := r.store.ListProtectionPlans("")
+	if err != nil {
+		r.logger.Warn("failed to list protection plans for cleanup reconcile", "error", err)
+		return
+	}
+	for _, plan := range plans {
+		if plan.Status != "cleanup_running" {
+			continue
+		}
+		complete, err := r.protectionCleanupTasksComplete(plan, "")
+		if err != nil {
+			r.logger.Warn("failed to reconcile protection cleanup tasks", "plan_id", plan.ID, "error", err)
+			continue
+		}
+		if complete {
+			if _, _, err := r.store.CleanupProtectionPlanRecords(plan.ID); err != nil {
+				r.logger.Error("failed to finalize reconciled protection cleanup", "plan_id", plan.ID, "error", err)
+				_, _, _ = r.store.UpdateProtectionPlanStatus(plan.ID, "cleanup_failed")
+			}
+			continue
+		}
+		// A cleanup that has made no terminal progress for ten minutes must not
+		// remain an unexplained spinner forever.
+		if !plan.UpdatedAt.IsZero() && now.After(plan.UpdatedAt.Add(10*time.Minute)) {
+			_, _, _ = r.store.UpdateProtectionPlanStatus(plan.ID, "cleanup_failed")
+			r.logger.Warn("protection cleanup timed out during reconcile", "plan_id", plan.ID)
+		}
 	}
 }
 

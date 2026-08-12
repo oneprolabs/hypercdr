@@ -13,11 +13,41 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
+func TestPreflightRestoreCache(t *testing.T) {
+	deletePolicy := corev1.PersistentVolumeReclaimDelete
+	client := fake.NewSimpleClientset(
+		&storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: "cache-sc"}, Provisioner: "csi.example.test", ReclaimPolicy: &deletePolicy},
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "node-agent-config", Namespace: "hypercdr-agent"}, Data: map[string]string{"node-agent-config.json": `{"cachePVC":{"storageClass":"cache-sc","residentThresholdInMB":1024}}`}},
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "backup-repository-config", Namespace: "hypercdr-agent"}, Data: map[string]string{"kopia": `{"cacheLimitMB":4096}`}},
+	)
+	runtime := &KubernetesAgentRuntime{client: client}
+	result, err := runtime.PreflightRestoreCache(context.Background(), "hypercdr-agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Enabled || !result.Usable || result.StorageClass != "cache-sc" || result.CacheLimitMB != 4096 {
+		t.Fatalf("unexpected preflight result: %+v", result)
+	}
+}
+
+func TestPreflightRestoreCacheRejectsRetainStorageClass(t *testing.T) {
+	retainPolicy := corev1.PersistentVolumeReclaimRetain
+	client := fake.NewSimpleClientset(
+		&storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: "cache-sc"}, Provisioner: "csi.example.test", ReclaimPolicy: &retainPolicy},
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "node-agent-config", Namespace: "hypercdr-agent"}, Data: map[string]string{"node-agent-config.json": `{"cachePVC":{"storageClass":"cache-sc","residentThresholdInMB":1024}}`}},
+	)
+	runtime := &KubernetesAgentRuntime{client: client}
+	result, err := runtime.PreflightRestoreCache(context.Background(), "hypercdr-agent")
+	if err == nil || result.Usable {
+		t.Fatalf("expected unusable Retain cache StorageClass, result=%+v err=%v", result, err)
+	}
+}
+
 func TestVeleroRuntimeStatusRequiresEveryNodeAgentDigest(t *testing.T) {
 	labels := map[string]string{"app": "velero"}
 	nodeLabels := map[string]string{"app": "node-agent"}
 	client := fake.NewSimpleClientset(
-		&storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: "fast"}},
+		&storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: "fast"}, Provisioner: "csi.example.test"},
 		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "hypercdr-agent"}, Rules: []rbacv1.PolicyRule{{APIGroups: []string{"apps"}, Resources: []string{"daemonsets"}, Verbs: []string{"get", "patch", "update"}}, {APIGroups: []string{"apiextensions.k8s.io"}, Resources: []string{"customresourcedefinitions"}, Verbs: []string{"get", "list", "watch", "delete"}}}},
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "velero", Namespace: "hypercdr-agent"}, Spec: appsv1.DeploymentSpec{Selector: &metav1.LabelSelector{MatchLabels: labels}, Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "velero", Image: "registry/velero:v1.17.1-hcdr.1"}}}}}, Status: appsv1.DeploymentStatus{Replicas: 1, UpdatedReplicas: 1, AvailableReplicas: 1}},
 		&appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "node-agent", Namespace: "hypercdr-agent"}, Spec: appsv1.DaemonSetSpec{Selector: &metav1.LabelSelector{MatchLabels: nodeLabels}}, Status: appsv1.DaemonSetStatus{DesiredNumberScheduled: 2, NumberReady: 2, UpdatedNumberScheduled: 2}},
@@ -77,7 +107,7 @@ func TestUpgradeVeleroReconcilesProviderPlugins(t *testing.T) {
 	labels := map[string]string{"app": "velero"}
 	nodeLabels := map[string]string{"app": "node-agent"}
 	client := fake.NewSimpleClientset(
-		&storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: "fast"}},
+		&storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: "fast"}, Provisioner: "csi.example.test"},
 		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "hypercdr-agent"}, Rules: []rbacv1.PolicyRule{{APIGroups: []string{"apps"}, Resources: []string{"daemonsets"}, Verbs: []string{"get", "patch", "update"}}, {APIGroups: []string{"apiextensions.k8s.io"}, Resources: []string{"customresourcedefinitions"}, Verbs: []string{"get", "list", "watch", "delete"}}}},
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "velero", Namespace: "hypercdr-agent"}, Spec: appsv1.DeploymentSpec{Selector: &metav1.LabelSelector{MatchLabels: labels}, Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "velero", Image: "old"}}, InitContainers: []corev1.Container{{Name: "velero-plugin-for-aws", Image: "old-plugin"}}}}}, Status: appsv1.DeploymentStatus{Replicas: 1, UpdatedReplicas: 1, AvailableReplicas: 1}},
 		&appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "node-agent", Namespace: "hypercdr-agent"}, Spec: appsv1.DaemonSetSpec{Selector: &metav1.LabelSelector{MatchLabels: nodeLabels}, Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "node-agent", Image: "old"}}}}}, Status: appsv1.DaemonSetStatus{DesiredNumberScheduled: 1, UpdatedNumberScheduled: 1, NumberReady: 1}},
@@ -110,12 +140,19 @@ func TestUpgradeVeleroReconcilesProviderPlugins(t *testing.T) {
 	if got := daemonSet.Spec.Template.Spec.Containers[0].Args; !containsString(got, "--node-agent-configmap=node-agent-config") {
 		t.Fatalf("node-agent args missing config map setting: %v", got)
 	}
+	if got := daemonSet.Spec.Template.Spec.Containers[0].Args; !containsString(got, "--backup-repository-configmap=backup-repository-config") {
+		t.Fatalf("node-agent args missing repository config map setting: %v", got)
+	}
 	configMap, err := client.CoreV1().ConfigMaps("hypercdr-agent").Get(context.Background(), "node-agent-config", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(configMap.Data["node-agent-config.json"], `"storageClass":"fast"`) {
 		t.Fatalf("unexpected node-agent config: %v", configMap.Data)
+	}
+	repositoryConfig, err := client.CoreV1().ConfigMaps("hypercdr-agent").Get(context.Background(), "backup-repository-config", metav1.GetOptions{})
+	if err != nil || !strings.Contains(repositoryConfig.Data["kopia"], `"cacheLimitMB":5120`) {
+		t.Fatalf("unexpected repository config: %v, err=%v", repositoryConfig, err)
 	}
 	role, err := client.RbacV1().ClusterRoles().Get(context.Background(), "hypercdr-agent", metav1.GetOptions{})
 	if err != nil {

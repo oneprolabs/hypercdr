@@ -1681,6 +1681,13 @@ body {
   text-align: center;
 }
 
+/* Application workflow stages use a compact, table-aligned empty message. */
+.premium-app .hbdr-dr-main-table .hbdr-hyper-table-empty {
+  justify-content: flex-start;
+  padding-left: 22px;
+  text-align: left;
+}
+
 .premium-app .hbdr-hyper-table-expanded-row {
   min-width: 100%;
   padding: 10px 14px;
@@ -7565,6 +7572,8 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   font-weight: 650 !important;
   line-height: 1;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.88);
+	cursor: pointer;
+	font-family: inherit;
 }
 
 .hbdr-dr-status-cell {
@@ -24781,8 +24790,13 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 }
 
 .premium-app .hbdr-namespace-rp-row {
-  grid-template-columns: 34px minmax(0, 1fr) auto;
+  grid-template-columns: 34px minmax(0, 1fr) auto auto;
 }
+
+.premium-app .hbdr-namespace-rp-metrics { display:grid; grid-template-columns:repeat(3,minmax(70px,auto)); gap:14px; }
+.premium-app .hbdr-namespace-rp-metrics div { min-width:70px; }
+.premium-app .hbdr-namespace-rp-metrics small { display:block; color:#8a96a5; font-size:9px; font-weight:700; white-space:nowrap; }
+.premium-app .hbdr-namespace-rp-metrics strong { margin-top:3px; font-size:11px; }
 
 .premium-app .hbdr-namespace-rp-icon,
 .premium-app .hbdr-namespace-task-icon {
@@ -24831,8 +24845,16 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 }
 
 .premium-app .hbdr-namespace-rp-meta {
+	position: relative;
+	display:flex;
+	align-items:center;
+	gap:7px;
   text-align: right;
 }
+.premium-app .hbdr-namespace-rp-menu-button { display:inline-flex; width:25px; height:25px; align-items:center; justify-content:center; border:1px solid #dfe5ec; border-radius:7px; color:#607083; }
+.premium-app .hbdr-namespace-rp-menu { position:absolute; z-index:20; top:30px; right:0; min-width:132px; border:1px solid #dfe5ec; border-radius:8px; background:#fff; padding:4px; box-shadow:0 12px 30px rgba(30,48,70,.15); }
+.premium-app .hbdr-namespace-rp-menu button { display:block; width:100%; border-radius:6px; padding:7px 9px; color:#354355; font-size:10px; font-weight:700; text-align:left; }
+.premium-app .hbdr-namespace-rp-menu button:hover { background:#f2f6fa; }
 
 .premium-app .hbdr-namespace-rp-meta em,
 .premium-app .hbdr-namespace-task-row > em {

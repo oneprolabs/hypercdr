@@ -130,6 +130,14 @@ export interface Cluster {
   nodes: number;
   nodeDetails?: ClusterNode[];
   storageClasses?: ClusterStorageClass[];
+  restoreCachePolicy?: {
+    mode: 'automatic' | string;
+    enabled: boolean;
+    storageClass?: string;
+    residentThresholdMB?: number;
+    cacheLimitMB?: number;
+    reason?: string;
+  };
   apiResources?: ClusterAPIResource[];
   namespaceApis?: ClusterNamespaceAPI[];
   namespaces: number;

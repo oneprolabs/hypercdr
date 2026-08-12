@@ -186,7 +186,7 @@ func (u *KubernetesUninstaller) deleteNamespacedAgentResources(ctx context.Conte
 				errs = append(errs, err)
 			}
 		}
-		for _, name := range []string{"node-agent-config"} {
+		for _, name := range []string{"node-agent-config", "backup-repository-config"} {
 			if err := u.client.CoreV1().ConfigMaps(namespace).Delete(ctx, name, metav1.DeleteOptions{}); ignoreNotFound(err) != nil {
 				errs = append(errs, err)
 			}

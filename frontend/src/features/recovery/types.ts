@@ -207,4 +207,6 @@ export type ApiRestorePointView = {
   backupStorageName?: string;
   veleroBackupName: string;
   includedNamespaces?: string[];
+	metadata?: Record<string, any>;
+	sizeMetricsV2?: Record<string, any>;
 };
