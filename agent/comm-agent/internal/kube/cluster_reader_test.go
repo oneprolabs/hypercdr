@@ -96,16 +96,16 @@ func int32Ptr(value int32) *int32 {
 	return &value
 }
 
-func TestReadNamespaceAPIsUsesDiscoveryAndReturnsOnlyPresentNamespacedTypes(t *testing.T) {
+func TestReadNamespaceAPIsReturnsOnlyRestorableNamespaceAndRelatedClusterTypes(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	discoveryClient := clientset.Discovery().(*fakediscovery.FakeDiscovery)
 	discoveryClient.Resources = []*metav1.APIResourceList{
 		{
 			GroupVersion: "actions.kio.kasten.io/v1alpha1",
 			APIResources: []metav1.APIResource{
-				{Name: "backupactions", Kind: "BackupAction", Namespaced: true, Verbs: metav1.Verbs{"get", "list"}},
+				{Name: "backupactions", Kind: "BackupAction", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "create", "delete"}},
 				{Name: "emptyactions", Kind: "EmptyAction", Namespaced: true, Verbs: metav1.Verbs{"get", "list"}},
-				{Name: "clusteractions", Kind: "ClusterAction", Namespaced: false, Verbs: metav1.Verbs{"get", "list"}},
+				{Name: "clusteractions", Kind: "ClusterAction", Namespaced: false, Verbs: metav1.Verbs{"get", "list", "create", "delete"}},
 			},
 		},
 	}
@@ -139,8 +139,8 @@ func TestReadNamespaceAPIsUsesDiscoveryAndReturnsOnlyPresentNamespacedTypes(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 2 {
-		t.Fatalf("expected present namespace and cluster types only, got %#v", items)
+	if len(items) != 1 {
+		t.Fatalf("expected only the present restorable namespace type, got %#v", items)
 	}
 	byResource := map[string]NamespaceAPI{}
 	for _, item := range items {
@@ -149,8 +149,49 @@ func TestReadNamespaceAPIsUsesDiscoveryAndReturnsOnlyPresentNamespacedTypes(t *t
 	if item := byResource["backupactions"]; item.Scope != "namespace" || item.Namespace != "backup-test-no-pvc" || item.Kind != "BackupAction" || item.Count != 1 {
 		t.Fatalf("unexpected discovered namespace API: %#v", item)
 	}
-	if item := byResource["clusteractions"]; item.Scope != "cluster" || item.Namespace != "" || item.Kind != "ClusterAction" || item.Count != 1 {
-		t.Fatalf("unexpected discovered cluster API: %#v", item)
+	if _, ok := byResource["clusteractions"]; ok {
+		t.Fatalf("unrelated cluster API leaked into namespace catalog: %#v", items)
+	}
+}
+
+func TestRestorablePreferredResourcesFiltersReadOnlyAndCohabitatingEvents(t *testing.T) {
+	verbs := []string{"get", "list", "create", "delete"}
+	got := restorablePreferredResources([]APIResource{
+		{Resource: "events", Verbs: verbs},
+		{Group: "events.k8s.io", Resource: "events", Verbs: verbs},
+		{Group: "apps.kio.kasten.io", Resource: "applications", Verbs: []string{"get", "list"}},
+		{Group: "apps", Resource: "deployments", Verbs: verbs},
+	})
+	if len(got) != 2 || resourceKey(got[0]) != "events" || resourceKey(got[1]) != "deployments.apps" {
+		t.Fatalf("unexpected preferred restorable resources: %#v", got)
+	}
+}
+
+func TestNamespaceCatalogExcludesClusterScopedResources(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	discoveryClient := clientset.Discovery().(*fakediscovery.FakeDiscovery)
+	discoveryClient.Resources = []*metav1.APIResourceList{{
+		GroupVersion: "v1",
+		APIResources: []metav1.APIResource{
+			{Name: "persistentvolumeclaims", Kind: "PersistentVolumeClaim", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "create", "delete"}},
+			{Name: "persistentvolumes", Kind: "PersistentVolume", Namespaced: false, Verbs: metav1.Verbs{"get", "list", "create", "delete"}},
+		},
+	}}
+	pvc := &unstructured.Unstructured{Object: map[string]any{"apiVersion": "v1", "kind": "PersistentVolumeClaim", "metadata": map[string]any{"name": "data", "namespace": "app-a"}, "spec": map[string]any{"volumeName": "pv-a"}}}
+	pv := &unstructured.Unstructured{Object: map[string]any{"apiVersion": "v1", "kind": "PersistentVolume", "metadata": map[string]any{"name": "pv-a"}}}
+	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		{Version: "v1", Resource: "persistentvolumeclaims"}: "PersistentVolumeClaimList",
+		{Version: "v1", Resource: "persistentvolumes"}:      "PersistentVolumeList",
+	}, pvc, pv)
+	reader := NewKubernetesClusterReaderWithClients(clientset, dynamicClient, discoveryClient)
+	items, err := reader.ReadNamespaceAPIs(context.Background(), "app-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range items {
+		if item.Scope == "cluster" || item.Resource == "persistentvolumes" {
+			t.Fatalf("cluster-scoped resource leaked into namespace catalog: %#v", item)
+		}
 	}
 }
 

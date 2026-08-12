@@ -23,7 +23,6 @@ type RestoreManifestSpec struct {
 	NamespaceMapping         map[string]string          `json:"namespaceMapping,omitempty"`
 	IncludeClusterResources  bool                       `json:"includeClusterResources"`
 	ExistingResourcePolicy   string                     `json:"existingResourcePolicy,omitempty"`
-	DefaultVolumesToFsBackup *bool                      `json:"defaultVolumesToFsBackup,omitempty"`
 	PreserveNodePorts        *bool                      `json:"preserveNodePorts,omitempty"`
 	ResourceModifier         *TypedLocalObjectReference `json:"resourceModifier,omitempty"`
 	IncludedResources        []string                   `json:"includedResources,omitempty"`
@@ -89,7 +88,6 @@ func BuildRestoreManifest(input RestoreBuildInput) (RestoreManifest, error) {
 			IncludedNamespaces:       sourceNamespaces,
 			IncludeClusterResources:  input.Command.IncludeClusterScoped,
 			ExistingResourcePolicy:   existingResourcePolicy(input.Command.ConflictPolicy),
-			DefaultVolumesToFsBackup: boolPtr(true),
 			PreserveNodePorts:        boolPtr(shouldPreserveNodePorts(input.Command)),
 			IncludedResources:        input.Command.IncludedResources,
 			ExcludedResources:        input.Command.ExcludedResources,

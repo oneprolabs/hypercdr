@@ -62,6 +62,7 @@ type ClusterOption = {
   version: string;
   isCurrent: boolean;
   storageClasses?: Array<{ name: string }>;
+  apiResources?: Array<{ group?: string; version: string; resource: string; kind: string; namespaced: boolean }>;
 };
 
 export type BackupContentResource = {
@@ -255,15 +256,22 @@ export function RecoveryWizardModal(props: Props) {
     const current = groups.get(key) || { key, resourceKey, apiVersion: item.apiVersion, kind: item.kind, clusterScoped: item.clusterScoped, count: 0 };
     current.count += 1; groups.set(key, current); return groups;
   }, new Map<string, { key: string; resourceKey: string; apiVersion: string; kind: string; clusterScoped: boolean; count: number }>()).values()).sort((a, b) => a.kind.localeCompare(b.kind));
+  const restoreNamespaceOptions = resourceGroups
+    .filter(group => !group.clusterScoped)
+    .map(group => ({ key: group.resourceKey, label: group.kind, detail: group.apiVersion, count: group.count }));
 
   const restoreSelection: ScopedResourceSelection = config.resourceSelection || { mode: 'all', namespaceScoped: [], clusterScoped: [] };
   const updateRestoreSelection = (selection: ScopedResourceSelection) => {
-    const selected = [...selection.namespaceScoped, ...selection.clusterScoped];
+    const excluded = selection.mode === 'exclude' ? selection.namespaceScoped : [];
     updateConfig({
       resourceSelection: selection,
-      includedResources: selection.mode === 'custom' ? selected : [],
-      excludedResources: [],
-      includeClusterScoped: selection.mode === 'custom' && selection.clusterScoped.length > 0,
+      // Drill custom mode is exclusion-based: checked resource types map
+      // directly to Velero excludedResources. An empty custom selection is
+      // therefore equivalent to Default and preserves Velero's resource
+      // closure for filesystem volume restores.
+      includedResources: [],
+      excludedResources: excluded,
+      includeClusterScoped: false,
     });
   };
 
@@ -527,8 +535,7 @@ export function RecoveryWizardModal(props: Props) {
                     value={restoreSelection}
                     onChange={updateRestoreSelection}
                     disabled={contentsLoading || Boolean(contentsError)}
-                    namespaceResources={resourceGroups.filter(group => !group.clusterScoped).map(group => ({ key: group.resourceKey, label: group.kind, detail: group.apiVersion, count: group.count }))}
-                    clusterResources={resourceGroups.filter(group => group.clusterScoped).map(group => ({ key: group.resourceKey, label: group.kind, detail: group.apiVersion, count: group.count }))}
+                    namespaceResources={restoreNamespaceOptions}
                   />
                   {contentsLoading && <p className="hbdr-recovery-inline-status"><RefreshCw size={13} className="animate-spin" /> Reading the selected restore point…</p>}
                   {contentsError && (

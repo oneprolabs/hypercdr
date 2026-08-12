@@ -1,10 +1,21 @@
 package wsclient
 
 import (
+	"errors"
 	"testing"
 
 	"hypercdr-platform/agent/comm-agent/pkg/protocol"
 )
+
+func TestRestoreSubmitErrorCodeIdentifiesStaleCleanupTimeout(t *testing.T) {
+	got := restoreSubmitErrorCode(errors.New("timed out waiting for stale restore state to be deleted"))
+	if got != "RESTORE_STALE_STATE_CLEANUP_TIMEOUT" {
+		t.Fatalf("restoreSubmitErrorCode() = %q", got)
+	}
+	if got := restoreSubmitErrorCode(errors.New("admission rejected restore")); got != "RESTORE_SUBMIT_FAILED" {
+		t.Fatalf("generic restore error code = %q", got)
+	}
+}
 
 func TestWithRecoveryStagesMarksReadinessFailureWithoutRegressingRestore(t *testing.T) {
 	task := protocol.TaskDispatchPayload{Type: "drill"}

@@ -27,9 +27,6 @@ func TestBuildRestoreManifestDisablesPreserveNodePorts(t *testing.T) {
 	if got := manifest.Spec.NamespaceMapping["demo-mysql-csi"]; got != "demo-mysql-csi-drill" {
 		t.Fatalf("namespace mapping = %q, want demo-mysql-csi-drill", got)
 	}
-	if manifest.Spec.DefaultVolumesToFsBackup == nil || !*manifest.Spec.DefaultVolumesToFsBackup {
-		t.Fatalf("DefaultVolumesToFsBackup should be true")
-	}
 	if manifest.Spec.PreserveNodePorts == nil {
 		t.Fatalf("PreserveNodePorts should be set")
 	}

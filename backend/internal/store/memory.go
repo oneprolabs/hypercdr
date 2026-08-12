@@ -1447,6 +1447,19 @@ func (s *MemoryStore) CreateProtectionPlan(input ProtectionPlanInput) (Protectio
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for _, existing := range s.plans {
+		if existing.TenantID != plan.TenantID || existing.SourceClusterID != plan.SourceClusterID {
+			continue
+		}
+		existingAppIDs := dedupNonEmpty(append(append([]string{}, existing.AppIDs...), existing.AppID))
+		for _, appID := range appIDs {
+			for _, existingAppID := range existingAppIDs {
+				if appID == existingAppID {
+					return ProtectionPlan{}, &ApplicationAlreadyProtectedError{ProtectionPlanID: existing.ID, ApplicationID: appID}
+				}
+			}
+		}
+	}
 	s.plans[plan.ID] = plan
 	return plan, nil
 }
@@ -1666,7 +1679,24 @@ func (s *MemoryStore) CleanupProtectionPlanRecords(id string) (ProtectionPlan, b
 		if !ok {
 			continue
 		}
-		app.ProtectionStatus = "unprotected"
+		stillProtected := false
+		for _, other := range s.plans {
+			if other.TenantID != plan.TenantID || other.SourceClusterID != plan.SourceClusterID {
+				continue
+			}
+			for _, otherAppID := range dedupNonEmpty(append(append([]string{}, other.AppIDs...), other.AppID)) {
+				if otherAppID == appID {
+					stillProtected = true
+					break
+				}
+			}
+			if stillProtected {
+				break
+			}
+		}
+		if !stillProtected {
+			app.ProtectionStatus = "pending_protection"
+		}
 		s.applications[appID] = app
 	}
 	return plan, true, nil

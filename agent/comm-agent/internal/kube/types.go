@@ -78,6 +78,7 @@ type APIResource struct {
 	Resource   string
 	Kind       string
 	Namespaced bool
+	Verbs      []string
 }
 
 type Node struct {

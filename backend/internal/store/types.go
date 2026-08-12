@@ -23,6 +23,15 @@ var (
 	ErrResetInvalid = errors.New("password reset token is invalid or expired")
 )
 
+type ApplicationAlreadyProtectedError struct {
+	ProtectionPlanID string
+	ApplicationID    string
+}
+
+func (e *ApplicationAlreadyProtectedError) Error() string {
+	return "application already belongs to protection plan " + e.ProtectionPlanID
+}
+
 type Store interface {
 	ListTenants() ([]Tenant, error)
 	GetTenant(id string) (Tenant, bool, error)
@@ -523,17 +532,14 @@ func mergeNamespaceAPIs(existing, scanned []ClusterNamespaceAPI, namespace strin
 		return scanned
 	}
 	merged := make([]ClusterNamespaceAPI, 0, len(existing)+len(scanned))
-	replacesClusterScope := false
-	for _, resource := range scanned {
-		if resource.Scope == "cluster" {
-			replacesClusterScope = true
-			break
-		}
-	}
 	for _, resource := range existing {
-		if resource.Namespace != namespace && !(replacesClusterScope && resource.Scope == "cluster") {
-			merged = append(merged, resource)
+		// Cluster-scoped catalog entries are still relationships discovered for
+		// one namespace. Keep other namespaces independent, and discard legacy
+		// unowned cluster entries so they cannot leak into every application.
+		if resource.Namespace == namespace || (resource.Scope == "cluster" && resource.Namespace == "") {
+			continue
 		}
+		merged = append(merged, resource)
 	}
 	return append(merged, scanned...)
 }

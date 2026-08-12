@@ -116,6 +116,7 @@ type Props = {
   setStep: (step: ProtectWizardStep) => void;
   onClose: () => void;
   onFinish: () => void;
+  submitting?: boolean;
   targetSummary: string;
   targetCount: number;
   targetNames: string[];
@@ -142,7 +143,6 @@ type Props = {
   targetClusterOptions: TargetClusterOption[];
   labelOptions: LabelSelectorOption[];
   namespaceResourceOptions?: ScopedResourceOption[];
-  clusterResourceOptions?: ScopedResourceOption[];
   customResourcesLoaded?: boolean;
   onRequestCustomResources?: () => Promise<boolean>;
   preScriptRef: React.RefObject<HTMLInputElement | null>;
@@ -296,6 +296,7 @@ export function DrConfigurationModal(props: Props) {
     setStep,
     onClose,
     onFinish,
+    submitting = false,
     targetSummary,
     targetCount,
     targetNames,
@@ -321,7 +322,6 @@ export function DrConfigurationModal(props: Props) {
     targetClusterOptions,
     labelOptions,
     namespaceResourceOptions,
-    clusterResourceOptions,
     customResourcesLoaded,
     onRequestCustomResources,
     onCreateStorage,
@@ -360,7 +360,7 @@ export function DrConfigurationModal(props: Props) {
     }));
   }, [multiNamespaceFilterDisabled, protectConfig.resourceSelection.mode, setProtectConfig]);
 
-  const resourceSelectionValid = protectConfig.resourceSelection.mode !== 'custom' || protectConfig.resourceSelection.namespaceScoped.length + protectConfig.resourceSelection.clusterScoped.length > 0;
+  const resourceSelectionValid = true;
   const canSave = Boolean(resourceSelectionValid && protectConfig.storageId && (protectConfig.targetCluster || targetClusterOptions.length === 0));
   void filteredPolicyOptions;
   void paginatedPolicyOptions;
@@ -691,7 +691,6 @@ export function DrConfigurationModal(props: Props) {
                         resourceSelection,
                       }))}
                       namespaceResources={namespaceResourceOptions || []}
-                      clusterResources={clusterResourceOptions || []}
                       customResourcesLoaded={customResourcesLoaded}
                       onRequestCustomResources={onRequestCustomResources}
                     />}
@@ -811,8 +810,8 @@ export function DrConfigurationModal(props: Props) {
                 <span className={canSave ? 'is-ready' : ''}>{canSave ? 'Ready' : !resourceSelectionValid ? 'Select at least one included resource' : 'Repository and target cluster required'}</span>
               </div>
               <button type="button" onClick={onClose}>Cancel</button>
-              <button type="button" className="hbdr-config-save" disabled={!canSave} onClick={onFinish}>
-                <Check size={15} />Save
+              <button type="button" className="hbdr-config-save" disabled={!canSave || submitting} onClick={onFinish}>
+                <Check size={15} />{submitting ? 'Saving...' : 'Save'}
               </button>
             </footer>
           </motion.div>

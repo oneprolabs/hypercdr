@@ -1931,6 +1931,39 @@ func (s *PostgresStore) CreateProtectionPlan(input ProtectionPlanInput) (Protect
 		return ProtectionPlan{}, err
 	}
 	defer tx.Rollback()
+	// Lock the application rows so concurrent requests for the same app cannot
+	// both pass the ownership check and create duplicate plans.
+	if len(appIDs) > 0 {
+		rows, err := tx.Query(`select id from applications where id = any($1::uuid[]) order by id for update`, planIDsSlice(appIDs))
+		if err != nil {
+			return ProtectionPlan{}, err
+		}
+		for rows.Next() {
+			var lockedID string
+			if err := rows.Scan(&lockedID); err != nil {
+				rows.Close()
+				return ProtectionPlan{}, err
+			}
+		}
+		if err := rows.Close(); err != nil {
+			return ProtectionPlan{}, err
+		}
+		var existingPlanID, existingAppID string
+		err = tx.QueryRow(`
+			select p.id, ppa.app_id
+			from protection_plans p
+			join protection_plan_apps ppa on ppa.plan_id = p.id
+			where p.tenant_id = $1 and p.source_cluster_id = $2
+			  and ppa.app_id = any($3::uuid[])
+			limit 1
+		`, plan.TenantID, plan.SourceClusterID, planIDsSlice(appIDs)).Scan(&existingPlanID, &existingAppID)
+		if err == nil {
+			return ProtectionPlan{}, &ApplicationAlreadyProtectedError{ProtectionPlanID: existingPlanID, ApplicationID: existingAppID}
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return ProtectionPlan{}, err
+		}
+	}
 	_, err = tx.Exec(`
 		insert into protection_plans (
 			id, tenant_id, source_cluster_id, app_id, scope_type, included_resources, resource_selection, label_selector,
@@ -2369,10 +2402,18 @@ func (s *PostgresStore) CleanupProtectionPlanRecords(id string) (ProtectionPlan,
 	if len(item.AppIDs) > 0 {
 		if _, err := tx.Exec(`
 			update applications
-			set protection_status = 'unprotected',
+			set protection_status = 'pending_protection',
 			    updated_at = $2
 			where id = any($1::uuid[])
-		`, planIDsSlice(item.AppIDs), time.Now().UTC()); err != nil {
+			  and not exists (
+			    select 1
+			    from protection_plan_apps ppa
+			    join protection_plans pp on pp.id = ppa.plan_id
+			    where ppa.app_id = applications.id
+			      and pp.tenant_id = $3
+			      and pp.source_cluster_id = $4
+			  )
+		`, planIDsSlice(item.AppIDs), time.Now().UTC(), item.TenantID, item.SourceClusterID); err != nil {
 			return ProtectionPlan{}, false, err
 		}
 	}

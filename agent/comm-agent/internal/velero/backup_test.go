@@ -102,7 +102,7 @@ func TestBuildBackupManifestUsesVeleroScopedResourceFields(t *testing.T) {
 			ExcludedResources:       []string{"secrets"},
 			IncludeClusterResources: true,
 			ResourceSelection: protocol.ResourceSelection{
-				Mode:            "custom",
+				Mode:            "exclude",
 				NamespaceScoped: []string{"deployments.apps", "persistentvolumeclaims"},
 				ClusterScoped:   []string{"persistentvolumes"},
 			},
@@ -117,11 +117,33 @@ func TestBuildBackupManifestUsesVeleroScopedResourceFields(t *testing.T) {
 	if manifest.Spec.IncludeClusterResources != nil {
 		t.Fatal("legacy includeClusterResources must be omitted for scoped selection")
 	}
-	if got := manifest.Spec.IncludedNamespaceScopedResources; len(got) != 2 || got[0] != "deployments.apps" {
-		t.Fatalf("namespace scoped resources = %v", got)
+	if got := manifest.Spec.IncludedNamespaceScopedResources; len(got) != 1 || got[0] != "*" {
+		t.Fatalf("included namespace scoped resources = %v", got)
 	}
-	if got := manifest.Spec.IncludedClusterScopedResources; len(got) != 1 || got[0] != "persistentvolumes" {
-		t.Fatalf("cluster scoped resources = %v", got)
+	if got := manifest.Spec.ExcludedNamespaceScopedResources; len(got) != 2 || got[0] != "deployments.apps" {
+		t.Fatalf("excluded namespace scoped resources = %v", got)
+	}
+	if got := manifest.Spec.ExcludedClusterScopedResources; len(got) != 1 || got[0] != "*" {
+		t.Fatalf("excluded cluster scoped resources = %v", got)
+	}
+}
+
+func TestBuildBackupManifestExcludesBothEventAPIResources(t *testing.T) {
+	manifest, err := BuildBackupManifest(BackupBuildInput{
+		TaskID: "task-events",
+		Command: protocol.BackupCommand{
+			SourceNamespace: "demo",
+			ResourceSelection: protocol.ResourceSelection{
+				Mode: "exclude", NamespaceScoped: []string{"events"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"events", "events.events.k8s.io"}
+	if got := manifest.Spec.ExcludedNamespaceScopedResources; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("event exclusions = %v, want %v", got, want)
 	}
 }
 
@@ -159,7 +181,7 @@ func TestBuildScheduleManifestUsesVeleroScopedResourceFields(t *testing.T) {
 			IncludeClusterResources: true,
 			ExcludeResources:        []protocol.ExcludeRule{{Resource: "secrets"}},
 			ResourceSelection: protocol.ResourceSelection{
-				Mode:            "custom",
+				Mode:            "exclude",
 				NamespaceScoped: []string{"deployments.apps"},
 				ClusterScoped:   []string{"persistentvolumes"},
 			},
@@ -172,11 +194,54 @@ func TestBuildScheduleManifestUsesVeleroScopedResourceFields(t *testing.T) {
 	if len(template.IncludedResources) != 0 || len(template.ExcludedResources) != 0 || template.IncludeClusterResources != nil {
 		t.Fatalf("legacy fields must be omitted for scoped selection: %#v", template)
 	}
-	if got := template.IncludedNamespaceScopedResources; len(got) != 1 || got[0] != "deployments.apps" {
-		t.Fatalf("namespace scoped resources = %v", got)
+	if got := template.IncludedNamespaceScopedResources; len(got) != 1 || got[0] != "*" {
+		t.Fatalf("included namespace scoped resources = %v", got)
 	}
-	if got := template.IncludedClusterScopedResources; len(got) != 1 || got[0] != "persistentvolumes" {
-		t.Fatalf("cluster scoped resources = %v", got)
+	if got := template.ExcludedNamespaceScopedResources; len(got) != 1 || got[0] != "deployments.apps" {
+		t.Fatalf("excluded namespace scoped resources = %v", got)
+	}
+	if got := template.ExcludedClusterScopedResources; len(got) != 1 || got[0] != "*" {
+		t.Fatalf("excluded cluster scoped resources = %v", got)
+	}
+}
+
+func TestBuildScheduleManifestExcludesBothEventAPIResources(t *testing.T) {
+	manifest, err := BuildScheduleManifest(ScheduleBuildInput{
+		TaskID: "task-events-schedule",
+		Command: protocol.ScheduleSyncCommand{
+			PlanID: "plan-events", Cron: "0 * * * *", SourceNamespaces: []string{"demo"},
+			ResourceSelection: protocol.ResourceSelection{
+				Mode: "exclude", NamespaceScoped: []string{"events.events.k8s.io"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"events.events.k8s.io", "events"}
+	if got := manifest.Spec.Template.ExcludedNamespaceScopedResources; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("scheduled event exclusions = %v, want %v", got, want)
+	}
+}
+
+func TestBuildBackupManifestPreservesLegacyCustomIncludeSemantics(t *testing.T) {
+	manifest, err := BuildBackupManifest(BackupBuildInput{
+		TaskID: "task-legacy-custom",
+		Command: protocol.BackupCommand{
+			SourceNamespace: "demo",
+			ResourceSelection: protocol.ResourceSelection{
+				Mode: "custom", NamespaceScoped: []string{"deployments.apps"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := manifest.Spec.IncludedNamespaceScopedResources; len(got) != 1 || got[0] != "deployments.apps" {
+		t.Fatalf("legacy include resources = %v", got)
+	}
+	if len(manifest.Spec.ExcludedNamespaceScopedResources) != 0 {
+		t.Fatalf("legacy custom selection unexpectedly became exclusions: %v", manifest.Spec.ExcludedNamespaceScopedResources)
 	}
 }
 

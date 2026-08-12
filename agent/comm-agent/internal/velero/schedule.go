@@ -104,7 +104,15 @@ func BuildScheduleManifest(input ScheduleBuildInput) (ScheduleManifest, error) {
 	if input.Command.LabelSelector != "" {
 		template.LabelSelector = parseLegacyScheduleLabelSelector(input.Command.LabelSelector)
 	}
-	if input.Command.ResourceSelection.Mode == "custom" {
+	if input.Command.ResourceSelection.Mode == "exclude" {
+		template.IncludedResources = nil
+		template.ExcludedResources = nil
+		template.IncludedNamespaceScopedResources = []string{"*"}
+		template.ExcludedNamespaceScopedResources = expandScopedResourceExclusions(input.Command.ResourceSelection.NamespaceScoped)
+		template.ExcludedClusterScopedResources = []string{"*"}
+		template.IncludeClusterResources = nil
+	} else if input.Command.ResourceSelection.Mode == "custom" {
+		// Backward compatibility for plans created before exclusion mode existed.
 		template.IncludedResources = nil
 		template.ExcludedResources = nil
 		template.IncludedNamespaceScopedResources = input.Command.ResourceSelection.NamespaceScoped

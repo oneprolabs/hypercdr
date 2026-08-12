@@ -5206,8 +5206,8 @@ func (r *Router) createProtectionPlan(w http.ResponseWriter, req *http.Request) 
 	if input.ResourceSelection.Mode == "" {
 		input.ResourceSelection.Mode = "all"
 	}
-	if input.ResourceSelection.Mode != "all" && input.ResourceSelection.Mode != "custom" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_resource_selection_mode", "allowed": []string{"all", "custom"}})
+	if input.ResourceSelection.Mode != "all" && input.ResourceSelection.Mode != "custom" && input.ResourceSelection.Mode != "exclude" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_resource_selection_mode", "allowed": []string{"all", "custom", "exclude"}})
 		return
 	}
 	if input.ResourceSelection.Mode == "custom" && len(input.ResourceSelection.NamespaceScoped) == 0 && len(input.ResourceSelection.ClusterScoped) == 0 {
@@ -5220,6 +5220,14 @@ func (r *Router) createProtectionPlan(w http.ResponseWriter, req *http.Request) 
 	input.Status = "activating_storage"
 	item, err := r.store.CreateProtectionPlan(input)
 	if err != nil {
+		var conflict *store.ApplicationAlreadyProtectedError
+		if errors.As(err, &conflict) {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error": "application_already_protected", "message": "An active protection plan already exists for this application.",
+				"protectionPlanId": conflict.ProtectionPlanID, "applicationId": conflict.ApplicationID,
+			})
+			return
+		}
 		r.logger.Error("failed to create protection plan", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "create_protection_plan_failed"})
 		return
@@ -9969,6 +9977,28 @@ func (r *Router) finishProtectionCleanupTask(task store.Task, veleroPayload map[
 	}
 	if !complete {
 		r.logger.Info("protection cleanup task completed; waiting for remaining cleanup tasks", "plan_id", planID, "task_id", task.ID, "mode", stringPayload(task.Payload, "cleanupMode"))
+		// Source and target agents can finish almost simultaneously. Each event
+		// handler may observe the peer task before its succeeded status commits,
+		// leaving the plan in cleanup_running forever. Recheck shortly after the
+		// concurrent completions settle; CleanupProtectionPlanRecords is
+		// idempotent, so either retry may safely close the plan.
+		go func(task store.Task) {
+			time.Sleep(500 * time.Millisecond)
+			plan, ok, err := r.store.GetProtectionPlan(planID)
+			if err != nil || !ok {
+				return
+			}
+			complete, err := r.protectionCleanupTasksComplete(plan)
+			if err != nil || !complete {
+				return
+			}
+			if _, ok, err := r.store.CleanupProtectionPlanRecords(planID); err != nil {
+				r.logger.Error("failed to physically cleanup protection plan records after completion race", "plan_id", planID, "task_id", task.ID, "error", err)
+				_, _, _ = r.store.UpdateProtectionPlanStatus(planID, "cleanup_failed")
+			} else if !ok {
+				r.logger.Warn("protection cleanup completion race resolved for missing plan", "plan_id", planID, "task_id", task.ID)
+			}
+		}(task)
 		return
 	}
 	if _, ok, err := r.store.CleanupProtectionPlanRecords(planID); err != nil {

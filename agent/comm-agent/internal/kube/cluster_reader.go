@@ -216,6 +216,7 @@ func (r *KubernetesClusterReader) readAPIResources() []APIResource {
 			items = append(items, APIResource{
 				Group: gv.Group, Version: gv.Version, Resource: resource.Name,
 				Kind: resource.Kind, Namespaced: resource.Namespaced,
+				Verbs: append([]string(nil), resource.Verbs...),
 			})
 		}
 	}
@@ -231,22 +232,24 @@ func (r *KubernetesClusterReader) readAPIResources() []APIResource {
 	return items
 }
 
-// ReadNamespaceAPIs enumerates every discoverable resource type that currently
-// has objects: namespaced resources are counted in the requested namespace and
-// cluster-scoped resources across the cluster. Discovery, rather than CRD
-// enumeration, is intentional: aggregated APIs such as Kasten are not backed
-// by CustomResourceDefinitions but are still valid Velero resource types. APIs
-// that cannot be listed and types with zero objects are deliberately omitted.
+// ReadNamespaceAPIs builds the custom-backup catalog for one namespace.
+// Namespaced entries must be restorable by Velero and have objects in the
+// requested namespace. Cluster-scoped entries are limited to dependency types
+// implied by those namespaced objects; exposing every type present in the
+// cluster would invite a namespace backup to capture unrelated shared state.
 func (r *KubernetesClusterReader) ReadNamespaceAPIs(ctx context.Context, namespace string) ([]NamespaceAPI, error) {
 	if r.dynamic == nil || r.discovery == nil || namespace == "" {
 		return nil, nil
 	}
-	resources := r.readAPIResources()
+	resources := restorablePreferredResources(r.readAPIResources())
 	items := make([]NamespaceAPI, 0)
 	var itemsMu sync.Mutex
 	var workers sync.WaitGroup
 	limit := make(chan struct{}, 8)
 	for _, resource := range resources {
+		if !resource.Namespaced {
+			continue
+		}
 		resource := resource
 		workers.Add(1)
 		go func() {
@@ -260,25 +263,15 @@ func (r *KubernetesClusterReader) ReadNamespaceAPIs(ctx context.Context, namespa
 			client := r.dynamic.Resource(schema.GroupVersionResource{Group: resource.Group, Version: resource.Version, Resource: resource.Resource})
 			var list *unstructured.UnstructuredList
 			var listErr error
-			if resource.Namespaced {
-				list, listErr = client.Namespace(namespace).List(ctx, metav1.ListOptions{})
-			} else {
-				list, listErr = client.List(ctx, metav1.ListOptions{})
-			}
+			list, listErr = client.Namespace(namespace).List(ctx, metav1.ListOptions{})
 			if listErr != nil {
 				// Some aggregated endpoints expose create-only resources or can be
 				// temporarily unavailable. Skip them rather than failing the catalog.
 				return
 			}
 			if len(list.Items) > 0 {
-				scope := "cluster"
-				resourceNamespace := ""
-				if resource.Namespaced {
-					scope = "namespace"
-					resourceNamespace = namespace
-				}
 				itemsMu.Lock()
-				items = append(items, NamespaceAPI{Scope: scope, Namespace: resourceNamespace, Group: resource.Group, Version: resource.Version, Resource: resource.Resource, Kind: resource.Kind, Count: len(list.Items)})
+				items = append(items, NamespaceAPI{Scope: "namespace", Namespace: namespace, Group: resource.Group, Version: resource.Version, Resource: resource.Resource, Kind: resource.Kind, Count: len(list.Items)})
 				itemsMu.Unlock()
 			}
 		}()
@@ -294,6 +287,48 @@ func (r *KubernetesClusterReader) ReadNamespaceAPIs(ctx context.Context, namespa
 		return items[i].Resource < items[j].Resource
 	})
 	return items, nil
+}
+
+func resourceKey(resource APIResource) string {
+	if resource.Group == "" {
+		return resource.Resource
+	}
+	return resource.Resource + "." + resource.Group
+}
+
+func hasAllVerbs(resource APIResource, required ...string) bool {
+	available := make(map[string]bool, len(resource.Verbs))
+	for _, verb := range resource.Verbs {
+		available[verb] = true
+	}
+	for _, verb := range required {
+		if !available[verb] {
+			return false
+		}
+	}
+	return true
+}
+
+func restorablePreferredResources(resources []APIResource) []APIResource {
+	coreEvents := false
+	for _, resource := range resources {
+		if resource.Group == "" && resource.Resource == "events" && hasAllVerbs(resource, "get", "list", "create", "delete") {
+			coreEvents = true
+		}
+	}
+	items := make([]APIResource, 0, len(resources))
+	for _, resource := range resources {
+		if !hasAllVerbs(resource, "get", "list", "create", "delete") {
+			continue
+		}
+		// Kubernetes serves the same Event objects through core/v1 and
+		// events.k8s.io/v1. Velero cohabitation keeps only one representation.
+		if coreEvents && resource.Group == "events.k8s.io" && resource.Resource == "events" {
+			continue
+		}
+		items = append(items, resource)
+	}
+	return items
 }
 
 // EnsureResourceDiscoveryPermission adds a read-only wildcard rule so the

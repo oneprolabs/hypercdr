@@ -318,7 +318,7 @@ export const ERROR_MESSAGE_CATALOG: ErrorMessageDefinition[] = [
   },
   {
     code: '140001',
-    aliases: ['RESTORE_FAILED'],
+    aliases: ['RESTORE_FAILED', 'RESTORE_SUBMIT_FAILED'],
     title: 'Restore failed',
     description: 'The restore task failed before the target namespace became usable.',
     detail: 'Velero restore failed. Review restore result errors, namespace conflicts, transforms, and target cluster resources.',
@@ -365,6 +365,14 @@ export const ERROR_MESSAGE_CATALOG: ErrorMessageDefinition[] = [
     description: 'A restored container repeatedly exited and the application could not become ready.',
     detail: 'Review the restored Pod logs, last container exit reason, restored volume permissions, secrets, configuration, and application startup requirements.',
   },
+  {
+    code: '140008',
+    aliases: ['RESTORE_STALE_STATE_CLEANUP_TIMEOUT'],
+    title: 'Previous restore cleanup timed out',
+    description: 'The target cluster could not remove stale Velero restore state before starting this recovery.',
+    detail: 'Inspect deleting Velero Restore and PodVolumeRestore objects on the target cluster. Resolve stuck finalizers or controllers, confirm the stale objects are removed, and then retry the drill.',
+    match: message => message.toLowerCase().includes('timed out waiting for stale restore state to be deleted'),
+  },
 ];
 
 export const ERROR_MESSAGE_BY_CODE = new Map(ERROR_MESSAGE_CATALOG.map(item => [item.code, item]));
@@ -409,9 +417,10 @@ export function normalizeErrorCode(code?: string): string {
 
 export function resolveErrorCode(rawCode: string | undefined, message: string): string {
   const normalized = normalizeErrorCode(rawCode);
-  if (rawCode && normalized !== '100000') return normalized;
   const matched = ERROR_MESSAGE_CATALOG.find(item => item.match?.(message));
-  return matched?.code || normalized;
+  if (matched) return matched.code;
+  if (rawCode && normalized !== '100000') return normalized;
+  return normalized;
 }
 
 export function errorMessageDefinition(code: string): ErrorMessageDefinition {

@@ -11,6 +11,7 @@ import { RecoveryWizardModal, type BackupContentResource, type RecoveryWizardCon
 import { HyperTable, type HyperTableColumn } from '../../components/table';
 import { SearchBar } from '../../components/search-bar';
 import ListToolbarControls from '../../components/list-toolbar-controls';
+import type { ScopedResourceOption } from '../../components/scoped-resource-selector';
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from '../../api/client';
 import { formatDateTime, formatLocalDateTime } from '../../lib/date-time';
 import type { AppItem, Cluster, DRSupportSummary, ResourceCategory, ResourceCategoryKey } from '../clusters/types';
@@ -72,6 +73,8 @@ export default function ApplicationDrPage(props: {
   const [submittingRecoveryTasks, setSubmittingRecoveryTasks] = useState<Record<string, ApiTask>>({});
   const [syncSubmitting, setSyncSubmitting] = useState(false);
   const [recoverySubmitting, setRecoverySubmitting] = useState(false);
+  const [protectSubmitting, setProtectSubmitting] = useState(false);
+  const protectSubmittingRef = useRef(false);
   const [resourceCatalogLoading, setResourceCatalogLoading] = useState(false);
   const [resourceCatalogLoaded, setResourceCatalogLoaded] = useState(false);
   const resourceCatalogRequestsRef = useRef(new Map<string, { clusterId: string; requestId: string }>());
@@ -110,42 +113,50 @@ export default function ApplicationDrPage(props: {
       return app ? [app.name, app.namespace] : [name];
     }));
     const seen = new Set<string>();
-    const namespaceScoped: Array<{ key: string; label: string; detail: string; count?: number }> = [];
-    const clusterScoped: Array<{ key: string; label: string; detail: string; count?: number }> = [];
+    const namespaceScoped: ScopedResourceOption[] = [];
+    let discoveredNamespaceCatalog = false;
+    const hasCoreEvents = (currentCluster?.namespaceApis || []).some(resource =>
+      resource.scope !== 'cluster' && targetNames.has(resource.namespace) && !resource.group && resource.resource === 'events'
+    );
     for (const resource of currentCluster?.namespaceApis || []) {
       if (resource.count <= 0) continue;
       const key = resource.group ? `${resource.resource}.${resource.group}` : resource.resource;
       const clusterResource = resource.scope === 'cluster';
-      if (!clusterResource && !targetNames.has(resource.namespace)) continue;
-      const identity = `${clusterResource ? 'cluster' : 'namespace'}:${key}`;
+      if (!targetNames.has(resource.namespace)) continue;
+      if (!clusterResource) discoveredNamespaceCatalog = true;
+      // Keep the UI consistent while older agents roll forward: Kasten's
+      // Application endpoint is read-only, and the events.k8s.io endpoint is
+      // the cohabitating alias of core/v1 Event already handled by Velero.
+      if (!clusterResource && (key === 'applications.apps.kio.kasten.io' || (key === 'events.events.k8s.io' && hasCoreEvents))) continue;
+      if (clusterResource) continue;
+      const identity = `namespace:${key}`;
       if (seen.has(identity)) continue;
       seen.add(identity);
-      const option = { key, label: resource.kind, detail: `${resource.group || 'core'}/${resource.version} · ${key}`, count: resource.count };
-      if (clusterResource) clusterScoped.push(option);
-      else namespaceScoped.push(option);
+      namespaceScoped.push({ key, label: resource.kind, detail: `${resource.group || 'core'}/${resource.version} · ${key}`, count: resource.count });
     }
     // Older installed agents may not yet report the complete namespace API
     // catalog. Preserve currently observed standard inventory until rolling
     // upgrades deliver the discovery-based counts.
-    for (const app of apps.filter(item => targetNames.has(item.name) || targetNames.has(item.namespace))) {
-      for (const category of app.resourceSummary?.categories || []) {
-        for (const item of category.items || []) {
-          if (item.count <= 0 || !item.kind) continue;
-          const candidates = (currentCluster?.apiResources || []).filter(resource => resource.namespaced && resource.kind === item.kind);
-          for (const resource of candidates) {
-            const key = resource.group ? `${resource.resource}.${resource.group}` : resource.resource;
-            const identity = `namespace:${key}`;
-            if (seen.has(identity)) continue;
-            seen.add(identity);
-            namespaceScoped.push({ key, label: resource.kind, detail: `${resource.group || 'core'}/${resource.version} · ${key}` });
+    if (!discoveredNamespaceCatalog) {
+      for (const app of apps.filter(item => targetNames.has(item.name) || targetNames.has(item.namespace))) {
+        for (const category of app.resourceSummary?.categories || []) {
+          for (const item of category.items || []) {
+            if (item.count <= 0 || !item.kind) continue;
+            const candidates = (currentCluster?.apiResources || []).filter(resource => resource.namespaced && resource.kind === item.kind);
+            for (const resource of candidates) {
+              const key = resource.group ? `${resource.resource}.${resource.group}` : resource.resource;
+              const identity = `namespace:${key}`;
+              if (seen.has(identity)) continue;
+              seen.add(identity);
+              namespaceScoped.push({ key, label: resource.kind, detail: `${resource.group || 'core'}/${resource.version} · ${key}` });
+            }
           }
         }
       }
     }
     const byLabel = (a: { label: string; key: string }, b: { label: string; key: string }) => a.label.localeCompare(b.label) || a.key.localeCompare(b.key);
     namespaceScoped.sort(byLabel);
-    clusterScoped.sort(byLabel);
-    return { namespaceScoped, clusterScoped };
+    return { namespaceScoped };
   }, [apps, configAppNames, currentCluster?.apiResources, currentCluster?.namespaceApis, protectWizardMode, selectedConfigApps, selectedRunApps]);
   const [newExcludeRule, setNewExcludeRule] = useState({ group: '', resource: '', name: '', version: '', labels: '' });
   const [editingRuleIndex, setEditingRuleIndex] = useState<number | null>(null);
@@ -1087,9 +1098,11 @@ export default function ApplicationDrPage(props: {
       setResourceCatalogLoading(false);
     }
   };
-  const hasCachedResourceCatalog = (targets: AppItem[]) => {
-    const namespaces = new Set(targets.map(app => app.namespace || app.name));
-    return namespaces.size === 1 && Boolean(currentCluster?.namespaceApis?.some(resource => resource.count > 0 && namespaces.has(resource.namespace)));
+  const warmWizardResourceCatalog = (app: AppItem | undefined) => {
+    if (!app) return;
+    void refreshResourceCatalog(app)
+      .then(() => setResourceCatalogLoaded(true))
+      .catch(() => undefined);
   };
   useEffect(() => {
     if (stage !== 'select') return;
@@ -1968,13 +1981,26 @@ export default function ApplicationDrPage(props: {
         toast('Select one application to configure protection');
         return;
       }
-      const selectedRows = selectedConfigApps
-        .map(name => apps.find(item => item.name === name))
-        .filter((app): app is AppItem => Boolean(app));
-      setResourceCatalogLoaded(hasCachedResourceCatalog(selectedRows));
+      // Keep the last successful catalog usable while a fresh scan runs. A
+      // cluster API hiccup must not block Custom or silently force the user
+      // back to Default.
+      setResourceCatalogLoaded(discoveredResourceOptions.namespaceScoped.length > 0);
+      // A create flow must never inherit a custom resource selection from the
+      // application configured immediately before it. Custom will initialize
+      // from the newly discovered namespace catalog (all namespace, no cluster).
+      setProtectConfig(prev => ({
+        ...prev,
+        scope: 'all',
+        includeAllResources: true,
+        includedResources: [],
+        excludedResources: [],
+        labelSelector: { matchLabels: {}, matchExpressions: [] },
+        resourceSelection: { mode: 'all', namespaceScoped: [], clusterScoped: [] },
+      }));
       setProtectWizardMode('create');
       setProtectWizardStep(1);
       setProtectWizardOpen(true);
+      warmWizardResourceCatalog(apps.find(item => item.name === selectedConfigApps[0]));
       return;
     }
 
@@ -2098,10 +2124,11 @@ export default function ApplicationDrPage(props: {
       toast('Select one protected application to modify protection');
       return;
     }
-    setResourceCatalogLoaded(hasCachedResourceCatalog(selectedRunRows.flatMap(row => unitMembers(row))));
+    setResourceCatalogLoaded(discoveredResourceOptions.namespaceScoped.length > 0);
     setProtectWizardMode('modify');
     setProtectWizardStep(1);
     setProtectWizardOpen(true);
+    warmWizardResourceCatalog(apps.find(item => item.name === selectedRunApps[0]));
   };
   const deleteDrConfiguration = async () => {
     if (selectedRunApps.length === 0) {
@@ -2121,7 +2148,7 @@ export default function ApplicationDrPage(props: {
       const appsWithoutPlan = targetApps.filter(app => !app.protectionPlanId && app.apiId);
       if (appsWithoutPlan.length > 0) {
         await Promise.all(appsWithoutPlan.map(app =>
-          apiPatch(`/api/v1/applications/${app.apiId}`, { protectionStatus: 'unprotected' })
+          apiPatch(`/api/v1/applications/${app.apiId}`, { protectionStatus: 'pending_protection' })
         ));
       }
     } catch (error) {
@@ -2162,8 +2189,8 @@ export default function ApplicationDrPage(props: {
                 const key = appOverrideKey(app);
                 next[key] = {
                   ...(next[key] || {}),
-                  stage: 'select',
-                  protectionStatus: 'unprotected',
+                  stage: 'config',
+                  protectionStatus: 'pending_protection',
                   isProtected: false,
                   status: mapApplicationStatus(app.status, false),
                   protectionPlanId: '',
@@ -2173,7 +2200,8 @@ export default function ApplicationDrPage(props: {
               return next;
             });
             setSelectedConfigApps([]);
-            setStage('select');
+            setStage('config');
+            toast('Cleanup completed. Application returned to Setup DR.');
           }
         } catch {
           if (remaining > 0) pollCleanup(remaining - 1);
@@ -2212,6 +2240,9 @@ export default function ApplicationDrPage(props: {
     }, 1500);
   };
   const finishProtectWizard = async () => {
+    if (protectSubmittingRef.current) return;
+    protectSubmittingRef.current = true;
+    setProtectSubmitting(true);
     const targetRows = protectWizardMode === 'modify'
       ? selectedRunRows
       : selectedConfigApps
@@ -2224,10 +2255,14 @@ export default function ApplicationDrPage(props: {
       : protectConfig.resourceSelection;
     if (!currentClusterId) {
       toast('Select a source cluster first');
+      protectSubmittingRef.current = false;
+      setProtectSubmitting(false);
       return;
     }
     if (!protectConfig.storageId) {
       toast('Select a storage repository before saving DR configuration');
+      protectSubmittingRef.current = false;
+      setProtectSubmitting(false);
       return;
     }
     const targetCluster = clusters.find(cluster => cluster.name === protectConfig.targetCluster);
@@ -2239,6 +2274,8 @@ export default function ApplicationDrPage(props: {
       .map(app => ({ apiId: app.apiId as string, name: app.name }));
     if (targetAppMeta.length === 0) {
       toast('No applications selected to protect');
+      protectSubmittingRef.current = false;
+      setProtectSubmitting(false);
       return;
     }
     const planGroups = protectConfig.mergeNamespaces || protectWizardMode === 'modify'
@@ -2276,7 +2313,7 @@ export default function ApplicationDrPage(props: {
       ));
 	  // Capability evidence is collected on demand after DR configuration.
 	  // Periodic inventory intentionally does not upload cluster-wide API data.
-	  await Promise.allSettled(targetAppMeta.flatMap(meta => {
+	  void Promise.allSettled(targetAppMeta.flatMap(meta => {
 		const requests: Promise<unknown>[] = [apiPost(`/api/v1/clusters/${currentClusterId}/inventory/request`, { scope: 'capabilities', namespace: meta.name, includeDetails: true, reason: 'dr_configuration' })];
 		if (targetCluster?.id && targetCluster.id !== currentClusterId) {
 		  requests.push(apiPost(`/api/v1/clusters/${targetCluster.id}/inventory/request`, { scope: 'capabilities', namespace: meta.name, includeDetails: true, reason: 'dr_configuration' }));
@@ -2317,6 +2354,8 @@ export default function ApplicationDrPage(props: {
       });
     } catch (error) {
       toast('Failed to create protection plan: ' + (error instanceof Error ? error.message : 'unknown error'));
+      protectSubmittingRef.current = false;
+      setProtectSubmitting(false);
       return;
     }
     setProtectedAppNames(prev => Array.from(new Set([...prev, ...targetApps])));
@@ -2340,6 +2379,8 @@ export default function ApplicationDrPage(props: {
     } else {
       toast(protectWizardMode === 'modify' ? 'DR configuration updated' : 'DR protection enabled');
     }
+    protectSubmittingRef.current = false;
+    setProtectSubmitting(false);
   };
   const resetExcludeRuleForm = () => {
     setNewExcludeRule({ group: '', resource: '', name: '', version: '', labels: '' });
@@ -2919,6 +2960,7 @@ export default function ApplicationDrPage(props: {
               version: cluster.version,
               isCurrent: currentCluster?.id === cluster.id,
               storageClasses: cluster.storageClasses,
+              apiResources: cluster.apiResources,
             }))}
             repositoryOptions={storage.map(repo => ({
               id: repo.id,
@@ -2950,6 +2992,7 @@ export default function ApplicationDrPage(props: {
         setStep={setProtectWizardStep}
         onClose={() => setProtectWizardOpen(false)}
         onFinish={finishProtectWizard}
+        submitting={protectSubmitting}
         targetSummary={wizardTargetSummary}
         targetCount={wizardTargetNames.length}
         targetNames={wizardTargetNames}
@@ -2976,7 +3019,6 @@ export default function ApplicationDrPage(props: {
         targetClusterOptions={targetClusterOptions}
         labelOptions={wizardLabelOptions}
         namespaceResourceOptions={discoveredResourceOptions.namespaceScoped}
-        clusterResourceOptions={discoveredResourceOptions.clusterScoped}
         customResourcesLoaded={resourceCatalogLoaded}
         onRequestCustomResources={loadWizardCustomResources}
         preScriptRef={preScriptRef}

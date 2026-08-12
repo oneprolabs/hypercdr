@@ -93,7 +93,7 @@ export type ApiProtectionPlan = {
   targetClusterId?: string;
   includedResources?: string[];
   resourceSelection?: {
-    mode: 'all' | 'custom';
+    mode: 'all' | 'custom' | 'exclude';
     namespaceScoped?: string[];
     clusterScoped?: string[];
   };

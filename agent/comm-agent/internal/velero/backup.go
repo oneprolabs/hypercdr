@@ -33,6 +33,8 @@ type BackupManifestSpec struct {
 	ExcludedResources                []string                `json:"excludedResources,omitempty"`
 	IncludedClusterScopedResources   []string                `json:"includedClusterScopedResources,omitempty"`
 	IncludedNamespaceScopedResources []string                `json:"includedNamespaceScopedResources,omitempty"`
+	ExcludedClusterScopedResources   []string                `json:"excludedClusterScopedResources,omitempty"`
+	ExcludedNamespaceScopedResources []string                `json:"excludedNamespaceScopedResources,omitempty"`
 	LabelSelector                    *protocol.LabelSelector `json:"labelSelector,omitempty"`
 	StorageLocation                  string                  `json:"storageLocation,omitempty"`
 	IncludeClusterResources          *bool                   `json:"includeClusterResources,omitempty"`
@@ -100,7 +102,15 @@ func BuildBackupManifest(input BackupBuildInput) (BackupManifest, error) {
 	// Velero v1.18's scoped resource fields must never be mixed with the
 	// legacy generic fields. Only custom selections use them; the all mode
 	// intentionally leaves every filter absent to preserve native defaults.
-	if input.Command.ResourceSelection.Mode == "custom" {
+	if input.Command.ResourceSelection.Mode == "exclude" {
+		manifest.Spec.IncludedResources = nil
+		manifest.Spec.ExcludedResources = nil
+		manifest.Spec.IncludedNamespaceScopedResources = []string{"*"}
+		manifest.Spec.ExcludedNamespaceScopedResources = expandScopedResourceExclusions(input.Command.ResourceSelection.NamespaceScoped)
+		manifest.Spec.ExcludedClusterScopedResources = []string{"*"}
+		manifest.Spec.IncludeClusterResources = nil
+	} else if input.Command.ResourceSelection.Mode == "custom" {
+		// Backward compatibility for plans created before exclusion mode existed.
 		manifest.Spec.IncludedResources = nil
 		manifest.Spec.ExcludedResources = nil
 		manifest.Spec.IncludedNamespaceScopedResources = input.Command.ResourceSelection.NamespaceScoped
@@ -118,6 +128,36 @@ func BuildBackupManifest(input BackupBuildInput) (BackupManifest, error) {
 		manifest.Metadata.Labels["hypercdr.io/source-cluster-id"] = input.SourceClusterID
 	}
 	return manifest, nil
+}
+
+// expandScopedResourceExclusions keeps exclusions complete when Kubernetes
+// exposes one logical resource through multiple API groups. Events are served
+// through both core/v1 (events) and events.k8s.io/v1
+// (events.events.k8s.io); excluding only one still lets Velero back up the
+// other representation.
+func expandScopedResourceExclusions(resources []string) []string {
+	seen := make(map[string]struct{}, len(resources)+1)
+	out := make([]string, 0, len(resources)+1)
+	add := func(resource string) {
+		resource = strings.TrimSpace(resource)
+		if resource == "" {
+			return
+		}
+		if _, exists := seen[resource]; exists {
+			return
+		}
+		seen[resource] = struct{}{}
+		out = append(out, resource)
+	}
+	for _, resource := range resources {
+		add(resource)
+		if resource == "events" {
+			add("events.events.k8s.io")
+		} else if resource == "events.events.k8s.io" {
+			add("events")
+		}
+	}
+	return out
 }
 
 // convertExcludeRules turns protocol-level ExcludeRule entries into the

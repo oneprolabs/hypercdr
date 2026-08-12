@@ -34,7 +34,7 @@ const (
 	backupStorageLocationCheckTimeout = 5 * time.Second
 	backupStorageLocationRetryCount   = 3
 	backupStorageLocationRetryDelay   = time.Second
-	veleroStatusReadRetryGrace       = 2 * time.Minute
+	veleroStatusReadRetryGrace        = 2 * time.Minute
 	veleroCRDBundleMaxBytes           = 10 << 20
 )
 
@@ -1125,7 +1125,7 @@ func (c *Client) executeRestoreTask(task protocol.TaskDispatchPayload) {
 		return
 	}
 	if err := c.restoreExec.SubmitRestore(context.Background(), manifest); err != nil {
-		_ = c.sendTaskFailed(task, "RESTORE_SUBMIT_FAILED", err.Error())
+		_ = c.sendTaskFailed(task, restoreSubmitErrorCode(err), err.Error())
 		return
 	}
 	if c.statusReader != nil {
@@ -1159,6 +1159,13 @@ func (c *Client) executeRestoreTask(task protocol.TaskDispatchPayload) {
 		c.logger.Error("failed to send task completed", "task_id", task.TaskID, "error", err)
 		return
 	}
+}
+
+func restoreSubmitErrorCode(err error) string {
+	if err != nil && strings.Contains(strings.ToLower(err.Error()), "timed out waiting for stale restore state to be deleted") {
+		return "RESTORE_STALE_STATE_CLEANUP_TIMEOUT"
+	}
+	return "RESTORE_SUBMIT_FAILED"
 }
 
 func (c *Client) executeStorageSyncTask(task protocol.TaskDispatchPayload) {
