@@ -132,6 +132,7 @@ import {
   latestTaskForRestorePoint, restorePointIsScheduled, restorePointListStatus,
   restorePointNamespaces, taskMatchesRestorePoint, taskStatusLabel,
 } from './features/restore-points/restore-point-support';
+import { validateFrontendModules, type ExtensionViewId, type HyperCDRFrontendModule } from './app/extensions';
 
 const FailbackPage = React.lazy(() => import('./features/failback/failback-page'));
 const LazyEmailSettingsPage = React.lazy(() => import('./features/settings/email-settings-page'));
@@ -168,7 +169,7 @@ type View =
   | 'email_settings'
   | 'profile'
   | 'upgrades'
-  ;
+  | ExtensionViewId;
 
 type TopModule = 'overview' | 'dr' | 'config' | 'ops' | 'monitor' | 'settings';
 
@@ -926,7 +927,10 @@ function createUuid() {
   });
 }
 
-export default function App() {
+export type HyperCDRAppProps = { modules?: HyperCDRFrontendModule[] };
+
+export default function App({ modules = [] }: HyperCDRAppProps) {
+  const extensionModules = useMemo(() => validateFrontendModules(modules), [modules]);
   const [authSession, setAuthSession] = useState<AuthSession | null>(() => readStoredAuthSession());
   const [passwordChangeCompleted, setPasswordChangeCompleted] = useState(false);
   const [view, setView] = useState<View>(() => readStoredAuthSession() ? (readStoredView() || 'dashboard') : 'login');
@@ -1644,9 +1648,10 @@ export default function App() {
         ...(authSession?.user.systemAdmin ? [{ label: 'Tenant Management', desc: 'Create and maintain isolated tenants', view: 'tenants' as View, icon: Building2 }] : []),
         ...(authSession?.user.systemAdmin ? [{ label: 'Email Settings', desc: 'Configure password recovery email delivery', view: 'email_settings' as View, icon: Settings2 }] : []),
         ...(authSession?.user.systemAdmin ? [{ label: 'Upgrade', desc: 'Check and upgrade platform and cluster components', view: 'upgrades' as View, icon: Upload }] : []),
+        ...extensionModules.filter(module => module.navigation.group === 'settings').map(module => ({ label: module.navigation.label, desc: module.navigation.description, view: module.view as View, icon: module.navigation.icon })),
       ],
     };
-  }, [activeModule, authSession?.user.role, authSession?.user.systemAdmin, view]);
+  }, [activeModule, authSession?.user.role, authSession?.user.systemAdmin, extensionModules, view]);
 
   const openView = (nextView: View, options: { preserveSelectedCluster?: boolean } = {}) => {
     if (!options.preserveSelectedCluster && (nextView === 'dashboard' || nextView === 'applications' || nextView === 'failback')) {
@@ -2053,13 +2058,13 @@ export default function App() {
                     key={item.view}
                     onClick={() => { if (disabled) { setToast(onboardingMessage); openView('clusters'); return; } openView(item.view); }}
                     disabled={disabled}
-                    title={disabled ? onboardingMessage : language.secondaryMeta[item.view][0]}
+                    title={disabled ? onboardingMessage : item.label}
                     className={`${view === item.view ? 'hbdr-secondary-active' : ''} ${disabled ? 'cursor-not-allowed opacity-50 hover:bg-transparent' : ''}`}
                   >
                     <item.icon size={16} />
                     <span>
-                      <strong>{language.secondaryMeta[item.view][0]}</strong>
-                      <small>{language.secondaryMeta[item.view][1]}</small>
+                      <strong>{item.label}</strong>
+                      <small>{item.desc}</small>
                     </span>
                   </button>
                 );
@@ -2271,6 +2276,7 @@ export default function App() {
             {view === 'email_settings' && authSession?.user.systemAdmin && <React.Suspense fallback={<PageLoadFallback />}><LazyEmailSettingsPage currentUser={authSession.user} toast={setToast} /></React.Suspense>}
             {view === 'profile' && authSession && <React.Suspense fallback={<PageLoadFallback />}><LazyProfilePage session={authSession} setSession={next => { setAuthSession(next); writeStoredAuthSession(next); }} toast={setToast} /></React.Suspense>}
             {view === 'upgrades' && authSession?.user.systemAdmin && <React.Suspense fallback={<PageLoadFallback />}><LazyUpgradeManagementPage isAdmin toast={setToast} refreshPlatformData={refreshPlatformData} /></React.Suspense>}
+            {extensionModules.map(module => view === module.view ? <React.Suspense key={module.id} fallback={<PageLoadFallback />}><module.component /></React.Suspense> : null)}
           </AnimatePresence>
         </section>
       </main>

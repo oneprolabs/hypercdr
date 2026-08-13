@@ -70,6 +70,14 @@ type Router struct {
 	logCleanupAt           time.Time
 	logRetryAfter          map[string]time.Time
 	schedulerOnce          sync.Once
+	productInfo            ProductInfo
+}
+
+type ProductInfo struct {
+	Product      string `json:"product"`
+	Edition      string `json:"edition"`
+	Capabilities any    `json:"capabilities"`
+	License      any    `json:"license"`
 }
 
 type requestUserContextKey struct{}
@@ -87,6 +95,10 @@ var cleanObjectStoragePrefix = deleteObjectStoragePrefix
 type captchaChallenge struct {
 	Code      string
 	ExpiresAt time.Time
+}
+
+func (r *Router) getProductInfo(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, r.productInfo)
 }
 
 type inventoryRequestStatus struct {
@@ -108,6 +120,10 @@ type imageDigestCacheEntry struct {
 }
 
 func NewRouter(cfg config.Config, logger *slog.Logger, repo store.Store) http.Handler {
+	return NewRouterWithProductInfo(cfg, logger, repo, ProductInfo{Product: "HyperCDR", Edition: "community", Capabilities: map[string]any{}})
+}
+
+func NewRouterWithProductInfo(cfg config.Config, logger *slog.Logger, repo store.Store, productInfo ProductInfo) http.Handler {
 	router := &Router{
 		cfg:                   cfg,
 		logger:                logger,
@@ -123,6 +139,7 @@ func NewRouter(cfg config.Config, logger *slog.Logger, repo store.Store) http.Ha
 		contentIndexing:       map[string]struct{}{},
 		contentIndexSlots:     make(chan struct{}, 2),
 		logRetryAfter:         map[string]time.Time{},
+		productInfo:           productInfo,
 	}
 	router.routes()
 	router.startScheduler()
@@ -132,7 +149,7 @@ func NewRouter(cfg config.Config, logger *slog.Logger, repo store.Store) http.Ha
 func (r *Router) withPlatformAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		path := req.URL.Path
-		publicAuth := path == "/api/v1/auth/captcha" || path == "/api/v1/auth/login" || path == "/api/v1/auth/forgot-password" || path == "/api/v1/auth/reset-password" || path == "/api/v1/auth/config"
+		publicAuth := path == "/api/v1/product-info" || path == "/api/v1/auth/captcha" || path == "/api/v1/auth/login" || path == "/api/v1/auth/forgot-password" || path == "/api/v1/auth/reset-password" || path == "/api/v1/auth/config"
 		if _, isMemory := r.store.(*store.MemoryStore); isMemory || !strings.HasPrefix(path, "/api/v1/") || publicAuth || path == "/api/v1/agent-tokens/validate" {
 			next.ServeHTTP(w, req)
 			return
@@ -317,6 +334,7 @@ func (r *Router) tenantGuard(kind string, next http.HandlerFunc) http.HandlerFun
 }
 
 func (r *Router) routes() {
+	r.mux.HandleFunc("GET /api/v1/product-info", r.getProductInfo)
 	r.mux.HandleFunc("GET /healthz", r.healthz)
 	r.mux.HandleFunc("GET /readyz", r.readyz)
 	r.mux.HandleFunc("GET /api/v1/platform/version", r.platformVersion)
