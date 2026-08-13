@@ -26,6 +26,7 @@ test-agent:
 	cd agent/comm-agent && go test ./...
 
 test-frontend:
+	cd frontend && npm run test:topology
 	cd frontend && npm run build
 
 test-bootstrap:

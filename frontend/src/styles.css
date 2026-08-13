@@ -1021,6 +1021,37 @@ body {
   gap: 7px;
 }
 
+.premium-app .hbdr-cluster-role-badges {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.premium-app .hbdr-cluster-role-badges span {
+  display: inline-flex;
+  min-height: 21px;
+  align-items: center;
+  padding: 0 8px;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 750;
+  line-height: 19px;
+}
+
+.premium-app .hbdr-cluster-role-badges .is-source {
+  border-color: #b9d6ea;
+  background: #edf6fc;
+  color: #286f9f;
+}
+
+.premium-app .hbdr-cluster-role-badges .is-target {
+  border-color: #c9d9cd;
+  background: #f0f7f2;
+  color: #367451;
+}
+
 .premium-app .cluster-protection-badge {
   min-height: 24px !important;
   border-radius: 999px !important;
@@ -24264,24 +24295,51 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 }
 
 /* Clusters page cards — refined enterprise presentation. */
+.premium-app .hbdr-clusters-page { height:100%; min-height:0; }
+.premium-app .hbdr-clusters-workspace { display:grid; grid-template-rows:auto minmax(0,1fr) auto; gap:14px; height:100%; min-height:0; }
+.premium-app .hbdr-clusters-card-region { display:flex; min-height:0; flex-direction:column; overflow:hidden; }
+.premium-app .hbdr-clusters-card-region .hbdr-cluster-card-grid { flex:1 1 auto; }
 .premium-app .hbdr-cluster-card-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-  padding: 16px;
+  grid-template-columns: repeat(3, 560px);
+  justify-content: start;
+  align-items: start;
+  align-content: start;
+  gap: 20px;
+  min-height: 0;
+  padding: 18px 18px 32px;
+  background: #f7f9fc;
+  overflow-x: auto;
+  overflow-y: auto;
+  scrollbar-gutter: auto;
 }
 
+.premium-app .hbdr-cluster-card-grid.is-single-row {
+  min-height: 426px;
+  overflow-y: hidden;
+}
+.premium-app .hbdr-cluster-card-grid.is-multi-row { overflow-y:auto; }
+
 .premium-app .hbdr-cluster-card-grid .cluster-card-premium {
-  width: auto !important;
+  box-sizing: border-box;
+  width: 560px !important;
+  max-width: 560px;
   min-width: 0;
-  min-height: 304px;
+  height: 368px;
+  min-height: 368px;
+  aspect-ratio: auto;
   padding: 18px !important;
-  border: 1px solid #dce5ef !important;
+  border: 1px solid #cbd8e5 !important;
   border-radius: 12px !important;
   background:
     radial-gradient(circle at 94% 2%, rgba(53, 122, 181, 0.08), transparent 170px),
     #ffffff !important;
-  box-shadow: 0 8px 24px rgba(25, 45, 72, 0.07) !important;
+  box-shadow: 0 7px 18px rgba(25, 45, 72, 0.12), 0 1px 2px rgba(25, 45, 72, 0.08) !important;
+}
+
+.premium-app.hbdr-workspace .premium-content .hbdr-cluster-card-grid .cluster-card-premium {
+  border-color: #c3d1df !important;
+  box-shadow: 0 7px 18px rgba(25, 45, 72, 0.12), 0 1px 2px rgba(25, 45, 72, 0.08) !important;
 }
 
 .premium-app .hbdr-cluster-card-grid .cluster-card-premium::before {
@@ -24419,10 +24477,113 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   background: linear-gradient(90deg, #d75a65, #e8a0a6 70%, transparent) !important;
 }
 
-@media (max-width: 1050px) {
-  .premium-app .hbdr-cluster-card-grid {
-    grid-template-columns: 1fr;
-  }
+/* Cluster DR topology is an on-demand analysis drawer; the main page remains operational. */
+.premium-app .hbdr-cluster-task-dock { position:relative; z-index:10; min-width:0; overflow:hidden; border-color:#d9e3ec !important; border-radius:11px !important; box-shadow:0 8px 24px rgba(20,42,67,.10) !important; transition:box-shadow 180ms ease; }
+.premium-app .hbdr-cluster-task-dock-toggle { display:flex; width:100%; min-height:38px; align-items:center; justify-content:space-between; gap:16px; padding:7px 14px; border:0 !important; border-radius:0 !important; background:#fff !important; color:#21354a !important; box-shadow:none !important; text-align:left; }
+.premium-app .hbdr-cluster-task-dock-toggle:hover { background:#f8fbfd !important; transform:none !important; }
+.premium-app .hbdr-cluster-task-dock-title { display:inline-flex; align-items:center; gap:8px; font-size:12px; font-weight:780; }
+.premium-app .hbdr-cluster-task-dock-title em { display:inline-flex; min-width:21px; height:20px; align-items:center; justify-content:center; padding:0 6px; border-radius:999px; background:#edf2f6; color:#607386; font-size:9px; font-style:normal; }
+.premium-app .hbdr-cluster-task-dock-summary { display:flex; align-items:center; gap:7px; }
+.premium-app .hbdr-cluster-task-dock-summary span { padding:2px 7px; border-radius:999px; font-size:9px; font-weight:750; }
+.premium-app .hbdr-cluster-task-dock-summary .is-running { background:#eaf3fb; color:#2d72a6; }
+.premium-app .hbdr-cluster-task-dock-summary .is-failed { background:#fdecef; color:#b93b49; }
+.premium-app .hbdr-cluster-task-dock-body { max-height:190px; overflow:hidden; border-top:1px solid #e4ebf1; background:#fff; }
+.premium-app .hbdr-cluster-task-dock-body .hbdr-hyper-table { display:flex; height:190px; min-height:0; flex-direction:column; border:0 !important; border-radius:0 !important; box-shadow:none !important; }
+.premium-app .hbdr-cluster-task-dock-body .hbdr-hyper-table-scroll { min-height:0; flex:1 1 auto; overflow:auto; }
+.premium-app .hbdr-cluster-task-dock-body .hbdr-hyper-table-head { position:sticky; top:0; z-index:3; }
+.premium-app .hbdr-cluster-task-dock-body .hbdr-hyper-table-pagination { flex:0 0 auto; }
+.premium-app .hbdr-cluster-task-dock-body .hbdr-hyper-table-compact .hbdr-hyper-table-cell { min-height:31px; padding-right:10px; padding-left:10px; }
+.premium-app .hbdr-cluster-task-dock-body .hbdr-hyper-table-pagination { min-height:34px; padding:4px 10px; }
+.premium-app .hbdr-cluster-task-dock-body .hbdr-hyper-table-pagination-controls select,
+.premium-app .hbdr-cluster-task-dock-body .hbdr-hyper-table-pagination-controls button { height:24px; }
+.premium-app .hbdr-cluster-task-dock-body .hbdr-cluster-task-new {
+  position: relative;
+  background: #edf6ff;
+  box-shadow: inset 3px 0 0 #3b82c4;
+  animation: hbdr-cluster-task-arrival 900ms ease-out 2;
+}
+@keyframes hbdr-cluster-task-arrival {
+  0%, 100% { background: #edf6ff; }
+  50% { background: #dceeff; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .premium-app .hbdr-cluster-task-dock-body .hbdr-cluster-task-new { animation: none; }
+}
+@media (max-width:900px) {
+  .premium-app .hbdr-cluster-task-dock-body { max-height:190px; }
+}
+@media (max-height:950px) {
+  .premium-app .hbdr-cluster-card-grid { padding-bottom:20px; }
+}
+.premium-app .hbdr-cluster-toolbar-actions { display:flex; align-items:center; gap:8px; }
+.premium-app .hbdr-cluster-topology-trigger { display:inline-flex; align-items:center; gap:6px; min-height:32px; padding:7px 11px; border:1px solid #cfdce7; border-radius:8px; background:#fff; color:#49647c; font-size:10px; font-weight:750; transition:border-color 150ms ease,background 150ms ease,color 150ms ease; }
+.premium-app .hbdr-cluster-topology-trigger:hover { border-color:#9bbbd3; background:#f2f8fc; color:#25689f; }
+.premium-app .hbdr-topology-drawer { width:min(680px,calc(100vw - 120px)); }
+.premium-app .hbdr-topology-drawer-body { padding:18px; overflow:hidden; }
+.premium-app .hbdr-topology-drawer .hbdr-dr-topology { height:100%; }
+.premium-app .hbdr-topology-drawer .hbdr-dr-topology-canvas { min-height:calc(100vh - 170px) !important; }
+.premium-app .hbdr-dr-topology {
+  position:relative;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid #dbe5ee;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(25, 45, 72, .06);
+}
+.premium-app .hbdr-dr-topology-head { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 18px; border-bottom:1px solid #e7edf3; }
+.premium-app .hbdr-dr-topology-head h3 { margin:0; color:#17263a; font-size:15px; font-weight:780; }
+.premium-app .hbdr-dr-topology-head p { margin:3px 0 0; color:#7b8999; font-size:11px; }
+.premium-app .hbdr-dr-topology-legend { display:flex; align-items:center; gap:7px; color:#718096; font-size:10px; font-weight:650; }
+.premium-app .hbdr-dr-topology-legend span { width:18px; height:2px; border-radius:999px; background:#3b82b8; }
+.premium-app .hbdr-dr-topology-legend span.is-warning { background:#d68a28; }
+.premium-app .hbdr-dr-topology-legend span.is-configuring { border-top:2px dashed #7d8da0; background:transparent; }
+.premium-app .hbdr-dr-topology-canvas { position:relative; overflow:hidden; background:radial-gradient(circle at 1px 1px, #dce6ef 1px, transparent 1px); background-size:24px 24px; }
+.premium-app .hbdr-dr-topology-lines { position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; }
+.premium-app .hbdr-dr-topology-lines marker .hbdr-dr-arrow-head { fill:none; stroke:#397ead; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+.premium-app .hbdr-dr-topology-lines path { fill:none; stroke:#397ead; stroke-width:2.2; opacity:.72; vector-effect:non-scaling-stroke; }
+.premium-app .hbdr-dr-topology-lines path.is-warning { stroke:#d68a28; }
+.premium-app .hbdr-dr-topology-lines path.is-configuring { stroke:#8292a3; stroke-dasharray:7 5; }
+.premium-app .hbdr-dr-topology-lines path.is-failed { stroke:#d4525d; }
+.premium-app .hbdr-dr-topology-lines path.is-selected { stroke-width:3.6; opacity:1; }
+.premium-app .hbdr-dr-node { position:absolute; z-index:3; width:176px; min-height:78px; padding:11px 13px; transform:translate(-50%,-50%); pointer-events:auto; border:1px solid #cddbe7; border-radius:11px; background:#fff; text-align:left; box-shadow:0 8px 22px rgba(25,55,87,.12); transition:transform 150ms ease,border-color 150ms ease; }
+.premium-app .hbdr-dr-node:hover { transform:translate(-50%,-52%); border-color:#7facce; }
+.premium-app .hbdr-dr-node.is-selected { border-color:#4387b8; box-shadow:0 0 0 4px rgba(52,120,168,.14),0 8px 22px rgba(25,55,87,.14); }
+.premium-app .hbdr-dr-node-title { display:flex; align-items:center; gap:7px; overflow:hidden; color:#17263a; font-size:13px; font-weight:780; text-overflow:ellipsis; white-space:nowrap; }
+.premium-app .hbdr-dr-node-title i { width:8px; height:8px; flex:0 0 auto; border-radius:50%; background:#20a26a; box-shadow:0 0 0 3px #e5f7ef; }
+.premium-app .hbdr-dr-node.is-offline .hbdr-dr-node-title i { background:#d4525d; box-shadow:0 0 0 3px #fdecef; }
+.premium-app .hbdr-dr-node > span:nth-child(2) { display:block; margin-top:7px; color:#637487; font-size:10px; }
+.premium-app .hbdr-dr-edge-label { position:absolute; z-index:6; display:flex; align-items:center; gap:4px; min-width:72px; min-height:30px; justify-content:center; padding:4px 8px; transform:translate(-50%,-50%) !important; pointer-events:auto; border:1px solid #c7d9e7; border-radius:999px; background:#fff; color:#3478a8; font-size:10px; font-weight:750; box-shadow:0 3px 10px rgba(24,54,83,.1); transition:border-color 140ms ease,background-color 140ms ease,box-shadow 140ms ease; }
+.premium-app .hbdr-dr-edge-label:hover,
+.premium-app .hbdr-dr-edge-label:focus,
+.premium-app .hbdr-dr-edge-label:focus-visible,
+.premium-app .hbdr-dr-edge-label:active,
+.premium-app .hbdr-dr-edge-label.is-selected { transform:translate(-50%,-50%) !important; }
+.premium-app .hbdr-dr-edge-label::before { content:""; position:absolute; inset:-11px; z-index:-1; border-radius:16px; }
+.premium-app .hbdr-dr-edge-label:hover { border-color:#7cacca; background:#f7fbfe; box-shadow:0 0 0 4px rgba(52,120,168,.10),0 4px 12px rgba(24,54,83,.12); }
+.premium-app .hbdr-dr-edge-label.is-warning { border-color:#ecd19f; color:#a56618; }
+.premium-app .hbdr-dr-edge-label.is-failed { border-color:#efb7bd; color:#b73845; }
+.premium-app .hbdr-dr-edge-label.is-selected { outline:3px solid rgba(52,120,168,.14); }
+.premium-app .hbdr-dr-topology-empty { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; color:#8a99aa; }
+.premium-app .hbdr-dr-topology-empty strong { color:#556779; font-size:13px; }
+.premium-app .hbdr-dr-topology-empty span { font-size:11px; }
+.premium-app .hbdr-dr-relationship-detail { position:absolute; z-index:8; right:12px; bottom:12px; left:12px; display:grid; grid-template-columns:minmax(170px,220px) 1fr; align-items:start; gap:18px; min-height:70px; padding:11px 13px; border:1px solid #d8e4ed; border-radius:9px; background:rgba(248,250,252,.98); box-shadow:0 8px 24px rgba(28,49,72,.14); }
+.premium-app .hbdr-dr-relationship-summary strong { display:flex; align-items:center; gap:7px; color:#203247; font-size:12px; }
+.premium-app .hbdr-dr-relationship-summary > span { display:block; margin-top:4px; color:#718096; font-size:10px; }
+.premium-app .hbdr-dr-relationship-namespace-list { min-width:0; }
+.premium-app .hbdr-dr-relationship-namespace-list > strong { display:block; margin-bottom:5px; color:#52677b; font-size:10px; font-weight:750; }
+.premium-app .hbdr-dr-relationship-namespaces { max-height:92px; overflow:auto; border:1px solid #d8e4ed; border-radius:7px; background:#fff; }
+.premium-app .hbdr-dr-relationship-namespaces > div { display:flex; align-items:center; gap:7px; min-height:28px; padding:5px 8px; border-bottom:1px solid #edf2f6; color:#385a73; font-size:10px; font-weight:650; }
+.premium-app .hbdr-dr-relationship-namespaces > div:last-child { border-bottom:0; }
+.premium-app .hbdr-dr-relationship-namespaces svg { flex:0 0 auto; color:#5d88a7; }
+.premium-app .hbdr-dr-relationship-namespaces span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+@media (max-width:900px) {
+  .premium-app .hbdr-topology-drawer { width:calc(100vw - 24px); }
+  .premium-app .hbdr-topology-drawer-body { padding:12px; }
+  .premium-app .hbdr-topology-drawer .hbdr-dr-topology-canvas { min-height:calc(100vh - 150px) !important; }
+  .premium-app .hbdr-dr-topology-legend { display:none; }
+  .premium-app .hbdr-dr-node { width:145px; }
 }
 
 /* Native choice controls must never inherit text-field dimensions. */

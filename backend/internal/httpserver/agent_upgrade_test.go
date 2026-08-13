@@ -1,14 +1,105 @@
 package httpserver
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"hypercdr-platform/platform/backend/internal/config"
+	"hypercdr-platform/platform/backend/internal/protocol"
 	"hypercdr-platform/platform/backend/internal/store"
+
+	"log/slog"
+	"os"
+
+	"github.com/gorilla/websocket"
 )
+
+func TestAgentUpgradeReturnsPersistedQueuedTaskBeforeAsyncDispatch(t *testing.T) {
+	repo := store.NewMemoryStore()
+	if _, err := repo.UpsertComponentRelease(store.ComponentReleaseInput{Component: "comm-agent", Version: "v2", Image: "registry.example/hypercdr/comm-agent:v2", ImageDigest: "sha256:v2", Status: "active"}); err != nil {
+		t.Fatal(err)
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	server := httptest.NewServer(NewRouter(config.Config{AgentNamespace: "hypercdr-agent"}, logger, repo))
+	defer server.Close()
+
+	token := createTestAgentToken(t, server.URL)
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/ws/agent", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := conn.WriteJSON(protocol.Message[protocol.RegisterPayload]{
+		Version: protocol.Version, MessageID: "upgrade-register", Type: protocol.MessageAgentRegister, AgentID: "agent-upgrade-test", Timestamp: time.Now().UTC(),
+		Payload: protocol.RegisterPayload{InstallToken: token, Cluster: protocol.ClusterSummary{Name: "upgrade-source", KubeVersion: "v1.30.0"}, Agent: protocol.AgentSummary{Version: "v1", Namespace: "hypercdr-agent"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var accepted protocol.Message[protocol.RegisterAcceptedPayload]
+	if err := conn.ReadJSON(&accepted); err != nil {
+		t.Fatal(err)
+	}
+	clusterID := accepted.Payload.ClusterID
+
+	response, err := http.Post(server.URL+"/api/v1/clusters/"+clusterID+"/agent/upgrade", "application/json", bytes.NewReader([]byte(`{}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("upgrade status = %d", response.StatusCode)
+	}
+	var queued store.Task
+	if err := json.NewDecoder(response.Body).Decode(&queued); err != nil {
+		t.Fatal(err)
+	}
+	if queued.ID == "" || queued.Status != "queued" {
+		t.Fatalf("response task = %#v, want persisted queued task", queued)
+	}
+	tasks, err := repo.ListTasks(clusterID)
+	upgradeTasks := make([]store.Task, 0, 1)
+	for _, task := range tasks {
+		if task.Type == "agent-upgrade" {
+			upgradeTasks = append(upgradeTasks, task)
+		}
+	}
+	if err != nil || len(upgradeTasks) != 1 || upgradeTasks[0].ID != queued.ID || upgradeTasks[0].Status != "queued" {
+		t.Fatalf("persisted tasks = %#v, err = %v", tasks, err)
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var dispatch protocol.Message[protocol.TaskDispatchPayload]
+	if err := conn.ReadJSON(&dispatch); err != nil {
+		t.Fatal(err)
+	}
+	if dispatch.Payload.TaskID != queued.ID || dispatch.Payload.Type != "agent-upgrade" {
+		t.Fatalf("dispatch = %#v, want task %s", dispatch.Payload, queued.ID)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		tasks, err = repo.ListTasks(clusterID)
+		var dispatched bool
+		for _, task := range tasks {
+			if task.ID == queued.ID && task.Status == "dispatched" {
+				dispatched = true
+				break
+			}
+		}
+		if err == nil && dispatched {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("task did not transition to dispatched: %#v, err=%v", tasks, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
 
 func TestResolveRegistryManifestDigestKeepsIndexAndManifestNegotiationSeparate(t *testing.T) {
 	var accepts []string

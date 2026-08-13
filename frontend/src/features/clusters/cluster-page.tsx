@@ -1,12 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, CheckCircle2, ChevronRight, Edit2, Eye, MoreVertical, Plus, PlusCircle, RefreshCw, Server, ShieldCheck, Star, Terminal, Trash2, Upload, X } from 'lucide-react';
+import { AlertTriangle, Check, CheckCircle2, ChevronRight, Edit2, Eye, GitBranch, MoreVertical, Plus, PlusCircle, RefreshCw, Server, ShieldCheck, Star, Terminal, Trash2, Upload, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { apiGet, apiPatch, apiPost } from '../../api/client';
 import { SearchBar } from '../../components/search-bar';
 import { HyperTable, type HyperTableColumn } from '../../components/table';
 import ClusterActivityPanel from './cluster-activity-panel';
-import { Metric, ProtectionBadge, getProtectedAppCount, isClusterProtected } from './cluster-presentation';
+import { Metric, getProtectedAppCount, isClusterProtected } from './cluster-presentation';
 import type { Cluster, ClusterNamespaceRow, ClusterNodeRow, ClusterStorageClassRow } from './types';
+import type { ApiProtectionPlan } from '../recovery/types';
+import { buildDRTopology, type DRRelationship } from './dr-topology';
+import DRTopologyView from './dr-topology-view';
 
 type ApiList<T>={items:T[]};
 type ApiAgentToken={installCommand:string;prepareNodeCommand?:string};
@@ -27,6 +30,7 @@ const copyTextToClipboard=async(text:string,textarea?:HTMLTextAreaElement|null)=
 
 export default function ClusterPage(props: {
   clusters: Cluster[];
+  protectionPlans: ApiProtectionPlan[];
   canUpgrade: boolean;
   defaultClusterId: string | null;
   clusterMenuId: string | null;
@@ -36,8 +40,8 @@ export default function ClusterPage(props: {
   clearDefaultCluster: (event?: React.MouseEvent) => void;
   unregisterCluster: (cluster: Cluster, event?: React.MouseEvent, deleteBackupData?: boolean) => Promise<ApiTask | null>;
   onRenameCluster: (clusterId: string, name: string) => void;
-  onUpgradeCluster: (clusterId: string) => Promise<void>;
-  onUpgradeVelero: (clusterId: string) => Promise<void>;
+  onUpgradeCluster: (clusterId: string) => Promise<ApiTask>;
+  onUpgradeVelero: (clusterId: string) => Promise<ApiTask>;
   onRegisterCluster: (cluster: Cluster) => void;
   onRefreshRegistration: () => Promise<Cluster[]>;
   clusterTaskLogs: Record<string, ClusterTaskLog[]>;
@@ -46,7 +50,7 @@ export default function ClusterPage(props: {
   openDashboard: () => void;
   toast: (msg: string) => void;
 }) {
-  const { clusters, canUpgrade, defaultClusterId, clusterMenuId, setClusterMenuId, setSelectedCluster, setDefaultCluster, clearDefaultCluster, unregisterCluster, onRenameCluster, onUpgradeCluster, onUpgradeVelero, onRegisterCluster, onRefreshRegistration, clusterTaskLogs, getAgentTokenForRegistration, prefetchAgentToken, openDashboard, toast } = props;
+  const { clusters, protectionPlans, canUpgrade, defaultClusterId, clusterMenuId, setClusterMenuId, setSelectedCluster, setDefaultCluster, clearDefaultCluster, unregisterCluster, onRenameCluster, onUpgradeCluster, onUpgradeVelero, onRegisterCluster, onRefreshRegistration, clusterTaskLogs, getAgentTokenForRegistration, prefetchAgentToken, openDashboard, toast } = props;
   const [registerOpen, setRegisterOpen] = useState(false);
   const [registerStep, setRegisterStep] = useState<1 | 2 | 3>(1);
   const [copied, setCopied] = useState(false);
@@ -71,11 +75,17 @@ export default function ClusterPage(props: {
   const [unregistering, setUnregistering] = useState(false);
   const [upgradeSubmitting, setUpgradeSubmitting] = useState(false);
   const [veleroUpgradeSubmitting, setVeleroUpgradeSubmitting] = useState(false);
+  const [highlightedTaskId, setHighlightedTaskId] = useState<string | null>(null);
   const [unregisterTaskId, setUnregisterTaskId] = useState<string | null>(null);
   const [unregisterTask, setUnregisterTask] = useState<ApiTask | null>(null);
   const [unregisterEvents, setUnregisterEvents] = useState<ApiTaskEvent[]>([]);
   const [clusterResourceDetail, setClusterResourceDetail] = useState<{ cluster: Cluster; type: 'overview' | 'namespaces' | 'nodes' | 'storageClasses' } | null>(null);
   const [actionCopied, setActionCopied] = useState(false);
+  const [topologyOpen, setTopologyOpen] = useState(false);
+  const [selectedRelationshipId, setSelectedRelationshipId] = useState<string | null>(null);
+  const [selectedTopologyClusterId, setSelectedTopologyClusterId] = useState<string | null>(null);
+  const topology = useMemo(() => buildDRTopology(clusters, protectionPlans), [clusters, protectionPlans]);
+  const selectRelationship = (relationship: DRRelationship) => { setSelectedRelationshipId(relationship.id); setSelectedTopologyClusterId(null); };
   const registryCACommandRef = useRef<HTMLTextAreaElement | null>(null);
   const installCommandRef = useRef<HTMLTextAreaElement | null>(null);
   const actionCommandRef = useRef<HTMLTextAreaElement | null>(null);
@@ -465,7 +475,8 @@ export default function ClusterPage(props: {
     if (!upgradeTarget) return;
     setUpgradeSubmitting(true);
     try {
-      await onUpgradeCluster(upgradeTarget.id);
+      const task = await onUpgradeCluster(upgradeTarget.id);
+      setHighlightedTaskId(task.id);
       toast(`${upgradeTarget.name} agent upgrade submitted`);
       closeUpgrade();
     } catch (error) {
@@ -479,7 +490,8 @@ export default function ClusterPage(props: {
     if (!veleroUpgradeTarget) return;
     setVeleroUpgradeSubmitting(true);
     try {
-      await onUpgradeVelero(veleroUpgradeTarget.id);
+      const task = await onUpgradeVelero(veleroUpgradeTarget.id);
+      setHighlightedTaskId(task.id);
       toast(`${veleroUpgradeTarget.name} Velero upgrade task created`);
       setVeleroUpgradeTarget(null);
     } catch (error) {
@@ -551,18 +563,22 @@ export default function ClusterPage(props: {
   };
 
   return (
-    <motion.div key="clusters" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
+    <motion.div key="clusters" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="hbdr-clusters-page">
+      <div className="hbdr-clusters-workspace">
       <SearchBar title="Clusters" desc="Register clusters and maintain the default cluster." />
 
       {clusters.length > 0 ? (
-        <div className="hbdr-section-card">
+        <div className="hbdr-section-card hbdr-clusters-card-region">
           <div className="hbdr-section-toolbar">
             <div>
               <h3>Registered Clusters</h3>
             </div>
-            <button type="button" onClick={openRegister} className="hbdr-dr-action-primary inline-flex items-center gap-1.5"><Plus size={14} />Register Cluster</button>
+            <div className="hbdr-cluster-toolbar-actions">
+              <button type="button" onClick={() => { setSelectedRelationshipId(null); setSelectedTopologyClusterId(null); setTopologyOpen(true); }} className="hbdr-cluster-topology-trigger"><GitBranch size={14} />DR Topology</button>
+              <button type="button" onClick={openRegister} className="hbdr-dr-action-primary inline-flex items-center gap-1.5"><Plus size={14} />Register Cluster</button>
+            </div>
           </div>
-          <div className="hbdr-cluster-card-grid">
+          <div className={`hbdr-cluster-card-grid ${clusters.length <= 3 ? 'is-single-row' : 'is-multi-row'}`}>
             {clusters.map(cluster => (
               <motion.div key={cluster.id} whileHover={{ y: -2 }} className={`cluster-card-premium ${cluster.connectionStatus !== 'online' ? 'cluster-card-offline' : ''} relative w-full cursor-default overflow-visible rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm transition-all hover:border-blue-200 hover:shadow-lg md:w-[340px] group ${clusterMenuId === cluster.id ? 'z-40' : 'z-0'}`}>
               {(() => {
@@ -596,7 +612,6 @@ export default function ClusterPage(props: {
               <div className="cluster-card-head mb-2 flex items-start justify-between">
                 <div className="cluster-card-icon rounded-lg bg-slate-50 p-2 transition-colors group-hover:bg-blue-50"><Server className="text-blue-600" size={20} /></div>
                 <div className="cluster-card-state-stack flex flex-col items-end gap-1.5 pr-10">
-                  <ProtectionBadge cluster={cluster} />
                   {cluster.id === defaultClusterId ? (
                     <button type="button" onClick={(event) => clearDefaultCluster(event)} className="cluster-default-button cluster-default-button-active inline-flex items-center gap-1 rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700 transition-colors hover:border-blue-200 hover:bg-blue-100">
                       <Star size={10} className="fill-blue-500 text-blue-500" />Default
@@ -605,6 +620,12 @@ export default function ClusterPage(props: {
                     <button type="button" onClick={(event) => setDefaultCluster(cluster, event)} className="cluster-default-button inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700">
                       <Star size={10} />Default
                     </button>
+                  )}
+                  {(topology.summaries[cluster.id]?.outboundRelationships > 0 || topology.summaries[cluster.id]?.inboundRelationships > 0) && (
+                    <div className="hbdr-cluster-role-badges" aria-label="DR roles">
+                      {topology.summaries[cluster.id]?.outboundRelationships > 0 && <span className="is-source">Source</span>}
+                      {topology.summaries[cluster.id]?.inboundRelationships > 0 && <span className="is-target">Target</span>}
+                    </div>
                   )}
                 </div>
               </div>
@@ -711,9 +732,9 @@ export default function ClusterPage(props: {
                 </div>
               </div>
               <div className="cluster-metrics-grid grid grid-cols-3 gap-2 border-t border-slate-50 pt-2 text-xs">
-                <Metric label="Namespaces" value={cluster.namespaces} onClick={() => setClusterResourceDetail({ cluster, type: 'namespaces' })} />
                 <Metric label="Nodes" value={cluster.nodes} onClick={() => setClusterResourceDetail({ cluster, type: 'nodes' })} />
-                <Metric label="StorageClasses" value={(cluster.storageClasses || []).length} onClick={() => setClusterResourceDetail({ cluster, type: 'storageClasses' })} />
+                <Metric label="Namespaces" value={cluster.applications} onClick={() => setClusterResourceDetail({ cluster, type: 'namespaces' })} />
+                <Metric label="Protected" value={topology.summaries[cluster.id]?.protectedApps || 0} success={(topology.summaries[cluster.id]?.protectedApps || 0) > 0} />
               </div>
               <button type="button" onClick={() => { setSelectedCluster(cluster); openDashboard(); }} className="cluster-entry-bar mt-2 flex w-full items-center justify-between rounded-md border border-transparent bg-slate-50/70 px-2.5 py-1.5 text-left text-[11px] font-semibold text-slate-500 transition-all hover:border-blue-100 hover:bg-blue-50/80 hover:text-blue-700">
                 <span>DR Workspace</span><span className="flex items-center gap-1">Enter <ChevronRight size={13} /></span>
@@ -734,6 +755,26 @@ export default function ClusterPage(props: {
           <button onClick={openRegister} className="mt-5 inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-100 transition-all hover:bg-blue-700"><Plus size={15} />Register Cluster</button>
         </div>
       )}
+
+      <ClusterActivityPanel logs={clusterTaskLogs} clusters={clusters} highlightedTaskId={highlightedTaskId} onHighlightComplete={() => setHighlightedTaskId(null)} />
+      </div>
+
+      <AnimatePresence>
+        {topologyOpen && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="hbdr-filter-drawer-backdrop" onClick={() => setTopologyOpen(false)} />
+            <motion.aside initial={{ opacity: 0, x: 34 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 34 }} transition={{ duration: 0.18, ease: 'easeOut' }} className="hbdr-filter-drawer hbdr-topology-drawer" role="dialog" aria-modal="true" aria-label="DR Topology">
+              <div className="hbdr-filter-drawer-head">
+                <div><strong>DR Topology</strong><span>Namespace protection relationships between registered clusters</span></div>
+                <button type="button" onClick={() => setTopologyOpen(false)} aria-label="Close DR topology"><X size={18} /></button>
+              </div>
+              <div className="hbdr-filter-drawer-body hbdr-topology-drawer-body">
+                <DRTopologyView clusters={clusters} model={topology} selectedRelationshipId={selectedRelationshipId} selectedClusterId={selectedTopologyClusterId} onSelectRelationship={selectRelationship} onSelectCluster={(clusterId) => { setSelectedTopologyClusterId(clusterId); setSelectedRelationshipId(null); }} />
+              </div>
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {clusterResourceDetail && (() => {
@@ -773,7 +814,7 @@ export default function ClusterPage(props: {
                       <div><span>Nodes</span><strong>{cluster.nodes}</strong></div>
                       <div><span>Namespaces</span><strong>{cluster.namespaces}</strong></div>
                       <div><span>Storage Classes</span><strong>{(cluster.storageClasses || []).length}</strong></div>
-                      <div><span>Applications</span><strong>{cluster.applications}</strong></div>
+                      <div><span>Namespaces</span><strong>{cluster.applications}</strong></div>
                       <div><span>Protected</span><strong>{protectedCount}</strong></div>
                       <div><span>Restore Status</span><strong>{cluster.veleroStatus || 'Unknown'}</strong></div>
                     </div>
@@ -855,8 +896,8 @@ export default function ClusterPage(props: {
                       <h4>Protection</h4>
                     </div>
                     <div className="hbdr-cluster-key-values">
-                      <div><span>Protected Applications</span><strong>{protectedCount}</strong></div>
-                      <div><span>Unprotected Applications</span><strong>{Math.max(0, cluster.apps.length - protectedCount)}</strong></div>
+                      <div><span>Protected Namespaces</span><strong>{protectedCount}</strong></div>
+                      <div><span>Unprotected Namespaces</span><strong>{Math.max(0, cluster.apps.length - protectedCount)}</strong></div>
                       <div><span>Protection State</span><strong>{isClusterProtected(cluster) ? 'Protected' : 'Unprotected'}</strong></div>
                     </div>
                   </section>
@@ -867,7 +908,6 @@ export default function ClusterPage(props: {
         })()}
       </AnimatePresence>
 
-<ClusterActivityPanel logs={clusterTaskLogs} clusters={clusters} />
             <AnimatePresence>
         {registerOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">

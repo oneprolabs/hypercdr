@@ -63,6 +63,7 @@ type Router struct {
 	contentIndexMu         sync.Mutex
 	contentIndexing        map[string]struct{}
 	contentIndexSlots      chan struct{}
+	taskDispatchMu         sync.Mutex
 	logCollectMu           sync.Mutex
 	logMaintMu             sync.Mutex
 	logMaintRun            bool
@@ -2982,33 +2983,8 @@ func (r *Router) upgradeClusterAgent(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "create_task_failed"})
 		return
 	}
-	if err := r.dispatchStoredTask(conn, task); err != nil {
-		r.logger.Error("failed to dispatch agent upgrade task", "cluster_id", clusterID, "task_id", task.ID, "error", err)
-		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{
-			TaskID:       task.ID,
-			Status:       "queued",
-			Progress:     0,
-			ErrorCode:    "DISPATCH_FAILED",
-			ErrorMessage: err.Error(),
-		})
-		writeJSON(w, http.StatusAccepted, map[string]any{
-			"task":    task,
-			"warning": "agent upgrade task created but dispatch failed",
-		})
-		return
-	}
-	task, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{
-		TaskID:   task.ID,
-		Status:   "dispatched",
-		Progress: 0,
-	})
-	_ = r.store.AddTaskEvent(store.TaskEventInput{
-		TaskID:  task.ID,
-		Level:   "info",
-		Reason:  "dispatched",
-		Message: "agent upgrade task dispatched",
-	})
 	writeJSON(w, http.StatusAccepted, task)
+	go r.dispatchComponentUpgrade(conn, task, "agent upgrade task dispatched")
 }
 
 func (r *Router) upgradeClusterVelero(w http.ResponseWriter, req *http.Request) {
@@ -3095,18 +3071,23 @@ func (r *Router) upgradeClusterVelero(w http.ResponseWriter, req *http.Request) 
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "create_task_failed"})
 		return
 	}
-	if err := r.dispatchStoredTask(conn, task); err != nil {
-		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "queued", ErrorCode: "DISPATCH_FAILED", ErrorMessage: err.Error()})
-		writeJSON(w, http.StatusAccepted, map[string]any{"task": task, "warning": "Velero upgrade task created but dispatch failed"})
-		return
-	}
-	task, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "dispatched", Progress: 0})
 	dispatchMessage := "Velero upgrade task dispatched to cluster agent"
 	if input.Repair {
 		dispatchMessage = "Velero repair task dispatched to cluster agent"
 	}
-	_ = r.store.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "info", Reason: "dispatched", Message: dispatchMessage})
 	writeJSON(w, http.StatusAccepted, task)
+	go r.dispatchComponentUpgrade(conn, task, dispatchMessage)
+}
+
+func (r *Router) dispatchComponentUpgrade(conn *websocket.Conn, task store.Task, message string) {
+	if err := r.dispatchStoredTask(conn, task); err != nil {
+		r.logger.Error("failed to dispatch component upgrade task", "cluster_id", task.ClusterID, "task_id", task.ID, "type", task.Type, "error", err)
+		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "queued", Progress: 0, ErrorCode: "DISPATCH_FAILED", ErrorMessage: err.Error()})
+		_ = r.store.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "warning", Reason: "dispatch_failed", Message: "Upgrade task was created but could not be dispatched; it remains queued for retry."})
+		return
+	}
+	_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "dispatched", Progress: 0})
+	_ = r.store.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "info", Reason: "dispatched", Message: message})
 }
 
 func (r *Router) clusterExists(clusterID string) bool {
@@ -4501,6 +4482,8 @@ func (r *Router) redispatchPendingTasks(clusterID string, conn *websocket.Conn) 
 }
 
 func (r *Router) dispatchStoredTask(conn *websocket.Conn, task store.Task) error {
+	r.taskDispatchMu.Lock()
+	defer r.taskDispatchMu.Unlock()
 	dispatch, err := r.buildStoredTaskDispatch(task)
 	if err != nil {
 		return err

@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { HyperTable, type HyperTableColumn } from '../../components/table';
 import { formatDateTime } from '../../lib/date-time';
 
@@ -16,15 +17,34 @@ const taskStatusClass=(status?:string)=>status==='succeeded'?'text-emerald-600':
 const latestVolumeProgress=(events?:ApiTaskEvent[]):VolumeProgressInfo|null=>{for(let index=(events?.length||0)-1;index>=0;index--){const progress=events?.[index]?.payload?.velero?.volumeProgress;if(progress&&typeof progress==='object')return{bytesDone:Number(progress.bytesDone||0),totalBytes:Number(progress.totalBytes||0),knownTotal:Boolean(progress.knownTotal),allTotalsKnown:Boolean(progress.allTotalsKnown),percent:Number(progress.percent||0),speedBytesPerSecond:Number(progress.speedBytesPerSecond||0),etaSeconds:Number(progress.etaSeconds||0)}}return null};
 const taskProgressInfo=(task:ApiTask,events?:ApiTaskEvent[])=>{const metrics=task.payload?.progressMetrics&&typeof task.payload.progressMetrics==='object'?task.payload.progressMetrics:task.payload||{};const totalBytes=Number(metrics.totalBytes||0),syncedBytes=Number(metrics.syncedBytes||0);if(totalBytes>0)return{bytesDone:Math.max(0,syncedBytes),totalBytes,knownTotal:true,allTotalsKnown:true,percent:Number(metrics.percent||(syncedBytes>0?syncedBytes*100/totalBytes:0)),speedBytesPerSecond:Number(metrics.speedBytesPerSecond||0),etaSeconds:Number(metrics.etaSeconds||0)};if(['succeeded','failed','canceled','cancelled'].includes(task.status))return null;const volume=latestVolumeProgress(events);return volume?.knownTotal&&volume.allTotalsKnown&&volume.totalBytes>0?volume:null};
 
-export default function ClusterActivityPanel({ logs, clusters }: { logs: Record<string, ClusterTaskLog[]>; clusters: Cluster[] }) {
+export default function ClusterActivityPanel({ logs, clusters, highlightedTaskId, onHighlightComplete }: { logs: Record<string, ClusterTaskLog[]>; clusters: Cluster[]; highlightedTaskId?: string | null; onHighlightComplete?: () => void }) {
   const entries = Object.entries(logs)
     .flatMap(([clusterId, clusterLogs]) => {
       const cluster = clusters.find(item => item.id === clusterId) || null;
       return clusterLogs.map(log => ({ cluster, clusterId, log }));
     })
     .sort((a, b) => (b.log.task.createdAt || '').localeCompare(a.log.task.createdAt || ''));
-  const visibleEntries = entries.filter(entry => !['succeeded', 'failed', 'canceled'].includes(entry.log.task.status || '')).concat(entries.filter(entry => ['succeeded', 'failed', 'canceled'].includes(entry.log.task.status || '')).slice(0, 8));
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [dockExpanded, setDockExpanded] = useState(() => {
+    const saved = window.localStorage.getItem('hypercdr:clusters:recent-tasks-expanded');
+    if (saved !== null) return saved === 'true';
+    return !window.matchMedia('(max-width: 900px)').matches;
+  });
+  const setDockState = (expanded: boolean) => {
+    setDockExpanded(expanded);
+    window.localStorage.setItem('hypercdr:clusters:recent-tasks-expanded', String(expanded));
+  };
+  const runningCount = entries.filter(entry => ['running', 'accepted', 'dispatched', 'queued'].includes(entry.log.task.status || '')).length;
+  const failedCount = entries.filter(entry => entry.log.task.status === 'failed').length;
+  useEffect(() => {
+    if (runningCount > 0) setDockState(true);
+  }, [runningCount]);
+  useEffect(() => {
+    if (!highlightedTaskId) return;
+    setDockState(true);
+    const timer = window.setTimeout(() => onHighlightComplete?.(), 5000);
+    return () => window.clearTimeout(timer);
+  }, [highlightedTaskId]);
   const taskTypeLabel = (type: string) => type === 'register' ? 'Register cluster' : type === 'unregister' ? 'Unregister cluster' : type === 'agent-upgrade' ? 'Upgrade Comm Agent' : type === 'velero-upgrade' ? 'Upgrade Velero' : type;
   const taskInitials = (entry: { log: ClusterTaskLog }) => entry.log.task.type === 'register' ? 'R' : entry.log.task.type === 'unregister' ? 'U' : entry.log.task.type === 'agent-upgrade' ? 'CA' : entry.log.task.type === 'velero-upgrade' ? 'V' : (entry.log.task.type || '?').charAt(0).toUpperCase();
   const taskAccent = (type: string) => type === 'register' ? 'bg-blue-500' : type === 'unregister' ? 'bg-rose-500' : type === 'agent-upgrade' ? 'bg-indigo-500' : type === 'velero-upgrade' ? 'bg-cyan-600' : 'bg-slate-500';
@@ -52,7 +72,7 @@ export default function ClusterActivityPanel({ logs, clusters }: { logs: Record<
     return archived || entry.clusterId;
   };
   const isActive = (task: ApiTask) => !['succeeded', 'failed', 'canceled'].includes(task.status || '');
-  const activityColumns: HyperTableColumn<typeof visibleEntries[number]>[] = [
+  const activityColumns: HyperTableColumn<typeof entries[number]>[] = [
     {
       id: 'task',
       header: 'Task',
@@ -178,7 +198,7 @@ export default function ClusterActivityPanel({ logs, clusters }: { logs: Record<
       meta: { align: 'right', title: entry => entry.log.task.completedAt ? formatDateTime(entry.log.task.completedAt) : formatDateTime(entry.log.task.createdAt) },
     },
   ];
-  const renderActivityExpandedRow = (entry: typeof visibleEntries[number]) => {
+  const renderActivityExpandedRow = (entry: typeof entries[number]) => {
     const expanded = expandedId === entry.log.task.id;
     if (!expanded) return null;
     return (
@@ -208,40 +228,39 @@ export default function ClusterActivityPanel({ logs, clusters }: { logs: Record<
     );
   };
 
-  if (entries.length === 0) {
-    return (
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5">
-          <div>
-            <h3 className="text-sm font-black text-slate-900">Recent Tasks</h3>
-          </div>
-          <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-500">Idle</span>
-        </div>
-        <div className="px-4 py-4 text-center text-xs font-medium text-slate-400">No recent cluster lifecycle or component tasks yet.</div>
-      </div>
-    );
-  }
   return (
-    <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5">
-        <div>
-          <h3 className="text-sm font-black text-slate-900">Recent Tasks</h3>
+      <div className={`hbdr-cluster-recent-tasks hbdr-cluster-task-dock ${dockExpanded ? 'is-expanded' : 'is-collapsed'} rounded-xl border border-slate-200 bg-white shadow-sm`}>
+        <button type="button" className="hbdr-cluster-task-dock-toggle" onClick={() => setDockState(!dockExpanded)} aria-expanded={dockExpanded} aria-controls="cluster-recent-task-list">
+          <span className="hbdr-cluster-task-dock-title">Recent Tasks <em>{entries.length}</em></span>
+          <span className="hbdr-cluster-task-dock-summary">
+            {runningCount > 0 && <span className="is-running">Running {runningCount}</span>}
+            {failedCount > 0 && <span className="is-failed">Failed {failedCount}</span>}
+            {dockExpanded ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+          </span>
+        </button>
+        {dockExpanded && <div id="cluster-recent-task-list" className="hbdr-cluster-task-dock-body">
+          {entries.length === 0 ? (
+            <div className="px-4 py-4 text-left text-xs font-medium text-slate-400">No recent cluster lifecycle or component tasks yet.</div>
+          ) : (
+            <HyperTable
+              variant="page"
+              density="compact"
+              columns={activityColumns}
+              data={entries}
+              getRowId={row => row.log.task.id}
+              onRowClick={row => setExpandedId(expandedId === row.log.task.id ? null : row.log.task.id)}
+              getRowClassName={row => [
+                expandedId === row.log.task.id ? 'hbdr-dr-row-selected' : '',
+                highlightedTaskId === row.log.task.id ? 'hbdr-cluster-task-new' : '',
+              ].filter(Boolean).join(' ')}
+              renderExpandedRow={renderActivityExpandedRow}
+              initialPageSize={8}
+              pageSizeOptions={[8, 20, 50]}
+              emptyMessage="No recent tasks yet."
+            />
+          )}
         </div>
-        <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-600">Live</span>
+        }
       </div>
-      <HyperTable
-        variant="page"
-        density="compact"
-        columns={activityColumns}
-        data={visibleEntries}
-        getRowId={row => row.log.task.id}
-        onRowClick={row => setExpandedId(expandedId === row.log.task.id ? null : row.log.task.id)}
-        getRowClassName={row => expandedId === row.log.task.id ? 'hbdr-dr-row-selected' : ''}
-        renderExpandedRow={renderActivityExpandedRow}
-        initialPageSize={8}
-        pageSizeOptions={[8, 20, 50]}
-        emptyMessage="No recent tasks yet."
-      />
-    </div>
   );
 }

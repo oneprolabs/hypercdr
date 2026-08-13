@@ -70,6 +70,45 @@ func TestTenantListsAndMutationsAreIsolated(t *testing.T) {
 	}
 }
 
+func TestProtectionPlanListIsTenantScoped(t *testing.T) {
+	repo := store.NewMemoryStore()
+	tenantA, _ := repo.CreateTenant(store.TenantInput{Name: "Topology Tenant A", Status: "active"})
+	tenantB, _ := repo.CreateTenant(store.TenantInput{Name: "Topology Tenant B", Status: "active"})
+	planA, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{
+		TenantID: tenantA.ID, SourceClusterID: "a-source", TargetClusterID: "a-target", AppID: "a-app", Status: "ready",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	planB, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{
+		TenantID: tenantB.ID, SourceClusterID: "b-source", TargetClusterID: "b-target", AppID: "b-app", Status: "ready",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r := &Router{cfg: config.Config{}, logger: slog.New(slog.NewTextHandler(io.Discard, nil)), store: repo}
+	userB := store.User{ID: "user-b", TenantID: tenantB.ID, Role: "admin", Status: "active"}
+	req := tenantRequest(httptest.NewRequest(http.MethodGet, "/api/v1/protection-plans", nil), userB)
+	res := httptest.NewRecorder()
+	r.listProtectionPlans(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("list protection plans returned %d: %s", res.Code, res.Body.String())
+	}
+	var result struct {
+		Items []store.ProtectionPlan `json:"items"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 1 || result.Items[0].ID != planB.ID || result.Items[0].TenantID != tenantB.ID {
+		t.Fatalf("tenant B saw unexpected plans: %#v", result.Items)
+	}
+	if result.Items[0].ID == planA.ID {
+		t.Fatalf("tenant B saw tenant A plan %q", planA.ID)
+	}
+}
+
 func TestAgentRegistrationUsesTokenTenant(t *testing.T) {
 	repo := store.NewMemoryStore()
 	tenant, _ := repo.CreateTenant(store.TenantInput{Name: "Agent Tenant", Status: "active"})

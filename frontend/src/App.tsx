@@ -1386,11 +1386,10 @@ export default function App() {
         const clusterTasks = tasks
           .filter(task => ['register', 'unregister', 'agent-upgrade', 'velero-upgrade'].includes(task.type))
           .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-        const visibleClusterTasks = clusterTasks.filter(task => isActiveTaskStatus(task.status)).concat(clusterTasks.filter(task => !isActiveTaskStatus(task.status)).slice(0, 8));
         if (cancelled) return;
         setClusterTaskLogs(prev => {
           const next: Record<string, ClusterTaskLog[]> = {};
-          for (const task of visibleClusterTasks) {
+          for (const task of clusterTasks) {
             const key = String(task.clusterId || task.payload?.archivedClusterId || task.payload?.clusterId || 'platform');
             if (!next[key]) next[key] = [];
             const existing = prev[key]?.find(log => log.task.id === task.id);
@@ -2158,6 +2157,7 @@ export default function App() {
             {view === 'clusters' && (
               <React.Suspense fallback={<PageLoadFallback />}><LazyClusterPage
                 clusters={liveClusters ?? clusters}
+                protectionPlans={liveApiPlans}
                 canUpgrade={authSession?.user.role === 'admin'}
                 defaultClusterId={defaultClusterId}
                 clusterMenuId={clusterMenuId}
@@ -2173,7 +2173,9 @@ export default function App() {
                   setSelectedCluster(prev => prev ? patchCluster(prev) : prev);
                 }}
                 onUpgradeCluster={async (clusterId) => {
-                  await apiPost<ApiTask>(`/api/v1/clusters/${clusterId}/agent/upgrade`, {});
+                  const task = await apiPost<ApiTask>(`/api/v1/clusters/${clusterId}/agent/upgrade`, {});
+                  setClusterTaskLogs(prev => ({ ...prev, [clusterId]: [{ task, events: [], loading: true }, ...(prev[clusterId] || []).filter(log => log.task.id !== task.id)] }));
+                  setActiveClusterTaskIds(prev => new Set(prev).add(task.id));
                   const markUpgrading = (cluster: Cluster) => cluster.id === clusterId ? {
                     ...cluster,
                     agentUpgradeStatus: 'upgrading',
@@ -2181,13 +2183,17 @@ export default function App() {
                   setClusters(prev => prev.map(markUpgrading));
                   setLiveClusters(prev => prev ? prev.map(markUpgrading) : prev);
                   setSelectedCluster(prev => prev ? markUpgrading(prev) : prev);
+                  return task;
                 }}
                 onUpgradeVelero={async (clusterId) => {
-                  await apiPost<ApiTask>(`/api/v1/clusters/${clusterId}/velero/upgrade`, {});
+                  const task = await apiPost<ApiTask>(`/api/v1/clusters/${clusterId}/velero/upgrade`, {});
+                  setClusterTaskLogs(prev => ({ ...prev, [clusterId]: [{ task, events: [], loading: true }, ...(prev[clusterId] || []).filter(log => log.task.id !== task.id)] }));
+                  setActiveClusterTaskIds(prev => new Set(prev).add(task.id));
                   const markUpgrading = (cluster: Cluster) => cluster.id === clusterId ? { ...cluster, veleroUpgradeStatus: 'upgrading' } : cluster;
                   setClusters(prev => prev.map(markUpgrading));
                   setLiveClusters(prev => prev ? prev.map(markUpgrading) : prev);
                   setSelectedCluster(prev => prev ? markUpgrading(prev) : prev);
+                  return task;
                 }}
                 onRegisterCluster={(cluster) => {
                   setClusters(prev => [cluster, ...prev]);
