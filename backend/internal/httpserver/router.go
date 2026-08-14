@@ -68,9 +68,14 @@ type Router struct {
 	logMaintMu             sync.Mutex
 	logMaintRun            bool
 	logCleanupAt           time.Time
+	diagnosticLogRetention time.Duration
+	extensionRoutes        []ExtensionRoute
 	logRetryAfter          map[string]time.Time
 	schedulerOnce          sync.Once
 	productInfo            ProductInfo
+	editionAuthorizer      EditionAuthorizer
+	identityProvider       EditionIdentityProvider
+	auditSink              EditionAuditSink
 }
 
 type ProductInfo struct {
@@ -78,6 +83,94 @@ type ProductInfo struct {
 	Edition      string `json:"edition"`
 	Capabilities any    `json:"capabilities"`
 	License      any    `json:"license"`
+}
+
+type EditionPrincipal struct {
+	ID, TenantID, Email, Role string
+	SystemAdmin               bool
+}
+
+type EditionAuthorizationRequest struct {
+	Method    string
+	Path      string
+	Principal EditionPrincipal
+}
+
+type EditionAuthorizationDecision struct {
+	Allowed bool
+	Code    string
+	Message string
+}
+
+type EditionAuthorizer func(context.Context, EditionAuthorizationRequest) EditionAuthorizationDecision
+
+type RouterOption func(*Router)
+
+type ExtensionRoute struct {
+	Pattern string
+	Handler func(http.ResponseWriter, *http.Request, EditionPrincipal)
+}
+
+type EditionIdentity struct {
+	ID                 string `json:"id"`
+	TenantID           string `json:"tenantId"`
+	TenantName         string `json:"tenantName"`
+	Email              string `json:"email"`
+	DisplayName        string `json:"displayName,omitempty"`
+	Role               string `json:"role"`
+	Status             string `json:"status"`
+	AuthProvider       string `json:"authProvider"`
+	TimeZone           string `json:"timeZone,omitempty"`
+	SystemAdmin        bool   `json:"systemAdmin,omitempty"`
+	MustChangePassword bool   `json:"mustChangePassword"`
+}
+
+type EditionIdentitySession struct {
+	Token     string
+	ExpiresAt time.Time
+}
+
+type EditionIdentityProfileUpdate struct{ ID, Email, DisplayName, TimeZone string }
+
+type EditionIdentityProvider interface {
+	Authenticate(context.Context, string, string) (EditionIdentity, bool, error)
+	CreateSession(context.Context, string, time.Duration) (EditionIdentitySession, error)
+	AuthenticateSession(context.Context, string) (EditionIdentity, bool, error)
+	DeleteSession(context.Context, string) error
+	UpdateProfile(context.Context, EditionIdentityProfileUpdate) (EditionIdentity, bool, error)
+	SetPassword(context.Context, string, string, bool) (EditionIdentity, bool, error)
+	CreatePasswordResetToken(context.Context, string, time.Duration) (string, bool, error)
+	ResetPassword(context.Context, string, string) (bool, error)
+}
+
+type EditionAuditEvent struct {
+	TenantID, ActorID, Actor, Action, ResourceType, ResourceID, ResourceName, Result, Message string
+	HTTPStatus                                                                                int
+}
+type EditionAuditSink interface {
+	RecordAudit(context.Context, EditionAuditEvent) error
+}
+
+func WithDiagnosticLogRetention(retention time.Duration) RouterOption {
+	return func(router *Router) {
+		if retention > 0 {
+			router.diagnosticLogRetention = retention
+		}
+	}
+}
+
+func WithExtensionRoutes(routes []ExtensionRoute) RouterOption {
+	return func(router *Router) {
+		router.extensionRoutes = append([]ExtensionRoute(nil), routes...)
+	}
+}
+
+func WithIdentityProvider(provider EditionIdentityProvider) RouterOption {
+	return func(router *Router) { router.identityProvider = provider }
+}
+
+func WithAuditSink(sink EditionAuditSink) RouterOption {
+	return func(router *Router) { router.auditSink = sink }
 }
 
 type requestUserContextKey struct{}
@@ -120,30 +213,65 @@ type imageDigestCacheEntry struct {
 }
 
 func NewRouter(cfg config.Config, logger *slog.Logger, repo store.Store) http.Handler {
-	return NewRouterWithProductInfo(cfg, logger, repo, ProductInfo{Product: "HyperCDR", Edition: "community", Capabilities: map[string]any{}})
+	return NewRouterWithProductInfo(cfg, logger, repo, ProductInfo{Product: "HyperCDR", Edition: "community", Capabilities: map[string]any{}}, nil)
 }
 
-func NewRouterWithProductInfo(cfg config.Config, logger *slog.Logger, repo store.Store, productInfo ProductInfo) http.Handler {
+func NewRouterWithProductInfo(cfg config.Config, logger *slog.Logger, repo store.Store, productInfo ProductInfo, args ...any) http.Handler {
+	var editionAuthorizer EditionAuthorizer
 	router := &Router{
-		cfg:                   cfg,
-		logger:                logger,
-		mux:                   http.NewServeMux(),
-		store:                 repo,
-		hub:                   newSessionHub(),
-		captchas:              map[string]captchaChallenge{},
-		oauthStates:           map[string]time.Time{},
-		inventory:             map[string]inventoryRequestStatus{},
-		imageDigests:          map[string]imageDigestCacheEntry{},
-		logRequests:           map[string]chan protocol.LogReportPayload{},
-		backupContentRequests: map[string]chan protocol.BackupContentReportPayload{},
-		contentIndexing:       map[string]struct{}{},
-		contentIndexSlots:     make(chan struct{}, 2),
-		logRetryAfter:         map[string]time.Time{},
-		productInfo:           productInfo,
+		cfg:                    cfg,
+		logger:                 logger,
+		mux:                    http.NewServeMux(),
+		store:                  repo,
+		hub:                    newSessionHub(),
+		captchas:               map[string]captchaChallenge{},
+		oauthStates:            map[string]time.Time{},
+		inventory:              map[string]inventoryRequestStatus{},
+		imageDigests:           map[string]imageDigestCacheEntry{},
+		logRequests:            map[string]chan protocol.LogReportPayload{},
+		backupContentRequests:  map[string]chan protocol.BackupContentReportPayload{},
+		contentIndexing:        map[string]struct{}{},
+		contentIndexSlots:      make(chan struct{}, 2),
+		logRetryAfter:          map[string]time.Time{},
+		productInfo:            productInfo,
+		diagnosticLogRetention: 30 * 24 * time.Hour,
 	}
+	for _, arg := range args {
+		switch value := arg.(type) {
+		case EditionAuthorizer:
+			editionAuthorizer = value
+		case RouterOption:
+			value(router)
+		}
+	}
+	if router.identityProvider == nil {
+		router.identityProvider = storeIdentityProvider{store: repo}
+	}
+	if router.auditSink == nil {
+		router.auditSink = storeAuditSink{store: repo}
+	}
+	router.editionAuthorizer = editionAuthorizer
 	router.routes()
+	router.mountExtensionRoutes()
 	router.startScheduler()
 	return router.withPlatformAuth(router.withAccessLog(router.withAuditLog(router.mux)))
+}
+
+func (r *Router) mountExtensionRoutes() {
+	for _, route := range r.extensionRoutes {
+		route := route
+		if strings.TrimSpace(route.Pattern) == "" || route.Handler == nil {
+			panic("invalid edition extension route")
+		}
+		r.mux.HandleFunc(route.Pattern, func(w http.ResponseWriter, req *http.Request) {
+			user, ok := requestUser(req)
+			if !ok {
+				writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "authentication_required"})
+				return
+			}
+			route.Handler(w, req, EditionPrincipal{ID: user.ID, TenantID: user.TenantID, Email: user.Email, Role: user.Role, SystemAdmin: user.SystemAdmin})
+		})
+	}
 }
 
 func (r *Router) withPlatformAuth(next http.Handler) http.Handler {
@@ -165,7 +293,7 @@ func (r *Router) withPlatformAuth(next http.Handler) http.Handler {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "authentication_required", "message": "Sign in to continue."})
 			return
 		}
-		user, ok, err := r.store.AuthenticatePlatformSession(strings.TrimSpace(strings.TrimPrefix(header, "Bearer ")))
+		identity, ok, err := r.identityProvider.AuthenticateSession(req.Context(), strings.TrimSpace(strings.TrimPrefix(header, "Bearer ")))
 		if err != nil {
 			r.logger.Error("session authentication failed", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "session_check_failed"})
@@ -176,6 +304,7 @@ func (r *Router) withPlatformAuth(next http.Handler) http.Handler {
 			return
 		}
 		passwordChangeAllowed := path == "/api/v1/auth/me" || path == "/api/v1/auth/change-password" || path == "/api/v1/auth/logout"
+		user := storeUserFromIdentity(identity)
 		if user.MustChangePassword && !passwordChangeAllowed {
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": "password_change_required", "message": "Change your temporary password before continuing."})
 			return
@@ -187,6 +316,24 @@ func (r *Router) withPlatformAuth(next http.Handler) http.Handler {
 		if requiresSystemAdmin(req) && !user.SystemAdmin && user.Email != "release-pipeline" {
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": "system_administrator_required", "message": "System administrator permission is required."})
 			return
+		}
+		if r.editionAuthorizer != nil {
+			decision := r.editionAuthorizer(req.Context(), EditionAuthorizationRequest{
+				Method: req.Method, Path: req.URL.Path,
+				Principal: EditionPrincipal{ID: user.ID, TenantID: user.TenantID, Email: user.Email, Role: user.Role, SystemAdmin: user.SystemAdmin},
+			})
+			if !decision.Allowed {
+				code := strings.TrimSpace(decision.Code)
+				if code == "" {
+					code = "edition_policy_denied"
+				}
+				message := strings.TrimSpace(decision.Message)
+				if message == "" {
+					message = "This operation is not permitted by the edition policy."
+				}
+				writeJSON(w, http.StatusForbidden, map[string]any{"error": code, "message": message})
+				return
+			}
 		}
 		next.ServeHTTP(w, req.WithContext(context.WithValue(req.Context(), requestUserContextKey{}, user)))
 	})
@@ -352,27 +499,27 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("GET /api/v1/auth/config", r.authConfig)
 	r.mux.HandleFunc("POST /api/v1/auth/logout", r.logout)
 	r.mux.HandleFunc("GET /api/v1/auth/me", r.currentUser)
-	r.mux.HandleFunc("GET /api/v1/audit-logs", r.listAuditLogs)
-	r.mux.HandleFunc("GET /api/v1/diagnostic-logs", r.listDiagnosticLogs)
-	r.mux.HandleFunc("GET /api/v1/diagnostic-logs/export", r.exportDiagnosticLogs)
-	r.mux.HandleFunc("GET /api/v1/diagnostic-log-sources", r.diagnosticLogSources)
+	if r.productInfo.Edition == "community" {
+		r.mux.HandleFunc("GET /api/v1/audit-logs", r.listAuditLogs)
+	}
+	if r.productInfo.Edition == "community" {
+		r.mux.HandleFunc("GET /api/v1/diagnostic-logs", r.listDiagnosticLogs)
+		r.mux.HandleFunc("GET /api/v1/diagnostic-logs/export", r.exportDiagnosticLogs)
+		r.mux.HandleFunc("GET /api/v1/diagnostic-log-sources", r.diagnosticLogSources)
+	}
 	r.mux.HandleFunc("POST /api/v1/clusters/{id}/logs/collect", r.tenantGuard("cluster-log", r.collectClusterLogs))
 	r.mux.HandleFunc("POST /api/v1/clusters/{id}/logs/search", r.tenantGuard("cluster-log", r.searchClusterLogs))
 	r.mux.HandleFunc("PATCH /api/v1/auth/me", r.updateCurrentUser)
 	r.mux.HandleFunc("POST /api/v1/auth/change-password", r.changeOwnPassword)
-	r.mux.HandleFunc("GET /api/v1/users", r.listUsers)
-	r.mux.HandleFunc("POST /api/v1/users", r.createUser)
-	r.mux.HandleFunc("PATCH /api/v1/users/{id}", r.updateUser)
-	r.mux.HandleFunc("DELETE /api/v1/users/{id}", r.deleteUser)
-	r.mux.HandleFunc("POST /api/v1/users/{id}/password", r.resetUserPassword)
-	r.mux.HandleFunc("GET /api/v1/tenants", r.listTenants)
-	r.mux.HandleFunc("POST /api/v1/tenants", r.createTenant)
-	r.mux.HandleFunc("GET /api/v1/tenants/{id}", r.getTenant)
-	r.mux.HandleFunc("PATCH /api/v1/tenants/{id}", r.updateTenant)
-	r.mux.HandleFunc("DELETE /api/v1/tenants/{id}", r.deleteTenant)
 	r.mux.HandleFunc("GET /api/v1/email-settings", r.getEmailSettings)
 	r.mux.HandleFunc("PUT /api/v1/email-settings", r.updateEmailSettings)
 	r.mux.HandleFunc("POST /api/v1/email-settings/test", r.testEmailSettings)
+	r.mux.HandleFunc("GET /api/v1/email-settings/configurations", r.listEmailSettings)
+	r.mux.HandleFunc("POST /api/v1/email-settings/configurations", r.createEmailSettings)
+	r.mux.HandleFunc("PUT /api/v1/email-settings/configurations/{id}", r.updateEmailSettingsByID)
+	r.mux.HandleFunc("DELETE /api/v1/email-settings/configurations/{id}", r.deleteEmailSettings)
+	r.mux.HandleFunc("POST /api/v1/email-settings/configurations/{id}/default", r.setDefaultEmailSettings)
+	r.mux.HandleFunc("POST /api/v1/email-settings/configurations/{id}/test", r.testEmailSettingsByID)
 	r.mux.HandleFunc("GET /api/v1/clusters", r.listClusters)
 	r.mux.HandleFunc("PATCH /api/v1/clusters/{id}", r.tenantGuard("cluster", r.updateCluster))
 	r.mux.HandleFunc("DELETE /api/v1/clusters/{id}", r.tenantGuard("cluster", r.deleteCluster))
@@ -505,7 +652,11 @@ func (r *Router) withAuditLog(next http.Handler) http.Handler {
 				message = auditResponseString(response, "error")
 			}
 		}
-		_, err := r.store.CreateAuditLog(store.AuditLogInput{ActorID: user.ID, Actor: user.Email, Action: action, ResourceType: resourceType, ResourceID: validAuditUUID(resourceID), ResourceName: resourceName, Result: result, Message: message, Payload: map[string]any{"httpStatus": status}})
+		sink := r.auditSink
+		if sink == nil {
+			sink = storeAuditSink{store: r.store}
+		}
+		err := sink.RecordAudit(req.Context(), EditionAuditEvent{TenantID: user.TenantID, ActorID: user.ID, Actor: user.Email, Action: action, ResourceType: resourceType, ResourceID: validAuditUUID(resourceID), ResourceName: resourceName, Result: result, Message: message, HTTPStatus: status})
 		if err != nil {
 			r.logger.Error("write audit log failed", "error", err, "action", action, "actor", user.Email)
 		}
@@ -909,10 +1060,7 @@ func (r *Router) login(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	user, ok, err := r.store.AuthenticateUser(store.UserAuthInput{
-		Email:    body.Email,
-		Password: body.Password,
-	})
+	user, ok, err := r.identityProvider.Authenticate(req.Context(), body.Email, body.Password)
 	if err != nil {
 		r.logger.Error("failed to authenticate user", "email", body.Email, "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "login_failed"})
@@ -923,7 +1071,7 @@ func (r *Router) login(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	session, err := r.store.CreatePlatformSession(user.ID, time.Hour)
+	session, err := r.identityProvider.CreateSession(req.Context(), user.ID, time.Hour)
 	if err != nil {
 		r.logger.Error("failed to create platform session", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "session_create_failed"})
@@ -947,7 +1095,7 @@ func requestUser(req *http.Request) (store.User, bool) {
 }
 
 func (r *Router) logout(w http.ResponseWriter, req *http.Request) {
-	_ = r.store.DeletePlatformSession(bearerToken(req))
+	_ = r.identityProvider.DeleteSession(req.Context(), bearerToken(req))
 	writeJSON(w, http.StatusOK, map[string]any{"loggedOut": true})
 }
 func (r *Router) currentUser(w http.ResponseWriter, req *http.Request) {
@@ -985,7 +1133,7 @@ func (r *Router) updateCurrentUser(w http.ResponseWriter, req *http.Request) {
 			}
 		}
 	}
-	updated, _, err := r.store.UpdateUser(store.UserUpdateInput{ID: u.ID, TenantID: u.TenantID, Email: body.Email, DisplayName: body.DisplayName, Role: u.Role, Status: u.Status, TimeZone: timeZone})
+	updated, _, err := r.identityProvider.UpdateProfile(req.Context(), EditionIdentityProfileUpdate{ID: u.ID, Email: body.Email, DisplayName: body.DisplayName, TimeZone: timeZone})
 	if err != nil {
 		writeJSON(w, 409, map[string]any{"error": "user_update_failed", "message": err.Error()})
 		return
@@ -1006,11 +1154,11 @@ func (r *Router) changeOwnPassword(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, 400, map[string]any{"error": "password_unchanged", "message": "New password must be different from the temporary password."})
 		return
 	}
-	if _, valid, _ := r.store.AuthenticateUser(store.UserAuthInput{Email: u.Email, Password: body.CurrentPassword}); !valid {
+	if _, valid, _ := r.identityProvider.Authenticate(req.Context(), u.Email, body.CurrentPassword); !valid {
 		writeJSON(w, 400, map[string]any{"error": "current_password_invalid", "message": "Current password is incorrect."})
 		return
 	}
-	updated, found, err := r.store.SetUserPassword(u.ID, body.NewPassword, false)
+	updated, found, err := r.identityProvider.SetPassword(req.Context(), u.ID, body.NewPassword, false)
 	if err != nil || !found {
 		writeJSON(w, 500, map[string]any{"error": "password_update_failed"})
 		return
@@ -1018,92 +1166,8 @@ func (r *Router) changeOwnPassword(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, 200, updated)
 }
 
-func (r *Router) listUsers(w http.ResponseWriter, req *http.Request) {
-	items, err := r.store.ListUsers()
-	if err != nil {
-		writeJSON(w, 500, map[string]any{"error": "list_users_failed"})
-		return
-	}
-	if actor, ok := requestUser(req); ok && !actor.SystemAdmin {
-		filtered := make([]store.User, 0, len(items))
-		for _, item := range items {
-			if item.TenantID == actor.TenantID && !item.SystemAdmin {
-				filtered = append(filtered, item)
-			}
-		}
-		items = filtered
-	}
-	writeJSON(w, 200, map[string]any{"items": nonNilSlice(items)})
-}
-
-func (r *Router) listTenants(w http.ResponseWriter, req *http.Request) {
-	items, err := r.store.ListTenants()
-	if err != nil {
-		writeJSON(w, 500, map[string]any{"error": "list_tenants_failed"})
-		return
-	}
-	writeJSON(w, 200, map[string]any{"items": nonNilSlice(items)})
-}
-func (r *Router) getTenant(w http.ResponseWriter, req *http.Request) {
-	item, found, err := r.store.GetTenant(req.PathValue("id"))
-	if err != nil {
-		writeJSON(w, 500, map[string]any{"error": "get_tenant_failed"})
-		return
-	}
-	if !found {
-		writeJSON(w, 404, map[string]any{"error": "tenant_not_found"})
-		return
-	}
-	writeJSON(w, 200, item)
-}
-func (r *Router) createTenant(w http.ResponseWriter, req *http.Request) {
-	var body store.TenantInput
-	if decodeJSON(req, &body) != nil || strings.TrimSpace(body.Name) == "" {
-		writeJSON(w, 400, map[string]any{"error": "tenant_name_required"})
-		return
-	}
-	item, err := r.store.CreateTenant(body)
-	if err != nil {
-		writeJSON(w, 409, map[string]any{"error": "create_tenant_failed", "message": err.Error()})
-		return
-	}
-	writeJSON(w, 201, item)
-}
-func (r *Router) updateTenant(w http.ResponseWriter, req *http.Request) {
-	var body store.TenantInput
-	if decodeJSON(req, &body) != nil || strings.TrimSpace(body.Name) == "" {
-		writeJSON(w, 400, map[string]any{"error": "tenant_name_required"})
-		return
-	}
-	item, found, err := r.store.UpdateTenant(req.PathValue("id"), body)
-	if err != nil {
-		writeJSON(w, 409, map[string]any{"error": "update_tenant_failed", "message": err.Error()})
-		return
-	}
-	if !found {
-		writeJSON(w, 404, map[string]any{"error": "tenant_not_found"})
-		return
-	}
-	writeJSON(w, 200, item)
-}
-func (r *Router) deleteTenant(w http.ResponseWriter, req *http.Request) {
-	deleted, inUse, err := r.store.DeleteTenant(req.PathValue("id"))
-	if err != nil {
-		writeJSON(w, 500, map[string]any{"error": "delete_tenant_failed"})
-		return
-	}
-	if inUse {
-		writeJSON(w, 409, map[string]any{"error": "tenant_in_use", "message": "Remove all users and resources from this tenant before deleting it."})
-		return
-	}
-	if !deleted {
-		writeJSON(w, 404, map[string]any{"error": "tenant_not_found"})
-		return
-	}
-	writeJSON(w, 200, map[string]any{"deleted": true})
-}
-
 type emailSettingsRequest struct {
+	Name        string `json:"name"`
 	Enabled     bool   `json:"enabled"`
 	Host        string `json:"host"`
 	Port        int    `json:"port"`
@@ -1126,6 +1190,9 @@ func (r *Router) getEmailSettings(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, 200, item)
 }
 func validateEmailSettings(body emailSettingsRequest) (string, string) {
+	if strings.TrimSpace(body.Name) == "" {
+		return "invalid_name", "Configuration name is required."
+	}
 	if body.Port < 1 || body.Port > 65535 {
 		return "invalid_port", "Port must be between 1 and 65535."
 	}
@@ -1143,6 +1210,9 @@ func (r *Router) updateEmailSettings(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, 400, map[string]any{"error": "invalid_json"})
 		return
 	}
+	if strings.TrimSpace(body.Name) == "" {
+		body.Name = "Default SMTP"
+	}
 	if code, message := validateEmailSettings(body); code != "" {
 		writeJSON(w, 400, map[string]any{"error": code, "message": message})
 		return
@@ -1158,12 +1228,155 @@ func (r *Router) updateEmailSettings(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 	actor, _ := requestUser(req)
-	item, err := r.store.UpsertEmailSettings(store.EmailSettingsInput{Enabled: true, Host: strings.TrimSpace(body.Host), Port: body.Port, Security: body.Security, Username: strings.TrimSpace(body.Username), PasswordCiphertext: ciphertext, SenderName: strings.TrimSpace(body.SenderName), SenderEmail: strings.TrimSpace(body.SenderEmail), UpdatedBy: actor.ID})
+	item, err := r.store.UpsertEmailSettings(emailSettingsStoreInput(body, ciphertext, actor.ID))
 	if err != nil {
 		writeJSON(w, 500, map[string]any{"error": "email_settings_update_failed"})
 		return
 	}
 	writeJSON(w, 200, item)
+}
+
+func emailSettingsStoreInput(body emailSettingsRequest, ciphertext, updatedBy string) store.EmailSettingsInput {
+	return store.EmailSettingsInput{Name: strings.TrimSpace(body.Name), Enabled: true, Host: strings.TrimSpace(body.Host), Port: body.Port, Security: body.Security, Username: strings.TrimSpace(body.Username), PasswordCiphertext: ciphertext, SenderName: strings.TrimSpace(body.SenderName), SenderEmail: strings.TrimSpace(body.SenderEmail), UpdatedBy: updatedBy}
+}
+
+func (r *Router) listEmailSettings(w http.ResponseWriter, _ *http.Request) {
+	items, err := r.store.ListEmailSettings()
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "email_settings_failed"})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": items})
+}
+
+func (r *Router) createEmailSettings(w http.ResponseWriter, req *http.Request) {
+	var body emailSettingsRequest
+	if decodeJSON(req, &body) != nil {
+		writeJSON(w, 400, map[string]any{"error": "invalid_json"})
+		return
+	}
+	if code, message := validateEmailSettings(body); code != "" {
+		writeJSON(w, 400, map[string]any{"error": code, "message": message})
+		return
+	}
+	if body.Password == "" {
+		writeJSON(w, 400, map[string]any{"error": "password_required", "message": "SMTP password is required for a new configuration."})
+		return
+	}
+	ciphertext, err := r.encryptSetting(body.Password)
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "email_password_encrypt_failed"})
+		return
+	}
+	actor, _ := requestUser(req)
+	item, err := r.store.CreateEmailSettings(emailSettingsStoreInput(body, ciphertext, actor.ID))
+	if errors.Is(err, store.ErrEmailSettingsNameExists) {
+		writeJSON(w, 409, map[string]any{"error": "email_settings_name_exists", "message": "An SMTP configuration with this name already exists."})
+		return
+	}
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "email_settings_create_failed"})
+		return
+	}
+	writeJSON(w, 201, item)
+}
+
+func (r *Router) updateEmailSettingsByID(w http.ResponseWriter, req *http.Request) {
+	var body emailSettingsRequest
+	if decodeJSON(req, &body) != nil {
+		writeJSON(w, 400, map[string]any{"error": "invalid_json"})
+		return
+	}
+	if code, message := validateEmailSettings(body); code != "" {
+		writeJSON(w, 400, map[string]any{"error": code, "message": message})
+		return
+	}
+	current, found, err := r.store.GetEmailSettingsByID(req.PathValue("id"))
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "email_settings_failed"})
+		return
+	}
+	if !found {
+		writeJSON(w, 404, map[string]any{"error": "email_settings_not_found"})
+		return
+	}
+	ciphertext := current.PasswordCiphertext
+	if body.Password != "" {
+		ciphertext, err = r.encryptSetting(body.Password)
+		if err != nil {
+			writeJSON(w, 500, map[string]any{"error": "email_password_encrypt_failed"})
+			return
+		}
+	}
+	actor, _ := requestUser(req)
+	item, _, err := r.store.UpdateEmailSettings(current.ID, emailSettingsStoreInput(body, ciphertext, actor.ID))
+	if errors.Is(err, store.ErrEmailSettingsNameExists) {
+		writeJSON(w, 409, map[string]any{"error": "email_settings_name_exists", "message": "An SMTP configuration with this name already exists."})
+		return
+	}
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "email_settings_update_failed"})
+		return
+	}
+	writeJSON(w, 200, item)
+}
+
+func (r *Router) deleteEmailSettings(w http.ResponseWriter, req *http.Request) {
+	deleted, isDefault, err := r.store.DeleteEmailSettings(req.PathValue("id"))
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "email_settings_delete_failed"})
+		return
+	}
+	if isDefault {
+		writeJSON(w, 409, map[string]any{"error": "default_email_settings", "message": "Set another SMTP configuration as default before deleting this one."})
+		return
+	}
+	if !deleted {
+		writeJSON(w, 404, map[string]any{"error": "email_settings_not_found"})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"deleted": true})
+}
+
+func (r *Router) setDefaultEmailSettings(w http.ResponseWriter, req *http.Request) {
+	item, found, err := r.store.SetDefaultEmailSettings(req.PathValue("id"))
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "email_settings_default_failed"})
+		return
+	}
+	if !found {
+		writeJSON(w, 404, map[string]any{"error": "email_settings_not_found"})
+		return
+	}
+	writeJSON(w, 200, item)
+}
+
+func (r *Router) sendEmailSettingsTest(w http.ResponseWriter, settings store.EmailSettings, recipient string) {
+	now := time.Now().UTC()
+	if err := r.sendConfiguredEmail(settings, recipient, "HyperCDR email test", "Your HyperCDR SMTP settings are working correctly."); err != nil {
+		_ = r.store.UpdateEmailSettingsTestResult(settings.ID, "failed", err.Error(), now)
+		r.logger.Warn("SMTP test failed", "configuration_id", settings.ID, "error", err)
+		writeJSON(w, 502, map[string]any{"error": "smtp_test_failed", "message": err.Error()})
+		return
+	}
+	_ = r.store.UpdateEmailSettingsTestResult(settings.ID, "succeeded", "", now)
+	writeJSON(w, 200, map[string]any{"sent": true, "testedAt": now})
+}
+
+func (r *Router) testEmailSettingsByID(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Recipient string `json:"recipient"`
+	}
+	if decodeJSON(req, &body) != nil || !validUserEmail(body.Recipient) {
+		writeJSON(w, 400, map[string]any{"error": "invalid_recipient"})
+		return
+	}
+	settings, found, err := r.store.GetEmailSettingsByID(req.PathValue("id"))
+	if err != nil || !found {
+		writeJSON(w, 404, map[string]any{"error": "email_settings_not_found"})
+		return
+	}
+	r.sendEmailSettingsTest(w, settings, strings.TrimSpace(body.Recipient))
 }
 func (r *Router) testEmailSettings(w http.ResponseWriter, req *http.Request) {
 	var body struct {
@@ -1178,12 +1391,7 @@ func (r *Router) testEmailSettings(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, 409, map[string]any{"error": "email_not_configured"})
 		return
 	}
-	if err = r.sendConfiguredEmail(settings, strings.TrimSpace(body.Recipient), "HyperCDR email test", "Your HyperCDR SMTP settings are working correctly."); err != nil {
-		r.logger.Warn("SMTP test failed", "error", err)
-		writeJSON(w, 502, map[string]any{"error": "smtp_test_failed", "message": err.Error()})
-		return
-	}
-	writeJSON(w, 200, map[string]any{"sent": true})
+	r.sendEmailSettingsTest(w, settings, strings.TrimSpace(body.Recipient))
 }
 
 func (r *Router) encryptSetting(value string) (string, error) {
@@ -1220,161 +1428,6 @@ func (r *Router) decryptSetting(value string) (string, error) {
 	plain, err := gcm.Open(nil, raw[:gcm.NonceSize()], raw[gcm.NonceSize():], nil)
 	return string(plain), err
 }
-func (r *Router) createUser(w http.ResponseWriter, req *http.Request) {
-	var body struct {
-		TenantID    string `json:"tenantId"`
-		Email       string `json:"email"`
-		DisplayName string `json:"displayName"`
-		Password    string `json:"password"`
-		Role        string `json:"role"`
-	}
-	if decodeJSON(req, &body) != nil {
-		writeJSON(w, 400, map[string]any{"error": "invalid_json"})
-		return
-	}
-	if !validUserEmail(body.Email) {
-		writeJSON(w, 400, map[string]any{"error": "email_invalid", "message": "Enter a valid email address"})
-		return
-	}
-	if !validUserPassword(body.Password) {
-		writeJSON(w, 400, map[string]any{"error": "password_invalid", "message": "Password must be 8 to 128 characters"})
-		return
-	}
-	actor, _ := requestUser(req)
-	tenantID := strings.TrimSpace(body.TenantID)
-	if !actor.SystemAdmin {
-		tenantID = actor.TenantID
-	}
-	if tenantID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "tenant_required", "message": "Select a tenant for this user."})
-		return
-	}
-	tenant, found, err := r.store.GetTenant(tenantID)
-	if err != nil || !found || tenant.Status != "active" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "tenant_invalid", "message": "Select an active tenant for this user."})
-		return
-	}
-	u, err := r.store.CreateUser(tenantID, body.Email, body.Password)
-	if err != nil {
-		writeJSON(w, 409, map[string]any{"error": "create_user_failed", "message": err.Error()})
-		return
-	}
-	role := body.Role
-	if role != "admin" {
-		role = "operator"
-	}
-	u, _, err = r.store.UpdateUser(store.UserUpdateInput{ID: u.ID, TenantID: tenantID, Email: u.Email, DisplayName: body.DisplayName, Role: role, Status: "active", TimeZone: u.TimeZone})
-	if err != nil {
-		writeJSON(w, 500, map[string]any{"error": "create_user_failed"})
-		return
-	}
-	writeJSON(w, 201, u)
-}
-func (r *Router) updateUser(w http.ResponseWriter, req *http.Request) {
-	current, found, err := r.store.GetUser(req.PathValue("id"))
-	if err != nil || !found {
-		writeJSON(w, 404, map[string]any{"error": "user_not_found"})
-		return
-	}
-	actor, hasActor := requestUser(req)
-	if hasActor && !actor.SystemAdmin && (current.SystemAdmin || current.TenantID != actor.TenantID) {
-		writeJSON(w, 404, map[string]any{"error": "user_not_found"})
-		return
-	}
-	var body struct {
-		TenantID    string `json:"tenantId"`
-		Email       string `json:"email"`
-		DisplayName string `json:"displayName"`
-		Role        string `json:"role"`
-		Status      string `json:"status"`
-	}
-	if decodeJSON(req, &body) != nil {
-		writeJSON(w, 400, map[string]any{"error": "invalid_json"})
-		return
-	}
-	if current.Email == store.DefaultAdminEmail {
-		body.Role = "admin"
-		body.Status = "active"
-		body.Email = store.DefaultAdminEmail
-	} else if !validUserEmail(body.Email) {
-		writeJSON(w, 400, map[string]any{"error": "email_invalid", "message": "Enter a valid email address"})
-		return
-	}
-	if body.Role != "admin" {
-		body.Role = "operator"
-	}
-	if body.Status != "disabled" {
-		body.Status = "active"
-	}
-	tenantID := current.TenantID
-	if actor.SystemAdmin && !current.SystemAdmin {
-		tenantID = strings.TrimSpace(body.TenantID)
-		if tenantID == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "tenant_required", "message": "Select a tenant for this user."})
-			return
-		}
-		tenant, tenantFound, tenantErr := r.store.GetTenant(tenantID)
-		if tenantErr != nil || !tenantFound || tenant.Status != "active" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "tenant_invalid", "message": "Select an active tenant for this user."})
-			return
-		}
-	}
-	updated, _, err := r.store.UpdateUser(store.UserUpdateInput{ID: current.ID, TenantID: tenantID, Email: body.Email, DisplayName: body.DisplayName, Role: body.Role, Status: body.Status, TimeZone: current.TimeZone})
-	if err != nil {
-		writeJSON(w, 409, map[string]any{"error": "update_user_failed", "message": err.Error()})
-		return
-	}
-	writeJSON(w, 200, updated)
-}
-func (r *Router) deleteUser(w http.ResponseWriter, req *http.Request) {
-	u, found, _ := r.store.GetUser(req.PathValue("id"))
-	if !found {
-		writeJSON(w, 404, map[string]any{"error": "user_not_found"})
-		return
-	}
-	actor, hasActor := requestUser(req)
-	if hasActor && !actor.SystemAdmin && (u.SystemAdmin || u.TenantID != actor.TenantID) {
-		writeJSON(w, 404, map[string]any{"error": "user_not_found"})
-		return
-	}
-	if u.Email == store.DefaultAdminEmail {
-		writeJSON(w, 409, map[string]any{"error": "admin_user_protected", "message": "The admin user cannot be deleted."})
-		return
-	}
-	deleted, err := r.store.DeleteUser(u.ID)
-	if err != nil || !deleted {
-		if err != nil {
-			r.logger.Error("failed to delete user", "user_id", u.ID, "error", err)
-		}
-		writeJSON(w, 500, map[string]any{"error": "delete_user_failed", "message": "User could not be deleted. Please try again."})
-		return
-	}
-	writeJSON(w, 200, map[string]any{"deleted": true})
-}
-func (r *Router) resetUserPassword(w http.ResponseWriter, req *http.Request) {
-	var body struct{ Password string }
-	if decodeJSON(req, &body) != nil || !validUserPassword(body.Password) {
-		writeJSON(w, 400, map[string]any{"error": "password_invalid"})
-		return
-	}
-	target, found, err := r.store.GetUser(req.PathValue("id"))
-	if err != nil || !found {
-		writeJSON(w, 404, map[string]any{"error": "user_not_found"})
-		return
-	}
-	actor, hasActor := requestUser(req)
-	if hasActor && !actor.SystemAdmin && (target.SystemAdmin || target.TenantID != actor.TenantID) {
-		writeJSON(w, 404, map[string]any{"error": "user_not_found"})
-		return
-	}
-	u, found, err := r.store.SetUserPassword(target.ID, body.Password, true)
-	if err != nil || !found {
-		writeJSON(w, 404, map[string]any{"error": "user_not_found"})
-		return
-	}
-	writeJSON(w, 200, u)
-}
-
 func (r *Router) consumeCaptcha(id, code string) bool {
 	r.captchaMu.Lock()
 	challenge, ok := r.captchas[id]
@@ -1437,38 +1490,6 @@ func serverLocation() *time.Location {
 	return location
 }
 
-func (r *Router) registerUser(w http.ResponseWriter, req *http.Request) {
-	var body struct{ Email, Password, CaptchaID, CaptchaCode string }
-	if decodeJSON(req, &body) != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
-		return
-	}
-	email := strings.ToLower(strings.TrimSpace(body.Email))
-	if !strings.Contains(email, "@") || len(email) > 254 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "email_invalid", "message": "Enter a valid email address"})
-		return
-	}
-	if !validUserPassword(body.Password) {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "password_invalid", "message": "Password must be 8 to 128 characters"})
-		return
-	}
-	if !r.consumeCaptcha(body.CaptchaID, body.CaptchaCode) {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "captcha_invalid", "message": "Verification code is incorrect"})
-		return
-	}
-	u, err := r.store.CreateUser(store.DefaultTenantID, email, body.Password)
-	if errors.Is(err, store.ErrUserExists) {
-		writeJSON(w, http.StatusConflict, map[string]any{"error": "user_exists", "message": "An account with this email already exists"})
-		return
-	}
-	if err != nil {
-		r.logger.Error("failed to register user", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "registration_failed"})
-		return
-	}
-	writeJSON(w, http.StatusCreated, map[string]any{"user": u, "message": "Account created. You can now sign in."})
-}
-
 func (r *Router) forgotPassword(w http.ResponseWriter, req *http.Request) {
 	var body struct {
 		Email string `json:"email"`
@@ -1490,7 +1511,7 @@ func (r *Router) forgotPassword(w http.ResponseWriter, req *http.Request) {
 		})
 		return
 	}
-	token, found, err := r.store.CreatePasswordResetToken(body.Email, 15*time.Minute)
+	token, found, err := r.identityProvider.CreatePasswordResetToken(req.Context(), body.Email, 15*time.Minute)
 	if err != nil {
 		r.logger.Error("failed to create reset token", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "reset_request_failed"})
@@ -1594,8 +1615,8 @@ func (r *Router) resetPassword(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "password_invalid", "message": "Password must be 8 to 128 characters"})
 		return
 	}
-	_, err := r.store.ResetPassword(strings.TrimSpace(body.Token), body.Password)
-	if errors.Is(err, store.ErrResetInvalid) {
+	found, err := r.identityProvider.ResetPassword(req.Context(), strings.TrimSpace(body.Token), body.Password)
+	if err == nil && !found {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "reset_invalid", "message": "Reset link is invalid or expired"})
 		return
 	}
@@ -11258,6 +11279,16 @@ fi
 if ! command -v kubectl >/dev/null 2>&1; then
   fail "kubectl is required but was not found in PATH"
 fi
+RBAC_SCOPE_SUFFIX=""
+if [[ "$NAMESPACE" != "hypercdr-agent" ]]; then
+  if command -v sha256sum >/dev/null 2>&1; then
+    RBAC_SCOPE_SUFFIX="-$(printf '%s' "$NAMESPACE" | sha256sum | cut -c1-8)"
+  else
+    RBAC_SCOPE_SUFFIX="-$(printf '%s' "$NAMESPACE" | cksum | awk '{print $1}' | cut -c1-8)"
+  fi
+fi
+AGENT_RBAC_NAME="hypercdr-agent${RBAC_SCOPE_SUFFIX}"
+VELERO_RBAC_NAME="hypercdr-velero${RBAC_SCOPE_SUFFIX}"
 print_install_summary
 
 log_section "Preflight checks"
@@ -11902,11 +11933,13 @@ rollback_failed_registration() {
   log_warn "Rolling back changes because comm-agent registration did not complete"
   if [[ "$NAMESPACE_EXISTS" == "false" && "$AGENT_DEPLOYMENT_EXISTS" == "false" ]]; then
     kubectl delete namespace "$NAMESPACE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
-    kubectl delete clusterrolebinding hypercdr-agent hypercdr-velero --ignore-not-found >/dev/null 2>&1 || true
-    kubectl delete clusterrole hypercdr-agent hypercdr-velero --ignore-not-found >/dev/null 2>&1 || true
-    for crd in backuprepositories.velero.io backups.velero.io backupstoragelocations.velero.io datadownloads.velero.io datauploads.velero.io deletebackuprequests.velero.io downloadrequests.velero.io podvolumebackups.velero.io podvolumerestores.velero.io restores.velero.io schedules.velero.io serverstatusrequests.velero.io volumesnapshotlocations.velero.io; do
-      kubectl delete crd "$crd" --ignore-not-found --wait=false >/dev/null 2>&1 || true
-    done
+    kubectl delete clusterrolebinding "$AGENT_RBAC_NAME" "$VELERO_RBAC_NAME" --ignore-not-found >/dev/null 2>&1 || true
+    kubectl delete clusterrole "$AGENT_RBAC_NAME" "$VELERO_RBAC_NAME" --ignore-not-found >/dev/null 2>&1 || true
+    if [[ "$NAMESPACE" == "hypercdr-agent" ]]; then
+      for crd in backuprepositories.velero.io backups.velero.io backupstoragelocations.velero.io datadownloads.velero.io datauploads.velero.io deletebackuprequests.velero.io downloadrequests.velero.io podvolumebackups.velero.io podvolumerestores.velero.io restores.velero.io schedules.velero.io serverstatusrequests.velero.io volumesnapshotlocations.velero.io; do
+        kubectl delete crd "$crd" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+      done
+    fi
     log_ok "Failed first-time installation was rolled back"
   else
     kubectl -n "$NAMESPACE" delete secret hypercdr-agent-credential --ignore-not-found >/dev/null 2>&1 || true
@@ -11981,7 +12014,7 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: hypercdr-velero
+  name: ${VELERO_RBAC_NAME}
 rules:
   - apiGroups: ["*"]
     resources: ["*"]
@@ -11990,11 +12023,11 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: hypercdr-velero
+  name: ${VELERO_RBAC_NAME}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: hypercdr-velero
+  name: ${VELERO_RBAC_NAME}
 subjects:
   - kind: ServiceAccount
     name: velero
@@ -12210,7 +12243,7 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: hypercdr-agent
+  name: ${AGENT_RBAC_NAME}
 rules:
   - apiGroups: ["*"]
     resources: ["*"]
@@ -12285,11 +12318,11 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: hypercdr-agent
+  name: ${AGENT_RBAC_NAME}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: hypercdr-agent
+  name: ${AGENT_RBAC_NAME}
 subjects:
   - kind: ServiceAccount
     name: hypercdr-agent

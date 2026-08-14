@@ -6,7 +6,6 @@ import (
 )
 
 const (
-	diagnosticLogRetention       = 180 * 24 * time.Hour
 	diagnosticLogCleanupInterval = 24 * time.Hour
 	clusterLogArchiveInterval    = 24 * time.Hour
 	clusterLogRetryInterval      = 15 * time.Minute
@@ -33,7 +32,9 @@ func (r *Router) scheduleLogMaintenance(now time.Time) {
 			r.logMaintRun = false
 			r.logMaintMu.Unlock()
 		}()
-		r.runDiagnosticLogCleanup(now)
+		if r.productInfo.Edition == "community" {
+			r.runDiagnosticLogCleanup(now)
+		}
 		r.runClusterLogArchive(now)
 	}()
 }
@@ -45,7 +46,11 @@ func (r *Router) runDiagnosticLogCleanup(now time.Time) {
 	if !lastRun.IsZero() && now.Sub(lastRun) < diagnosticLogCleanupInterval {
 		return
 	}
-	cutoff := now.Add(-diagnosticLogRetention)
+	retention := r.diagnosticLogRetention
+	if retention <= 0 {
+		retention = 30 * 24 * time.Hour
+	}
+	cutoff := now.Add(-retention)
 	var total int64
 	for batches := 0; batches < 100; batches++ {
 		removed, err := r.store.PurgeDiagnosticLogs(cutoff)
@@ -61,7 +66,7 @@ func (r *Router) runDiagnosticLogCleanup(now time.Time) {
 	r.logMaintMu.Lock()
 	r.logCleanupAt = now
 	r.logMaintMu.Unlock()
-	r.logger.Info("diagnostic log retention cleanup completed", "retention_days", 180, "removed", total)
+	r.logger.Info("diagnostic log retention cleanup completed", "retention_days", int(retention.Hours()/24), "removed", total)
 }
 
 func (r *Router) runClusterLogArchive(now time.Time) {

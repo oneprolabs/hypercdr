@@ -145,36 +145,6 @@ func TestPasswordResetFlow(t *testing.T) {
 	}
 }
 
-func TestSystemAdminCanMoveUserToAnotherTenant(t *testing.T) {
-	repo := store.NewMemoryStore()
-	tenant, err := repo.CreateTenant(store.TenantInput{Name: "Customer B", Status: "active"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	user, err := repo.CreateUser(store.DefaultTenantID, "tenant-user@example.com", "initial-password")
-	if err != nil {
-		t.Fatal(err)
-	}
-	router := &Router{store: repo, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	body := strings.NewReader(`{"tenantId":"` + tenant.ID + `","email":"tenant-user@example.com","displayName":"Tenant User","role":"operator","status":"active"}`)
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/users/"+user.ID, body)
-	req.SetPathValue("id", user.ID)
-	req = req.WithContext(context.WithValue(req.Context(), requestUserContextKey{}, store.User{ID: "system-admin", TenantID: store.DefaultTenantID, Email: store.DefaultAdminEmail, Role: "admin", Status: "active", SystemAdmin: true}))
-	recorder := httptest.NewRecorder()
-
-	router.updateUser(recorder, req)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("update user status = %d, body = %s", recorder.Code, recorder.Body.String())
-	}
-	updated, found, err := repo.GetUser(user.ID)
-	if err != nil || !found {
-		t.Fatalf("updated user lookup: found=%v err=%v", found, err)
-	}
-	if updated.TenantID != tenant.ID {
-		t.Fatalf("updated tenant = %q, want %q", updated.TenantID, tenant.ID)
-	}
-}
-
 func TestClusterRoleAndDefault(t *testing.T) {
 	repo := store.NewMemoryStore()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))

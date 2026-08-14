@@ -16,11 +16,12 @@ const DefaultAdminPassword = "admin123"
 const clusterConnectionStaleAfter = 10 * time.Minute
 
 var (
-	ErrTokenInvalid = errors.New("install token is invalid")
-	ErrTokenExpired = errors.New("install token is expired")
-	ErrTokenUsed    = errors.New("install token is already used")
-	ErrUserExists   = errors.New("user already exists")
-	ErrResetInvalid = errors.New("password reset token is invalid or expired")
+	ErrTokenInvalid            = errors.New("install token is invalid")
+	ErrTokenExpired            = errors.New("install token is expired")
+	ErrTokenUsed               = errors.New("install token is already used")
+	ErrUserExists              = errors.New("user already exists")
+	ErrResetInvalid            = errors.New("password reset token is invalid or expired")
+	ErrEmailSettingsNameExists = errors.New("SMTP configuration name already exists")
 )
 
 type ApplicationAlreadyProtectedError struct {
@@ -40,6 +41,13 @@ type Store interface {
 	DeleteTenant(id string) (bool, bool, error)
 	GetEmailSettings() (EmailSettings, bool, error)
 	UpsertEmailSettings(input EmailSettingsInput) (EmailSettings, error)
+	ListEmailSettings() ([]EmailSettings, error)
+	GetEmailSettingsByID(id string) (EmailSettings, bool, error)
+	CreateEmailSettings(input EmailSettingsInput) (EmailSettings, error)
+	UpdateEmailSettings(id string, input EmailSettingsInput) (EmailSettings, bool, error)
+	DeleteEmailSettings(id string) (bool, bool, error)
+	SetDefaultEmailSettings(id string) (EmailSettings, bool, error)
+	UpdateEmailSettingsTestResult(id, status, message string, testedAt time.Time) error
 	GetPlatformSettings() (PlatformSettings, bool, error)
 	UpsertPlatformSettings(input PlatformSettingsInput) (PlatformSettings, error)
 	AuthenticateUser(input UserAuthInput) (User, bool, error)
@@ -159,18 +167,26 @@ type TenantInput struct {
 }
 
 type EmailSettings struct {
-	Enabled            bool      `json:"enabled"`
-	Host               string    `json:"host"`
-	Port               int       `json:"port"`
-	Security           string    `json:"security"`
-	Username           string    `json:"username"`
-	PasswordCiphertext string    `json:"-"`
-	PasswordConfigured bool      `json:"passwordConfigured"`
-	SenderName         string    `json:"senderName"`
-	SenderEmail        string    `json:"senderEmail"`
-	UpdatedAt          time.Time `json:"updatedAt,omitempty"`
+	ID                 string     `json:"id"`
+	Name               string     `json:"name"`
+	IsDefault          bool       `json:"isDefault"`
+	Enabled            bool       `json:"enabled"`
+	Host               string     `json:"host"`
+	Port               int        `json:"port"`
+	Security           string     `json:"security"`
+	Username           string     `json:"username"`
+	PasswordCiphertext string     `json:"-"`
+	PasswordConfigured bool       `json:"passwordConfigured"`
+	SenderName         string     `json:"senderName"`
+	SenderEmail        string     `json:"senderEmail"`
+	LastTestStatus     string     `json:"lastTestStatus"`
+	LastTestedAt       *time.Time `json:"lastTestedAt,omitempty"`
+	LastTestError      string     `json:"lastTestError,omitempty"`
+	CreatedAt          time.Time  `json:"createdAt,omitempty"`
+	UpdatedAt          time.Time  `json:"updatedAt,omitempty"`
 }
 type EmailSettingsInput struct {
+	Name               string
 	Enabled            bool
 	Host               string
 	Port               int

@@ -33,24 +33,143 @@ type MemoryStore struct {
 	platformReleases    map[string]PlatformRelease
 	platformUpgradeJobs map[string]PlatformUpgradeJob
 	platformSettings    *PlatformSettings
-	emailSettings       *EmailSettings
+	emailSettings       map[string]EmailSettings
 	tenants             map[string]Tenant
 }
 
 func (s *MemoryStore) GetEmailSettings() (EmailSettings, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.emailSettings == nil {
-		return EmailSettings{}, false, nil
+	for _, item := range s.emailSettings {
+		if item.IsDefault {
+			return item, true, nil
+		}
 	}
-	return *s.emailSettings, true, nil
+	return EmailSettings{}, false, nil
 }
 func (s *MemoryStore) UpsertEmailSettings(input EmailSettingsInput) (EmailSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	item := EmailSettings{Enabled: input.Enabled, Host: input.Host, Port: input.Port, Security: input.Security, Username: input.Username, PasswordCiphertext: input.PasswordCiphertext, PasswordConfigured: input.PasswordCiphertext != "", SenderName: input.SenderName, SenderEmail: input.SenderEmail, UpdatedAt: time.Now().UTC()}
-	s.emailSettings = &item
+	for id, current := range s.emailSettings {
+		if current.IsDefault {
+			item := memoryEmailSettings(id, current.Name, true, current.CreatedAt, input)
+			s.emailSettings[id] = item
+			return item, nil
+		}
+	}
+	item := memoryEmailSettings(NewPublicID(), defaultSMTPName(input.Name), true, time.Now().UTC(), input)
+	s.emailSettings[item.ID] = item
 	return item, nil
+}
+
+func memoryEmailSettings(id, name string, isDefault bool, createdAt time.Time, input EmailSettingsInput) EmailSettings {
+	now := time.Now().UTC()
+	if createdAt.IsZero() {
+		createdAt = now
+	}
+	return EmailSettings{ID: id, Name: defaultSMTPName(name), IsDefault: isDefault, Enabled: input.Enabled, Host: input.Host, Port: input.Port, Security: input.Security, Username: input.Username, PasswordCiphertext: input.PasswordCiphertext, PasswordConfigured: input.PasswordCiphertext != "", SenderName: input.SenderName, SenderEmail: input.SenderEmail, LastTestStatus: "not_tested", CreatedAt: createdAt, UpdatedAt: now}
+}
+
+func defaultSMTPName(name string) string {
+	if strings.TrimSpace(name) == "" {
+		return "Default SMTP"
+	}
+	return strings.TrimSpace(name)
+}
+
+func (s *MemoryStore) ListEmailSettings() ([]EmailSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	items := make([]EmailSettings, 0, len(s.emailSettings))
+	for _, item := range s.emailSettings {
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].IsDefault != items[j].IsDefault {
+			return items[i].IsDefault
+		}
+		return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
+	})
+	return items, nil
+}
+
+func (s *MemoryStore) GetEmailSettingsByID(id string) (EmailSettings, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := s.emailSettings[id]
+	return item, ok, nil
+}
+
+func (s *MemoryStore) CreateEmailSettings(input EmailSettingsInput) (EmailSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, item := range s.emailSettings {
+		if strings.EqualFold(item.Name, strings.TrimSpace(input.Name)) {
+			return EmailSettings{}, ErrEmailSettingsNameExists
+		}
+	}
+	item := memoryEmailSettings(NewPublicID(), input.Name, len(s.emailSettings) == 0, time.Now().UTC(), input)
+	s.emailSettings[item.ID] = item
+	return item, nil
+}
+
+func (s *MemoryStore) UpdateEmailSettings(id string, input EmailSettingsInput) (EmailSettings, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.emailSettings[id]
+	if !ok {
+		return EmailSettings{}, false, nil
+	}
+	for otherID, item := range s.emailSettings {
+		if otherID != id && strings.EqualFold(item.Name, strings.TrimSpace(input.Name)) {
+			return EmailSettings{}, true, ErrEmailSettingsNameExists
+		}
+	}
+	updated := memoryEmailSettings(id, input.Name, current.IsDefault, current.CreatedAt, input)
+	updated.LastTestStatus, updated.LastTestedAt, updated.LastTestError = current.LastTestStatus, current.LastTestedAt, current.LastTestError
+	s.emailSettings[id] = updated
+	return updated, true, nil
+}
+
+func (s *MemoryStore) DeleteEmailSettings(id string) (bool, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := s.emailSettings[id]
+	if !ok {
+		return false, false, nil
+	}
+	if item.IsDefault {
+		return false, true, nil
+	}
+	delete(s.emailSettings, id)
+	return true, false, nil
+}
+
+func (s *MemoryStore) SetDefaultEmailSettings(id string) (EmailSettings, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	selected, ok := s.emailSettings[id]
+	if !ok {
+		return EmailSettings{}, false, nil
+	}
+	for itemID, item := range s.emailSettings {
+		item.IsDefault = itemID == id
+		s.emailSettings[itemID] = item
+	}
+	selected.IsDefault = true
+	return selected, true, nil
+}
+
+func (s *MemoryStore) UpdateEmailSettingsTestResult(id, status, message string, testedAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := s.emailSettings[id]
+	if !ok {
+		return nil
+	}
+	item.LastTestStatus, item.LastTestedAt, item.LastTestError = status, &testedAt, message
+	s.emailSettings[id] = item
+	return nil
 }
 
 func (s *MemoryStore) GetPlatformSettings() (PlatformSettings, bool, error) {
@@ -108,6 +227,7 @@ func NewMemoryStore() *MemoryStore {
 		releases:            map[string]ComponentRelease{},
 		platformReleases:    map[string]PlatformRelease{},
 		platformUpgradeJobs: map[string]PlatformUpgradeJob{},
+		emailSettings:       map[string]EmailSettings{},
 	}
 }
 

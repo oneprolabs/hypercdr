@@ -14,12 +14,68 @@ import (
 
 	"hypercdr-platform/platform/backend/internal/migrations"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type PostgresStore struct {
-	db *sql.DB
+	db               *sql.DB
+	diagnosticWriter DiagnosticLogWriter
+	secretKey        string
+}
+
+type DiagnosticLogWriter interface {
+	CreateDiagnosticLog(DiagnosticLogInput) (DiagnosticLog, error)
+}
+
+func (s *PostgresStore) SetDiagnosticLogWriter(writer DiagnosticLogWriter) {
+	s.diagnosticWriter = writer
+}
+
+type EditionMigration struct {
+	Version string
+	SQL     string
+}
+
+// ApplyEditionMigrations runs only after the embedded Community migration set.
+// Edition versions use a separate ledger so repositories retain ownership of
+// their own forward-only history.
+func (s *PostgresStore) ApplyEditionMigrations(ctx context.Context, migrations []EditionMigration) error {
+	if len(migrations) == 0 {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx, `create table if not exists enterprise_schema_migrations (version text primary key, applied_at timestamptz not null default now())`); err != nil {
+		return err
+	}
+	for _, migration := range migrations {
+		version := strings.TrimSpace(migration.Version)
+		if version == "" || strings.TrimSpace(migration.SQL) == "" {
+			return errors.New("edition migration version and SQL are required")
+		}
+		var applied bool
+		if err := s.db.QueryRowContext(ctx, `select exists(select 1 from enterprise_schema_migrations where version=$1)`, version).Scan(&applied); err != nil {
+			return err
+		}
+		if applied {
+			continue
+		}
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, migration.SQL); err == nil {
+			_, err = tx.ExecContext(ctx, `insert into enterprise_schema_migrations(version) values($1)`, version)
+		}
+		if err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("apply edition migration %s: %w", version, err)
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func NewPostgresStore(ctx context.Context, databaseURL string) (*PostgresStore, error) {
@@ -75,8 +131,16 @@ func (s *PostgresStore) Close() error {
 }
 
 func (s *PostgresStore) GetEmailSettings() (EmailSettings, bool, error) {
+	return scanEmailSettings(s.db.QueryRow(emailSettingsSelect + ` where is_default=true`))
+}
+
+const emailSettingsSelect = `select id::text,name,is_default,enabled,host,port,security,username,password_ciphertext,sender_name,sender_email,last_test_status,last_tested_at,last_test_error,created_at,updated_at from smtp_configurations`
+
+type emailSettingsScanner interface{ Scan(...any) error }
+
+func scanEmailSettings(scanner emailSettingsScanner) (EmailSettings, bool, error) {
 	var item EmailSettings
-	err := s.db.QueryRow(`select enabled,host,port,security,username,password_ciphertext,sender_name,sender_email,updated_at from email_settings where id=true`).Scan(&item.Enabled, &item.Host, &item.Port, &item.Security, &item.Username, &item.PasswordCiphertext, &item.SenderName, &item.SenderEmail, &item.UpdatedAt)
+	err := scanner.Scan(&item.ID, &item.Name, &item.IsDefault, &item.Enabled, &item.Host, &item.Port, &item.Security, &item.Username, &item.PasswordCiphertext, &item.SenderName, &item.SenderEmail, &item.LastTestStatus, &item.LastTestedAt, &item.LastTestError, &item.CreatedAt, &item.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return EmailSettings{}, false, nil
 	}
@@ -84,19 +148,137 @@ func (s *PostgresStore) GetEmailSettings() (EmailSettings, bool, error) {
 	return item, err == nil, err
 }
 func (s *PostgresStore) UpsertEmailSettings(input EmailSettingsInput) (EmailSettings, error) {
-	_, err := s.db.Exec(`insert into email_settings(id,enabled,host,port,security,username,password_ciphertext,sender_name,sender_email,updated_by) values(true,$1,$2,$3,$4,$5,$6,$7,$8,nullif($9,'')::uuid) on conflict(id) do update set enabled=excluded.enabled,host=excluded.host,port=excluded.port,security=excluded.security,username=excluded.username,password_ciphertext=excluded.password_ciphertext,sender_name=excluded.sender_name,sender_email=excluded.sender_email,updated_by=excluded.updated_by,updated_at=now()`, input.Enabled, input.Host, input.Port, input.Security, input.Username, input.PasswordCiphertext, input.SenderName, input.SenderEmail, input.UpdatedBy)
+	current, found, err := s.GetEmailSettings()
 	if err != nil {
 		return EmailSettings{}, err
 	}
-	item, _, err := s.GetEmailSettings()
+	if found {
+		item, _, updateErr := s.UpdateEmailSettings(current.ID, EmailSettingsInput{Name: current.Name, Enabled: input.Enabled, Host: input.Host, Port: input.Port, Security: input.Security, Username: input.Username, PasswordCiphertext: input.PasswordCiphertext, SenderName: input.SenderName, SenderEmail: input.SenderEmail, UpdatedBy: input.UpdatedBy})
+		return item, updateErr
+	}
+	return s.CreateEmailSettings(EmailSettingsInput{Name: defaultSMTPName(input.Name), Enabled: input.Enabled, Host: input.Host, Port: input.Port, Security: input.Security, Username: input.Username, PasswordCiphertext: input.PasswordCiphertext, SenderName: input.SenderName, SenderEmail: input.SenderEmail, UpdatedBy: input.UpdatedBy})
+}
+
+func (s *PostgresStore) ListEmailSettings() ([]EmailSettings, error) {
+	rows, err := s.db.Query(emailSettingsSelect + ` order by is_default desc,lower(name),created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []EmailSettings{}
+	for rows.Next() {
+		item, _, scanErr := scanEmailSettings(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *PostgresStore) GetEmailSettingsByID(id string) (EmailSettings, bool, error) {
+	return scanEmailSettings(s.db.QueryRow(emailSettingsSelect+` where id=$1`, id))
+}
+
+func emailSettingsNameConflict(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "smtp_configurations_name_unique" {
+		return ErrEmailSettingsNameExists
+	}
+	return err
+}
+
+func (s *PostgresStore) CreateEmailSettings(input EmailSettingsInput) (EmailSettings, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return EmailSettings{}, err
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec(`lock table smtp_configurations in share row exclusive mode`); err != nil {
+		return EmailSettings{}, err
+	}
+	var count int
+	if err = tx.QueryRow(`select count(*) from smtp_configurations`).Scan(&count); err != nil {
+		return EmailSettings{}, err
+	}
+	id := NewPublicID()
+	_, err = tx.Exec(`insert into smtp_configurations(id,name,is_default,enabled,host,port,security,username,password_ciphertext,sender_name,sender_email,updated_by) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,nullif($12,'')::uuid)`, id, strings.TrimSpace(input.Name), count == 0, input.Enabled, input.Host, input.Port, input.Security, input.Username, input.PasswordCiphertext, input.SenderName, input.SenderEmail, input.UpdatedBy)
+	if err != nil {
+		return EmailSettings{}, emailSettingsNameConflict(err)
+	}
+	if err = tx.Commit(); err != nil {
+		return EmailSettings{}, err
+	}
+	item, _, err := s.GetEmailSettingsByID(id)
 	return item, err
+}
+
+func (s *PostgresStore) UpdateEmailSettings(id string, input EmailSettingsInput) (EmailSettings, bool, error) {
+	result, err := s.db.Exec(`update smtp_configurations set name=$2,enabled=$3,host=$4,port=$5,security=$6,username=$7,password_ciphertext=$8,sender_name=$9,sender_email=$10,updated_by=nullif($11,'')::uuid,updated_at=now() where id=$1`, id, strings.TrimSpace(input.Name), input.Enabled, input.Host, input.Port, input.Security, input.Username, input.PasswordCiphertext, input.SenderName, input.SenderEmail, input.UpdatedBy)
+	if err != nil {
+		return EmailSettings{}, false, emailSettingsNameConflict(err)
+	}
+	count, _ := result.RowsAffected()
+	if count == 0 {
+		return EmailSettings{}, false, nil
+	}
+	item, _, err := s.GetEmailSettingsByID(id)
+	return item, true, err
+}
+
+func (s *PostgresStore) DeleteEmailSettings(id string) (bool, bool, error) {
+	result, err := s.db.Exec(`delete from smtp_configurations where id=$1 and not is_default`, id)
+	if err != nil {
+		return false, false, err
+	}
+	count, _ := result.RowsAffected()
+	if count > 0 {
+		return true, false, nil
+	}
+	var isDefault bool
+	err = s.db.QueryRow(`select is_default from smtp_configurations where id=$1`, id).Scan(&isDefault)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false, nil
+	}
+	return false, isDefault, err
+}
+
+func (s *PostgresStore) SetDefaultEmailSettings(id string) (EmailSettings, bool, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return EmailSettings{}, false, err
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec(`lock table smtp_configurations in share row exclusive mode`); err != nil {
+		return EmailSettings{}, false, err
+	}
+	var exists bool
+	if err = tx.QueryRow(`select exists(select 1 from smtp_configurations where id=$1)`, id).Scan(&exists); err != nil || !exists {
+		return EmailSettings{}, false, err
+	}
+	if _, err = tx.Exec(`update smtp_configurations set is_default=false where is_default and id<>$1`, id); err != nil {
+		return EmailSettings{}, false, err
+	}
+	if _, err = tx.Exec(`update smtp_configurations set is_default=true,updated_at=now() where id=$1`, id); err != nil {
+		return EmailSettings{}, false, err
+	}
+	if err = tx.Commit(); err != nil {
+		return EmailSettings{}, false, err
+	}
+	item, _, err := s.GetEmailSettingsByID(id)
+	return item, true, err
+}
+
+func (s *PostgresStore) UpdateEmailSettingsTestResult(id, status, message string, testedAt time.Time) error {
+	_, err := s.db.Exec(`update smtp_configurations set last_test_status=$2,last_tested_at=$3,last_test_error=$4 where id=$1`, id, status, testedAt.UTC(), message)
+	return err
 }
 
 func (s *PostgresStore) ListTenants() ([]Tenant, error) {
 	rows, err := s.db.Query(`
 		select t.id,t.name,coalesce(t.description,''),t.status,t.created_at,t.updated_at,
 		       count(distinct u.id),count(distinct c.id)
-		from tenants t
+		from resource_scopes t
 		left join users u on u.tenant_id=t.id
 		left join clusters c on c.tenant_id=t.id
 		group by t.id,t.name,t.description,t.status,t.created_at,t.updated_at
@@ -118,7 +300,7 @@ func (s *PostgresStore) ListTenants() ([]Tenant, error) {
 
 func (s *PostgresStore) GetTenant(id string) (Tenant, bool, error) {
 	var item Tenant
-	err := s.db.QueryRow(`select t.id,t.name,coalesce(t.description,''),t.status,t.created_at,t.updated_at,(select count(*) from users u where u.tenant_id=t.id),(select count(*) from clusters c where c.tenant_id=t.id) from tenants t where t.id=$1`, id).Scan(&item.ID, &item.Name, &item.Description, &item.Status, &item.CreatedAt, &item.UpdatedAt, &item.UserCount, &item.ClusterCount)
+	err := s.db.QueryRow(`select t.id,t.name,coalesce(t.description,''),t.status,t.created_at,t.updated_at,(select count(*) from users u where u.tenant_id=t.id),(select count(*) from clusters c where c.tenant_id=t.id) from resource_scopes t where t.id=$1`, id).Scan(&item.ID, &item.Name, &item.Description, &item.Status, &item.CreatedAt, &item.UpdatedAt, &item.UserCount, &item.ClusterCount)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Tenant{}, false, nil
 	}
@@ -134,7 +316,7 @@ func (s *PostgresStore) CreateTenant(input TenantInput) (Tenant, error) {
 		status = "active"
 	}
 	var item Tenant
-	err := s.db.QueryRow(`insert into tenants(id,name,description,status) values($1,$2,nullif($3,''),$4) returning id,name,coalesce(description,''),status,created_at,updated_at`, newID(), strings.TrimSpace(input.Name), strings.TrimSpace(input.Description), status).Scan(&item.ID, &item.Name, &item.Description, &item.Status, &item.CreatedAt, &item.UpdatedAt)
+	err := s.db.QueryRow(`insert into resource_scopes(id,name,description,status) values($1,$2,nullif($3,''),$4) returning id,name,coalesce(description,''),status,created_at,updated_at`, newID(), strings.TrimSpace(input.Name), strings.TrimSpace(input.Description), status).Scan(&item.ID, &item.Name, &item.Description, &item.Status, &item.CreatedAt, &item.UpdatedAt)
 	return item, err
 }
 
@@ -147,7 +329,7 @@ func (s *PostgresStore) UpdateTenant(id string, input TenantInput) (Tenant, bool
 		status = "active"
 	}
 	var item Tenant
-	err := s.db.QueryRow(`update tenants set name=$2,description=nullif($3,''),status=$4,updated_at=now() where id=$1 returning id,name,coalesce(description,''),status,created_at,updated_at`, id, strings.TrimSpace(input.Name), strings.TrimSpace(input.Description), status).Scan(&item.ID, &item.Name, &item.Description, &item.Status, &item.CreatedAt, &item.UpdatedAt)
+	err := s.db.QueryRow(`update resource_scopes set name=$2,description=nullif($3,''),status=$4,updated_at=now() where id=$1 returning id,name,coalesce(description,''),status,created_at,updated_at`, id, strings.TrimSpace(input.Name), strings.TrimSpace(input.Description), status).Scan(&item.ID, &item.Name, &item.Description, &item.Status, &item.CreatedAt, &item.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Tenant{}, false, nil
 	}
@@ -163,7 +345,7 @@ func (s *PostgresStore) DeleteTenant(id string) (bool, bool, error) {
 	if err != nil || inUse {
 		return false, inUse, err
 	}
-	result, err := s.db.Exec(`delete from tenants where id=$1`, id)
+	result, err := s.db.Exec(`delete from resource_scopes where id=$1`, id)
 	if err != nil {
 		return false, false, err
 	}
@@ -344,7 +526,7 @@ func (s *PostgresStore) ActivateComponentRelease(id string, publishedBy string) 
 
 func (s *PostgresStore) ensureDefaultTenant(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `
-		insert into tenants (id, name, status)
+		insert into resource_scopes (id, name, status)
 		values ($1, 'Admin', 'active')
 		on conflict (id) do nothing
 	`, DefaultTenantID)
@@ -371,7 +553,7 @@ func (s *PostgresStore) AuthenticateUser(input UserAuthInput) (User, bool, error
 	}
 	row := s.db.QueryRow(`
 		select u.id,u.tenant_id,t.name,u.email,coalesce(u.display_name,''),u.password_hash,u.role,u.status,u.auth_provider,coalesce(u.time_zone,''),u.is_system_admin,u.must_change_password
-		from users u join tenants t on t.id=u.tenant_id
+		from users u join resource_scopes t on t.id=u.tenant_id
 		where lower(u.email)=$1 and u.status='active' and (u.is_system_admin or t.status='active')
 	`, email)
 	var user User
@@ -406,7 +588,7 @@ func (s *PostgresStore) CreateUser(tenantID, email, password string) (User, erro
 }
 
 func (s *PostgresStore) ListUsers() ([]User, error) {
-	rows, err := s.db.Query(`select u.id,u.tenant_id,t.name,u.email,coalesce(u.display_name,''),u.role,u.status,u.auth_provider,coalesce(u.time_zone,''),u.is_system_admin,u.must_change_password from users u join tenants t on t.id=u.tenant_id order by case when u.is_system_admin then 0 else 1 end, u.email`)
+	rows, err := s.db.Query(`select u.id,u.tenant_id,t.name,u.email,coalesce(u.display_name,''),u.role,u.status,u.auth_provider,coalesce(u.time_zone,''),u.is_system_admin,u.must_change_password from users u join resource_scopes t on t.id=u.tenant_id order by case when u.is_system_admin then 0 else 1 end, u.email`)
 	if err != nil {
 		return nil, err
 	}
@@ -424,7 +606,7 @@ func (s *PostgresStore) ListUsers() ([]User, error) {
 
 func (s *PostgresStore) GetUser(id string) (User, bool, error) {
 	var u User
-	err := s.db.QueryRow(`select u.id,u.tenant_id,t.name,u.email,coalesce(u.display_name,''),u.role,u.status,u.auth_provider,coalesce(u.time_zone,''),u.is_system_admin,u.must_change_password from users u join tenants t on t.id=u.tenant_id where u.id=$1`, id).Scan(&u.ID, &u.TenantID, &u.TenantName, &u.Email, &u.DisplayName, &u.Role, &u.Status, &u.AuthProvider, &u.TimeZone, &u.SystemAdmin, &u.MustChangePassword)
+	err := s.db.QueryRow(`select u.id,u.tenant_id,t.name,u.email,coalesce(u.display_name,''),u.role,u.status,u.auth_provider,coalesce(u.time_zone,''),u.is_system_admin,u.must_change_password from users u join resource_scopes t on t.id=u.tenant_id where u.id=$1`, id).Scan(&u.ID, &u.TenantID, &u.TenantName, &u.Email, &u.DisplayName, &u.Role, &u.Status, &u.AuthProvider, &u.TimeZone, &u.SystemAdmin, &u.MustChangePassword)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, false, nil
 	}
@@ -488,7 +670,7 @@ func (s *PostgresStore) CreatePlatformSession(userID string, ttl time.Duration) 
 
 func (s *PostgresStore) AuthenticatePlatformSession(token string) (User, bool, error) {
 	var u User
-	err := s.db.QueryRow(`select u.id,u.tenant_id,t.name,u.email,coalesce(u.display_name,''),u.role,u.status,u.auth_provider,coalesce(u.time_zone,''),u.is_system_admin,u.must_change_password from platform_sessions s join users u on u.id=s.user_id join tenants t on t.id=u.tenant_id where s.token_hash=$1 and s.expires_at>now() and u.status='active' and (u.is_system_admin or t.status='active')`, resetTokenDigest(token)).Scan(&u.ID, &u.TenantID, &u.TenantName, &u.Email, &u.DisplayName, &u.Role, &u.Status, &u.AuthProvider, &u.TimeZone, &u.SystemAdmin, &u.MustChangePassword)
+	err := s.db.QueryRow(`select u.id,u.tenant_id,t.name,u.email,coalesce(u.display_name,''),u.role,u.status,u.auth_provider,coalesce(u.time_zone,''),u.is_system_admin,u.must_change_password from platform_sessions s join users u on u.id=s.user_id join resource_scopes t on t.id=u.tenant_id where s.token_hash=$1 and s.expires_at>now() and u.status='active' and (u.is_system_admin or t.status='active')`, resetTokenDigest(token)).Scan(&u.ID, &u.TenantID, &u.TenantName, &u.Email, &u.DisplayName, &u.Role, &u.Status, &u.AuthProvider, &u.TimeZone, &u.SystemAdmin, &u.MustChangePassword)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, false, nil
 	}
@@ -507,7 +689,7 @@ func (s *PostgresStore) DeletePlatformSession(token string) error {
 func (s *PostgresStore) CreatePasswordResetToken(email string, ttl time.Duration) (string, bool, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	token := "hpr_" + newID() + newID()
-	result, err := s.db.Exec(`insert into password_reset_tokens (id,user_id,token_hash,expires_at) select $1,u.id,$2,$3 from users u join tenants t on t.id=u.tenant_id where lower(u.email)=$4 and u.status='active' and not u.is_system_admin and t.status='active'`, newID(), resetTokenDigest(token), time.Now().UTC().Add(ttl), email)
+	result, err := s.db.Exec(`insert into password_reset_tokens (id,user_id,token_hash,expires_at) select $1,u.id,$2,$3 from users u join resource_scopes t on t.id=u.tenant_id where lower(u.email)=$4 and u.status='active' and not u.is_system_admin and t.status='active'`, newID(), resetTokenDigest(token), time.Now().UTC().Add(ttl), email)
 	if err != nil {
 		return "", false, err
 	}
@@ -1425,7 +1607,7 @@ func (s *PostgresStore) CreateStorageRepository(input StorageRepositoryInput) (S
 	if err != nil {
 		return StorageRepository{}, err
 	}
-	secretRaw, err := json.Marshal(secret)
+	secretCiphertext, err := s.encodeStorageSecret(secret)
 	if err != nil {
 		return StorageRepository{}, err
 	}
@@ -1451,11 +1633,11 @@ func (s *PostgresStore) CreateStorageRepository(input StorageRepositoryInput) (S
 	_, err = s.db.Exec(`
 		insert into storage_repositories (
 			id, tenant_id, name, type, endpoint, bucket, region, tls_enabled, status,
-			config, secret_ref, secret_payload, created_at, updated_at
+			config, secret_ref, secret_payload, secret_ciphertext, created_at, updated_at
 		)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, '{}'::jsonb, $12, $13, $13)
 	`, repo.ID, repo.TenantID, repo.Name, repo.Type, repo.Endpoint, repo.Bucket, repo.Region,
-		repo.TLSEnabled, repo.Status, configRaw, repo.SecretRef, secretRaw, now)
+		repo.TLSEnabled, repo.Status, configRaw, repo.SecretRef, secretCiphertext, now)
 	return repo, err
 }
 
@@ -1463,7 +1645,7 @@ func (s *PostgresStore) ListStorageRepositories() ([]StorageRepository, error) {
 	rows, err := s.db.Query(`
 		select id, tenant_id, name, type, coalesce(endpoint, ''), coalesce(bucket, ''),
 		       coalesce(region, ''), tls_enabled, status, config, coalesce(secret_ref, ''),
-		       secret_payload, coalesce(last_validated_at, '0001-01-01'::timestamptz), created_at, updated_at
+		       secret_payload,secret_ciphertext,coalesce(last_validated_at, '0001-01-01'::timestamptz), created_at, updated_at
 		from storage_repositories
 		order by created_at desc
 	`)
@@ -1476,13 +1658,17 @@ func (s *PostgresStore) ListStorageRepositories() ([]StorageRepository, error) {
 	for rows.Next() {
 		var item StorageRepository
 		var configRaw, secretRaw []byte
+		var secretCiphertext string
 		if err := rows.Scan(&item.ID, &item.TenantID, &item.Name, &item.Type, &item.Endpoint,
 			&item.Bucket, &item.Region, &item.TLSEnabled, &item.Status, &configRaw, &item.SecretRef,
-			&secretRaw, &item.LastValidatedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			&secretRaw, &secretCiphertext, &item.LastValidatedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(configRaw, &item.Config)
-		_ = json.Unmarshal(secretRaw, &item.Secret)
+		item.Secret, err = s.decodeStorageSecret(secretCiphertext, secretRaw)
+		if err != nil {
+			return nil, err
+		}
 		items = append(items, item)
 	}
 	return items, rows.Err()
@@ -1511,11 +1697,11 @@ func (s *PostgresStore) UpdateStorageRepository(id string, input StorageReposito
 	if err != nil {
 		return StorageRepository{}, false, err
 	}
-	secretRaw, err := json.Marshal(secret)
+	secretCiphertext, err := s.encodeStorageSecret(secret)
 	if err != nil {
 		return StorageRepository{}, false, err
 	}
-	result, err := s.db.Exec(`update storage_repositories set name=$2,type=$3,endpoint=nullif($4,''),bucket=nullif($5,''),region=nullif($6,''),tls_enabled=$7,config=$8,secret_payload=$9,status='unknown',last_validated_at=null,updated_at=now() where id=$1 and tenant_id=$10`, id, input.Name, input.Type, input.Endpoint, input.Bucket, input.Region, input.TLSEnabled, configRaw, secretRaw, current.TenantID)
+	result, err := s.db.Exec(`update storage_repositories set name=$2,type=$3,endpoint=nullif($4,''),bucket=nullif($5,''),region=nullif($6,''),tls_enabled=$7,config=$8,secret_payload='{}'::jsonb,secret_ciphertext=$9,status='unknown',last_validated_at=null,updated_at=now() where id=$1 and tenant_id=$10`, id, input.Name, input.Type, input.Endpoint, input.Bucket, input.Region, input.TLSEnabled, configRaw, secretCiphertext, current.TenantID)
 	if err != nil {
 		return StorageRepository{}, false, err
 	}
@@ -1551,6 +1737,7 @@ func (s *PostgresStore) SetStorageRepositoryStatus(id string, status string, las
 	}
 	var item StorageRepository
 	var configRaw, secretRaw []byte
+	var secretCiphertext string
 	var lastValidated sql.NullTime
 	err := s.db.QueryRow(`
 		update storage_repositories
@@ -1560,10 +1747,10 @@ func (s *PostgresStore) SetStorageRepositoryStatus(id string, status string, las
 		 where id = $1
 		returning id, tenant_id, name, type, coalesce(endpoint, ''), coalesce(bucket, ''),
 		          coalesce(region, ''), tls_enabled, status, config, coalesce(secret_ref, ''),
-		          secret_payload, coalesce(last_validated_at, '0001-01-01'::timestamptz), created_at, updated_at
+		          secret_payload,secret_ciphertext,coalesce(last_validated_at, '0001-01-01'::timestamptz), created_at, updated_at
 	`, id, status, lastValidatedAt).Scan(&item.ID, &item.TenantID, &item.Name, &item.Type, &item.Endpoint,
 		&item.Bucket, &item.Region, &item.TLSEnabled, &item.Status, &configRaw, &item.SecretRef,
-		&secretRaw, &lastValidated, &item.CreatedAt, &item.UpdatedAt)
+		&secretRaw, &secretCiphertext, &lastValidated, &item.CreatedAt, &item.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return StorageRepository{}, false, nil
 	}
@@ -1574,7 +1761,10 @@ func (s *PostgresStore) SetStorageRepositoryStatus(id string, status string, las
 		item.LastValidatedAt = lastValidated.Time
 	}
 	_ = json.Unmarshal(configRaw, &item.Config)
-	_ = json.Unmarshal(secretRaw, &item.Secret)
+	item.Secret, err = s.decodeStorageSecret(secretCiphertext, secretRaw)
+	if err != nil {
+		return StorageRepository{}, false, err
+	}
 	if item.Config == nil {
 		item.Config = map[string]any{}
 	}
@@ -1587,15 +1777,16 @@ func (s *PostgresStore) SetStorageRepositoryStatus(id string, status string, las
 func (s *PostgresStore) GetStorageRepository(id string) (StorageRepository, bool, error) {
 	var item StorageRepository
 	var configRaw, secretRaw []byte
+	var secretCiphertext string
 	err := s.db.QueryRow(`
 		select id, tenant_id, name, type, coalesce(endpoint, ''), coalesce(bucket, ''),
 		       coalesce(region, ''), tls_enabled, status, config, coalesce(secret_ref, ''),
-		       secret_payload, coalesce(last_validated_at, '0001-01-01'::timestamptz), created_at, updated_at
+		       secret_payload,secret_ciphertext,coalesce(last_validated_at, '0001-01-01'::timestamptz), created_at, updated_at
 		from storage_repositories
 		where id = $1
 	`, id).Scan(&item.ID, &item.TenantID, &item.Name, &item.Type, &item.Endpoint,
 		&item.Bucket, &item.Region, &item.TLSEnabled, &item.Status, &configRaw,
-		&item.SecretRef, &secretRaw, &item.LastValidatedAt, &item.CreatedAt, &item.UpdatedAt)
+		&item.SecretRef, &secretRaw, &secretCiphertext, &item.LastValidatedAt, &item.CreatedAt, &item.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return StorageRepository{}, false, nil
 	}
@@ -1603,7 +1794,10 @@ func (s *PostgresStore) GetStorageRepository(id string) (StorageRepository, bool
 		return StorageRepository{}, false, err
 	}
 	_ = json.Unmarshal(configRaw, &item.Config)
-	_ = json.Unmarshal(secretRaw, &item.Secret)
+	item.Secret, err = s.decodeStorageSecret(secretCiphertext, secretRaw)
+	if err != nil {
+		return StorageRepository{}, false, err
+	}
 	if item.Config == nil {
 		item.Config = map[string]any{}
 	}
@@ -2081,7 +2275,7 @@ func (s *PostgresStore) ListDueProtectionPlanSchedules(now time.Time) ([]Protect
 		       pps.enabled, pps.created_at, pps.updated_at
 		from protection_plan_schedules pps
 		join protection_plans pp on pp.id=pps.protection_plan_id
-		join tenants t on t.id=pp.tenant_id and t.status='active'
+		join resource_scopes t on t.id=pp.tenant_id and t.status='active'
 		where pps.enabled = true
 		  and pps.next_fire_at is not null
 		  and pps.next_fire_at <= $1
@@ -2835,15 +3029,30 @@ func (s *PostgresStore) AddTaskEvent(input TaskEventInput) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(`insert into diagnostic_logs(id,tenant_id,scope,level,component,operation,message,cluster_id,task_id,command_id,error_code,status,details,created_at)
-		select $1,t.tenant_id,'tenant',$2,'task',t.type,$3,t.cluster_id,t.id,t.command_id,nullif($4,''),t.status,$5,$6 from tasks t where t.id=$7`, newID(), normalizeDiagnosticLevel(input.Level), input.Message, input.Reason, payloadRaw, now, input.TaskID)
-	if err != nil {
+	if s.diagnosticWriter == nil {
+		_, err = tx.Exec(`insert into diagnostic_logs(id,tenant_id,scope,level,component,operation,message,cluster_id,task_id,command_id,error_code,status,details,created_at)
+			select $1,t.tenant_id,'tenant',$2,'task',t.type,$3,t.cluster_id,t.id,t.command_id,nullif($4,''),t.status,$5,$6 from tasks t where t.id=$7`, newID(), normalizeDiagnosticLevel(input.Level), input.Message, input.Reason, payloadRaw, now, input.TaskID)
+		if err != nil {
+			return err
+		}
+	}
+	if err = tx.Commit(); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if s.diagnosticWriter != nil {
+		task, found, taskErr := s.getTask(input.TaskID)
+		if taskErr != nil || !found {
+			return taskErr
+		}
+		_, err = s.CreateDiagnosticLog(DiagnosticLogInput{TenantID: task.TenantID, Scope: "tenant", Level: input.Level, Component: "task", Operation: task.Type, Message: input.Message, ClusterID: task.ClusterID, TaskID: task.ID, CommandID: task.CommandID, ErrorCode: input.Reason, Status: task.Status, Details: input.Payload, EventAt: now})
+	}
+	return err
 }
 
 func (s *PostgresStore) CreateDiagnosticLog(input DiagnosticLogInput) (DiagnosticLog, error) {
+	if s.diagnosticWriter != nil {
+		return s.diagnosticWriter.CreateDiagnosticLog(input)
+	}
 	item := diagnosticLogFromInput(input, time.Now().UTC())
 	detailsRaw, err := json.Marshal(item.Details)
 	if err != nil {

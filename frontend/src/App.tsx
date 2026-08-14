@@ -136,11 +136,8 @@ import { validateFrontendModules, type ExtensionViewId, type HyperCDRFrontendMod
 
 const FailbackPage = React.lazy(() => import('./features/failback/failback-page'));
 const LazyEmailSettingsPage = React.lazy(() => import('./features/settings/email-settings-page'));
-const LazyTenantPage = React.lazy(() => import('./features/tenants/tenant-page'));
 const LazyOperationsPage = React.lazy(() => import('./features/operations/operations-page'));
-const LazyDiagnosticLogsPage = React.lazy(() => import('./features/logs/diagnostic-logs-page'));
 const LazyUpgradeManagementPage = React.lazy(() => import('./features/upgrades/upgrade-management-page'));
-const LazyUserManagementPage = React.lazy(() => import('./features/users/user-management-page'));
 const LazyProfilePage = React.lazy(() => import('./features/profile/profile-page'));
 const LazyTagManagementPage = React.lazy(() => import('./features/tags/tag-management-page'));
 const LazyPolicyPage = React.lazy(() => import('./features/policies/policy-page'));
@@ -846,7 +843,7 @@ const topNav: Array<{ key: TopModule; view: View }> = [
   { key: 'overview', view: 'dashboard' },
   { key: 'dr', view: 'applications' },
   { key: 'config', view: 'clusters' },
-  { key: 'ops', view: 'logs' },
+  { key: 'ops', view: 'operations' },
   { key: 'settings', view: 'profile' },
 ];
 
@@ -854,7 +851,7 @@ function moduleForView(view: View): TopModule {
   if (view === 'dashboard') return 'overview';
   if (view === 'applications' || view === 'restore_points' || view === 'dr_tasks' || view === 'failback') return 'dr';
   if (view === 'clusters' || view === 'storage' || view === 'policies' || view === 'tags') return 'config';
-  if (view === 'operations' || view === 'logs') return 'ops';
+  if (view === 'operations') return 'ops';
   return 'settings';
 }
 
@@ -929,9 +926,14 @@ function createUuid() {
 
 export type HyperCDRAppProps = { modules?: HyperCDRFrontendModule[] };
 
+type ApiProductInfo = {
+  capabilities?: Record<string, { enabled?: boolean }>;
+};
+
 export default function App({ modules = [] }: HyperCDRAppProps) {
   const extensionModules = useMemo(() => validateFrontendModules(modules), [modules]);
   const [authSession, setAuthSession] = useState<AuthSession | null>(() => readStoredAuthSession());
+  const [productCapabilities, setProductCapabilities] = useState<Record<string, { enabled?: boolean }>>({});
   const [passwordChangeCompleted, setPasswordChangeCompleted] = useState(false);
   const [view, setView] = useState<View>(() => readStoredAuthSession() ? (readStoredView() || 'dashboard') : 'login');
   const [timeZonePreference, setTimeZonePreference] = useState(() => authSession?.user.timeZone || '');
@@ -960,6 +962,22 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   const [releaseNotesUnread, setReleaseNotesUnread] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const releaseNotesAdminAudience = authSession?.user.role === 'admin';
+
+  useEffect(() => {
+    let cancelled = false;
+    void apiGet<ApiProductInfo>('/api/v1/product-info')
+      .then(info => {
+        if (!cancelled) {
+          setProductCapabilities(info.capabilities || {});
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setProductCapabilities({});
+        }
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (!authSession) {
@@ -1573,7 +1591,9 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     };
   }, [authSession, refreshPlatformData, view]);
 
-  const activeModule = moduleForView(view);
+  const visibleExtensionModules = useMemo(() => extensionModules.filter(module => authSession && (!module.isVisible || module.isVisible({ currentUser: authSession.user, capabilities: productCapabilities }))), [authSession, extensionModules, productCapabilities]);
+  const activeExtension = visibleExtensionModules.find(module => module.view === view);
+  const activeModule = activeExtension?.navigation.group === 'operations' ? 'ops' : activeExtension ? 'settings' : moduleForView(view);
   const language = locales[locale];
   const defaultCluster = useMemo(
     () => clusters.find(cluster => cluster.isDefault) || null,
@@ -1637,21 +1657,19 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       return {
         title: 'Operations',
         items: [
-          { label: 'Logs', desc: 'Search and export diagnostic logs', view: 'logs' as View, icon: Terminal },
+          ...visibleExtensionModules.filter(module => module.navigation.group === 'operations').map(module => ({ label: module.navigation.label, desc: module.navigation.description, view: module.view as View, icon: module.navigation.icon })),
         ],
       };
     }
     return {
       title: 'Settings',
       items: [
-        ...(authSession?.user.role === 'admin' ? [{ label: 'User Management', desc: 'Create and maintain platform users', view: 'users' as View, icon: User }] : []),
-        ...(authSession?.user.systemAdmin ? [{ label: 'Tenant Management', desc: 'Create and maintain isolated tenants', view: 'tenants' as View, icon: Building2 }] : []),
         ...(authSession?.user.systemAdmin ? [{ label: 'Email Settings', desc: 'Configure password recovery email delivery', view: 'email_settings' as View, icon: Settings2 }] : []),
         ...(authSession?.user.systemAdmin ? [{ label: 'Upgrade', desc: 'Check and upgrade platform and cluster components', view: 'upgrades' as View, icon: Upload }] : []),
-        ...extensionModules.filter(module => module.navigation.group === 'settings').map(module => ({ label: module.navigation.label, desc: module.navigation.description, view: module.view as View, icon: module.navigation.icon })),
+        ...visibleExtensionModules.filter(module => module.navigation.group === 'settings').map(module => ({ label: module.navigation.label, desc: module.navigation.description, view: module.view as View, icon: module.navigation.icon })),
       ],
     };
-  }, [activeModule, authSession?.user.role, authSession?.user.systemAdmin, extensionModules, view]);
+  }, [activeModule, authSession?.user.systemAdmin, visibleExtensionModules, view]);
 
   const openView = (nextView: View, options: { preserveSelectedCluster?: boolean } = {}) => {
     if (!options.preserveSelectedCluster && (nextView === 'dashboard' || nextView === 'applications' || nextView === 'failback')) {
@@ -1964,7 +1982,11 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
               return (
                 <button
                   key={item.key}
-                  onClick={() => openView(item.key === 'settings' ? 'users' : item.view)}
+                  onClick={() => openView(item.key === 'settings'
+                    ? (authSession?.user.systemAdmin
+                      ? 'email_settings'
+                      : (visibleExtensionModules.find(module => module.navigation.group === 'settings')?.view as View | undefined) || 'profile')
+                    : item.view)}
                   disabled={false}
                   className={activeModule === item.key ? 'bg-blue-50 text-blue-700' : ''}
                 >
@@ -2269,14 +2291,11 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
               /></React.Suspense>
             ))}
             {view === 'operations' && (onboarding !== 'ready' ? onboardingGate : <React.Suspense fallback={<PageLoadFallback />}><LazyOperationsPage /></React.Suspense>)}
-            {view === 'logs' && authSession && <React.Suspense fallback={<PageLoadFallback />}><LazyDiagnosticLogsPage currentUser={authSession.user} clusters={liveApiClusters} toast={setToast} /></React.Suspense>}
             {view === 'tags' && (onboarding !== 'ready' ? onboardingGate : <React.Suspense fallback={<PageLoadFallback />}><LazyTagManagementPage tags={tags} setTags={setTags} clusters={clusters} setClusters={setClusters} toast={setToast} /></React.Suspense>)}
-            {view === 'users' && authSession?.user.role === 'admin' && <React.Suspense fallback={<PageLoadFallback />}><LazyUserManagementPage currentUser={authSession.user} toast={setToast} /></React.Suspense>}
-            {view === 'tenants' && authSession?.user.systemAdmin && <React.Suspense fallback={<PageLoadFallback />}><LazyTenantPage toast={setToast} /></React.Suspense>}
             {view === 'email_settings' && authSession?.user.systemAdmin && <React.Suspense fallback={<PageLoadFallback />}><LazyEmailSettingsPage currentUser={authSession.user} toast={setToast} /></React.Suspense>}
             {view === 'profile' && authSession && <React.Suspense fallback={<PageLoadFallback />}><LazyProfilePage session={authSession} setSession={next => { setAuthSession(next); writeStoredAuthSession(next); }} toast={setToast} /></React.Suspense>}
             {view === 'upgrades' && authSession?.user.systemAdmin && <React.Suspense fallback={<PageLoadFallback />}><LazyUpgradeManagementPage isAdmin toast={setToast} refreshPlatformData={refreshPlatformData} /></React.Suspense>}
-            {extensionModules.map(module => view === module.view ? <React.Suspense key={module.id} fallback={<PageLoadFallback />}><module.component /></React.Suspense> : null)}
+            {authSession && visibleExtensionModules.map(module => view === module.view ? <React.Suspense key={module.id} fallback={<PageLoadFallback />}><module.component currentUser={authSession.user} clusters={liveApiClusters} toast={setToast} /></React.Suspense> : null)}
           </AnimatePresence>
         </section>
       </main>

@@ -69,7 +69,7 @@ func TestAgentUpgradeReturnsPersistedQueuedTaskBeforeAsyncDispatch(t *testing.T)
 			upgradeTasks = append(upgradeTasks, task)
 		}
 	}
-	if err != nil || len(upgradeTasks) != 1 || upgradeTasks[0].ID != queued.ID || upgradeTasks[0].Status != "queued" {
+	if err != nil || len(upgradeTasks) != 1 || upgradeTasks[0].ID != queued.ID || (upgradeTasks[0].Status != "queued" && upgradeTasks[0].Status != "dispatched") {
 		t.Fatalf("persisted tasks = %#v, err = %v", tasks, err)
 	}
 

@@ -1,7 +1,19 @@
 import type { ComponentType } from 'react';
 import type { LucideIcon } from 'lucide-react';
+import type { ApiLoginResponse } from '../auth/types';
 
 export type ExtensionViewId = `extension:${string}`;
+
+export type FrontendModuleContext = {
+  currentUser: ApiLoginResponse['user'];
+  clusters: Array<{ id: string; tenantId: string; name: string; connectionStatus: string }>;
+  toast: (message: string) => void;
+};
+
+export type FrontendModuleVisibilityContext = {
+  currentUser: ApiLoginResponse['user'];
+  capabilities: Record<string, { enabled?: boolean }>;
+};
 
 export interface HyperCDRFrontendModule {
   id: string;
@@ -11,9 +23,10 @@ export interface HyperCDRFrontendModule {
     description: string;
     icon: LucideIcon;
     order: number;
-    group: 'settings';
+    group: 'settings' | 'operations';
   };
-  component: ComponentType;
+  component: ComponentType<FrontendModuleContext>;
+  isVisible?: (context: FrontendModuleVisibilityContext) => boolean;
 }
 
 export function validateFrontendModules(modules: HyperCDRFrontendModule[]): HyperCDRFrontendModule[] {
