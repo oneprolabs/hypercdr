@@ -9,7 +9,8 @@ VERSION="${1:-}"
 BUILD_ROOT="${HCDR_BOOTSTRAP_BUILD_ROOT:-${RUNTIME_ROOT}/build/bootstrap}"
 PUBLISH_DIR="${HCDR_BOOTSTRAP_PUBLISH_DIR:-${RUNTIME_ROOT}/services/bootstrap-portal/source}"
 WORK_DIR="${BUILD_ROOT}/${VERSION:-unknown}"
-RELEASE_DIR="${PUBLISH_DIR}/releases/dev"
+RELEASE_DIR="${PUBLISH_DIR}/releases/community"
+LEGACY_RELEASE_DIR="${PUBLISH_DIR}/releases/dev"
 
 usage() {
   cat <<'USAGE'
@@ -50,10 +51,10 @@ for path in "${WORK_DIR}" "${PUBLISH_DIR}"; do
   fi
 done
 
-rm -rf "${WORK_DIR}" "${PUBLISH_DIR}"
+rm -rf "${WORK_DIR}" "${RELEASE_DIR}" "${LEGACY_RELEASE_DIR}"
 mkdir -p "${WORK_DIR}/hypercdr-bootstrap" "${PUBLISH_DIR}"
 cp -R "${SITE_SOURCE_DIR}/." "${PUBLISH_DIR}/"
-mkdir -p "${RELEASE_DIR}"
+mkdir -p "${RELEASE_DIR}" "${LEGACY_RELEASE_DIR}"
 
 package_dir="${WORK_DIR}/hypercdr-bootstrap"
 cp "${SCRIPT_DIR}/install-platform.sh" "${package_dir}/install-platform.sh"
@@ -90,6 +91,8 @@ chmod +x "${RELEASE_DIR}/install-platform.sh" "${RELEASE_DIR}/uninstall-platform
 
 cat > "${RELEASE_DIR}/manifest.json" <<EOF
 {
+  "edition": "community",
+  "name": "HyperCDR Community",
   "version": "${VERSION}",
   "buildTime": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "artifacts": [
@@ -101,6 +104,10 @@ cat > "${RELEASE_DIR}/manifest.json" <<EOF
   ]
 }
 EOF
+
+# Keep the historical /releases/dev URL available for existing bookmarks and
+# older portal copies while the UI uses the edition-specific path.
+cp -R "${RELEASE_DIR}/." "${LEGACY_RELEASE_DIR}/"
 
 cat <<EOF
 Bootstrap release ${VERSION} created without modifying source files.

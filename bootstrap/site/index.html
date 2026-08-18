@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Install HyperCDR</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230d1726'/%3E%3Cpath d='M18 16h8v12h12V16h8v32h-8V36H26v12h-8z' fill='white'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="./assets/styles.css" />
   </head>
   <body>
@@ -11,81 +12,57 @@
       <header class="topbar">
         <div class="brand">
           <span class="brand-mark">H</span>
-          <div><strong>HyperCDR</strong><small>Control plane installer</small></div>
+          <div><strong>HyperCDR</strong><small>Installation portal</small></div>
         </div>
-        <span id="release-version" class="header-version">Loading</span>
+        <span class="header-version">Install &amp; deploy</span>
       </header>
 
       <section class="install-intro">
-        <p class="eyebrow">Install</p>
-        <h1>Install the HyperCDR control plane</h1>
-        <p class="summary">Choose a deployment mode, enter the platform address, then copy and run one command.</p>
+        <p class="eyebrow">Get started</p>
+        <h1>Install HyperCDR</h1>
+        <p class="summary">Choose an edition, configure the deployment address, and run the generated command.</p>
       </section>
 
-      <section id="deploy" class="deploy-layout">
-        <article class="panel panel-primary deployment-mode-panel">
-          <div class="panel-heading">
-            <div>
-              <p class="eyebrow">Standalone host</p>
-              <h2>Docker Compose</h2>
-              <p class="panel-copy">Recommended for a dedicated Linux host. Images are pulled from the Registry configured in this release.</p>
-            </div>
-            <span class="badge">Recommended</span>
-          </div>
-          <div class="configuration-sections">
-            <section class="configuration-section">
-              <div class="configuration-section-heading">
-                <h3>Control plane address</h3>
-                <p>The address used by users and cluster agents to reach HyperCDR.</p>
-              </div>
-              <div class="form-grid">
-                <label>
-                  Public URL
-                  <input id="host-public-url" placeholder="https://192.168.8.149:3002" />
-                  <small>Use an address reachable from protected clusters.</small>
-                </label>
-              </div>
-            </section>
-          </div>
-          <div class="install-step">
-            <div class="install-step-heading"><span>1</span><div><strong>Install HyperCDR</strong><small>Run on the target host as root.</small></div></div>
-            <div class="command-window">
-              <div class="command-title"><span></span><span></span><span></span><strong>install-hypercdr.sh</strong></div>
-              <pre id="host-install-command" class="command" tabindex="0"></pre>
-              <button type="button" class="command-copy" data-copy-target="host-install-command">Copy</button>
-            </div>
-          </div>
-        </article>
+      <section class="edition-grid" aria-label="HyperCDR editions">
+        <button id="community-card" class="edition-card is-selected" type="button" data-edition="community" aria-pressed="true">
+          <span class="edition-icon">C</span>
+          <span class="edition-content"><strong>HyperCDR Community</strong><small>Open source control plane</small></span>
+          <span id="community-version" class="edition-version">Loading</span>
+        </button>
+        <button id="enterprise-card" class="edition-card" type="button" data-edition="enterprise" aria-pressed="false">
+          <span class="edition-icon enterprise">E</span>
+          <span class="edition-content"><strong>HyperCDR Enterprise</strong><small>Enterprise governance and support</small></span>
+          <span id="enterprise-version" class="edition-version">Loading</span>
+        </button>
+      </section>
 
-        <article class="panel panel-secondary deployment-mode-panel">
-          <div class="panel-heading">
-            <div>
-              <p class="eyebrow">Kubernetes</p>
-              <h2>Helm deployment</h2>
-              <p class="panel-copy">Install into an existing Kubernetes cluster from a host with kubectl and Helm access.</p>
-            </div>
-            <span class="badge muted">Kubernetes</span>
-          </div>
-          <div class="configuration-sections">
-            <section class="configuration-section">
-              <div class="configuration-section-heading"><h3>Deployment settings</h3><p>Provide only settings specific to the target cluster.</p></div>
-              <div class="form-grid">
-                <label>Cluster node IP<input id="k8s-node-ip" placeholder="192.168.8.158" /><small>Reachable by users and agents.</small></label>
-                <label>NodePort<input id="k8s-node-port" value="30080" /></label>
-                <label>StorageClass<input id="k8s-storage-class" value="longhorn" /><small>Used by the bundled PostgreSQL volume.</small></label>
-                <div class="derived-url"><span>Public URL</span><strong id="k8s-derived-url">https://node-ip:30080</strong></div>
-              </div>
-            </section>
-          </div>
-          <div class="install-step">
-            <div class="install-step-heading"><span>1</span><div><strong>Install HyperCDR</strong><small>Run with kubectl and Helm access.</small></div></div>
-            <div class="command-window">
-              <div class="command-title"><span></span><span></span><span></span><strong>install-hypercdr-k8s.sh</strong></div>
-              <pre id="k8s-command" class="command" tabindex="0"></pre>
-              <button type="button" class="command-copy" data-copy-target="k8s-command">Copy</button>
-            </div>
-          </div>
-        </article>
+      <section id="community-panel" class="edition-panel" aria-labelledby="community-card">
+        <div class="panel-heading">
+          <div><p class="eyebrow">Community</p><h2>Install the Community edition</h2><p class="panel-copy">Use Docker Compose on a dedicated host or Helm in an existing Kubernetes cluster.</p></div>
+          <span class="badge">Current release</span>
+        </div>
+        <div class="mode-tabs" role="tablist" aria-label="Community deployment mode">
+          <button class="mode-tab is-active" type="button" data-mode="docker" role="tab" aria-selected="true">Docker Compose</button>
+          <button class="mode-tab" type="button" data-mode="k8s" role="tab" aria-selected="false">Kubernetes</button>
+        </div>
+        <div id="community-docker" class="mode-panel">
+          <label>Public URL<input id="host-public-url" placeholder="https://192.168.8.149:3002" /><small>Use an address reachable from protected clusters.</small></label>
+          <div class="command-window"><div class="command-title"><span></span><span></span><span></span><strong>install-community.sh</strong></div><pre id="community-docker-command" class="command" tabindex="0"></pre><button type="button" class="command-copy" data-copy-target="community-docker-command">Copy</button></div>
+        </div>
+        <div id="community-k8s" class="mode-panel hidden">
+          <div class="form-grid"><label>Cluster node IP<input id="k8s-node-ip" placeholder="192.168.8.158" /></label><label>NodePort<input id="k8s-node-port" value="30080" /></label><label>StorageClass<input id="k8s-storage-class" value="longhorn" /></label></div>
+          <div class="command-window"><div class="command-title"><span></span><span></span><span></span><strong>install-community-k8s.sh</strong></div><pre id="community-k8s-command" class="command" tabindex="0"></pre><button type="button" class="command-copy" data-copy-target="community-k8s-command">Copy</button></div>
+        </div>
+      </section>
+
+      <section id="enterprise-panel" class="edition-panel hidden" aria-labelledby="enterprise-card">
+        <div class="panel-heading">
+          <div><p class="eyebrow">Enterprise</p><h2>Install the Enterprise edition</h2><p class="panel-copy">Deploy with Helm using your production values and existing license and application secrets.</p></div>
+          <span class="badge">License required</span>
+        </div>
+        <label>Namespace<input id="enterprise-namespace" value="hypercdr-enterprise" /></label>
+        <div class="command-window"><div class="command-title"><span></span><span></span><span></span><strong>install-enterprise.sh</strong></div><pre id="enterprise-command" class="command" tabindex="0"></pre><button type="button" class="command-copy" data-copy-target="enterprise-command">Copy</button></div>
+        <p id="enterprise-unavailable" class="availability-note hidden">Enterprise installer is not published on this portal yet.</p>
       </section>
     </main>
     <script src="./assets/app.js"></script>

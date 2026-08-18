@@ -61,6 +61,52 @@ body {
 .install-intro h1 { font-size: 30px; }
 .install-intro .summary { margin-top: 9px; }
 
+.edition-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.edition-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 13px;
+  align-items: center;
+  min-height: 86px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--soft-shadow);
+  padding: 15px;
+  color: var(--text);
+  text-align: left;
+}
+
+.edition-card:hover { border-color: #9fb2c9; background: #fff; }
+.edition-card.is-selected { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.1), var(--soft-shadow); }
+.edition-icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 8px; background: #e8f5f2; color: var(--accent-dark); font-weight: 850; }
+.edition-icon.enterprise { background: #e8eef8; color: #294a7a; }
+.edition-content strong, .edition-content small { display: block; }
+.edition-content strong { color: var(--ink); font-size: 15px; }
+.edition-content small { margin-top: 4px; color: var(--muted); font-size: 12px; font-weight: 500; }
+.edition-version { border-radius: 999px; background: #f1f5f9; color: #526174; padding: 5px 9px; font-size: 11px; font-weight: 750; white-space: nowrap; }
+
+.edition-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 22px;
+}
+
+.edition-panel > label { max-width: 460px; }
+.mode-tabs { display: inline-flex; gap: 3px; margin: 0 0 16px; border-radius: 7px; background: #eef2f6; padding: 3px; }
+.mode-tab { min-height: 32px; border-radius: 5px; background: transparent; color: #526174; padding: 6px 11px; font-size: 12px; }
+.mode-tab:hover { background: #e3e9f0; }
+.mode-tab.is-active { background: #fff; color: var(--ink); box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12); }
+.availability-note { margin: 10px 0 0; border: 1px solid #f1d4a7; border-radius: 7px; background: #fff8ed; color: #8a5a17; padding: 10px 12px; font-size: 12px; }
+
 .panel,
 .version-card,
 .command-window,
@@ -616,6 +662,7 @@ button:hover,
   .hero,
   .grid,
   .deploy-layout,
+  .edition-grid,
   .status-strip,
   .form-grid,
   .artifact-list {
@@ -655,4 +702,7 @@ button:hover,
   h1 {
     font-size: 34px;
   }
+
+  .edition-card { grid-template-columns: auto minmax(0, 1fr); }
+  .edition-version { grid-column: 2; justify-self: start; }
 }
