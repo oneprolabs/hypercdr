@@ -85,6 +85,10 @@ fi
 mkdir -p "${PORTAL_DIR}"
 rm -rf "${PORTAL_DIR:?}/"*
 cp -R "${SOURCE_DIR}/." "${PORTAL_DIR}/"
+# The portal is served by an unprivileged web-server user. Release generation
+# may run with a restrictive umask, so normalize only the static portal copy.
+find "${PORTAL_DIR}" -type d -exec chmod 0755 {} +
+find "${PORTAL_DIR}" -type f -exec chmod 0644 {} +
 
 case "${MODE}" in
   docker)
