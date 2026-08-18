@@ -17,6 +17,13 @@ load_registry_profile "${ROOT_DIR}/config/registries.conf" harbor_149
 [[ "${HCDR_IMAGE_REGISTRY}" == "192.168.8.149:5001/hypercdr" ]]
 [[ "${HCDR_REGISTRY_TRUST}" == "private-ca" ]]
 
+HCDR_POSTGRES_SOURCE_IMAGE_OVERRIDE=registry.local/postgres:16
+HCDR_VELERO_PLUGIN_SOURCE_REGISTRY_OVERRIDE=registry.local/velero
+load_registry_profile "${ROOT_DIR}/config/registries.conf" aliyun_acr
+[[ "${HCDR_POSTGRES_SOURCE_IMAGE}" == "registry.local/postgres:16" ]]
+[[ "${HCDR_VELERO_PLUGIN_SOURCE_REGISTRY}" == "registry.local/velero" ]]
+[[ "${HCDR_REGISTRY_TRUST}" == "system" ]]
+
 if load_registry_profile "${ROOT_DIR}/config/registries.conf" missing >/dev/null 2>&1; then
   echo "unknown profile unexpectedly succeeded" >&2
   exit 1

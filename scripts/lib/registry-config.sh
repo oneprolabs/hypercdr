@@ -4,9 +4,17 @@ registry_config_die() { echo "error: $*" >&2; return 1; }
 
 load_registry_profile() {
   local config_file="$1" requested_profile="${2:-}" profile upper field variable value
+  local postgres_source_override="${HCDR_POSTGRES_SOURCE_IMAGE_OVERRIDE-}"
+  local velero_plugin_source_override="${HCDR_VELERO_PLUGIN_SOURCE_REGISTRY_OVERRIDE-}"
   [[ -r "${config_file}" ]] || registry_config_die "registry config is not readable: ${config_file}" || return 1
   # shellcheck disable=SC1090
   source "${config_file}"
+  if [[ -n "${postgres_source_override}" ]]; then
+    HCDR_POSTGRES_SOURCE_IMAGE="${postgres_source_override}"
+  fi
+  if [[ -n "${velero_plugin_source_override}" ]]; then
+    HCDR_VELERO_PLUGIN_SOURCE_REGISTRY="${velero_plugin_source_override}"
+  fi
   profile="${requested_profile:-${HCDR_ACTIVE_REGISTRY:-}}"
   [[ -n "${profile}" ]] || registry_config_die "HCDR_ACTIVE_REGISTRY is not configured" || return 1
   [[ "${profile}" =~ ^[a-z0-9_]+$ ]] || registry_config_die "invalid registry profile: ${profile}" || return 1
