@@ -7,8 +7,25 @@ import (
 	"testing"
 	"time"
 
+	"hypercdr-platform/platform/backend/internal/config"
 	"hypercdr-platform/platform/backend/internal/httpserver"
+	"hypercdr-platform/platform/backend/internal/store"
 )
+
+func TestMissingRegistryBackfillUsesConfiguredRegistryAndPreservesSettings(t *testing.T) {
+	settings := store.PlatformSettings{AgentNamespace: "hypercdr-enterprise-agent", VeleroVersion: "v1.18.2", PublicEndpoint: "https://192.168.8.149:3102"}
+	input, required := missingRegistryBackfill(settings, config.Config{ImageRegistry: "registry.example/hypercdr/"})
+	if !required {
+		t.Fatal("empty persisted registry was not backfilled")
+	}
+	if input.ImageRegistry != "registry.example/hypercdr" || input.AgentNamespace != settings.AgentNamespace || input.VeleroVersion != settings.VeleroVersion || input.PublicEndpoint != settings.PublicEndpoint {
+		t.Fatalf("backfill changed unrelated settings: %#v", input)
+	}
+	settings.ImageRegistry = "persisted.example/hypercdr"
+	if _, required = missingRegistryBackfill(settings, config.Config{ImageRegistry: "registry.example/hypercdr"}); required {
+		t.Fatal("an existing persisted registry must not be overwritten at startup")
+	}
+}
 
 type recordingAuthorizer struct {
 	request AuthorizationRequest
@@ -74,10 +91,12 @@ func TestCommunityUsesFixedDefaultTenant(t *testing.T) {
 		{method: "POST", path: "/api/v1/tenants", allowed: false},
 		{method: "PATCH", path: "/api/v1/tenants/tenant-2", allowed: false},
 		{method: "DELETE", path: "/api/v1/tenants/tenant-2", allowed: false},
-		{method: "GET", path: "/api/v1/users", allowed: false},
+		{method: "GET", path: "/api/v1/users", allowed: true},
+		{method: "PATCH", path: "/api/v1/users/admin-id", allowed: true},
+		{method: "POST", path: "/api/v1/users/admin-id/password", allowed: true},
 		{method: "POST", path: "/api/v1/users", allowed: false},
 		{method: "GET", path: "/api/v1/diagnostic-logs", allowed: true},
-		{method: "GET", path: "/api/v1/diagnostic-logs/export", allowed: false},
+		{method: "GET", path: "/api/v1/diagnostic-logs/export", allowed: true},
 		{method: "POST", path: "/api/v1/tasks/backup", allowed: true},
 	} {
 		decision := authorizer.Authorize(context.Background(), AuthorizationRequest{Method: test.method, Path: test.path})

@@ -34,6 +34,7 @@ const columnResizeMode: ColumnResizeMode = 'onChange';
 type HyperColumnMeta<TData> = {
   align?: 'left' | 'center' | 'right';
   className?: string;
+  kind?: 'primary' | 'secondary' | 'number' | 'code' | 'status';
   title?: (row: TData) => string;
 };
 
@@ -166,7 +167,7 @@ export function HyperTable<TData>(props: HyperTableProps<TData>) {
                     return (
                       <div
                         key={cell.id}
-                        className={`hbdr-hyper-table-cell hbdr-hyper-table-body-cell hbdr-hyper-table-align-${meta?.align || 'left'} ${meta?.className || ''}`}
+                        className={`hbdr-hyper-table-cell hbdr-hyper-table-body-cell hbdr-hyper-table-cell-${meta?.kind || 'default'} hbdr-hyper-table-align-${meta?.align || 'left'} ${meta?.className || ''}`}
                         style={{ width: cell.column.getSize() }}
                         title={title}
                       >

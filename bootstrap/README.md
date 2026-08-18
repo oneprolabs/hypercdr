@@ -132,7 +132,7 @@ cd /data/hypercdr/bootstrap
 ./release-bootstrap.sh v20260714.5
 ```
 
-This creates an external portal source at `/data/hypercdr-runtime/bootstrap-portal-source`
+This creates an external portal source at `/data/hypercdr-runtime/services/bootstrap-portal/source`
 and uses `/data/hypercdr-runtime/build/bootstrap` for temporary files. The Bootstrap
 source directory is not modified. It does not start the portal or install the
 control plane.
@@ -141,8 +141,8 @@ Start or refresh the bootstrap portal:
 
 ```bash
 ./portal/install-bootstrap-portal.sh \
-  --source-dir /data/hypercdr-runtime/bootstrap-portal-source \
-  --data-dir /data/hypercdr-runtime/bootstrap-portal \
+  --source-dir /data/hypercdr-runtime/services/bootstrap-portal/source \
+  --data-dir /data/hypercdr-runtime/services/bootstrap-portal/data \
   --port 8080 \
   --execute
 ```

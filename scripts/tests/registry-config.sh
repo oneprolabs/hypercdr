@@ -9,8 +9,8 @@ load_registry_profile "${ROOT_DIR}/config/registries.conf"
 [[ "${HCDR_SELECTED_REGISTRY}" == "aliyun_acr" ]]
 [[ "${HCDR_IMAGE_REGISTRY}" == "crpi-tne0uo16mzanbvpi.cn-zhangjiakou.personal.cr.aliyuncs.com/hypercdr" ]]
 [[ "${HCDR_REGISTRY_TRUST}" == "system" ]]
-[[ "$(bash -c 'printf %s "$HCDR_POSTGRES_SOURCE_IMAGE"')" == "192.168.8.149:5001/hypercdr/postgres:16" ]]
-[[ "$(bash -c 'printf %s "$HCDR_VELERO_PLUGIN_SOURCE_REGISTRY"')" == "192.168.8.149:5001/hypercdr" ]]
+[[ "$(bash -c 'printf %s "$HCDR_POSTGRES_SOURCE_IMAGE"')" == "postgres:16" ]]
+[[ "$(bash -c 'printf %s "$HCDR_VELERO_PLUGIN_SOURCE_REGISTRY"')" == "docker.io/velero" ]]
 
 load_registry_profile "${ROOT_DIR}/config/registries.conf" harbor_149
 [[ "${HCDR_SELECTED_REGISTRY}" == "harbor_149" ]]

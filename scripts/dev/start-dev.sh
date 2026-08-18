@@ -100,23 +100,17 @@ dev_log "Running database migrations"
 dev_log "Preparing external frontend dependencies"
 rm -rf "${FRONTEND_DIR}"
 mkdir -p "${FRONTEND_DIR}"
-cp "${FRONTEND_SOURCE_DIR}/package.json" "${FRONTEND_DIR}/package.json"
-cp "${FRONTEND_SOURCE_DIR}/package-lock.json" "${FRONTEND_DIR}/package-lock.json"
+cp -a "${FRONTEND_SOURCE_DIR}/." "${FRONTEND_DIR}/"
 (
   cd "${FRONTEND_DIR}"
   npm ci --registry="${HCDR_BUILD_NPM_REGISTRY:-https://registry.npmmirror.com}" --cache="${NPM_CACHE}"
 )
 
-if [[ -e "${FRONTEND_SOURCE_DIR}/node_modules" && ! -L "${FRONTEND_SOURCE_DIR}/node_modules" ]]; then
-  dev_die "refusing to replace non-symlink ${FRONTEND_SOURCE_DIR}/node_modules"
-fi
-ln -sfn "${FRONTEND_DIR}/node_modules" "${FRONTEND_SOURCE_DIR}/node_modules"
-
-dev_log "Type-checking frontend source"
+dev_log "Type-checking external frontend workspace"
 (
-  cd "${FRONTEND_SOURCE_DIR}"
-  "${FRONTEND_DIR}/node_modules/.bin/tsc" --noEmit
-	"${FRONTEND_DIR}/node_modules/.bin/vite" build --outDir "${FRONTEND_DIR}/dist" --emptyOutDir
+  cd "${FRONTEND_DIR}"
+  ./node_modules/.bin/tsc --noEmit
+	./node_modules/.bin/vite build --outDir "${FRONTEND_DIR}/dist" --emptyOutDir
 )
 
 cat > "${HCDR_DEV_DIR}/run-api.sh" <<EOF
@@ -146,7 +140,7 @@ set -euo pipefail
 export HCDR_API_PROXY="http://127.0.0.1:${HCDR_DEV_API_PORT}"
 export HCDR_DEV_TLS_CERT_FILE="${HCDR_DEV_TLS_CERT_FILE}"
 export HCDR_DEV_TLS_KEY_FILE="${HCDR_DEV_TLS_KEY_FILE}"
-cd "${FRONTEND_SOURCE_DIR}"
+cd "${FRONTEND_DIR}"
 exec "${FRONTEND_DIR}/node_modules/.bin/vite" preview --outDir "${FRONTEND_DIR}/dist" --host 0.0.0.0 --port "${HCDR_DEV_FRONTEND_PORT}" >> "${LOG_DIR}/platform-frontend.log" 2>&1
 EOF
 chmod 700 "${HCDR_DEV_DIR}/run-api.sh" "${HCDR_DEV_DIR}/run-frontend.sh"

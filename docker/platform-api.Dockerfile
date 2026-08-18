@@ -12,6 +12,7 @@ WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN if [ -n "${NPM_REGISTRY}" ]; then npm ci --registry="${NPM_REGISTRY}"; else npm ci; fi
 COPY frontend/ ./
+ENV HCDR_FRONTEND_OUT_DIR=/src/frontend/dist
 RUN npm run build
 
 FROM ${GOLANG_IMAGE} AS backend-builder

@@ -33,12 +33,8 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Install dependencies
-        working-directory: frontend
-        run: npm ci
-      - name: Type-check and build
-        working-directory: frontend
-        run: npm run build
+      - name: Test, type-check, and build outside the source tree
+        run: ./scripts/build-frontend.sh
 
   repository:
     runs-on: ubuntu-latest
@@ -53,5 +49,5 @@ jobs:
       - name: Reject generated artifacts
         run: |
           test ! -e frontend/node_modules
-          test -z "$(git ls-files | grep -E '(^|/)\.playwright-cli/|(^|/)output/playwright/')"
+          test -z "$(git ls-files | grep -E '(^|/)(\.playwright-cli|output)/|^frontend/node_modules(\.before-[^/]*)?/')"
           test -z "$(git ls-files -- ':!third_party/**' '*.log' '*.pid' '*.key' '*.pem' '*.crt')"

@@ -8,11 +8,11 @@ export default function FailbackPage({ toast }: { toast: (msg: string) => void }
   const rows: Array<{ name: string; source: string; target: string; point: string; status: string }> = [];
   const failbackColumns: HyperTableColumn<typeof rows[number]>[] = [
     { id: 'select', header: '', cell: info => <input type="radio" checked={selectedApp === info.row.original.name} onClick={event => event.stopPropagation()} onChange={() => setSelectedApp(info.row.original.name)} />, size: 42, minSize: 42, maxSize: 54, enableSorting: false, enableResizing: false, meta: { align: 'center' } },
-    { id: 'name', header: 'Application', accessorFn: row => row.name, size: 270, minSize: 200, maxSize: 520, cell: info => <div><p className="text-sm font-black text-slate-900">{info.row.original.name}</p><p className="text-xs text-slate-400">Application-level DR runtime</p></div>, meta: { title: row => row.name } },
-    { id: 'source', header: 'Source', accessorFn: row => row.source, size: 190, minSize: 150, cell: info => <span className="text-xs font-semibold text-slate-500">{info.row.original.source}</span>, meta: { title: row => row.source } },
-    { id: 'target', header: 'Target', accessorFn: row => row.target, size: 210, minSize: 160, cell: info => <span className="text-xs font-semibold text-slate-500">{info.row.original.target}</span>, meta: { title: row => row.target } },
-    { id: 'point', header: 'Restore Point', accessorFn: row => row.point, size: 170, minSize: 140, cell: info => <span className="text-xs font-semibold text-slate-500">{info.row.original.point}</span>, meta: { title: row => row.point } },
-    { id: 'status', header: 'Status', accessorFn: row => row.status, size: 150, minSize: 120, cell: info => <span className="w-fit rounded-full border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] font-black text-blue-700">{info.row.original.status}</span>, meta: { title: row => row.status } },
+    { id: 'name', header: 'Application', accessorFn: row => row.name, size: 270, minSize: 200, maxSize: 520, cell: info => <div><p>{info.row.original.name}</p><p className="text-xs font-normal text-slate-400">Application-level DR runtime</p></div>, meta: { kind: 'primary', title: row => row.name } },
+    { id: 'source', header: 'Source', accessorFn: row => row.source, size: 190, minSize: 150, cell: info => <span>{info.row.original.source}</span>, meta: { kind: 'secondary', title: row => row.source } },
+    { id: 'target', header: 'Target', accessorFn: row => row.target, size: 210, minSize: 160, cell: info => <span>{info.row.original.target}</span>, meta: { kind: 'secondary', title: row => row.target } },
+    { id: 'point', header: 'Restore Point', accessorFn: row => row.point, size: 170, minSize: 140, cell: info => <span>{info.row.original.point}</span>, meta: { kind: 'secondary', title: row => row.point } },
+    { id: 'status', header: 'Status', accessorFn: row => row.status, size: 150, minSize: 120, cell: info => <span className="w-fit rounded-full border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] font-medium text-blue-700">{info.row.original.status}</span>, meta: { kind: 'status', title: row => row.status } },
   ];
 
   return (

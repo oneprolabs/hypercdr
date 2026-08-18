@@ -15,13 +15,14 @@
 - `architecture/`: System boundaries and component responsibilities.
 - `decisions/`: Architecture Decision Records (ADRs).
 - `deployment/`: Installation, release, upgrade, and rollback procedures.
-- `development/`: Historical context and environment-specific engineering notes.
+- `development/`: Maintained developer workflows and component build guidance.
 - `operations/`: Logging, diagnostics, and operational practices.
 - `protocols/`: REST/WebSocket contracts, messages, and task state machines.
-- `testing/`: Acceptance and regression-test procedures.
+- `testing/`: Maintained regression-test procedures.
 - `database/`: Schema, migrations, and persistence rules.
 - `agent/`: Cluster agent implementation and installation design.
 
-Environment-specific notes must stay under `development/`; they are not product
-installation documentation. Protocol and schema changes must update the related
-document and automated tests in the same pull request.
+Host-specific notes, test evidence, handoff records, and generated reports do
+not belong in this repository. Store them under `hypercdr-runtime`. Protocol and
+schema changes must update the related document and automated tests in the same
+pull request.

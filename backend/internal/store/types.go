@@ -57,6 +57,8 @@ type Store interface {
 	UpdateUser(input UserUpdateInput) (User, bool, error)
 	DeleteUser(id string) (bool, error)
 	SetUserPassword(id string, password string, mustChangePassword bool) (User, bool, error)
+	GetAdminRecoveryEmail(userID string) (string, bool, error)
+	SetAdminRecoveryEmail(userID, email string) (string, bool, error)
 	CreatePlatformSession(userID string, ttl time.Duration) (PlatformSession, error)
 	AuthenticatePlatformSession(token string) (User, bool, error)
 	DeletePlatformSession(token string) error
@@ -323,6 +325,7 @@ type User struct {
 	TimeZone           string `json:"timeZone,omitempty"`
 	SystemAdmin        bool   `json:"systemAdmin,omitempty"`
 	MustChangePassword bool   `json:"mustChangePassword"`
+	RecoveryEmail      string `json:"recoveryEmail,omitempty"`
 }
 
 type UserUpdateInput struct {

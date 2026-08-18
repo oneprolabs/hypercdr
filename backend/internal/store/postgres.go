@@ -661,6 +661,24 @@ func (s *PostgresStore) SetUserPassword(id, password string, mustChangePassword 
 	return s.GetUser(id)
 }
 
+func (s *PostgresStore) GetAdminRecoveryEmail(userID string) (string, bool, error) {
+	var email string
+	err := s.db.QueryRow(`select email from admin_recovery_email where user_id=$1`, userID).Scan(&email)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return email, err == nil, err
+}
+func (s *PostgresStore) SetAdminRecoveryEmail(userID, email string) (string, bool, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	result, err := s.db.Exec(`insert into admin_recovery_email(user_id,email) select id,$2 from users where id=$1 and is_system_admin on conflict(user_id) do update set email=excluded.email,verified_at=now(),updated_at=now()`, userID, email)
+	if err != nil {
+		return "", false, err
+	}
+	n, _ := result.RowsAffected()
+	return email, n == 1, nil
+}
+
 func (s *PostgresStore) CreatePlatformSession(userID string, ttl time.Duration) (PlatformSession, error) {
 	token := "hcs_" + newID() + newID()
 	expires := time.Now().UTC().Add(ttl)
@@ -689,7 +707,7 @@ func (s *PostgresStore) DeletePlatformSession(token string) error {
 func (s *PostgresStore) CreatePasswordResetToken(email string, ttl time.Duration) (string, bool, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	token := "hpr_" + newID() + newID()
-	result, err := s.db.Exec(`insert into password_reset_tokens (id,user_id,token_hash,expires_at) select $1,u.id,$2,$3 from users u join resource_scopes t on t.id=u.tenant_id where lower(u.email)=$4 and u.status='active' and not u.is_system_admin and t.status='active'`, newID(), resetTokenDigest(token), time.Now().UTC().Add(ttl), email)
+	result, err := s.db.Exec(`insert into password_reset_tokens (id,user_id,token_hash,expires_at) select $1,u.id,$2,$3 from users u join resource_scopes t on t.id=u.tenant_id left join admin_recovery_email recovery on recovery.user_id=u.id where (lower(u.email)=$4 and not u.is_system_admin or lower(recovery.email)=$4 and u.is_system_admin) and u.status='active' and (u.is_system_admin or t.status='active')`, newID(), resetTokenDigest(token), time.Now().UTC().Add(ttl), email)
 	if err != nil {
 		return "", false, err
 	}

@@ -26,21 +26,21 @@ test-agent:
 	cd agent/comm-agent && go test ./...
 
 test-frontend:
-	cd frontend && npm run test:topology
-	cd frontend && npm run build
+	./scripts/build-frontend.sh
 
 test-bootstrap:
 	bash bootstrap/tests/registry-ca-flow.sh
 	bash scripts/tests/registry-config.sh
 
 build-frontend:
-	cd frontend && npm run build
+	./scripts/build-frontend.sh
 
 fmt:
 	cd backend && gofmt -w $$(find . -name '*.go' -type f)
 	cd agent/comm-agent && gofmt -w $$(find . -name '*.go' -type f)
 
 verify: test
+	bash scripts/tests/repository-hygiene.sh
 	git diff --check -- . ':!third_party/velero'
 	test "$$(cat third_party/velero/UPSTREAM_BASELINE)" = "c253c7fe37d78c9b7e55c68544f7c5b2608712d8"
 	bash -n third_party/velero/deployments/build-velero-image.sh third_party/velero/hack/build-restic.sh

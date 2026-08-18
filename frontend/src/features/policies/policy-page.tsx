@@ -163,7 +163,7 @@ export default function PolicyPage({ policies, setPolicies }: { policies: Policy
             </div>
           );
         },
-        meta: { title: policy => `${policy.name} (${policy.id})` },
+        meta: { kind: 'primary', title: policy => `${policy.name} (${policy.id})` },
       },
     ];
     const addColumn = (column: HyperTableColumn<PolicyItem>) => {
@@ -176,7 +176,7 @@ export default function PolicyPage({ policies, setPolicies }: { policies: Policy
       size: 190,
       minSize: 170,
       cell: info => <span className="hbdr-dr-policy">{formatPolicyComposition(info.row.original.composition)}</span>,
-      meta: { title: policy => formatPolicyComposition(policy.composition) },
+      meta: { kind: 'secondary', title: policy => formatPolicyComposition(policy.composition) },
     });
     addColumn({
       id: 'schedule',
@@ -186,7 +186,7 @@ export default function PolicyPage({ policies, setPolicies }: { policies: Policy
       minSize: 160,
       maxSize: 360,
       cell: info => formatPolicySchedule(info.row.original),
-      meta: { title: policy => formatPolicySchedule(policy) },
+      meta: { kind: 'secondary', title: policy => formatPolicySchedule(policy) },
     });
     addColumn({
       id: 'retention',
@@ -195,7 +195,7 @@ export default function PolicyPage({ policies, setPolicies }: { policies: Policy
       size: 150,
       minSize: 130,
       cell: info => formatPolicyRetention(info.row.original),
-      meta: { title: policy => formatPolicyRetention(policy) },
+      meta: { kind: 'number', title: policy => formatPolicyRetention(policy) },
     });
     addColumn({
       id: 'bound',
@@ -204,7 +204,7 @@ export default function PolicyPage({ policies, setPolicies }: { policies: Policy
       size: 138,
       minSize: 120,
       cell: info => `${info.row.original.bound} applications`,
-      meta: { title: policy => `${policy.bound} applications` },
+      meta: { kind: 'number', title: policy => `${policy.bound} applications` },
     });
     addColumn({
       id: 'status',
@@ -213,7 +213,7 @@ export default function PolicyPage({ policies, setPolicies }: { policies: Policy
       size: 116,
       minSize: 100,
       cell: info => <span className={info.row.original.status === 'Active' ? 'hbdr-dr-task-ok' : 'hbdr-dr-task-warn'}>{info.row.original.status === 'Active' ? 'ACTIVE' : 'DISABLED'}</span>,
-      meta: { title: policy => policy.status },
+      meta: { kind: 'status', title: policy => policy.status },
     });
     return columns;
   }, [allVisiblePoliciesSelected, selectedPolicyIds, visibleColumns]);

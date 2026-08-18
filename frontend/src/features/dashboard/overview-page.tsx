@@ -10,6 +10,7 @@ type ApiRestorePointView={id:string;sourceClusterId:string;status:string;time?:s
 type ApiPolicy={id:string;scheduleType:string;intervalValue?:number;intervalUnit?:string;boundCount:number};
 type ApiProtectionPlan={id:string;appId?:string;appIds?:string[];policyId?:string};
 type ApiApplication={id:string;clusterId:string;namespace:string};
+type ProductInfo={product?:string;edition?:string;license?:{mode?:string;status?:string;detail?:string}};
 const isActiveTaskStatus=(status?:string)=>['queued','dispatched','accepted','running','canceling'].includes(status||'');
 const isSucceededStatus=(status?:string)=>status==='succeeded'||status==='completed';
 const isFailedStatus=(status?:string)=>['failed','canceled','cancelled','error','timeout','timed_out'].includes(status||'');
@@ -35,11 +36,12 @@ export function OverviewPage(props: {
   protectionPlans: ApiProtectionPlan[];
   applications: ApiApplication[];
   defaultClusterId: string | null;
+  productInfo: ProductInfo | null;
   openDr: () => void;
   openOperations: () => void;
   clusterContext: React.ReactNode;
 }) {
-  const { cluster, clusters, storage, protectedApps, restorePointCount, tasks, restorePoints, policies, protectionPlans, applications, defaultClusterId, openDr, openOperations, clusterContext } = props;
+  const { cluster, clusters, storage, protectedApps, restorePointCount, tasks, restorePoints, policies, protectionPlans, applications, defaultClusterId, productInfo, openDr, openOperations, clusterContext } = props;
   const clusterApps = cluster?.apps ?? [];
   const clusterTasks = cluster ? tasks.filter(task => task.clusterId === cluster.id) : [];
   const clusterRestorePoints = cluster ? restorePoints.filter(point => point.sourceClusterId === cluster.id && point.status === 'available') : [];
@@ -241,7 +243,7 @@ export function OverviewPage(props: {
           <DashboardLegend color="green" label="In Use" value={policiesInUse} />
           <DashboardLegend color="gray" label="Available" value={policiesAvailable} />
         </DashboardPanel>
-        <PlatformLicenseCard />
+        <PlatformLicenseCard productInfo={productInfo} />
         <DashboardPanel className="hbdr-platform-card-wide hbdr-platform-clusters-card" title="Registered Clusters">
           <div className="hbdr-dashboard-big-number">
             <strong>{registeredClusters}</strong>
@@ -361,7 +363,15 @@ export function DashboardPanel({
   );
 }
 
-export function PlatformLicenseCard() {
+export function PlatformLicenseCard({ productInfo }: { productInfo: ProductInfo | null }) {
+  const license = productInfo?.license;
+  const status = license?.status
+    ? license.status.replace(/-/g, ' ').replace(/\b\w/g, character => character.toUpperCase())
+    : 'No license data available';
+  const metadata = [productInfo?.edition, license?.mode]
+    .filter(Boolean)
+    .map(value => value!.replace(/-/g, ' '))
+    .join(' · ');
   return (
     <section className="hbdr-dashboard-card hbdr-platform-card-wide hbdr-platform-license-card">
       <header>
@@ -373,8 +383,8 @@ export function PlatformLicenseCard() {
       <div className="hbdr-platform-wide-body">
         <div className="hbdr-dashboard-empty-list hbdr-dashboard-license-empty">
           <Lock size={22} />
-          <p>No license data available</p>
-          <small>License metrics will appear after the platform license API is connected.</small>
+          <p>{status}</p>
+          <small>{license?.detail || metadata || 'License metrics will appear after the platform license API is connected.'}</small>
         </div>
       </div>
     </section>

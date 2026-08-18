@@ -40,7 +40,7 @@ docs/                     架构、协议、部署和运维资料
 依赖 Go 1.24、Node.js 22、Docker Compose v2、PostgreSQL 16 和 OpenSSL。
 
 ```bash
-cp scripts/dev/dev.conf.example ../hypercdr-runtime/dev/dev.conf
+cp scripts/dev/dev.conf.example ../hypercdr-runtime/environments/community/dev.conf
 ./scripts/dev/start-dev.sh
 ./scripts/dev/status-dev.sh
 ./scripts/dev/stop-dev.sh

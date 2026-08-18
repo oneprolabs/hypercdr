@@ -233,7 +233,7 @@ export default function StoragePage({ storage, clusters, onStorageCreated }: { s
       size: 150,
       minSize: 120,
       cell: info => <span className="hbdr-dr-storage">{info.row.original.type || 'N/A'}</span>,
-      meta: { title: repo => repo.type || 'N/A' },
+      meta: { kind: 'status', title: repo => repo.type || 'N/A' },
     });
     addColumn({
       id: 'bucket',
@@ -242,7 +242,7 @@ export default function StoragePage({ storage, clusters, onStorageCreated }: { s
       size: 180,
       minSize: 140,
       cell: info => info.row.original.bucket || <span className="hbdr-dr-na">N/A</span>,
-      meta: { title: repo => repo.bucket || 'N/A' },
+      meta: { kind: 'secondary', title: repo => repo.bucket || 'N/A' },
     });
     addColumn({
       id: 'region',
@@ -251,7 +251,7 @@ export default function StoragePage({ storage, clusters, onStorageCreated }: { s
       size: 130,
       minSize: 110,
       cell: info => info.row.original.region || <span className="hbdr-dr-na">N/A</span>,
-      meta: { title: repo => repo.region || 'N/A' },
+      meta: { kind: 'secondary', title: repo => repo.region || 'N/A' },
     });
     addColumn({
       id: 'endpoint',
@@ -261,7 +261,7 @@ export default function StoragePage({ storage, clusters, onStorageCreated }: { s
       minSize: 180,
       maxSize: 520,
       cell: info => info.row.original.endpoint || <span className="hbdr-dr-na">N/A</span>,
-      meta: { title: repo => repo.endpoint || 'N/A' },
+      meta: { kind: 'secondary', title: repo => repo.endpoint || 'N/A' },
     });
     addColumn({
       id: 'tls',
@@ -272,7 +272,7 @@ export default function StoragePage({ storage, clusters, onStorageCreated }: { s
       cell: info => info.row.original.useTls
         ? <span className="hbdr-dr-ssl hbdr-dr-ssl-on"><Lock size={11} />SSL</span>
         : <span className="hbdr-dr-ssl hbdr-dr-ssl-off">Off</span>,
-      meta: { title: repo => repo.useTls ? 'SSL enabled' : 'SSL disabled' },
+      meta: { kind: 'status', title: repo => repo.useTls ? 'SSL enabled' : 'SSL disabled' },
     });
     addColumn({
       id: 'urlStyle',
@@ -281,7 +281,7 @@ export default function StoragePage({ storage, clusters, onStorageCreated }: { s
       size: 126,
       minSize: 110,
       cell: info => <span className="hbdr-dr-url-style">{info.row.original.urlStyle === 'virtual' ? 'Virtual-host' : 'Path'}</span>,
-      meta: { title: repo => repo.urlStyle === 'virtual' ? 'Virtual-host' : 'Path' },
+      meta: { kind: 'status', title: repo => repo.urlStyle === 'virtual' ? 'Virtual-host' : 'Path' },
     });
     addColumn({
       id: 'status',
@@ -301,7 +301,7 @@ export default function StoragePage({ storage, clusters, onStorageCreated }: { s
           </span>
         );
       },
-      meta: { title: repo => repo.status || 'unknown' },
+      meta: { kind: 'status', title: repo => repo.status || 'unknown' },
     });
     addColumn({
       id: 'lastValidatedAt',
@@ -315,7 +315,7 @@ export default function StoragePage({ storage, clusters, onStorageCreated }: { s
           {info.row.original.lastValidatedAt ? formatDateTime(info.row.original.lastValidatedAt) : <span className="hbdr-dr-na">Never</span>}
         </span>
       ),
-      meta: { title: repo => repo.lastValidatedAt ? formatDateTime(repo.lastValidatedAt) : 'Never' },
+      meta: { kind: 'secondary', title: repo => repo.lastValidatedAt ? formatDateTime(repo.lastValidatedAt) : 'Never' },
     });
     return columns;
   }, [allVisibleReposSelected, selectedRepoIds, visibleColumns]);

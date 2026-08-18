@@ -31,7 +31,9 @@ bin/
 
 # Frontend dependencies and build output
 node_modules/
+node_modules.before-*/
 frontend/node_modules/
+frontend/node_modules.before-*/
 frontend/dist/
 frontend/visual-diffs/
 frontend/test-results/

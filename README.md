@@ -86,8 +86,10 @@ Generated binaries, frontend assets, release packages, logs, certificates, datab
 ../hypercdr-runtime/
 ├── build/                     # Versioned build workspaces
 ├── cache/                     # Reusable compiler and package caches
-├── dev/                       # Development configuration, data, and logs
-└── bootstrap-portal-source/   # Generated installer portal and release artifacts
+├── environments/             # Isolated Community and Enterprise development state
+├── shared/                    # Shared development certificates and local configuration
+├── services/                 # Bootstrap portal source and runtime data
+└── codex/                    # Codex context and generated validation evidence
 ```
 
 ## Quick Start
@@ -112,8 +114,8 @@ The pinned Velero source is committed under `third_party/velero`; no Git submodu
 ### 2. Start the development environment
 
 ```bash
-mkdir -p ../hypercdr-runtime/dev
-cp scripts/dev/dev.conf.example ../hypercdr-runtime/dev/dev.conf
+mkdir -p ../hypercdr-runtime/environments/community
+cp scripts/dev/dev.conf.example ../hypercdr-runtime/environments/community/dev.conf
 ./scripts/dev/start-dev.sh
 ```
 
@@ -124,7 +126,7 @@ Check or stop the environment:
 ./scripts/dev/stop-dev.sh
 ```
 
-Development runtime data remains under `../hypercdr-runtime/dev` when services are stopped.
+Development runtime data remains under `../hypercdr-runtime/environments/community` when services are stopped.
 
 ### 3. Run checks
 

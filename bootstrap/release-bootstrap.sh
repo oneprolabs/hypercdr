@@ -7,7 +7,7 @@ RUNTIME_ROOT="${HCDR_RUNTIME_ROOT:-$(cd "${ROOT_DIR}/.." && pwd)/hypercdr-runtim
 SITE_SOURCE_DIR="${SCRIPT_DIR}/site"
 VERSION="${1:-}"
 BUILD_ROOT="${HCDR_BOOTSTRAP_BUILD_ROOT:-${RUNTIME_ROOT}/build/bootstrap}"
-PUBLISH_DIR="${HCDR_BOOTSTRAP_PUBLISH_DIR:-${RUNTIME_ROOT}/bootstrap-portal-source}"
+PUBLISH_DIR="${HCDR_BOOTSTRAP_PUBLISH_DIR:-${RUNTIME_ROOT}/services/bootstrap-portal/source}"
 WORK_DIR="${BUILD_ROOT}/${VERSION:-unknown}"
 RELEASE_DIR="${PUBLISH_DIR}/releases/dev"
 
@@ -20,7 +20,7 @@ Usage:
 
 Environment:
   HCDR_BOOTSTRAP_BUILD_ROOT   External work root, default /data/hypercdr-runtime/build/bootstrap.
-  HCDR_BOOTSTRAP_PUBLISH_DIR  External portal source, default /data/hypercdr-runtime/bootstrap-portal-source.
+  HCDR_BOOTSTRAP_PUBLISH_DIR  External portal source, default /data/hypercdr-runtime/services/bootstrap-portal/source.
 
 The source directory is not modified. The script updates version references in
 the external package and portal copy only. It does not start the portal or

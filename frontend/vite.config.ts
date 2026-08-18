@@ -14,6 +14,8 @@ const proxyTarget = {
 
 const tlsCert = process.env.HCDR_DEV_TLS_CERT_FILE;
 const tlsKey = process.env.HCDR_DEV_TLS_KEY_FILE;
+const outDir = process.env.HCDR_FRONTEND_OUT_DIR
+  ?? path.resolve(__dirname, "../../hypercdr-runtime/build/community/frontend");
 const https = tlsCert && tlsKey
   ? { cert: fs.readFileSync(tlsCert), key: fs.readFileSync(tlsKey) }
   : undefined;
@@ -21,6 +23,8 @@ const https = tlsCert && tlsKey
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   build: {
+    outDir,
+    emptyOutDir: true,
     rollupOptions: {
       output: {
         manualChunks(id) {

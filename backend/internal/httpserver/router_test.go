@@ -77,6 +77,26 @@ func TestAgentCredentialReconnect(t *testing.T) {
 	}
 }
 
+func TestRegistryTagsTreatsMissingRepositoryAsEmpty(t *testing.T) {
+	registry := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/v2/hypercdr/platform-api/tags/list" {
+			t.Fatalf("unexpected registry path %q", req.URL.Path)
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"errors":[{"code":"NAME_UNKNOWN"}]}`))
+	}))
+	defer registry.Close()
+
+	host := strings.TrimPrefix(registry.URL, "https://")
+	gotRegistry, repository, tags, err := (&Router{}).registryTags(context.Background(), host+"/hypercdr/platform-api:latest")
+	if err != nil {
+		t.Fatalf("missing repository returned an error: %v", err)
+	}
+	if gotRegistry != host || repository != "hypercdr/platform-api" || len(tags) != 0 {
+		t.Fatalf("registry=%q repository=%q tags=%v", gotRegistry, repository, tags)
+	}
+}
+
 func TestValidReleaseToken(t *testing.T) {
 	for _, test := range []struct {
 		name, expected, provided string

@@ -12,7 +12,7 @@ Serve the repository bootstrap portal:
 
 ```bash
 /data/hypercdr-main/bootstrap/deploy-bootstrap.sh \
-  --source-dir /data/hypercdr-runtime/bootstrap-portal-source \
+  --source-dir /data/hypercdr-runtime/services/bootstrap-portal/source \
   --execute
 ```
 

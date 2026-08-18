@@ -1596,7 +1596,35 @@ body {
 .premium-app .hbdr-hyper-table-body-cell {
   color: #334155;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.premium-app .hbdr-hyper-table-cell-primary {
+  color: #0f172a;
+  font-weight: 500;
+}
+
+.premium-app .hbdr-hyper-table-cell-secondary {
+  color: #64748b;
+  font-weight: 400;
+}
+
+.premium-app .hbdr-hyper-table-cell-number {
+  color: #475569;
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+}
+
+.premium-app .hbdr-hyper-table-cell-code {
+  color: #475569;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.premium-app .hbdr-hyper-table-cell-status {
+  font-weight: 500;
 }
 
 .premium-app .hbdr-hyper-table-body-cell > * {
@@ -6904,6 +6932,8 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 }
 
 .hbdr-dr-action-group {
+  position: relative;
+  z-index: 60;
   display: flex;
   align-items: center;
   min-width: max-content;

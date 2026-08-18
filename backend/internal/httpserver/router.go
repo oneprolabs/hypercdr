@@ -511,6 +511,12 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("POST /api/v1/clusters/{id}/logs/search", r.tenantGuard("cluster-log", r.searchClusterLogs))
 	r.mux.HandleFunc("PATCH /api/v1/auth/me", r.updateCurrentUser)
 	r.mux.HandleFunc("POST /api/v1/auth/change-password", r.changeOwnPassword)
+	if r.productInfo.Edition == "community" {
+		r.mux.HandleFunc("GET /api/v1/users", r.listCommunityUsers)
+		r.mux.HandleFunc("PATCH /api/v1/users/{id}", r.updateCommunityAdmin)
+		r.mux.HandleFunc("POST /api/v1/users/{id}/password", r.resetCommunityAdminPassword)
+		r.mux.HandleFunc("PATCH /api/v1/users/{id}/recovery-email", r.updateCommunityAdminRecoveryEmail)
+	}
 	r.mux.HandleFunc("GET /api/v1/email-settings", r.getEmailSettings)
 	r.mux.HandleFunc("PUT /api/v1/email-settings", r.updateEmailSettings)
 	r.mux.HandleFunc("POST /api/v1/email-settings/test", r.testEmailSettings)
@@ -581,6 +587,88 @@ func (r *Router) routes() {
 	if strings.TrimSpace(r.cfg.FrontendDir) != "" {
 		r.mux.HandleFunc("GET /", r.frontend)
 	}
+}
+
+func (r *Router) listCommunityUsers(w http.ResponseWriter, req *http.Request) {
+	items, err := r.store.ListUsers()
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "list_users_failed"})
+		return
+	}
+	admin := []store.User{}
+	for _, item := range items {
+		if item.SystemAdmin {
+			item.Role = "System Administrator"
+			item.RecoveryEmail, _, _ = r.store.GetAdminRecoveryEmail(item.ID)
+			admin = append(admin, item)
+			break
+		}
+	}
+	writeJSON(w, 200, map[string]any{"items": admin})
+}
+
+func (r *Router) updateCommunityAdminRecoveryEmail(w http.ResponseWriter, req *http.Request) {
+	actor, ok := requestUser(req)
+	if !ok || !actor.SystemAdmin || actor.ID != req.PathValue("id") {
+		writeJSON(w, 404, map[string]any{"error": "user_not_found"})
+		return
+	}
+	var body struct {
+		Email string `json:"email"`
+	}
+	if decodeJSON(req, &body) != nil || !validUserEmail(body.Email) {
+		writeJSON(w, 400, map[string]any{"error": "email_invalid"})
+		return
+	}
+	email, found, err := r.store.SetAdminRecoveryEmail(actor.ID, body.Email)
+	if err != nil || !found {
+		writeJSON(w, 500, map[string]any{"error": "recovery_email_update_failed"})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"recoveryEmail": email, "verified": true})
+}
+
+func (r *Router) updateCommunityAdmin(w http.ResponseWriter, req *http.Request) {
+	actor, ok := requestUser(req)
+	if !ok || !actor.SystemAdmin || actor.ID != req.PathValue("id") {
+		writeJSON(w, 404, map[string]any{"error": "user_not_found"})
+		return
+	}
+	var body struct {
+		DisplayName string `json:"displayName"`
+	}
+	if decodeJSON(req, &body) != nil {
+		writeJSON(w, 400, map[string]any{"error": "invalid_json"})
+		return
+	}
+	item, found, err := r.store.UpdateUser(store.UserUpdateInput{ID: actor.ID, TenantID: actor.TenantID, Email: actor.Email, DisplayName: body.DisplayName, Role: "admin", Status: "active", TimeZone: actor.TimeZone})
+	if err != nil || !found {
+		writeJSON(w, 500, map[string]any{"error": "update_user_failed"})
+		return
+	}
+	item.Role = "System Administrator"
+	writeJSON(w, 200, item)
+}
+
+func (r *Router) resetCommunityAdminPassword(w http.ResponseWriter, req *http.Request) {
+	actor, ok := requestUser(req)
+	if !ok || !actor.SystemAdmin || actor.ID != req.PathValue("id") {
+		writeJSON(w, 404, map[string]any{"error": "user_not_found"})
+		return
+	}
+	var body struct {
+		Password string `json:"password"`
+	}
+	if decodeJSON(req, &body) != nil || !validUserPassword(body.Password) {
+		writeJSON(w, 400, map[string]any{"error": "password_invalid"})
+		return
+	}
+	_, found, err := r.store.SetUserPassword(actor.ID, body.Password, false)
+	if err != nil || !found {
+		writeJSON(w, 500, map[string]any{"error": "password_update_failed"})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"updated": true})
 }
 
 type auditResponseWriter struct {
@@ -800,6 +888,13 @@ func (r *Router) registryTags(ctx context.Context, image string) (string, string
 		return "", "", nil, err
 	}
 	defer tagsResp.Body.Close()
+	// A newly installed registry legitimately has no platform repository yet.
+	// Treat Docker Distribution's NAME_UNKNOWN response as an empty discovery
+	// result; transport, authentication, and other registry failures remain
+	// errors so the UI does not hide an unavailable release source.
+	if tagsResp.StatusCode == http.StatusNotFound {
+		return registry, repository, []string{}, nil
+	}
 	var result struct {
 		Name string   `json:"name"`
 		Tags []string `json:"tags"`
@@ -6001,13 +6096,23 @@ func (r *Router) listTasks(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_tasks_failed"})
 		return
 	}
+	typeFilter := map[string]struct{}{}
+	for _, taskType := range strings.Split(req.URL.Query().Get("types"), ",") {
+		if taskType = strings.TrimSpace(taskType); taskType != "" {
+			typeFilter[taskType] = struct{}{}
+		}
+	}
 	visible := items[:0]
 	for _, item := range items {
-		if tenantVisible(req, item.TenantID) {
+		_, typeAllowed := typeFilter[item.Type]
+		if tenantVisible(req, item.TenantID) && (len(typeFilter) == 0 || typeAllowed) {
 			visible = append(visible, item)
 		}
 	}
 	items = visible
+	if limit, parseErr := strconv.Atoi(req.URL.Query().Get("limit")); parseErr == nil && limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
 	items = r.enrichCleanupTaskRestorePointTimes(items)
 	writeJSON(w, http.StatusOK, map[string]any{"items": nonNilSlice(items)})
 }

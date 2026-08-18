@@ -30,6 +30,7 @@ const copyTextToClipboard=async(text:string,textarea?:HTMLTextAreaElement|null)=
 
 export default function ClusterPage(props: {
   clusters: Cluster[];
+  loading: boolean;
   protectionPlans: ApiProtectionPlan[];
   canUpgrade: boolean;
   defaultClusterId: string | null;
@@ -50,7 +51,7 @@ export default function ClusterPage(props: {
   openDashboard: () => void;
   toast: (msg: string) => void;
 }) {
-  const { clusters, protectionPlans, canUpgrade, defaultClusterId, clusterMenuId, setClusterMenuId, setSelectedCluster, setDefaultCluster, clearDefaultCluster, unregisterCluster, onRenameCluster, onUpgradeCluster, onUpgradeVelero, onRegisterCluster, onRefreshRegistration, clusterTaskLogs, getAgentTokenForRegistration, prefetchAgentToken, openDashboard, toast } = props;
+  const { clusters, loading, protectionPlans, canUpgrade, defaultClusterId, clusterMenuId, setClusterMenuId, setSelectedCluster, setDefaultCluster, clearDefaultCluster, unregisterCluster, onRenameCluster, onUpgradeCluster, onUpgradeVelero, onRegisterCluster, onRefreshRegistration, clusterTaskLogs, getAgentTokenForRegistration, prefetchAgentToken, openDashboard, toast } = props;
   const [registerOpen, setRegisterOpen] = useState(false);
   const [registerStep, setRegisterStep] = useState<1 | 2 | 3>(1);
   const [copied, setCopied] = useState(false);
@@ -129,7 +130,7 @@ export default function ClusterPage(props: {
       minSize: 150,
       maxSize: 560,
       cell: info => <span className="hbdr-hyper-table-text">{String(info.getValue() || '-')}</span>,
-      meta: { title: row => row.name },
+      meta: { kind: 'primary', title: row => row.name },
     },
     {
       accessorKey: 'status',
@@ -138,7 +139,7 @@ export default function ClusterPage(props: {
       minSize: 92,
       maxSize: 220,
       cell: info => <span className="hbdr-cluster-status-pill">{String(info.getValue() || '-')}</span>,
-      meta: { title: row => row.status },
+      meta: { kind: 'status', title: row => row.status },
     },
     {
       accessorKey: 'age',
@@ -147,7 +148,7 @@ export default function ClusterPage(props: {
       minSize: 64,
       maxSize: 160,
       cell: info => <span className="hbdr-hyper-table-text">{String(info.getValue() || '-')}</span>,
-      meta: { title: row => row.age },
+      meta: { kind: 'secondary', title: row => row.age },
     },
   ], []);
   const nodeColumns = useMemo<HyperTableColumn<ClusterNodeRow>[]>(() => [
@@ -158,7 +159,7 @@ export default function ClusterPage(props: {
       minSize: 150,
       maxSize: 520,
       cell: info => <span className="hbdr-hyper-table-text">{String(info.getValue() || '-')}</span>,
-      meta: { title: row => row.name },
+      meta: { kind: 'primary', title: row => row.name },
     },
     {
       accessorKey: 'status',
@@ -167,7 +168,7 @@ export default function ClusterPage(props: {
       minSize: 92,
       maxSize: 180,
       cell: info => <span className="hbdr-cluster-status-pill">{String(info.getValue() || '-')}</span>,
-      meta: { title: row => row.status },
+      meta: { kind: 'status', title: row => row.status },
     },
     {
       accessorKey: 'roles',
@@ -176,7 +177,7 @@ export default function ClusterPage(props: {
       minSize: 110,
       maxSize: 320,
       cell: info => <span className="hbdr-hyper-table-text">{String(info.getValue() || '-')}</span>,
-      meta: { title: row => row.roles },
+      meta: { kind: 'secondary', title: row => row.roles },
     },
     {
       accessorKey: 'age',
@@ -185,7 +186,7 @@ export default function ClusterPage(props: {
       minSize: 64,
       maxSize: 160,
       cell: info => <span className="hbdr-hyper-table-text">{String(info.getValue() || '-')}</span>,
-      meta: { title: row => row.age },
+      meta: { kind: 'secondary', title: row => row.age },
     },
     {
       accessorKey: 'version',
@@ -194,7 +195,7 @@ export default function ClusterPage(props: {
       minSize: 108,
       maxSize: 220,
       cell: info => <span className="hbdr-hyper-table-text">{String(info.getValue() || '-')}</span>,
-      meta: { title: row => row.version },
+      meta: { kind: 'secondary', title: row => row.version },
     },
   ], []);
   const storageClassColumns = useMemo<HyperTableColumn<ClusterStorageClassRow>[]>(() => [
@@ -205,7 +206,7 @@ export default function ClusterPage(props: {
       minSize: 150,
       maxSize: 420,
       cell: info => <span className="hbdr-hyper-table-text">{String(info.getValue() || '-')}</span>,
-      meta: { title: row => row.name },
+      meta: { kind: 'primary', title: row => row.name },
     },
     {
       accessorKey: 'provisioner',
@@ -214,7 +215,7 @@ export default function ClusterPage(props: {
       minSize: 160,
       maxSize: 460,
       cell: info => <span className="hbdr-hyper-table-text">{String(info.getValue() || '-')}</span>,
-      meta: { title: row => row.provisioner },
+      meta: { kind: 'code', title: row => row.provisioner },
     },
     {
       accessorKey: 'reclaimPolicy',
@@ -223,7 +224,7 @@ export default function ClusterPage(props: {
       minSize: 112,
       maxSize: 220,
       cell: info => <span className="hbdr-hyper-table-text">{String(info.getValue() || '-')}</span>,
-      meta: { title: row => row.reclaimPolicy },
+      meta: { kind: 'secondary', title: row => row.reclaimPolicy },
     },
     {
       accessorKey: 'volumeBindingMode',
@@ -232,7 +233,7 @@ export default function ClusterPage(props: {
       minSize: 150,
       maxSize: 320,
       cell: info => <span className="hbdr-hyper-table-text">{String(info.getValue() || '-')}</span>,
-      meta: { title: row => row.volumeBindingMode },
+      meta: { kind: 'secondary', title: row => row.volumeBindingMode },
     },
     {
       accessorKey: 'allowVolumeExpansion',
@@ -241,7 +242,7 @@ export default function ClusterPage(props: {
       minSize: 150,
       maxSize: 320,
       cell: info => <span className="hbdr-hyper-table-text">{String(info.getValue() || '-')}</span>,
-      meta: { title: row => row.allowVolumeExpansion },
+      meta: { kind: 'secondary', title: row => row.allowVolumeExpansion },
     },
     {
       accessorKey: 'age',
@@ -250,7 +251,7 @@ export default function ClusterPage(props: {
       minSize: 64,
       maxSize: 160,
       cell: info => <span className="hbdr-hyper-table-text">{String(info.getValue() || '-')}</span>,
-      meta: { title: row => row.age },
+      meta: { kind: 'secondary', title: row => row.age },
     },
   ], []);
   useEffect(() => {
@@ -443,7 +444,7 @@ export default function ClusterPage(props: {
     const loadTask = async () => {
       try {
         const [taskRes, eventRes] = await Promise.all([
-          apiGet<ApiList<ApiTask>>('/api/v1/tasks'),
+          apiGet<ApiList<ApiTask>>('/api/v1/tasks?types=unregister'),
           apiGet<ApiList<ApiTaskEvent>>(`/api/v1/tasks/${unregisterTaskId}/events`),
         ]);
         if (cancelled) return;
@@ -567,7 +568,9 @@ export default function ClusterPage(props: {
       <div className="hbdr-clusters-workspace">
       <SearchBar title="Clusters" desc="Register clusters and maintain the default cluster." />
 
-      {clusters.length > 0 ? (
+      {loading ? (
+        <div className="hbdr-section-card flex min-h-48 items-center justify-center text-xs font-semibold text-slate-400" role="status">Loading clusters...</div>
+      ) : clusters.length > 0 ? (
         <div className="hbdr-section-card hbdr-clusters-card-region">
           <div className="hbdr-section-toolbar">
             <div>

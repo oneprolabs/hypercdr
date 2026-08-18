@@ -10,7 +10,10 @@
 - `third_party/velero`: pinned third-party source; avoid unrelated edits.
 
 Generated files and local runtime state belong in `../hypercdr-runtime`, never
-inside the repository.
+inside the repository. This includes dependency caches, frontend build output,
+browser screenshots, test reports, logs, certificates, databases, temporary
+files, and release packages. Do not use `.gitignore` as a substitute for this
+source/runtime boundary.
 
 ## Required checks
 

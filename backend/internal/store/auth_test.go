@@ -62,6 +62,23 @@ func TestPasswordChangeRequirementCanBeClearedOrRestored(t *testing.T) {
 	}
 }
 
+func TestCommunityAdminRecoveryEmailCreatesResetToken(t *testing.T) {
+	repo := NewMemoryStore()
+	users, err := repo.ListUsers()
+	if err != nil || len(users) != 1 || !users[0].SystemAdmin {
+		t.Fatalf("admin users = %#v, %v", users, err)
+	}
+	if _, found, err := repo.SetAdminRecoveryEmail(users[0].ID, " Owner@Example.com "); err != nil || !found {
+		t.Fatalf("set recovery email: found=%v err=%v", found, err)
+	}
+	if email, found, err := repo.GetAdminRecoveryEmail(users[0].ID); err != nil || !found || email != "owner@example.com" {
+		t.Fatalf("recovery email=%q found=%v err=%v", email, found, err)
+	}
+	if token, found, err := repo.CreatePasswordResetToken("owner@example.com", time.Minute); err != nil || !found || token == "" {
+		t.Fatalf("admin reset token=%q found=%v err=%v", token, found, err)
+	}
+}
+
 func TestMemoryStoreGoogleUserLinksExistingEmail(t *testing.T) {
 	repo := NewMemoryStore()
 	created, err := repo.CreateUser(DefaultTenantID, "user@example.com", "password")

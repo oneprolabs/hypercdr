@@ -203,15 +203,15 @@ func CommunityOptions() Options {
 type communityAuthorizer struct{}
 
 func (communityAuthorizer) Authorize(_ context.Context, request AuthorizationRequest) AuthorizationDecision {
-	if strings.HasPrefix(request.Path, "/api/v1/tenants") || strings.HasPrefix(request.Path, "/api/v1/users") {
+	if strings.HasPrefix(request.Path, "/api/v1/tenants") {
 		return AuthorizationDecision{
 			Allowed: false,
 			Code:    "community_single_administrator",
 			Message: "HyperCDR Community uses one built-in administrator. Multi-user and tenant management are available in HyperCDR Enterprise.",
 		}
 	}
-	if request.Path == "/api/v1/diagnostic-logs/export" {
-		return AuthorizationDecision{Allowed: false, Code: "enterprise_log_export_required", Message: "Centralized diagnostic log export is available in HyperCDR Enterprise."}
+	if strings.HasPrefix(request.Path, "/api/v1/users") && request.Method != http.MethodGet && request.Method != http.MethodPatch && !(request.Method == http.MethodPost && strings.HasSuffix(request.Path, "/password")) {
+		return AuthorizationDecision{Allowed: false, Code: "community_single_administrator", Message: "HyperCDR Community cannot create or delete additional users."}
 	}
 	return AuthorizationDecision{Allowed: true}
 }

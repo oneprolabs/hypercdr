@@ -57,6 +57,11 @@ func Run(options Options) error {
 		if err != nil {
 			return err
 		}
+	} else if input, required := missingRegistryBackfill(settings, cfg); required {
+		settings, err = repo.UpsertPlatformSettings(input)
+		if err != nil {
+			return err
+		}
 	}
 	if namespace := strings.TrimSpace(options.AgentNamespace); namespace != "" && settings.AgentNamespace != namespace {
 		settings, err = repo.UpsertPlatformSettings(store.PlatformSettingsInput{
@@ -101,6 +106,18 @@ func Run(options Options) error {
 	ctx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 	return server.Shutdown(ctx)
+}
+
+func missingRegistryBackfill(settings store.PlatformSettings, cfg config.Config) (store.PlatformSettingsInput, bool) {
+	if strings.TrimSpace(settings.ImageRegistry) != "" || strings.TrimSpace(cfg.ImageRegistry) == "" {
+		return store.PlatformSettingsInput{}, false
+	}
+	return store.PlatformSettingsInput{
+		ImageRegistry:  strings.TrimRight(strings.TrimSpace(cfg.ImageRegistry), "/"),
+		AgentNamespace: settings.AgentNamespace,
+		VeleroVersion:  settings.VeleroVersion,
+		PublicEndpoint: settings.PublicEndpoint,
+	}, true
 }
 
 type diagnosticWriterAdapter struct{ sink DiagnosticSink }

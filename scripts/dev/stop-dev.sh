@@ -13,11 +13,6 @@ for unit in hypercdr-dev-frontend.service hypercdr-dev-api.service; do
   systemctl reset-failed "${unit}" >/dev/null 2>&1 || true
 done
 
-frontend_node_modules="${HCDR_SOURCE_DIR}/frontend/node_modules"
-if [[ -L "${frontend_node_modules}" ]]; then
-  rm -f "${frontend_node_modules}"
-fi
-
 if docker inspect hypercdr-dev-postgres >/dev/null 2>&1; then
   dev_log "Stopping development PostgreSQL"
   HCDR_DEV_DIR="${HCDR_DEV_DIR}" \

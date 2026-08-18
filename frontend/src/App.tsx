@@ -136,7 +136,10 @@ import { validateFrontendModules, type ExtensionViewId, type HyperCDRFrontendMod
 
 const FailbackPage = React.lazy(() => import('./features/failback/failback-page'));
 const LazyEmailSettingsPage = React.lazy(() => import('./features/settings/email-settings-page'));
-const LazyOperationsPage = React.lazy(() => import('./features/operations/operations-page'));
+const LazyCommunityUserManagementPage = React.lazy(() => import('./features/users/community-user-management-page'));
+const LazyOperationsCenterPage = React.lazy(() => import('./features/operations/operations-center-page'));
+const LazyActivityLogPage = React.lazy(() => import('./features/operations/activity-log-page'));
+const LazyDiagnosticLogsPage = React.lazy(() => import('./features/operations/diagnostic-logs-page'));
 const LazyUpgradeManagementPage = React.lazy(() => import('./features/upgrades/upgrade-management-page'));
 const LazyProfilePage = React.lazy(() => import('./features/profile/profile-page'));
 const LazyTagManagementPage = React.lazy(() => import('./features/tags/tag-management-page'));
@@ -159,6 +162,7 @@ type View =
   | 'policies'
   | 'restore_points'
   | 'operations'
+  | 'activity'
   | 'logs'
   | 'tags'
   | 'users'
@@ -254,8 +258,9 @@ const locales: Record<LocaleCode, {
       storage: ['Storage', 'Maintain shared restore-point repositories across clusters'],
       policies: ['Policies', 'Maintain application protection plans and recovery targets'],
       restore_points: ['Restore Points', 'View, drill, and take over restore points'],
-      operations: ['History', 'Review user operations and their results'],
-      logs: ['Logs', 'Search platform and cluster diagnostic logs'],
+      operations: ['Operations Center', 'Monitor platform health, active DR operations, and current issues'],
+      activity: ['Activity Log', 'Review administrator actions and their results'],
+      logs: ['Diagnostic Logs', 'Search platform and managed-cluster diagnostic logs'],
       tags: ['Tag Management', 'Create and maintain reusable application tags'],
       users: ['User Management', 'Create and maintain platform users'],
       tenants: ['Tenant Management', 'Create and maintain isolated tenants'],
@@ -352,28 +357,50 @@ const RESTORABLE_VIEWS = new Set<View>([
   'dashboard',
   'applications',
   'dr_tasks',
+  'failback',
   'clusters',
   'storage',
   'policies',
   'restore_points',
   'tags',
   'users',
+  'tenants',
+  'email_settings',
   'profile',
+  'operations',
+  'activity',
   'logs',
   'upgrades',
 ]);
 
+const PLATFORM_DATA_VIEWS = new Set<View>([
+  'dashboard',
+  'applications',
+  'dr_tasks',
+  'failback',
+  'clusters',
+  'storage',
+  'policies',
+  'restore_points',
+  'tags',
+  'upgrades',
+]);
+
+function isRestorableView(view: View) {
+  return RESTORABLE_VIEWS.has(view) || view.startsWith('extension:');
+}
+
 function readStoredView(): View | null {
   try {
     const value = localStorage.getItem(NAV_VIEW_KEY) as View | null;
-    return value && RESTORABLE_VIEWS.has(value) ? value : null;
+    return value && isRestorableView(value) ? value : null;
   } catch {
     return null;
   }
 }
 
 function writeStoredView(view: View) {
-  if (!RESTORABLE_VIEWS.has(view)) return;
+  if (!isRestorableView(view)) return;
   try {
     localStorage.setItem(NAV_VIEW_KEY, view);
   } catch {
@@ -851,7 +878,7 @@ function moduleForView(view: View): TopModule {
   if (view === 'dashboard') return 'overview';
   if (view === 'applications' || view === 'restore_points' || view === 'dr_tasks' || view === 'failback') return 'dr';
   if (view === 'clusters' || view === 'storage' || view === 'policies' || view === 'tags') return 'config';
-  if (view === 'operations') return 'ops';
+  if (view === 'operations' || view === 'activity' || view === 'logs') return 'ops';
   return 'settings';
 }
 
@@ -927,12 +954,27 @@ function createUuid() {
 export type HyperCDRAppProps = { modules?: HyperCDRFrontendModule[] };
 
 type ApiProductInfo = {
+  product?: string;
+  edition?: string;
+  license?: {
+    mode?: string;
+    status?: string;
+    detail?: string;
+  };
   capabilities?: Record<string, { enabled?: boolean }>;
 };
 
 export default function App({ modules = [] }: HyperCDRAppProps) {
   const extensionModules = useMemo(() => validateFrontendModules(modules), [modules]);
+  // Enterprise-owned modules are an edition boundary even before capability
+  // discovery finishes. Never flash the Community fallback while product-info
+  // is still loading or temporarily unavailable.
+  const hasEnterpriseAuditModule = useMemo(
+    () => extensionModules.some(module => module.id === 'enterprise-audit'),
+    [extensionModules],
+  );
   const [authSession, setAuthSession] = useState<AuthSession | null>(() => readStoredAuthSession());
+  const [productInfo, setProductInfo] = useState<ApiProductInfo | null>(null);
   const [productCapabilities, setProductCapabilities] = useState<Record<string, { enabled?: boolean }>>({});
   const [passwordChangeCompleted, setPasswordChangeCompleted] = useState(false);
   const [view, setView] = useState<View>(() => readStoredAuthSession() ? (readStoredView() || 'dashboard') : 'login');
@@ -968,11 +1010,13 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     void apiGet<ApiProductInfo>('/api/v1/product-info')
       .then(info => {
         if (!cancelled) {
+          setProductInfo(info);
           setProductCapabilities(info.capabilities || {});
         }
       })
       .catch(() => {
         if (!cancelled) {
+          setProductInfo(null);
           setProductCapabilities({});
         }
       });
@@ -1032,6 +1076,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   const [defaultClusterId, setDefaultClusterId] = useState<string | null>(null);
   const [clusterPickerOpen, setClusterPickerOpen] = useState(false);
   const [clusterMenuId, setClusterMenuId] = useState<string | null>(null);
+  const [diagnosticTaskId, setDiagnosticTaskId] = useState('');
   const prefetchedAgentTokenRef = useRef<ApiAgentToken | null>(null);
   const prefetchingAgentTokenRef = useRef<Promise<ApiAgentToken | null> | null>(null);
   const agentTokenOwnerRef = useRef('');
@@ -1172,7 +1217,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   }, [prefetchAgentToken, requestAgentToken, takePrefetchedAgentToken]);
 
   useEffect(() => {
-    if (!authSession || view === 'login') return;
+    if (!authSession || view !== 'clusters') return;
     void prefetchAgentToken();
   }, [authSession, prefetchAgentToken, view]);
 
@@ -1190,7 +1235,9 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
 
   useEffect(() => {
     if (view !== 'login' || authSession) return;
-    void refreshLoginCaptcha();
+    // Preserve high-value messages such as session expiry while refreshing the
+    // one-time captcha. Explicit user actions still clear stale login errors.
+    void refreshLoginCaptcha(false);
   }, [authSession, refreshLoginCaptcha, view]);
 
   useEffect(() => {
@@ -1271,7 +1318,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     const handleHistoryNavigation = (event: PopStateEvent) => {
       if (authSession) {
         const historyView = event.state?.view as View | undefined;
-        if (historyView && RESTORABLE_VIEWS.has(historyView)) {
+        if (historyView && isRestorableView(historyView)) {
           writeStoredView(historyView);
           setView(historyView);
           if (historyView === 'applications') setAppStage('select');
@@ -1289,7 +1336,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   }, [applyAuthFlow, authSession]);
 
   useEffect(() => {
-    if (!authSession || !RESTORABLE_VIEWS.has(view)) return;
+    if (!authSession || !isRestorableView(view)) return;
     window.history.replaceState({ ...window.history.state, view }, '', window.location.href);
   }, [authSession, view]);
 
@@ -1396,14 +1443,14 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   clusterTaskLogsRef.current = clusterTaskLogs;
 
   useEffect(() => {
-    if (!authSession || view === 'login') {
+    if (!authSession || view !== 'clusters') {
       setActiveClusterTaskIds(new Set());
       return;
     }
     let cancelled = false;
     const loadTasks = async () => {
       try {
-        const res = await apiGet<ApiList<ApiTask>>('/api/v1/tasks');
+        const res = await apiGet<ApiList<ApiTask>>('/api/v1/tasks?types=register,unregister,agent-upgrade,velero-upgrade');
         const tasks = listItems(res);
         const clusterTasks = tasks
           .filter(task => ['register', 'unregister', 'agent-upgrade', 'velero-upgrade'].includes(task.type))
@@ -1486,13 +1533,25 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     }
     refreshLastStartedAtRef.current = now;
     const request = (async () => {
+      const clusterRequest = apiGet<ApiList<ApiCluster>>('/api/v1/clusters');
+      void clusterRequest.then(clusterRes => {
+        if (resourceSessionOwnerRef.current !== owner) return;
+        const apiClusters = listItems(clusterRes);
+        setLiveApiClusters(apiClusters);
+        setLiveClusters(previous => apiClusters.map(cluster => mapCluster(
+          cluster,
+          previous?.find(item => item.id === cluster.id)?.apps || [],
+        )));
+      }).catch(() => {
+        // The complete refresh below keeps the previously rendered data visible.
+      });
       const [clusterRes, appRes, storageRes, policyRes, planRes, taskRes, tagRes] = await Promise.all([
-        apiGet<ApiList<ApiCluster>>('/api/v1/clusters'),
+        clusterRequest,
         apiGet<ApiList<ApiApplication>>('/api/v1/applications'),
         apiGet<ApiList<ApiStorageRepo>>('/api/v1/storage-repositories'),
         apiGet<ApiList<ApiPolicy>>('/api/v1/policies'),
         apiGet<ApiList<ApiProtectionPlan>>('/api/v1/protection-plans'),
-        apiGet<ApiList<ApiTask>>('/api/v1/tasks'),
+        apiGet<ApiList<ApiTask>>('/api/v1/tasks?types=backup,restore,drill,takeover'),
         apiGet<ApiList<TagItem>>('/api/v1/tags'),
       ]);
       const restorePointRes = await apiGet<ApiList<ApiRestorePoint>>('/api/v1/restore-points');
@@ -1569,7 +1628,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   }, [authSession?.session.token]);
 
   useEffect(() => {
-    if (!authSession || view === 'login') return;
+    if (!authSession || !PLATFORM_DATA_VIEWS.has(view)) return;
     let cancelled = false;
     const realtimeViews = new Set<View>(['dashboard', 'applications', 'clusters']);
     const loadPlatformData = async () => {
@@ -1625,7 +1684,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       ? 'Set a default cluster before using this section'
       : '';
   const navBlockedViews: Set<View> = new Set<View>([
-    'applications', 'failback', 'storage', 'policies', 'restore_points', 'dr_tasks', 'operations', 'tags',
+    'applications', 'failback', 'storage', 'policies', 'restore_points', 'dr_tasks', 'tags',
   ]);
 
 
@@ -1657,21 +1716,30 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       return {
         title: 'Operations',
         items: [
+          { label: 'Operations Center', desc: 'Platform health, active operations, and current issues', view: 'operations' as View, icon: Activity },
+          ...(!hasEnterpriseAuditModule && !productCapabilities.advancedAudit?.enabled ? [{ label: 'Activity Log', desc: 'Review administrator actions and results', view: 'activity' as View, icon: History }] : []),
           ...visibleExtensionModules.filter(module => module.navigation.group === 'operations').map(module => ({ label: module.navigation.label, desc: module.navigation.description, view: module.view as View, icon: module.navigation.icon })),
+          { label: 'Diagnostic Logs', desc: 'Search platform and managed-cluster logs', view: 'logs' as View, icon: Terminal },
         ],
       };
     }
     return {
       title: 'Settings',
-      items: [
-        ...(authSession?.user.systemAdmin ? [{ label: 'Email Settings', desc: 'Configure password recovery email delivery', view: 'email_settings' as View, icon: Settings2 }] : []),
-        ...(authSession?.user.systemAdmin ? [{ label: 'Upgrade', desc: 'Check and upgrade platform and cluster components', view: 'upgrades' as View, icon: Upload }] : []),
-        ...visibleExtensionModules.filter(module => module.navigation.group === 'settings').map(module => ({ label: module.navigation.label, desc: module.navigation.description, view: module.view as View, icon: module.navigation.icon })),
-      ],
+      items: productCapabilities.advancedIdentity?.enabled
+        ? [
+            ...visibleExtensionModules.filter(module => module.navigation.group === 'settings').map(module => ({ label: module.navigation.label, desc: module.navigation.description, view: module.view as View, icon: module.navigation.icon })),
+            ...(authSession?.user.systemAdmin ? [{ label: 'Email Settings', desc: 'Configure password recovery email delivery', view: 'email_settings' as View, icon: Settings2 }] : []),
+            ...(authSession?.user.systemAdmin ? [{ label: 'Upgrade', desc: 'Check and upgrade platform and cluster components', view: 'upgrades' as View, icon: Upload }] : []),
+          ]
+        : [
+            ...(authSession?.user.systemAdmin ? [{ label: 'User Management', desc: 'Manage the built-in Community administrator', view: 'users' as View, icon: User }] : []),
+            ...(authSession?.user.systemAdmin ? [{ label: 'Email Settings', desc: 'Configure password recovery email delivery', view: 'email_settings' as View, icon: Settings2 }] : []),
+            ...(authSession?.user.systemAdmin ? [{ label: 'Upgrade', desc: 'Check and upgrade platform and cluster components', view: 'upgrades' as View, icon: Upload }] : []),
+          ],
     };
-  }, [activeModule, authSession?.user.systemAdmin, visibleExtensionModules, view]);
+  }, [activeModule, authSession?.user.systemAdmin, hasEnterpriseAuditModule, productCapabilities.advancedAudit?.enabled, productCapabilities.advancedIdentity?.enabled, visibleExtensionModules, view]);
 
-  const openView = (nextView: View, options: { preserveSelectedCluster?: boolean } = {}) => {
+  const openView = (nextView: View, options: { preserveSelectedCluster?: boolean; diagnosticTaskId?: string } = {}) => {
     if (!options.preserveSelectedCluster && (nextView === 'dashboard' || nextView === 'applications' || nextView === 'failback')) {
       const target = defaultWorkspaceCluster;
       if (target) setSelectedCluster(target);
@@ -1681,6 +1749,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     }
     writeStoredView(nextView);
     setView(nextView);
+    setDiagnosticTaskId(nextView === 'logs' ? options.diagnosticTaskId || '' : '');
     if (nextView === 'applications') {
       setAppStage('select');
     }
@@ -1984,7 +2053,9 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
                   key={item.key}
                   onClick={() => openView(item.key === 'settings'
                     ? (authSession?.user.systemAdmin
-                      ? 'email_settings'
+                      ? (productCapabilities.advancedIdentity?.enabled
+                        ? (visibleExtensionModules.find(module => module.navigation.group === 'settings')?.view as View | undefined) || 'users'
+                        : 'users')
                       : (visibleExtensionModules.find(module => module.navigation.group === 'settings')?.view as View | undefined) || 'profile')
                     : item.view)}
                   disabled={false}
@@ -2111,6 +2182,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
                   protectionPlans={liveApiPlans}
                   applications={liveApiApps}
                   defaultClusterId={defaultClusterId}
+                  productInfo={productInfo}
                   openDr={() => openView('applications')}
                   openOperations={() => openView('operations')}
                   clusterContext={(
@@ -2184,6 +2256,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
             {view === 'clusters' && (
               <React.Suspense fallback={<PageLoadFallback />}><LazyClusterPage
                 clusters={liveClusters ?? clusters}
+                loading={liveClusters === null}
                 protectionPlans={liveApiPlans}
                 canUpgrade={authSession?.user.role === 'admin'}
                 defaultClusterId={defaultClusterId}
@@ -2290,9 +2363,12 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
                 )}
               /></React.Suspense>
             ))}
-            {view === 'operations' && (onboarding !== 'ready' ? onboardingGate : <React.Suspense fallback={<PageLoadFallback />}><LazyOperationsPage /></React.Suspense>)}
+            {view === 'operations' && <React.Suspense fallback={<PageLoadFallback />}><LazyOperationsCenterPage toast={setToast} openLogs={(taskId) => openView('logs', { diagnosticTaskId: taskId })} openClusters={() => openView('clusters')} /></React.Suspense>}
+            {view === 'activity' && !hasEnterpriseAuditModule && !productCapabilities.advancedAudit?.enabled && <React.Suspense fallback={<PageLoadFallback />}><LazyActivityLogPage /></React.Suspense>}
+            {view === 'logs' && authSession && <React.Suspense fallback={<PageLoadFallback />}><LazyDiagnosticLogsPage currentUser={authSession.user} toast={setToast} advancedTenancy={productCapabilities.advancedTenancy?.enabled === true} initialTaskId={diagnosticTaskId} /></React.Suspense>}
             {view === 'tags' && (onboarding !== 'ready' ? onboardingGate : <React.Suspense fallback={<PageLoadFallback />}><LazyTagManagementPage tags={tags} setTags={setTags} clusters={clusters} setClusters={setClusters} toast={setToast} /></React.Suspense>)}
             {view === 'email_settings' && authSession?.user.systemAdmin && <React.Suspense fallback={<PageLoadFallback />}><LazyEmailSettingsPage currentUser={authSession.user} toast={setToast} /></React.Suspense>}
+            {view === 'users' && authSession?.user.systemAdmin && !productCapabilities.advancedIdentity?.enabled && <React.Suspense fallback={<PageLoadFallback />}><LazyCommunityUserManagementPage currentUser={authSession.user} toast={setToast} /></React.Suspense>}
             {view === 'profile' && authSession && <React.Suspense fallback={<PageLoadFallback />}><LazyProfilePage session={authSession} setSession={next => { setAuthSession(next); writeStoredAuthSession(next); }} toast={setToast} /></React.Suspense>}
             {view === 'upgrades' && authSession?.user.systemAdmin && <React.Suspense fallback={<PageLoadFallback />}><LazyUpgradeManagementPage isAdmin toast={setToast} refreshPlatformData={refreshPlatformData} /></React.Suspense>}
             {authSession && visibleExtensionModules.map(module => view === module.view ? <React.Suspense key={module.id} fallback={<PageLoadFallback />}><module.component currentUser={authSession.user} clusters={liveApiClusters} toast={setToast} /></React.Suspense> : null)}

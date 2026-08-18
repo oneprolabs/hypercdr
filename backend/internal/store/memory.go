@@ -27,6 +27,7 @@ type MemoryStore struct {
 	logCoverage         map[string]ClusterLogCoverage
 	auditLogs           []AuditLog
 	users               map[string]memoryUser
+	adminRecoveryEmail  string
 	resetTokens         map[string]memoryResetToken
 	platformSessions    map[string]PlatformSession
 	releases            map[string]ComponentRelease
@@ -698,6 +699,27 @@ func (s *MemoryStore) SetUserPassword(id, password string, mustChangePassword bo
 	}
 	return User{}, false, nil
 }
+func (s *MemoryStore) GetAdminRecoveryEmail(userID string) (string, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, u := range s.users {
+		if u.ID == userID && u.SystemAdmin {
+			return s.adminRecoveryEmail, s.adminRecoveryEmail != "", nil
+		}
+	}
+	return "", false, nil
+}
+func (s *MemoryStore) SetAdminRecoveryEmail(userID, email string) (string, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, u := range s.users {
+		if u.ID == userID && u.SystemAdmin {
+			s.adminRecoveryEmail = strings.ToLower(strings.TrimSpace(email))
+			return s.adminRecoveryEmail, true, nil
+		}
+	}
+	return "", false, nil
+}
 func (s *MemoryStore) CreatePlatformSession(userID string, ttl time.Duration) (PlatformSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -735,11 +757,16 @@ func (s *MemoryStore) CreatePasswordResetToken(email string, ttl time.Duration) 
 	defer s.mu.Unlock()
 	email = strings.ToLower(strings.TrimSpace(email))
 	user, ok := s.users[email]
-	if !ok || user.SystemAdmin || s.tenants[user.TenantID].Status != "active" {
+	resetKey := email
+	if !ok && email == s.adminRecoveryEmail {
+		user, ok = s.users[DefaultAdminEmail]
+		resetKey = DefaultAdminEmail
+	}
+	if !ok || (!user.SystemAdmin && s.tenants[user.TenantID].Status != "active") {
 		return "", false, nil
 	}
 	token := "hpr_" + newID() + newID()
-	s.resetTokens[token] = memoryResetToken{Email: email, ExpiresAt: time.Now().UTC().Add(ttl)}
+	s.resetTokens[token] = memoryResetToken{Email: resetKey, ExpiresAt: time.Now().UTC().Add(ttl)}
 	return token, true, nil
 }
 
