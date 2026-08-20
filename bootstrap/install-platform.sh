@@ -12,10 +12,14 @@ else
 fi
 if [[ -d "${SCRIPT_DIR}/charts/hypercdr-platform" ]]; then
   CHART_DIR="${SCRIPT_DIR}/charts/hypercdr-platform"
-  COMPOSE_TEMPLATE="${SCRIPT_DIR}/compose.yaml"
 else
   SOURCE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
   CHART_DIR="${SOURCE_ROOT}/charts/hypercdr-platform"
+fi
+if [[ -r "${SCRIPT_DIR}/compose.yaml" ]]; then
+  COMPOSE_TEMPLATE="${SCRIPT_DIR}/compose.yaml"
+else
+  SOURCE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
   COMPOSE_TEMPLATE="${SOURCE_ROOT}/docker-compose.yml"
 fi
 RELEASE_NAME="${RELEASE_NAME:-hypercdr}"
