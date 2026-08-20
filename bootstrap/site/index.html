@@ -57,10 +57,20 @@
 
       <section id="enterprise-panel" class="edition-panel hidden" aria-labelledby="enterprise-card">
         <div class="panel-heading">
-          <div><p class="eyebrow">Enterprise</p><h2>Install the Enterprise edition</h2><p class="panel-copy">Deploy with Helm using your production values and existing license and application secrets.</p></div>
+          <div><p class="eyebrow">Enterprise</p><h2>Install the Enterprise edition</h2><p class="panel-copy">Use Docker Compose on a dedicated host or Helm in an existing Kubernetes cluster.</p></div>
           <span class="badge">License required</span>
         </div>
-        <label>Namespace<input id="enterprise-namespace" value="hypercdr-enterprise" /></label>
+        <div class="mode-tabs" role="tablist" aria-label="Enterprise deployment mode">
+          <button class="mode-tab is-active" type="button" data-enterprise-mode="docker" role="tab" aria-selected="true">Docker Compose</button>
+          <button class="mode-tab" type="button" data-enterprise-mode="k8s" role="tab" aria-selected="false">Kubernetes</button>
+        </div>
+        <div class="form-grid">
+          <label>Public URL<input id="enterprise-public-url" placeholder="https://192.168.8.149:3102" /><small>Reachable by users and protected clusters.</small></label>
+          <label>License file<input id="enterprise-license-file" value="./license.json" /></label>
+          <label>Public keys file<input id="enterprise-public-keys-file" value="./public-keys.json" /></label>
+          <label id="enterprise-namespace-field" class="hidden">Namespace<input id="enterprise-namespace" value="hypercdr-enterprise" /></label>
+          <label id="enterprise-database-field" class="hidden">Database URL<input id="enterprise-database-url" placeholder="postgres://user:password@host:5432/hypercdr" /></label>
+        </div>
         <div class="command-window"><div class="command-title"><span></span><span></span><span></span><strong>install-enterprise.sh</strong></div><pre id="enterprise-command" class="command" tabindex="0"></pre><button type="button" class="command-copy" data-copy-target="enterprise-command">Copy</button></div>
         <p id="enterprise-unavailable" class="availability-note hidden">Enterprise installer is not published on this portal yet.</p>
       </section>

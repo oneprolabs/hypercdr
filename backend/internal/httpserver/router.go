@@ -73,6 +73,7 @@ type Router struct {
 	logRetryAfter          map[string]time.Time
 	schedulerOnce          sync.Once
 	productInfo            ProductInfo
+	productInfoProvider    func() ProductInfo
 	editionAuthorizer      EditionAuthorizer
 	identityProvider       EditionIdentityProvider
 	auditSink              EditionAuditSink
@@ -191,7 +192,15 @@ type captchaChallenge struct {
 }
 
 func (r *Router) getProductInfo(w http.ResponseWriter, _ *http.Request) {
+	if r.productInfoProvider != nil {
+		writeJSON(w, http.StatusOK, r.productInfoProvider())
+		return
+	}
 	writeJSON(w, http.StatusOK, r.productInfo)
+}
+
+func WithProductInfoProvider(provider func() ProductInfo) RouterOption {
+	return func(router *Router) { router.productInfoProvider = provider }
 }
 
 type inventoryRequestStatus struct {

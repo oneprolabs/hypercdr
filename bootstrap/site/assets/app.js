@@ -43,13 +43,20 @@ function updateCommands() {
   ].join('\n');
 
   const namespace = value('enterprise-namespace') || 'hypercdr-enterprise';
+  const enterpriseMode = document.querySelector('[data-enterprise-mode].is-active')?.dataset.enterpriseMode || 'docker';
   element('enterprise-command').textContent = [
     `curl -fsSL ${enterpriseURL}/hypercdr-enterprise-installer-${enterpriseVersion}.tar.gz -o hypercdr-enterprise.tar.gz`,
     'mkdir -p hypercdr-enterprise && tar -xzf hypercdr-enterprise.tar.gz -C hypercdr-enterprise',
     'cd hypercdr-enterprise',
-    '# Review registry, URL, database, and secret settings before installation',
-    'vi values.production.yaml',
-    `./install.sh values.production.yaml hypercdr-enterprise ${shellQuote(namespace)}`,
+    `./install-enterprise.sh ${enterpriseMode} \\`,
+    `  --public-base-url ${shellQuote(value('enterprise-public-url') || `https://${portalHost}:3102`)} \\`,
+    `  --license-file ${shellQuote(value('enterprise-license-file') || './license.json')} \\`,
+    `  --public-keys-file ${shellQuote(value('enterprise-public-keys-file') || './public-keys.json')} \\`,
+    ...(enterpriseMode === 'k8s' ? [
+      `  --namespace ${shellQuote(namespace)} \\`,
+      `  --database-url ${shellQuote(value('enterprise-database-url') || 'postgres://user:password@host:5432/hypercdr')} \\`,
+    ] : []),
+    '  --execute',
   ].join('\n');
 }
 
@@ -79,6 +86,7 @@ async function copyText(text) {
 
 element('host-public-url').value = `https://${portalHost}:3002`;
 element('k8s-node-ip').value = portalHost;
+element('enterprise-public-url').value = `https://${portalHost}:3102`;
 for (const card of document.querySelectorAll('[data-edition]')) {
   card.addEventListener('click', () => {
     const edition = card.dataset.edition;
@@ -95,7 +103,16 @@ for (const tab of document.querySelectorAll('[data-mode]')) {
     element('community-k8s').classList.toggle('hidden', mode !== 'k8s');
   });
 }
-for (const id of ['host-public-url', 'k8s-node-ip', 'k8s-node-port', 'k8s-storage-class', 'enterprise-namespace']) element(id).addEventListener('input', updateCommands);
+for (const tab of document.querySelectorAll('[data-enterprise-mode]')) {
+  tab.addEventListener('click', () => {
+    const mode = tab.dataset.enterpriseMode;
+    for (const item of document.querySelectorAll('[data-enterprise-mode]')) { const active = item === tab; item.classList.toggle('is-active', active); item.setAttribute('aria-selected', String(active)); }
+    element('enterprise-namespace-field').classList.toggle('hidden', mode !== 'k8s');
+    element('enterprise-database-field').classList.toggle('hidden', mode !== 'k8s');
+    updateCommands();
+  });
+}
+for (const id of ['host-public-url', 'k8s-node-ip', 'k8s-node-port', 'k8s-storage-class', 'enterprise-public-url', 'enterprise-license-file', 'enterprise-public-keys-file', 'enterprise-namespace', 'enterprise-database-url']) element(id).addEventListener('input', updateCommands);
 for (const button of document.querySelectorAll('[data-copy-target]')) {
   button.addEventListener('click', async () => {
     try { await copyText(element(button.dataset.copyTarget).textContent); button.textContent = 'Copied'; }

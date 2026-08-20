@@ -78,9 +78,18 @@ func Run(options Options) error {
 	if strings.TrimSpace(settings.PublicEndpoint) != "" {
 		cfg.PublicBaseURL = settings.PublicEndpoint
 	}
-	handler := httpserver.NewRouterWithProductInfo(cfg, logger, repo, httpserver.ProductInfo{
+	productInfo := httpserver.ProductInfo{
 		Product: "HyperCDR", Edition: string(options.Edition), Capabilities: options.Capabilities, License: options.License,
-	}, editionAuthorizer(options.Authorizer), httpserver.WithDiagnosticLogRetention(options.DiagnosticLogRetention), httpserver.WithExtensionRoutes(editionRoutes(options.Routes)), httpserver.WithIdentityProvider(editionIdentityProvider(options.IdentityProvider)), httpserver.WithAuditSink(editionAuditSink(options.AuditSink)))
+	}
+	productInfoProvider := func() httpserver.ProductInfo {
+		current := productInfo
+		if options.LicenseStatusProvider != nil {
+			current.License = options.LicenseStatusProvider()
+		}
+		return current
+	}
+	handler := httpserver.NewRouterWithProductInfo(cfg, logger, repo, productInfo,
+		editionAuthorizer(options.Authorizer), httpserver.WithProductInfoProvider(productInfoProvider), httpserver.WithDiagnosticLogRetention(options.DiagnosticLogRetention), httpserver.WithExtensionRoutes(editionRoutes(options.Routes)), httpserver.WithIdentityProvider(editionIdentityProvider(options.IdentityProvider)), httpserver.WithAuditSink(editionAuditSink(options.AuditSink)))
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	errCh := make(chan error, 1)
 	go func() {

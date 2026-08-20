@@ -32,6 +32,11 @@ type LicenseStatus struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+// LicenseStatusProvider returns the license state at request time. Enterprise
+// uses this hook so an offline license that expires while the process is
+// running is reflected without requiring a restart.
+type LicenseStatusProvider func() LicenseStatus
+
 // ProductInfo is returned by the public product-info endpoint.
 type ProductInfo struct {
 	Product      string                `json:"product"`
@@ -168,6 +173,7 @@ type Options struct {
 	AgentNamespace         string
 	Capabilities           map[string]Capability
 	License                LicenseStatus
+	LicenseStatusProvider  LicenseStatusProvider
 	Authorizer             Authorizer
 	IdentityProvider       IdentityProvider
 	AuditSink              AuditSink

@@ -445,16 +445,23 @@ run_docker() {
   local installed_registry_ca_file="${data_dir}/certs/registry-ca.crt"
   local target_compose_file="${data_dir}/docker-compose.yaml"
   local postgres_password=""
+  local installed_secret_key=""
   local release_token=""
   if [[ -f "${data_dir}/.env" ]]; then
     while IFS='=' read -r key value; do
-      if [[ "${key}" == "HCDR_POSTGRES_PASSWORD" ]]; then postgres_password="${value}"; break; fi
+      case "${key}" in
+        HCDR_POSTGRES_PASSWORD) postgres_password="${value}" ;;
+        HCDR_SECRET_KEY) installed_secret_key="${value}" ;;
+      esac
     done < "${data_dir}/.env"
     # Compatibility with installations created before the password setting was
     # introduced. Their initialized database still uses the legacy password.
     if [[ -z "${postgres_password}" ]]; then postgres_password="hypercdr"; fi
   else
     postgres_password="$(openssl rand -hex 24)"
+  fi
+  if [[ "${secret_key}" == "dev-secret-change-me" && -n "${installed_secret_key}" ]]; then
+    secret_key="${installed_secret_key}"
   fi
   if [[ -f "${data_dir}/release-token" ]]; then
     release_token="$(tr -d '\r\n' < "${data_dir}/release-token")"
