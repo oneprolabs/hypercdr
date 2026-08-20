@@ -11957,6 +11957,8 @@ metadata:
   labels:
     app.kubernetes.io/name: hypercdr-image-preflight
 spec:
+  serviceAccountName: default
+  automountServiceAccountToken: false
   restartPolicy: Never
 ${IMAGE_PULL_SECRETS_BLOCK}
   containers:
@@ -12095,6 +12097,9 @@ log_section "Namespace and credentials"
 log_info "Creating or updating namespace ${NAMESPACE}"
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl_apply_retry
 log_ok "Namespace ${NAMESPACE} is ready"
+log_info "Ensuring the namespace default service account is ready"
+kubectl -n "$NAMESPACE" create serviceaccount default --dry-run=client -o yaml | kubectl_apply_retry
+log_ok "Namespace service account is ready"
 if [[ -n "$REGISTRY_SERVER" || -n "$REGISTRY_USERNAME" || -n "$REGISTRY_PASSWORD" ]]; then
   if [[ -z "$REGISTRY_SERVER" || -z "$REGISTRY_USERNAME" || -z "$REGISTRY_PASSWORD" ]]; then
     fail "--registry-server, --registry-username, and --registry-password must be provided together" 2
