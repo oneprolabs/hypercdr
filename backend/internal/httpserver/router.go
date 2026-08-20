@@ -11204,7 +11204,7 @@ RESET_AGENT_CREDENTIAL="true"
 SKIP_IMAGE_PREFLIGHT="false"
 IMAGE_PULL_PREFLIGHT="true"
 WAIT_READY="true"
-WAIT_TIMEOUT="180s"
+WAIT_TIMEOUT="300s"
 INSTALL_REGISTRY_CA="true"
 NODE_SSH_USER=""
 NODE_SSH_KEY=""
@@ -11776,7 +11776,7 @@ wait_timeout_seconds() {
   elif [[ "$WAIT_TIMEOUT" =~ ^([0-9]+)m$ ]]; then
     echo $(( BASH_REMATCH[1] * 60 ))
   else
-    echo 180
+    echo 300
   fi
 }
 
@@ -11795,13 +11795,14 @@ diagnose_rollout_failure() {
   local workload_kind="$1"
   local workload_name="$2"
   local selector="$3"
-  local diagnostic_text=""
+  local diagnostic_text="" pending_pvcs=""
 
   diagnostic_text="$(
     kubectl -n "$NAMESPACE" describe "${workload_kind}/${workload_name}" 2>&1 || true
     kubectl -n "$NAMESPACE" describe pods -l "$selector" 2>&1 || true
     kubectl -n "$NAMESPACE" get events --sort-by=.lastTimestamp 2>&1 | tail -n 40 || true
   )"
+  pending_pvcs="$(kubectl -n "$NAMESPACE" get pvc --no-headers 2>/dev/null | awk '$2 != "Bound" {print $1}' | paste -sd ', ' - || true)"
 
   log_section "Installation failed"
   if ! kubectl --request-timeout=5s get --raw='/readyz' >/dev/null 2>&1 || echo "$diagnostic_text" | grep -Eqi 'connection refused|Unable to connect to the server|etcdserver: request timed out'; then
@@ -11813,8 +11814,9 @@ diagnose_rollout_failure() {
   elif echo "$diagnostic_text" | grep -Eqi 'FailedMount|FailedAttachVolume|WaitForAttach|Unable to attach or mount volumes'; then
     log_error "Reason: a persistent volume could not be attached or mounted."
     log_error "Check the PVC, StorageClass, CSI controller, VolumeAttachment, and node storage health."
-  elif echo "$diagnostic_text" | grep -Eqi 'unbound immediate PersistentVolumeClaims|ProvisioningFailed|no storage class is set|storageclass.*not found'; then
+  elif [[ -n "$pending_pvcs" ]] && echo "$diagnostic_text" | grep -Eqi 'unbound immediate PersistentVolumeClaims|ProvisioningFailed|no storage class is set|storageclass.*not found'; then
     log_error "Reason: the installer PVC could not be provisioned."
+    log_error "Affected PVC: ${pending_pvcs}."
     log_error "Check that a default or selected StorageClass exists and its CSI provisioner is healthy."
   elif echo "$diagnostic_text" | grep -Eqi 'CrashLoopBackOff|Back-off restarting failed container'; then
     log_error "Reason: the workload container is repeatedly crashing."
@@ -11838,7 +11840,7 @@ wait_for_rollout() {
   local timeout_seconds deadline next_update status_output pod_status pvc_status
   timeout_seconds="$(wait_timeout_seconds)"
   if ! [[ "$timeout_seconds" =~ ^[0-9]+$ ]]; then
-    timeout_seconds=180
+    timeout_seconds=300
   fi
   deadline=$((SECONDS + timeout_seconds))
   next_update=$SECONDS
@@ -11860,6 +11862,12 @@ wait_for_rollout() {
     fi
     sleep 3
   done
+  # A rollout can become ready at the timeout boundary while the last short
+  # kubectl poll is returning. Check once more before reporting a failure.
+  if kubectl -n "$NAMESPACE" rollout status "${workload_kind}/${workload_name}" --timeout=2s >/dev/null 2>&1; then
+    log_ok "${display_name} is ready"
+    return 0
+  fi
   log_error "${display_name} did not become ready within ${WAIT_TIMEOUT}"
   diagnose_rollout_failure "$workload_kind" "$workload_name" "$selector"
   return 1
@@ -11868,7 +11876,7 @@ wait_for_rollout() {
 wait_agent_registration() {
   local timeout_seconds="${WAIT_TIMEOUT%s}"
   if ! [[ "$timeout_seconds" =~ ^[0-9]+$ ]]; then
-    timeout_seconds=180
+    timeout_seconds=300
   fi
   local deadline=$((SECONDS + timeout_seconds))
   log_info "Waiting for comm-agent to register with the HyperCDR platform"
@@ -11992,6 +12000,10 @@ check_existing_velero_installation() {
   if [[ "$INSTALL_VELERO" != "true" || "$ALLOW_EXISTING_VELERO" == "true" ]]; then
     return 0
   fi
+  is_hypercdr_managed_namespace() {
+    local namespace="$1"
+    [[ -n "$namespace" ]] && kubectl -n "$namespace" get deployment hypercdr-comm-agent >/dev/null 2>&1
+  }
   local conflicts=()
   if kubectl get namespace velero >/dev/null 2>&1; then
     conflicts+=("namespace/velero")
@@ -12003,7 +12015,11 @@ check_existing_velero_installation() {
       if [[ -z "$item" ]]; then
         continue
       fi
+      local namespace="${item%%/*}"
       if [[ "$item" == "${NAMESPACE}/velero" && "$AGENT_DEPLOYMENT_EXISTS" == "true" ]]; then
+        continue
+      fi
+      if [[ "$namespace" != "$NAMESPACE" ]] && is_hypercdr_managed_namespace "$namespace"; then
         continue
       fi
       conflicts+=("deployment/${item}")
@@ -12011,14 +12027,20 @@ check_existing_velero_installation() {
   fi
   local resource
   for resource in backups.velero.io restores.velero.io schedules.velero.io backupstoragelocations.velero.io backuprepositories.velero.io podvolumebackups.velero.io podvolumerestores.velero.io; do
-    if kubectl get "$resource" -A --ignore-not-found --no-headers 2>/dev/null | grep -q .; then
-      conflicts+=("${resource}")
-    fi
+    local resource_namespaces
+    resource_namespaces="$(kubectl get "$resource" -A --ignore-not-found --no-headers 2>/dev/null | awk '{print $1}' | sort -u || true)"
+    while IFS= read -r namespace; do
+      [[ -n "$namespace" ]] || continue
+      if [[ "$namespace" != "$NAMESPACE" ]] && is_hypercdr_managed_namespace "$namespace"; then
+        continue
+      fi
+      conflicts+=("${resource}/${namespace}")
+    done <<< "$resource_namespaces"
   done
   if [[ ${#conflicts[@]} -gt 0 ]]; then
     echo "existing Velero installation or Velero resources were found in this cluster:" >&2
     printf '  - %s\n' "${conflicts[@]}" >&2
-    echo "HyperCDR currently requires a dedicated Velero instance. Uninstall the existing Velero installation or use a clean cluster before installing the HyperCDR agent." >&2
+    echo "HyperCDR supports isolated Community and Enterprise Velero instances, but an unknown or third-party Velero installation cannot be reused safely." >&2
     echo "If this is a deliberate reinstall of a HyperCDR-managed Velero instance, rerun with --allow-existing-velero true." >&2
     exit 1
   fi

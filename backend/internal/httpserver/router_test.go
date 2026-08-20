@@ -802,6 +802,10 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 	text := body.String()
 	for _, expected := range []string{
 		"registry.local:5000/hypercdr/comm-agent:active",
+		`WAIT_TIMEOUT="300s"`,
+		"is_hypercdr_managed_namespace",
+		`rollout status "${workload_kind}/${workload_name}" --timeout=2s`,
+		`[[ -n "$pending_pvcs" ]]`,
 		"/assets/velero/v1.18.2/crds.yaml",
 		"--concurrent-backups=2",
 		"--node-agent-configmap=node-agent-config",
