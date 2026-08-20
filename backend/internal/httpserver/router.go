@@ -12071,11 +12071,9 @@ rollback_failed_registration() {
     kubectl delete namespace "$NAMESPACE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
     kubectl delete clusterrolebinding "$AGENT_RBAC_NAME" "$VELERO_RBAC_NAME" --ignore-not-found >/dev/null 2>&1 || true
     kubectl delete clusterrole "$AGENT_RBAC_NAME" "$VELERO_RBAC_NAME" --ignore-not-found >/dev/null 2>&1 || true
-    if [[ "$NAMESPACE" == "hypercdr-agent" ]]; then
-      for crd in backuprepositories.velero.io backups.velero.io backupstoragelocations.velero.io datadownloads.velero.io datauploads.velero.io deletebackuprequests.velero.io downloadrequests.velero.io podvolumebackups.velero.io podvolumerestores.velero.io restores.velero.io schedules.velero.io serverstatusrequests.velero.io volumesnapshotlocations.velero.io; do
-        kubectl delete crd "$crd" --ignore-not-found --wait=false >/dev/null 2>&1 || true
-      done
-    fi
+    # Velero CRDs are cluster-scoped and may be shared by another HyperCDR
+    # edition. Registration rollback therefore removes only resources owned by
+    # this namespace and never deletes shared CRDs.
     log_ok "Failed first-time installation was rolled back"
   else
     kubectl -n "$NAMESPACE" delete secret hypercdr-agent-credential --ignore-not-found >/dev/null 2>&1 || true

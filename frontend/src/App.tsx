@@ -1784,20 +1784,14 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     setDefaultClusterId(null);
   };
 
-  const unregisterCluster = async (cluster: Cluster, event?: React.MouseEvent, deleteBackupData = false): Promise<ApiTask | null> => {
+  const unregisterCluster = async (cluster: Cluster, event?: React.MouseEvent, deleteBackupData = false): Promise<ApiTask> => {
     event?.stopPropagation();
-    let result: ApiTaskResponse;
-    try {
-      result = await apiPost<ApiTaskResponse>(`/api/v1/clusters/${cluster.id}/unregister`, {
-        deleteVelero: true,
-        deleteNamespace: true,
-        deleteBackupData,
-        reason: 'requested from platform cluster page',
-      });
-    } catch {
-      setToast('Failed to create unregister task from platform API');
-      return null;
-    }
+    const result = await apiPost<ApiTaskResponse>(`/api/v1/clusters/${cluster.id}/unregister`, {
+      deleteVelero: true,
+      deleteNamespace: true,
+      deleteBackupData,
+      reason: 'requested from platform cluster page',
+    });
     const task = 'task' in result ? result.task : result;
     const warning = 'warning' in result ? result.warning : undefined;
     setToast(warning || `${cluster.name} unregister task dispatched`);

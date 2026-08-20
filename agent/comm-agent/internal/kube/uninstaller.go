@@ -2,8 +2,10 @@ package kube
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -70,7 +72,7 @@ func (u *KubernetesUninstaller) Uninstall(ctx context.Context, options Uninstall
 			preSelfRemovalErrs = append(preSelfRemovalErrs, err)
 		}
 	}
-	for _, name := range uninstallExternalClusterRBACNames(options.DeleteVelero) {
+	for _, name := range uninstallExternalClusterRBACNames(options.Namespace, options.DeleteVelero) {
 		if err := u.client.RbacV1().ClusterRoleBindings().Delete(ctx, name, metav1.DeleteOptions{}); ignoreNotFound(err) != nil {
 			preSelfRemovalErrs = append(preSelfRemovalErrs, err)
 		}
@@ -96,7 +98,7 @@ func (u *KubernetesUninstaller) Uninstall(ctx context.Context, options Uninstall
 			errs = append(errs, err)
 		}
 	} else {
-		for _, name := range uninstallAgentClusterRBACNames() {
+		for _, name := range uninstallAgentClusterRBACNames(options.Namespace) {
 			if err := u.client.RbacV1().ClusterRoleBindings().Delete(ctx, name, metav1.DeleteOptions{}); ignoreNotFound(err) != nil {
 				errs = append(errs, err)
 			}
@@ -130,7 +132,7 @@ func (u *KubernetesUninstaller) attachAgentRBACOwnerReferences(ctx context.Conte
 		return err
 	}
 	var errs []error
-	for _, name := range uninstallAgentClusterRBACNames() {
+	for _, name := range uninstallAgentClusterRBACNames(namespace) {
 		if _, err := u.client.RbacV1().ClusterRoles().Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{}); ignoreNotFound(err) != nil {
 			errs = append(errs, err)
 		}
@@ -259,6 +261,24 @@ func (u *KubernetesUninstaller) deleteVeleroCRDs(ctx context.Context, namespace 
 }
 
 func (u *KubernetesUninstaller) hasVeleroResourcesOutsideNamespace(ctx context.Context, namespace string) (bool, error) {
+	deployments, err := u.client.AppsV1().Deployments(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return false, err
+	}
+	for _, deployment := range deployments.Items {
+		if deployment.Namespace != namespace && (deployment.Name == "velero" || deployment.Name == "hypercdr-comm-agent") {
+			return true, nil
+		}
+	}
+	daemonSets, err := u.client.AppsV1().DaemonSets(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return false, err
+	}
+	for _, daemonSet := range daemonSets.Items {
+		if daemonSet.Namespace != namespace && daemonSet.Name == "node-agent" {
+			return true, nil
+		}
+	}
 	for _, gvr := range veleroNamespacedResources() {
 		list, err := u.dynamicClient.Resource(gvr).Namespace(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
 		if ignoreNotFound(err) != nil {
@@ -294,15 +314,23 @@ func veleroCRDNames() []string {
 	}
 }
 
-func uninstallExternalClusterRBACNames(deleteVelero bool) []string {
+func uninstallExternalClusterRBACNames(namespace string, deleteVelero bool) []string {
 	if deleteVelero {
-		return []string{"hypercdr-velero"}
+		return []string{scopedRBACName("hypercdr-velero", namespace)}
 	}
 	return nil
 }
 
-func uninstallAgentClusterRBACNames() []string {
-	return []string{"hypercdr-agent"}
+func uninstallAgentClusterRBACNames(namespace string) []string {
+	return []string{scopedRBACName("hypercdr-agent", namespace)}
+}
+
+func scopedRBACName(baseName, namespace string) string {
+	if namespace == "" || namespace == "hypercdr-agent" {
+		return baseName
+	}
+	digest := sha256.Sum256([]byte(namespace))
+	return fmt.Sprintf("%s-%x", baseName, digest[:4])
 }
 
 func ignoreNotFound(err error) error {

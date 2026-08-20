@@ -103,6 +103,40 @@ func TestUpgradeAgentDoesNotAttemptToEscalateItsOwnRBAC(t *testing.T) {
 	}
 }
 
+func TestPrepareVeleroUpgradeUsesNamespaceScopedRBAC(t *testing.T) {
+	const namespace = "hypercdr-enterprise-agent"
+	communityRole := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "hypercdr-agent"},
+		Rules:      []rbacv1.PolicyRule{{APIGroups: []string{"apps"}, Resources: []string{"daemonsets"}, Verbs: []string{"get"}}},
+	}
+	enterpriseRole := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: scopedRBACName("hypercdr-agent", namespace)},
+		Rules: []rbacv1.PolicyRule{
+			{APIGroups: []string{"apps"}, Resources: []string{"daemonsets"}, Verbs: []string{"get"}},
+			{APIGroups: []string{"apiextensions.k8s.io"}, Resources: []string{"customresourcedefinitions"}, Verbs: []string{"get", "list", "watch"}},
+		},
+	}
+	client := fake.NewSimpleClientset(communityRole, enterpriseRole)
+	runtime := &KubernetesAgentRuntime{client: client}
+	if err := runtime.PrepareVeleroUpgrade(context.Background(), namespace); err != nil {
+		t.Fatal(err)
+	}
+	communityAfter, err := client.RbacV1().ClusterRoles().Get(context.Background(), communityRole.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(communityAfter.Rules[0].Verbs) != 1 {
+		t.Fatalf("enterprise preparation modified community RBAC: %#v", communityAfter.Rules)
+	}
+	enterpriseAfter, err := client.RbacV1().ClusterRoles().Get(context.Background(), enterpriseRole.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsString(enterpriseAfter.Rules[0].Verbs, "patch") || !containsString(enterpriseAfter.Rules[1].Verbs, "create") {
+		t.Fatalf("enterprise scoped RBAC was not prepared: %#v", enterpriseAfter.Rules)
+	}
+}
+
 func TestUpgradeVeleroReconcilesProviderPlugins(t *testing.T) {
 	labels := map[string]string{"app": "velero"}
 	nodeLabels := map[string]string{"app": "node-agent"}

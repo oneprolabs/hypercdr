@@ -340,7 +340,7 @@ func (r *KubernetesClusterReader) EnsureResourceDiscoveryPermission(ctx context.
 		return nil
 	}
 	roles := r.clientset.RbacV1().ClusterRoles()
-	role, err := roles.Get(ctx, "hypercdr-agent", metav1.GetOptions{})
+	role, err := roles.Get(ctx, scopedRBACName("hypercdr-agent", r.namespace), metav1.GetOptions{})
 	if err != nil {
 		return err
 	}

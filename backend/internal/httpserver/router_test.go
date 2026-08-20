@@ -869,6 +869,9 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 	if strings.Contains(text, "kubectl_retry kubectl apply -f \"$VELERO_CRDS_URL\"") {
 		t.Fatal("expected install script to download Velero CRDs before kubectl apply so self-signed HTTPS works")
 	}
+	if strings.Contains(text, "kubectl delete crd") {
+		t.Fatal("registration rollback must not delete cluster-scoped Velero CRDs shared by another HyperCDR edition")
+	}
 	command := exec.Command("bash", "-n")
 	command.Stdin = strings.NewReader(text)
 	if output, err := command.CombinedOutput(); err != nil {

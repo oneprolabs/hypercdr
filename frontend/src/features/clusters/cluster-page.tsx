@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Check, CheckCircle2, ChevronRight, Edit2, Eye, GitBranch, MoreVertical, Plus, PlusCircle, RefreshCw, Server, ShieldCheck, Star, Terminal, Trash2, Upload, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { apiGet, apiPatch, apiPost } from '../../api/client';
+import { ApiRequestError, apiGet, apiPatch, apiPost } from '../../api/client';
 import { SearchBar } from '../../components/search-bar';
 import { HyperTable, type HyperTableColumn } from '../../components/table';
 import ClusterActivityPanel from './cluster-activity-panel';
@@ -25,6 +25,22 @@ const formatLastSeen=(value?:string)=>{if(!value)return'unknown';const timestamp
 const normalizeNodeStatus=(status?:string)=>{const value=(status||'').trim();return value||'Unknown'};
 const formatPercent=(value:number)=>Number.isFinite(value)?Math.max(0,Math.min(100,value)).toFixed(2):'0.00';
 const taskStatusLabel=(status?:string)=>status==='succeeded'?'Succeeded':status==='failed'?'Failed':['running','accepted','dispatched','queued'].includes(status||'')?'Running':status||'Unknown';
+const unregisterFailure=(task:ApiTask|null,events:ApiTaskEvent[])=>{
+  const event=[...events].reverse().find(item=>item.level==='error'||item.reason?.includes('FAILED'));
+  const raw=String(event?.payload?.error||event?.message||task?.errorMessage||'Cluster-side cleanup failed without a detailed agent response.');
+  const code=String(event?.reason||task?.errorCode||'UNREGISTER_FAILED');
+  const namespace=String(event?.payload?.namespace||task?.payload?.namespace||'');
+  const advice=/forbidden|cannot list|cannot delete/i.test(raw)
+    ? 'The agent RBAC is incomplete or belongs to another HyperCDR edition. Repair this edition’s scoped RBAC, then retry normal unregister.'
+    : /offline|not connected|connection/i.test(raw)
+      ? 'Confirm the comm-agent is online and can reach the platform WebSocket endpoint, then retry.'
+      : /timeout|timed out|deadline/i.test(raw)
+        ? 'The Kubernetes API or etcd did not answer in time. Check control-plane health and retry after it is stable.'
+        : /bucket|object storage|repository/i.test(raw)
+          ? 'Check object-storage credentials, bucket access, and the cluster prefix before retrying.'
+          : 'Review the agent and platform logs with the task ID, correct the reported cause, then retry normal unregister.';
+  return {code,raw,namespace,advice};
+};
 const agentReadiness=(cluster:Cluster)=>cluster.connectionStatus!=='online'?{label:'Offline',className:'text-slate-500'}:cluster.status==='healthy'?{label:'Ready',className:'text-emerald-600'}:cluster.status==='syncing'?{label:'Syncing',className:'text-blue-600'}:{label:'Degraded',className:'text-amber-600'};
 const copyTextToClipboard=async(text:string,textarea?:HTMLTextAreaElement|null)=>{try{await navigator.clipboard.writeText(text);return true}catch{if(!textarea)return false;textarea.focus();textarea.select();return document.execCommand('copy')}};
 
@@ -39,7 +55,7 @@ export default function ClusterPage(props: {
   setSelectedCluster: (cluster: Cluster) => void;
   setDefaultCluster: (cluster: Cluster, event?: React.MouseEvent) => void;
   clearDefaultCluster: (event?: React.MouseEvent) => void;
-  unregisterCluster: (cluster: Cluster, event?: React.MouseEvent, deleteBackupData?: boolean) => Promise<ApiTask | null>;
+  unregisterCluster: (cluster: Cluster, event?: React.MouseEvent, deleteBackupData?: boolean) => Promise<ApiTask>;
   onRenameCluster: (clusterId: string, name: string) => void;
   onUpgradeCluster: (clusterId: string) => Promise<ApiTask>;
   onUpgradeVelero: (clusterId: string) => Promise<ApiTask>;
@@ -74,6 +90,7 @@ export default function ClusterPage(props: {
   const [renameValue, setRenameValue] = useState('');
   const [renaming, setRenaming] = useState(false);
   const [unregistering, setUnregistering] = useState(false);
+  const [unregisterSubmitError, setUnregisterSubmitError] = useState('');
   const [upgradeSubmitting, setUpgradeSubmitting] = useState(false);
   const [veleroUpgradeSubmitting, setVeleroUpgradeSubmitting] = useState(false);
   const [highlightedTaskId, setHighlightedTaskId] = useState<string | null>(null);
@@ -326,6 +343,7 @@ export default function ClusterPage(props: {
     setForceRemoveConfirmation('');
     setDeleteBackupData(false);
     setUnregisterPrecheck(null);
+    setUnregisterSubmitError('');
     setUnregisterTarget(cluster);
     setUnregisterPrecheckLoading(true);
     void apiGet<ApiUnregisterPrecheck>(`/api/v1/clusters/${cluster.id}/unregister/precheck`)
@@ -354,6 +372,7 @@ export default function ClusterPage(props: {
     setForceRemoveConfirmation('');
     setDeleteBackupData(false);
     setUnregisterPrecheck(null);
+    setUnregisterSubmitError('');
     setUnregisterTaskId(null);
     setUnregisterTask(null);
     setUnregisterEvents([]);
@@ -457,7 +476,8 @@ export default function ClusterPage(props: {
           setUnregisterTaskId(null);
         }
         if (task?.status === 'failed') {
-          toast(task.errorMessage || 'Cluster unregister failed');
+          const failure=unregisterFailure(task,listItems(eventRes));
+          toast(`Cluster unregister failed: ${failure.raw}`);
           setUnregisterTaskId(null);
         }
       } catch {
@@ -505,6 +525,7 @@ export default function ClusterPage(props: {
   const finishUnregisterCluster = async () => {
     if (!unregisterTarget) return;
     setUnregistering(true);
+    setUnregisterSubmitError('');
     if (forceRemoveEnabled) {
       const target = unregisterTarget;
       try {
@@ -523,15 +544,22 @@ export default function ClusterPage(props: {
       }
       return;
     }
-    const task = await unregisterCluster(unregisterTarget, undefined, deleteBackupData);
-    if (task) {
+    try {
+      const task = await unregisterCluster(unregisterTarget, undefined, deleteBackupData);
       setUnregisterTaskId(task.id);
       setUnregisterTask(task);
       setUnregisterEvents([]);
       setUnregisterTarget(null);
       toast('Unregister task created. Track progress in Recent Tasks.');
+    } catch (error) {
+      const detail = error instanceof ApiRequestError
+        ? `${error.message} (${error.code}, HTTP ${error.status}${error.requestId ? `, request ${error.requestId}` : ''})`
+        : error instanceof Error ? error.message : 'Unknown request failure';
+      setUnregisterSubmitError(detail);
+      toast(`Unregister failed: ${detail}`);
+    } finally {
+      setUnregistering(false);
     }
-    setUnregistering(false);
   };
 
   const finishRenameCluster = async () => {
@@ -563,10 +591,26 @@ export default function ClusterPage(props: {
     }
   };
 
+  const failedUnregister = unregisterTask?.status === 'failed' ? unregisterFailure(unregisterTask, unregisterEvents) : null;
+
   return (
     <motion.div key="clusters" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="hbdr-clusters-page">
       <div className="hbdr-clusters-workspace">
       <SearchBar title="Clusters" desc="Register clusters and maintain the default cluster." />
+
+      {failedUnregister && (
+        <section role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs leading-5 text-rose-800">
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={18} className="mt-0.5 shrink-0 text-rose-600" />
+            <div className="min-w-0">
+              <strong className="block text-sm text-rose-900">Cluster unregister failed</strong>
+              <span className="mt-1 block break-words">{failedUnregister.raw}</span>
+              <span className="mt-2 block text-rose-700">{failedUnregister.advice}</span>
+              <span className="mt-2 block break-all font-mono text-[10px] text-rose-600">Code: {failedUnregister.code}{failedUnregister.namespace ? ` · Namespace: ${failedUnregister.namespace}` : ''} · Task: {unregisterTask?.id}</span>
+            </div>
+          </div>
+        </section>
+      )}
 
       {loading ? (
         <div className="hbdr-section-card flex min-h-48 items-center justify-center text-xs font-semibold text-slate-400" role="status">Loading clusters...</div>
@@ -1164,6 +1208,13 @@ export default function ClusterPage(props: {
                     </div>
                   )}
                 </section>
+                {unregisterSubmitError && (
+                  <section role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs leading-5 text-rose-800">
+                    <strong className="block text-sm text-rose-900">Unregister could not start</strong>
+                    <span className="mt-1 block break-words">{unregisterSubmitError}</span>
+                    <span className="mt-2 block text-rose-700">Review the readiness blockers above, confirm the agent is online, then retry. Use the request ID when checking platform logs.</span>
+                  </section>
+                )}
               </div>
 
               <div className="hbdr-filter-drawer-actions hbdr-unregister-drawer-actions">

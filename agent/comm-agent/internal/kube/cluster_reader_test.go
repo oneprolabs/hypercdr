@@ -212,3 +212,27 @@ func TestEnsureResourceDiscoveryPermissionAddsReadOnlyWildcardRule(t *testing.T)
 		t.Fatalf("read-only discovery rule missing: %#v", role.Rules)
 	}
 }
+
+func TestEnsureResourceDiscoveryPermissionUsesNamespaceScopedRBAC(t *testing.T) {
+	const namespace = "hypercdr-enterprise-agent"
+	clientset := fake.NewSimpleClientset(
+		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "hypercdr-agent"}},
+		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: scopedRBACName("hypercdr-agent", namespace)}},
+	)
+	reader := NewKubernetesClusterReaderWithClients(clientset, nil, nil)
+	reader.namespace = namespace
+	if err := reader.EnsureResourceDiscoveryPermission(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	communityRole, err := clientset.RbacV1().ClusterRoles().Get(context.Background(), "hypercdr-agent", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(communityRole.Rules) != 0 {
+		t.Fatalf("enterprise discovery modified community RBAC: %#v", communityRole.Rules)
+	}
+	enterpriseRole, err := clientset.RbacV1().ClusterRoles().Get(context.Background(), scopedRBACName("hypercdr-agent", namespace), metav1.GetOptions{})
+	if err != nil || len(enterpriseRole.Rules) != 1 {
+		t.Fatalf("enterprise scoped discovery rule missing: role=%#v err=%v", enterpriseRole, err)
+	}
+}

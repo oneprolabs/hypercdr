@@ -660,7 +660,11 @@ func (c *Client) executeVeleroUpgradeTask(task protocol.TaskDispatchPayload) {
 	_ = c.sendTaskProgress(task, map[string]any{"kind": "VeleroUpgrade", "image": command.Image}, 15, "velero upgrade accepted; updating server and node agents")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	if err := c.agentRuntime.PrepareVeleroUpgrade(ctx); err != nil {
+	namespace := command.Namespace
+	if namespace == "" {
+		namespace = c.cfg.Namespace
+	}
+	if err := c.agentRuntime.PrepareVeleroUpgrade(ctx, namespace); err != nil {
 		_ = c.sendTaskFailedWithDetails(task, "VELERO_UPGRADE_PERMISSION_FAILED", "failed to prepare Velero upgrade permissions", map[string]any{"error": err.Error()})
 		return
 	}

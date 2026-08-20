@@ -1,12 +1,28 @@
 import { AUTH_EXPIRED_EVENT, readStoredAuthSession } from '../auth/session';
 
+export class ApiRequestError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly requestId: string;
+  readonly details: Record<string, unknown>;
+
+  constructor(message: string, response: Response, details: Record<string, unknown> = {}) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = response.status;
+    this.code = String(details.error || 'request_failed');
+    this.requestId = response.headers.get('x-request-id') || String(details.requestId || '');
+    this.details = details;
+  }
+}
+
 async function readApiError(response: Response): Promise<Error> {
   try {
-    const body = await response.json();
+    const body = await response.json() as Record<string, unknown>;
     const message = body?.message || body?.error || `${response.status} ${response.statusText}`;
-    return new Error(String(message));
+    return new ApiRequestError(String(message), response, body);
   } catch {
-    return new Error(`${response.status} ${response.statusText}`);
+    return new ApiRequestError(`${response.status} ${response.statusText}`, response);
   }
 }
 

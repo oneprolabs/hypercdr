@@ -26,7 +26,7 @@ type AgentUpgrader interface {
 
 type VeleroRuntimeManager interface {
 	VeleroRuntimeStatus(ctx context.Context, namespace string) (VeleroRuntimeStatus, error)
-	PrepareVeleroUpgrade(ctx context.Context) error
+	PrepareVeleroUpgrade(ctx context.Context, namespace string) error
 	UpgradeVelero(ctx context.Context, options VeleroUpgradeOptions) error
 }
 
@@ -327,7 +327,7 @@ func (r *KubernetesAgentRuntime) UpgradeVelero(ctx context.Context, options Vele
 	if strings.TrimSpace(options.Image) == "" {
 		return fmt.Errorf("velero image is required")
 	}
-	if err := r.PrepareVeleroUpgrade(ctx); err != nil {
+	if err := r.PrepareVeleroUpgrade(ctx, namespace); err != nil {
 		return err
 	}
 	if err := r.ensureVeleroPerformanceConfig(ctx, namespace, options); err != nil {
@@ -387,11 +387,12 @@ func (r *KubernetesAgentRuntime) UpgradeVelero(ctx context.Context, options Vele
 	}
 }
 
-func (r *KubernetesAgentRuntime) PrepareVeleroUpgrade(ctx context.Context) error {
-	if err := r.ensureDaemonSetUpgradePermission(ctx); err != nil {
+func (r *KubernetesAgentRuntime) PrepareVeleroUpgrade(ctx context.Context, namespace string) error {
+	namespace = firstNonEmpty(namespace, "hypercdr-agent")
+	if err := r.ensureDaemonSetUpgradePermission(ctx, namespace); err != nil {
 		return fmt.Errorf("ensure node-agent upgrade permission: %w", err)
 	}
-	if err := r.ensureVeleroCRDUpgradePermission(ctx); err != nil {
+	if err := r.ensureVeleroCRDUpgradePermission(ctx, namespace); err != nil {
 		return fmt.Errorf("ensure Velero CRD upgrade permission: %w", err)
 	}
 	return nil
@@ -464,8 +465,9 @@ func (r *KubernetesAgentRuntime) ensureVeleroPerformanceConfig(ctx context.Conte
 	return err
 }
 
-func (r *KubernetesAgentRuntime) ensureDaemonSetUpgradePermission(ctx context.Context) error {
-	role, err := r.client.RbacV1().ClusterRoles().Get(ctx, "hypercdr-agent", metav1.GetOptions{})
+func (r *KubernetesAgentRuntime) ensureDaemonSetUpgradePermission(ctx context.Context, namespace string) error {
+	roleName := scopedRBACName("hypercdr-agent", namespace)
+	role, err := r.client.RbacV1().ClusterRoles().Get(ctx, roleName, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
@@ -483,11 +485,12 @@ func (r *KubernetesAgentRuntime) ensureDaemonSetUpgradePermission(ctx context.Co
 		_, err = r.client.RbacV1().ClusterRoles().Update(ctx, role, metav1.UpdateOptions{})
 		return err
 	}
-	return fmt.Errorf("hypercdr-agent ClusterRole has no apps/daemonsets rule")
+	return fmt.Errorf("%s ClusterRole has no apps/daemonsets rule", roleName)
 }
 
-func (r *KubernetesAgentRuntime) ensureVeleroCRDUpgradePermission(ctx context.Context) error {
-	role, err := r.client.RbacV1().ClusterRoles().Get(ctx, "hypercdr-agent", metav1.GetOptions{})
+func (r *KubernetesAgentRuntime) ensureVeleroCRDUpgradePermission(ctx context.Context, namespace string) error {
+	roleName := scopedRBACName("hypercdr-agent", namespace)
+	role, err := r.client.RbacV1().ClusterRoles().Get(ctx, roleName, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
@@ -504,7 +507,7 @@ func (r *KubernetesAgentRuntime) ensureVeleroCRDUpgradePermission(ctx context.Co
 		_, err = r.client.RbacV1().ClusterRoles().Update(ctx, role, metav1.UpdateOptions{})
 		return err
 	}
-	return fmt.Errorf("hypercdr-agent ClusterRole has no apiextensions.k8s.io/customresourcedefinitions rule")
+	return fmt.Errorf("%s ClusterRole has no apiextensions.k8s.io/customresourcedefinitions rule", roleName)
 }
 
 func containsString(values []string, target string) bool {
