@@ -184,7 +184,9 @@ else
   else
     component_curl_args+=(--insecure)
   fi
-  curl "${component_curl_args[@]}" --data "{\"component\":\"comm-agent\",\"version\":\"${VERSION}\",\"image\":\"${REGISTRY}/comm-agent:${VERSION}\",\"releaseNotes\":\"HyperCDR Comm Agent ${VERSION}\"}" >/dev/null
+  COMM_AGENT_IMAGE="${REGISTRY}/comm-agent:${VERSION}"
+  COMM_AGENT_DIGEST="$(local_image_digest "${COMM_AGENT_IMAGE}")"
+  curl "${component_curl_args[@]}" --data "{\"component\":\"comm-agent\",\"version\":\"${VERSION}\",\"image\":\"${COMM_AGENT_IMAGE}\",\"imageDigest\":\"${COMM_AGENT_DIGEST}\",\"releaseNotes\":\"HyperCDR Comm Agent ${VERSION}\"}" >/dev/null
   log "Comm-agent candidate registered: ${VERSION}"
 fi
 

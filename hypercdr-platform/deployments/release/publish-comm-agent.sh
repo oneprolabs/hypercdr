@@ -16,6 +16,7 @@ require_cmd curl
 
 REGISTRY="${REGISTRY%/}"
 IMAGE="${REGISTRY}/comm-agent:${VERSION}"
+IMAGE_DIGEST="$(local_image_digest "${IMAGE}")"
 [[ -r "${RELEASE_TOKEN_FILE}" ]] || die "release token file is not readable: ${RELEASE_TOKEN_FILE}"
 RELEASE_TOKEN="$(tr -d '\r\n' < "${RELEASE_TOKEN_FILE}")"
 [[ -n "${RELEASE_TOKEN}" ]] || die "release token file is empty: ${RELEASE_TOKEN_FILE}"
@@ -33,6 +34,6 @@ if [[ -n "${HCDR_PLATFORM_CA_FILE:-}" ]]; then
 else
   curl_args+=(--insecure)
 fi
-curl "${curl_args[@]}" --data "{\"component\":\"comm-agent\",\"version\":\"${VERSION}\",\"image\":\"${IMAGE}\",\"releaseNotes\":\"Adds remote diagnostic log collection and failure context reporting.\"}" >/dev/null
+curl "${curl_args[@]}" --data "{\"component\":\"comm-agent\",\"version\":\"${VERSION}\",\"image\":\"${IMAGE}\",\"imageDigest\":\"${IMAGE_DIGEST}\",\"releaseNotes\":\"Adds recovery stage reporting and failure context diagnostics.\"}" >/dev/null
 
 log "Comm-agent candidate registered: ${VERSION}"

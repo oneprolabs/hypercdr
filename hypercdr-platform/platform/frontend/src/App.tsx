@@ -1,6 +1,6 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DrConfigurationModal } from './dr-configuration-modal';
-import { RecoveryWizardModal, type RecoveryWizardConfig } from './recovery-wizard-modal';
+import { RecoveryWizardModal, type BackupContentResource, type RecoveryWizardConfig } from './recovery-wizard-modal';
 import { HyperTable, type HyperTableColumn } from './components/table';
 import {
   Activity,
@@ -889,7 +889,10 @@ async function apiPut<T>(path: string, body: unknown): Promise<T> {
 function isAgentTokenUsable(token: ApiAgentToken | null) {
   if (!token?.installCommand) return false;
   const expiresAt = Date.parse(token.expiresAt);
-  return Number.isNaN(expiresAt) || expiresAt > Date.now() + 60_000;
+  // A token copied from the registration drawer must remain valid for the
+  // whole cluster-side preflight and installation, not merely when the drawer
+  // opens. Slow image pulls can legitimately take several minutes.
+  return Number.isNaN(expiresAt) || expiresAt > Date.now() + 10 * 60_000;
 }
 
 async function apiPatch<T>(path: string, body: unknown): Promise<T> {
@@ -1403,13 +1406,16 @@ function TaskErrorStatus({
 function TaskErrorDetailBlock({
   failure,
   details,
+  onRetry,
 }: {
   failure: { code: string; title: string; description: string; fullText: string };
   details?: string[];
+  onRetry?: () => void;
 }) {
   const fullDetails = details && details.length > 0 ? details : failure.fullText ? [failure.fullText] : [];
   const definition = errorMessageDefinition(failure.code);
   const possibleCause = productTaskMessage(fullDetails[0] || failure.description || 'No specific cause was reported.');
+  const solution = taskFailureSolution(failure.code, fullDetails, definition.detail);
   return (
     <div className="hbdr-task-detail-error">
       <header>
@@ -1419,15 +1425,15 @@ function TaskErrorDetailBlock({
       </header>
       <div className="hbdr-task-detail-error-sections">
         <section>
-          <b>Possible cause</b>
+          <b>Root cause</b>
           <p>{possibleCause}</p>
         </section>
         <section>
           <b>Solution</b>
-          <p>{productTaskMessage(definition.detail)}</p>
+          <p>{solution}</p>
         </section>
         <section>
-          <b>Technical details</b>
+          <b>Evidence</b>
           {fullDetails.length > 0 ? (
             fullDetails.map((detail, index) => <p key={`${index}-${detail}`}>{detail}</p>)
           ) : (
@@ -1435,18 +1441,53 @@ function TaskErrorDetailBlock({
           )}
         </section>
       </div>
+      {onRetry && <div className="hbdr-task-detail-error-actions"><button type="button" onClick={onRetry}><RefreshCw size={13} />Retry recovery</button></div>}
     </div>
   );
 }
 
+function taskFailureSolution(code: string, details: string[], fallback: string): string {
+  const evidence = details.join(' ').toLowerCase();
+  if (code === '140005') {
+    if (/timeout|timed out|i\/o timeout|connection refused|no route|dial tcp/.test(evidence)) {
+      return 'Verify outbound DNS and TCP 443 access from every target worker node to the registry shown in Evidence. If direct access is intentionally blocked, map the image to an internal registry in Advanced options and retry the drill.';
+    }
+    if (/unauthorized|authentication required|denied|pull access/.test(evidence)) {
+      return 'Create or copy an imagePullSecret in the target namespace, attach it to the restored ServiceAccount or Pod template, verify registry permission, and retry the drill.';
+    }
+    if (/not found|manifest unknown/.test(evidence)) {
+      return 'Confirm that the exact repository and tag or digest in Evidence exists. Map it to an available target-registry image in Advanced options, then retry the drill.';
+    }
+  }
+  return productTaskMessage(fallback);
+}
+
 function TaskProcessTimeline({ task, events }: { task: ApiTask; events: ApiTaskEvent[] }) {
   const terminal = !isActiveTaskStatus(task.status);
+  const recoveryStages = taskRecoveryStages(task, events);
   return (
     <div className="hbdr-task-detail-section">
       <div className="hbdr-task-detail-section-title">
         <strong>Execution process</strong>
         <span>{terminal ? `${events.length} records` : `Live · ${events.length} records`}</span>
       </div>
+      {recoveryStages.length > 0 && (
+        <div className="hbdr-recovery-stage-list" aria-label="Recovery stages">
+          {recoveryStages.map(stage => (
+            <section key={stage.id} className={`is-${stage.status}`}>
+              <i aria-hidden="true" />
+              <div>
+                <strong>{stage.name}</strong>
+                {stage.message && <span>{productTaskMessage(stage.message)}</span>}
+                {stage.evidence.length > 0 && (
+                  <ul>{stage.evidence.map((item, index) => <li key={`${stage.id}-${index}`}>{item}</li>)}</ul>
+                )}
+              </div>
+              <em>{stage.status.replace(/_/g, ' ')}</em>
+            </section>
+          ))}
+        </div>
+      )}
       <div className="hbdr-task-detail-events" aria-live="polite">
         {events.length > 0 ? events.map(event => {
           const errors = eventRestoreResultErrors(event);
@@ -1464,6 +1505,37 @@ function TaskProcessTimeline({ task, events }: { task: ApiTask; events: ApiTaskE
       </div>
     </div>
   );
+}
+
+type TaskRecoveryStage = {
+  id: string;
+  name: string;
+  status: string;
+  message: string;
+  evidence: string[];
+};
+
+function taskRecoveryStages(task: ApiTask, events: ApiTaskEvent[]): TaskRecoveryStage[] {
+  const candidates: unknown[] = [task.payload?.recoveryStages, task.payload?.velero?.recoveryStages];
+  [...events].reverse().forEach(event => {
+    candidates.push(event.payload?.recoveryStages, event.payload?.velero?.recoveryStages);
+  });
+  const raw = candidates.find(value => Array.isArray(value)) as Array<Record<string, unknown>> | undefined;
+  if (!raw) return [];
+  return raw.map((stage, index) => {
+    const status = String(stage.status || 'pending').trim().toLowerCase().replace(/\s+/g, '_');
+    const evidenceValue = stage.evidence;
+    const evidence = Array.isArray(evidenceValue)
+      ? evidenceValue.map(item => typeof item === 'string' ? item : JSON.stringify(item)).filter(Boolean)
+      : evidenceValue ? [typeof evidenceValue === 'string' ? evidenceValue : JSON.stringify(evidenceValue)] : [];
+    return {
+      id: String(stage.id || `stage-${index}`),
+      name: String(stage.name || stage.id || `Stage ${index + 1}`),
+      status,
+      message: String(stage.message || ''),
+      evidence,
+    };
+  });
 }
 
 function taskProcessEventMessage(event: ApiTaskEvent): string {
@@ -2748,7 +2820,7 @@ function moduleForView(view: View): TopModule {
   if (view === 'dashboard') return 'overview';
   if (view === 'applications' || view === 'restore_points' || view === 'dr_tasks' || view === 'failback') return 'dr';
   if (view === 'clusters' || view === 'storage' || view === 'policies' || view === 'tags') return 'config';
-  if (view === 'operations' || view === 'logs' || view === 'upgrades') return 'ops';
+  if (view === 'operations' || view === 'logs') return 'ops';
   return 'settings';
 }
 
@@ -3807,7 +3879,6 @@ export default function App() {
         title: 'Operations',
         items: [
           { label: 'Logs', desc: 'Search and export diagnostic logs', view: 'logs' as View, icon: Terminal },
-          ...(authSession?.user.systemAdmin ? [{ label: 'Upgrade', desc: 'Check and upgrade platform and cluster components', view: 'upgrades' as View, icon: Upload }] : []),
         ],
       };
     }
@@ -3816,6 +3887,7 @@ export default function App() {
       items: [
         ...(authSession?.user.role === 'admin' ? [{ label: 'User Management', desc: 'Create and maintain platform users', view: 'users' as View, icon: User }] : []),
         ...(authSession?.user.systemAdmin ? [{ label: 'Tenant Management', desc: 'Create and maintain isolated tenants', view: 'tenants' as View, icon: Building2 }] : []),
+        ...(authSession?.user.systemAdmin ? [{ label: 'Upgrade', desc: 'Check and upgrade platform and cluster components', view: 'upgrades' as View, icon: Upload }] : []),
         ...(authSession?.user.systemAdmin ? [{ label: 'Email Settings', desc: 'Configure password recovery email delivery', view: 'email_settings' as View, icon: Settings2 }] : []),
       ],
     };
@@ -6447,7 +6519,7 @@ function ApplicationDrPage(props: {
       targetNamespace: mode === 'takeover' ? primaryNamespace : `${primaryNamespace}-drill`,
       restoreMode: 'full',
       artifactMode: 'all',
-      conflictPolicy: mode === 'takeover' ? 'replace' : 'skip',
+      conflictPolicy: 'replace',
       originalNamespaceConfirmed: false,
       includeClusterScoped: false,
       useTransforms: targetMode !== 'inPlace',
@@ -6456,6 +6528,15 @@ function ApplicationDrPage(props: {
       alternateProfileId: '',
       preflightChecks: true,
       autoStartValidation: mode === 'drill',
+      includedResources: [],
+      excludedResources: [],
+      storageClassMappings: {},
+      imageMappings: {},
+      waitForWorkloads: true,
+      runValidation: mode === 'drill',
+      forceStart: false,
+      contentCatalogLoaded: false,
+      persistentDataExpected: false,
       notes: mode === 'drill'
         ? 'Validate service startup, storage attachment, and application smoke test after recovery.'
         : 'Confirm routing cutover, service dependencies, and production freeze before takeover.',
@@ -6517,6 +6598,7 @@ function ApplicationDrPage(props: {
           sourceNamespaces,
           targetNamespace,
           targetNamespaces,
+          namespaceMode: action.config.namespaceMode,
           targetMode: action.config.targetMode,
           restoreMode: action.config.restoreMode,
           artifactMode: action.config.artifactMode,
@@ -6527,6 +6609,15 @@ function ApplicationDrPage(props: {
           transformPreset: action.config.transformPreset,
           storageProfileMode: action.config.storageProfileMode,
           alternateProfileId: action.config.alternateProfileId,
+          includedResources: action.config.includedResources,
+          excludedResources: action.config.excludedResources,
+          storageClassMappings: action.config.storageClassMappings,
+          imageMappings: action.config.imageMappings,
+          waitForWorkloads: action.config.waitForWorkloads,
+          runValidation: action.config.runValidation,
+          forceStart: action.config.forceStart,
+          contentCatalogLoaded: action.config.contentCatalogLoaded,
+          persistentDataExpected: action.config.persistentDataExpected,
       });
       setLiveRecoveryTasks(prev => ({ ...prev, [action.app.name]: createdTask }));
       setSubmittingRecoveryTasks(prev => ({ ...prev, [action.app.name]: createdTask }));
@@ -7757,6 +7848,7 @@ function ApplicationDrPage(props: {
               region: cluster.region,
               version: cluster.version,
               isCurrent: currentCluster?.id === cluster.id,
+              storageClasses: cluster.storageClasses,
             }))}
             repositoryOptions={storage.map(repo => ({
               id: repo.id,
@@ -7776,6 +7868,7 @@ function ApplicationDrPage(props: {
             onClose={() => setRestoreAction(null)}
             onSubmit={confirmRestoreAction}
             submitting={recoverySubmitting}
+            loadContents={restorePointId => apiGet<{ resources: BackupContentResource[]; truncated?: boolean }>(`/api/v1/restore-points/${encodeURIComponent(restorePointId)}/contents`)}
           />
         )}
       </AnimatePresence>
@@ -11568,6 +11661,7 @@ function RealRestorePointPage({
     region: cluster.connectionStatus === 'online' ? 'connected' : 'disconnected',
     version: cluster.kubeVersion || 'unknown',
     isCurrent: index === 0,
+    storageClasses: cluster.storageClasses || [],
   }));
   const repositoryOptions = storageRepos.map(repo => ({
     id: repo.id,
@@ -11594,7 +11688,7 @@ function RealRestorePointPage({
       targetNamespace: mode === 'takeover' ? row.namespace : `${row.namespace}-drill`,
       restoreMode: 'full',
       artifactMode: 'all',
-      conflictPolicy: mode === 'takeover' ? 'replace' : 'skip',
+      conflictPolicy: 'replace',
       originalNamespaceConfirmed: false,
       includeClusterScoped: false,
       useTransforms: targetMode !== 'inPlace',
@@ -11603,6 +11697,15 @@ function RealRestorePointPage({
       alternateProfileId: '',
       preflightChecks: true,
       autoStartValidation: mode === 'drill',
+      includedResources: [],
+      excludedResources: [],
+      storageClassMappings: {},
+      imageMappings: {},
+      waitForWorkloads: true,
+      runValidation: mode === 'drill',
+      forceStart: false,
+      contentCatalogLoaded: false,
+      persistentDataExpected: false,
       notes: mode === 'drill'
         ? 'Validate service startup, storage attachment, and namespace isolation after recovery.'
         : 'Confirm traffic cutover and production freeze before takeover.',
@@ -12050,7 +12153,16 @@ function RealRestorePointPage({
                 <div className="hbdr-task-detail">
                   <TaskProcessTimeline task={recoveryTaskDetail.task} events={recoveryTaskDetailEvents} />
                   {(isFailedStatus(recoveryTaskDetail.task.status) || taskHasWarning(recoveryTaskDetail.task)) && (
-                    <TaskErrorDetailBlock failure={failure} details={details} />
+                    <TaskErrorDetailBlock failure={failure} details={details} onRetry={isFailedStatus(recoveryTaskDetail.task.status) ? async () => {
+                      try {
+                        const retried = await apiPost<ApiTask>(`/api/v1/tasks/${recoveryTaskDetail.task.id}/retry`, {});
+                        setTasks(prev => [retried, ...prev]);
+                        setRecoveryTaskDetail(null);
+                        toast('Recovery retry submitted');
+                      } catch (error) {
+                        toast('Failed to retry recovery: ' + (error instanceof Error ? error.message : 'unknown error'));
+                      }
+                    } : undefined} />
                   )}
                   <TaskFinalResult task={recoveryTaskDetail.task} events={recoveryTaskDetailEvents} />
 
@@ -12084,6 +12196,7 @@ function RealRestorePointPage({
           }}
           onClose={() => setRestoreAction(null)}
           submitting={recoverySubmitting}
+          loadContents={restorePointId => apiGet<{ resources: BackupContentResource[]; truncated?: boolean }>(`/api/v1/restore-points/${encodeURIComponent(restorePointId)}/contents`)}
           onSubmit={async () => {
             const action = restoreAction;
             const targetNamespace = action.config.namespaceMode === 'original' ? action.row.namespace : action.config.targetNamespace;
@@ -12098,6 +12211,7 @@ function RealRestorePointPage({
                 sourceNamespace: action.row.namespace,
                 sourceNamespaces: action.row.namespaces,
                 targetNamespace,
+                namespaceMode: action.config.namespaceMode,
                 targetMode: action.config.targetMode,
                 restoreMode: action.config.restoreMode,
                 artifactMode: action.config.artifactMode,
@@ -12108,6 +12222,15 @@ function RealRestorePointPage({
                 transformPreset: action.config.transformPreset,
                 storageProfileMode: action.config.storageProfileMode,
                 alternateProfileId: action.config.alternateProfileId,
+                includedResources: action.config.includedResources,
+                excludedResources: action.config.excludedResources,
+                storageClassMappings: action.config.storageClassMappings,
+                imageMappings: action.config.imageMappings,
+                waitForWorkloads: action.config.waitForWorkloads,
+                runValidation: action.config.runValidation,
+                forceStart: action.config.forceStart,
+                contentCatalogLoaded: action.config.contentCatalogLoaded,
+                persistentDataExpected: action.config.persistentDataExpected,
               });
               setTasks(prev => [createdTask, ...prev.filter(task => task.id !== createdTask.id)]);
               setRestoreAction(null);
@@ -12660,7 +12783,7 @@ function RestorePointPage({ openDr, toast }: { openDr: () => void; toast: (msg: 
       targetNamespace: mode === 'takeover' ? row.name : `${row.name}-drill`,
       restoreMode: 'full',
       artifactMode: 'all',
-      conflictPolicy: mode === 'takeover' ? 'replace' : 'skip',
+      conflictPolicy: 'replace',
       originalNamespaceConfirmed: false,
       includeClusterScoped: false,
       useTransforms: targetMode !== 'inPlace',
@@ -12669,6 +12792,15 @@ function RestorePointPage({ openDr, toast }: { openDr: () => void; toast: (msg: 
       alternateProfileId: '',
       preflightChecks: true,
       autoStartValidation: mode === 'drill',
+      includedResources: [],
+      excludedResources: [],
+      storageClassMappings: {},
+      imageMappings: {},
+      waitForWorkloads: true,
+      runValidation: mode === 'drill',
+      forceStart: false,
+      contentCatalogLoaded: false,
+      persistentDataExpected: false,
       notes: mode === 'drill'
         ? 'Validate service startup, storage attachment, and namespace isolation after recovery.'
         : 'Confirm traffic cutover and production freeze before takeover.',
@@ -14665,6 +14797,7 @@ function UpgradeManagementPage({ isAdmin, toast, refreshPlatformData }: { isAdmi
   const [candidateNotes, setCandidateNotes] = useState('');
   const [candidateOpen, setCandidateOpen] = useState(false);
   const [publishTarget, setPublishTarget] = useState<ApiComponentRelease | null>(null);
+  const [publishError, setPublishError] = useState('');
   const [platformVersion, setPlatformVersion] = useState<ApiPlatformVersion | null>(null);
   const [platformReleases, setPlatformReleases] = useState<ApiPlatformRelease[]>([]);
   const [platformUpgrades, setPlatformUpgrades] = useState<ApiPlatformUpgrade[]>([]);
@@ -14746,12 +14879,17 @@ function UpgradeManagementPage({ isAdmin, toast, refreshPlatformData }: { isAdmi
   const publish = async () => {
     if (!publishTarget) return;
     setBusy(publishTarget.id);
+    setPublishError('');
     try {
       await apiPost<ApiComponentRelease>(`/api/v1/component-releases/${publishTarget.id}/activate`, {});
       toast(`${publishTarget.version} is now the ${publishTarget.component} target release`);
       setPublishTarget(null);
       await Promise.all([load(), refreshPlatformData()]);
-    } catch (error) { toast(error instanceof Error ? error.message : 'Release publish failed'); }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Release publish failed';
+      setPublishError(message);
+      toast(message);
+    }
     finally { setBusy(''); }
   };
 
@@ -14837,8 +14975,8 @@ function UpgradeManagementPage({ isAdmin, toast, refreshPlatformData }: { isAdmi
       <AnimatePresence>{candidateOpen && <ModalFrame title="Register Candidate Release" subtitle="The platform validates the image in Harbor and records its immutable digest." icon={<Upload size={18} />} onClose={() => setCandidateOpen(false)}>
         <div className="space-y-4"><label className="block text-xs font-bold text-slate-600">Component<select value={candidateComponent} onChange={event => setCandidateComponent(event.target.value as 'comm-agent' | 'velero')} className="mt-1 h-10 w-full rounded border border-slate-200 px-3"><option value="comm-agent">Comm Agent</option><option value="velero">Velero Agent</option></select></label><label className="block text-xs font-bold text-slate-600">Version<input value={candidateVersion} onChange={event => setCandidateVersion(event.target.value)} className="mt-1 h-10 w-full rounded border border-slate-200 px-3" placeholder="v20260722.1" /></label><label className="block text-xs font-bold text-slate-600">Full image<input value={candidateImage} onChange={event => setCandidateImage(event.target.value)} className="mt-1 h-10 w-full rounded border border-slate-200 px-3 font-mono text-xs" placeholder="registry/hypercdr/comm-agent:v20260722.1" /></label><label className="block text-xs font-bold text-slate-600">Release notes<textarea value={candidateNotes} onChange={event => setCandidateNotes(event.target.value)} className="mt-1 min-h-20 w-full rounded border border-slate-200 p-3 text-xs" /></label><div className="flex justify-end gap-2"><button onClick={() => setCandidateOpen(false)} className="rounded px-4 py-2 text-xs font-bold text-slate-500">Cancel</button><button disabled={busy === 'create'} onClick={() => void createCandidate()} className="rounded bg-blue-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{busy === 'create' ? 'Validating...' : 'Validate & Register'}</button></div></div>
       </ModalFrame>}</AnimatePresence>
-      <AnimatePresence>{publishTarget && <ModalFrame title="Publish Target Release" subtitle="This changes the upgrade target immediately but never upgrades clusters automatically." icon={<ShieldCheck size={18} />} onClose={() => setPublishTarget(null)}>
-        <div className="space-y-4"><div className="rounded border border-blue-100 bg-blue-50 p-4"><strong className="text-sm text-blue-900">{publishTarget.component} · {publishTarget.version}</strong><p className="mt-1 break-all text-xs text-blue-700">{publishTarget.image}</p><p className="mt-2 font-mono text-[10px] text-blue-500">sha256:{shortDigest(publishTarget.imageDigest)}</p></div><p className="text-xs leading-5 text-slate-600">Eligible clusters will display Update after publication. Users must confirm each cluster upgrade. Existing tasks keep their original target snapshot.</p><div className="flex justify-end gap-2"><button onClick={() => setPublishTarget(null)} className="rounded px-4 py-2 text-xs font-bold text-slate-500">Cancel</button><button disabled={busy === publishTarget.id} onClick={() => void publish()} className="rounded bg-blue-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{busy === publishTarget.id ? 'Publishing...' : 'Publish Target'}</button></div></div>
+      <AnimatePresence>{publishTarget && <ModalFrame title="Publish Target Release" subtitle="This changes the upgrade target immediately but never upgrades clusters automatically." icon={<ShieldCheck size={18} />} onClose={() => { setPublishTarget(null); setPublishError(''); }}>
+        <div className="space-y-4"><div className="rounded border border-blue-100 bg-blue-50 p-4"><strong className="text-sm text-blue-900">{publishTarget.component} · {publishTarget.version}</strong><p className="mt-1 break-all text-xs text-blue-700">{publishTarget.image}</p><p className="mt-2 font-mono text-[10px] text-blue-500">sha256:{shortDigest(publishTarget.imageDigest)}</p></div><p className="text-xs leading-5 text-slate-600">Eligible clusters will display Update after publication. Users must confirm each cluster upgrade. Existing tasks keep their original target snapshot.</p>{publishError && <div role="alert" className="flex gap-2 rounded border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs leading-5 text-rose-700"><AlertCircle size={16} className="mt-0.5 shrink-0" /><span>{publishError}</span></div>}<div className="flex justify-end gap-2"><button onClick={() => { setPublishTarget(null); setPublishError(''); }} className="rounded px-4 py-2 text-xs font-bold text-slate-500">Cancel</button><button disabled={busy === publishTarget.id} onClick={() => void publish()} className="rounded bg-blue-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{busy === publishTarget.id ? 'Publishing...' : 'Publish Target'}</button></div></div>
       </ModalFrame>}</AnimatePresence>
       <AnimatePresence>{platformTarget&&platformPrecheck&&<ModalFrame title="Confirm Platform Upgrade" subtitle={`${platformVersion?.version || 'current'} → ${platformTarget.version}`} icon={<Upload size={18}/>} onClose={()=>{setPlatformTarget(null);setPlatformPrecheck(null)}}><div className="space-y-4"><div className={`rounded-lg border p-4 ${platformPrecheck.passed?'border-emerald-100 bg-emerald-50':'border-rose-100 bg-rose-50'}`}><strong className={`text-sm ${platformPrecheck.passed?'text-emerald-800':'text-rose-800'}`}>{platformPrecheck.passed?'Ready to upgrade':'Upgrade is not available'}</strong><p className={`mt-1 text-xs leading-5 ${platformPrecheck.passed?'text-emerald-700':'text-rose-700'}`}>{platformPrecheck.passed?'The system check passed. Management services may be briefly unavailable during the upgrade.':platformPrecheck.checks.filter(check=>!check.passed).map(check=>check.label).join(' · ')}</p></div><p className="text-xs leading-5 text-slate-500">The system creates a database backup before switching versions. Cluster protection data is not changed.</p><div className="flex justify-end gap-2"><button onClick={()=>{setPlatformTarget(null);setPlatformPrecheck(null)}} className="rounded px-4 py-2 text-xs font-bold text-slate-500">Cancel</button><button disabled={!platformPrecheck.passed||busy===`upgrade-${platformTarget.id}`} onClick={()=>void startPlatformUpgrade()} className="rounded bg-indigo-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-40">Start Upgrade</button></div></div></ModalFrame>}</AnimatePresence>
     </motion.div>

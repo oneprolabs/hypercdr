@@ -87,6 +87,19 @@ func TestBuildRestoreResourceModifierConfigMapClearsPVCVolumeName(t *testing.T) 
 	}
 }
 
+func TestBuildRestoreResourceModifierConfigMapIncludesEnvironmentMappings(t *testing.T) {
+	manifest, err := BuildRestoreManifest(RestoreBuildInput{TaskID: "task-map", CommandID: "cmd-map", TaskType: "drill", AgentNamespace: "hypercdr-agent", Command: protocol.RestoreCommand{VeleroBackupName: "backup-1", SourceNamespace: "demo", TargetNamespace: "demo-drill", StorageClassMappings: map[string]string{"source-sc": "target-sc"}, ImageMappings: map[string]string{"docker.io/library/nginx:latest": "registry.local/nginx:v1"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	yaml := BuildRestoreResourceModifierConfigMap(manifest).Data["resource-modifiers.yaml"]
+	for _, expected := range []string{"source-sc", "target-sc", "docker.io/library/nginx:latest", "registry.local/nginx:v1", "/spec/template/spec/containers/0/image"} {
+		if !strings.Contains(yaml, expected) {
+			t.Fatalf("modifier does not contain %q: %s", expected, yaml)
+		}
+	}
+}
+
 func TestBuildRestoreManifestPreservesNodePortForNamespaceReplacement(t *testing.T) {
 	manifest, err := BuildRestoreManifest(RestoreBuildInput{
 		TaskID:         "task-12345678",

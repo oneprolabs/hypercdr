@@ -304,8 +304,9 @@ func (s *PostgresStore) UpsertComponentRelease(input ComponentReleaseInput) (Com
 	err := s.db.QueryRow(`insert into component_releases
 		(id, tenant_id, component, version, image, image_digest, status, release_notes, published_by, published_at, created_at, updated_at)
 		values ($1,$2,$3,$4,$5,$6,$7,nullif($8,''),nullif($9,''),case when $7::text='active' then $10::timestamptz else null::timestamptz end,$10::timestamptz,$10::timestamptz)
-		on conflict (tenant_id, component, image_digest) do update
-		set version=excluded.version, image=excluded.image, release_notes=excluded.release_notes, updated_at=excluded.updated_at
+		on conflict (tenant_id, component, version) do update
+		set image=excluded.image, image_digest=excluded.image_digest, release_notes=excluded.release_notes, updated_at=excluded.updated_at
+		where component_releases.status = 'candidate'
 		returning id, tenant_id, component, version, image, image_digest, status,
 		          coalesce(release_notes,''), coalesce(published_by,''), coalesce(published_at,'0001-01-01'::timestamptz), created_at, updated_at`,
 		newID(), DefaultTenantID, input.Component, input.Version, input.Image, input.ImageDigest, status, input.ReleaseNotes, input.PublishedBy, now).Scan(

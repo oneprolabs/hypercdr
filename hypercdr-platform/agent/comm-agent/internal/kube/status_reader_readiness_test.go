@@ -3,6 +3,8 @@ package kube
 import (
 	"strings"
 	"testing"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 func TestPodTerminalReadinessFailureReportsImagePull(t *testing.T) {
@@ -26,6 +28,19 @@ func TestPodTerminalReadinessFailureReportsImagePull(t *testing.T) {
 	for _, expected := range []string{"demo-web-abc", "web", "ImagePullBackOff", "registry.local/baseimage/demo-web:v2", "repository does not exist"} {
 		if !strings.Contains(message, expected) {
 			t.Fatalf("expected message to contain %q, got %q", expected, message)
+		}
+	}
+}
+
+func TestImagePullFailureEventMessageReturnsDetailedKubeletCause(t *testing.T) {
+	events := []unstructured.Unstructured{
+		{Object: map[string]any{"message": "Back-off pulling image nginx"}},
+		{Object: map[string]any{"message": `Failed to pull image "nginx": failed to do request: Head "https://registry-1.docker.io/v2/library/nginx/manifests/latest": dial tcp 199.59.150.39:443: i/o timeout`}},
+	}
+	message := imagePullFailureEventMessage(events)
+	for _, expected := range []string{"registry-1.docker.io", "443", "i/o timeout"} {
+		if !strings.Contains(message, expected) {
+			t.Fatalf("expected %q in %q", expected, message)
 		}
 	}
 }

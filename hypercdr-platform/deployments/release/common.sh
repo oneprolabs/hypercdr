@@ -49,6 +49,17 @@ image_ref() {
   echo "${registry}/${name}:${version}"
 }
 
+local_image_digest() {
+  local image="$1"
+  local digest
+  digest="$(docker image inspect "${image}" --format '{{range .RepoDigests}}{{println .}}{{end}}' | awk -F@ -v prefix="${image%:*}@" '$0 ~ "^" prefix {print $2; exit}')"
+  if [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    digest="$(docker image inspect "${image}" --format '{{range .RepoDigests}}{{println .}}{{end}}' | awk -F@ 'NF == 2 && $2 ~ /^sha256:[0-9a-f]{64}$/ {print $2; exit}')"
+  fi
+  [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || die "verified image digest is unavailable for ${image}"
+  echo "${digest}"
+}
+
 release_work_dir() {
   local version="$1"
   echo "${HCDR_BUILD_ROOT:-${DEFAULT_BUILD_ROOT}}/${version}"

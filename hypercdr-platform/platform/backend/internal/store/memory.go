@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -301,8 +302,11 @@ func (s *MemoryStore) UpsertComponentRelease(input ComponentReleaseInput) (Compo
 	defer s.mu.Unlock()
 	now := time.Now().UTC()
 	for id, item := range s.releases {
-		if item.Component == input.Component && item.ImageDigest == input.ImageDigest {
-			item.Version, item.Image, item.ReleaseNotes, item.UpdatedAt = input.Version, input.Image, input.ReleaseNotes, now
+		if item.Component == input.Component && item.Version == input.Version {
+			if item.Status != "candidate" {
+				return ComponentRelease{}, fmt.Errorf("component release %s %s is already %s", input.Component, input.Version, item.Status)
+			}
+			item.Image, item.ImageDigest, item.ReleaseNotes, item.UpdatedAt = input.Image, input.ImageDigest, input.ReleaseNotes, now
 			s.releases[id] = item
 			return item, nil
 		}

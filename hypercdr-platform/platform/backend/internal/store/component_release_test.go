@@ -40,3 +40,22 @@ func TestComponentReleaseActivationKeepsOneActiveTarget(t *testing.T) {
 		t.Fatalf("expected one active release, got %d", activeCount)
 	}
 }
+
+func TestComponentReleaseCandidateIsUpdatedByVersion(t *testing.T) {
+	repo := NewMemoryStore()
+	first, err := repo.UpsertComponentRelease(ComponentReleaseInput{Component: "comm-agent", Version: "v2", Image: "registry/comm-agent:v2", ImageDigest: "sha256:first", Status: "candidate"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := repo.UpsertComponentRelease(ComponentReleaseInput{Component: "comm-agent", Version: "v2", Image: "registry/comm-agent:v2", ImageDigest: "sha256:second", Status: "candidate"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ID != first.ID || updated.ImageDigest != "sha256:second" {
+		t.Fatalf("candidate was not updated in place: first=%#v updated=%#v", first, updated)
+	}
+	items, err := repo.ListComponentReleases("comm-agent")
+	if err != nil || len(items) != 1 {
+		t.Fatalf("expected one candidate, items=%#v err=%v", items, err)
+	}
+}

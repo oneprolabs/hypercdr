@@ -19,6 +19,22 @@ type ManifestApplier interface {
 	ApplyManifest(ctx context.Context, manifest Manifest) (AppliedObject, error)
 }
 
+type BackupContentResource struct {
+	APIVersion     string
+	Kind           string
+	Namespace      string
+	Name           string
+	Group          string
+	Resource       string
+	ClusterScoped  bool
+	Images         []string
+	StorageClasses []string
+}
+
+type BackupContentReader interface {
+	ReadVeleroBackupContents(ctx context.Context, namespace string, backupName string, limit int) ([]BackupContentResource, bool, error)
+}
+
 type ObjectDeleter interface {
 	DeleteObject(ctx context.Context, object AppliedObject) error
 }
