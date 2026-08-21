@@ -5466,6 +5466,10 @@ func (r *Router) createProtectionPlan(w http.ResponseWriter, req *http.Request) 
 		}
 		seenAppIDs[appID] = struct{}{}
 		if app, found, _ := r.store.GetApplication(appID); found && app.Namespace != "" {
+			if app.Namespace == r.agentNamespace() {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "reserved_namespace", "message": "The HyperCDR Agent namespace cannot be protected as an application."})
+				return
+			}
 			selectedNamespaces[app.Namespace] = struct{}{}
 		}
 	}

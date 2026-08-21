@@ -74,6 +74,11 @@ func BuildScheduleManifest(input ScheduleBuildInput) (ScheduleManifest, error) {
 	if agentNamespace == "" {
 		agentNamespace = "hypercdr-agent"
 	}
+	for _, namespace := range sourceNamespaces {
+		if namespace == agentNamespace {
+			return ScheduleManifest{}, fmt.Errorf("refusing to schedule agent namespace %q", namespace)
+		}
+	}
 	name := input.Command.ScheduleName
 	if name == "" {
 		name = "hcdr-plan-" + sanitizeName(input.Command.PlanID)

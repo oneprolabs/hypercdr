@@ -256,6 +256,28 @@ func TestBuildBackupManifestRejectsEmptySourceNamespace(t *testing.T) {
 	}
 }
 
+func TestBuildBackupManifestRejectsAgentNamespace(t *testing.T) {
+	_, err := BuildBackupManifest(BackupBuildInput{
+		AgentNamespace: "hypercdr-agent",
+		Command:        protocol.BackupCommand{SourceNamespace: "hypercdr-agent"},
+	})
+	if err == nil || !containsString(err.Error(), "refusing to back up agent namespace") {
+		t.Fatalf("expected agent namespace rejection, got %v", err)
+	}
+}
+
+func TestBuildScheduleManifestRejectsAgentNamespace(t *testing.T) {
+	_, err := BuildScheduleManifest(ScheduleBuildInput{
+		AgentNamespace: "hypercdr-agent",
+		Command: protocol.ScheduleSyncCommand{
+			PlanID: "plan", Cron: "0 * * * *", SourceNamespace: "hypercdr-agent",
+		},
+	})
+	if err == nil || !containsString(err.Error(), "refusing to schedule agent namespace") {
+		t.Fatalf("expected agent namespace rejection, got %v", err)
+	}
+}
+
 func containsString(haystack, needle string) bool {
 	return len(haystack) >= len(needle) && indexOf(haystack, needle) >= 0
 }

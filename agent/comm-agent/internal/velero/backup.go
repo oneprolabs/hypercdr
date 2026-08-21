@@ -67,6 +67,11 @@ func BuildBackupManifest(input BackupBuildInput) (BackupManifest, error) {
 	if agentNamespace == "" {
 		agentNamespace = "hypercdr-agent"
 	}
+	for _, namespace := range sourceNamespaces {
+		if namespace == agentNamespace {
+			return BackupManifest{}, fmt.Errorf("refusing to back up agent namespace %q", namespace)
+		}
+	}
 	name := input.Command.VeleroBackupName
 	if name == "" {
 		name = backupName(sourceNamespace, input.TaskID)

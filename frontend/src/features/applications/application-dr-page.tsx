@@ -641,7 +641,8 @@ export default function ApplicationDrPage(props: {
   const drSupportKeyForApp = (app: AppItem): string => `${app.clusterId || currentClusterId || ''}:${app.namespace || app.name}`;
   const isDRSupportUnknown = (app: AppItem): boolean => unitMembers(app).some(member => !drSupportStatus(member));
   const isDRSupportChecking = (app: AppItem): boolean => unitMembers(app).some(member => drSupportCheckingKeys.includes(drSupportKeyForApp(member)));
-  const isDRUnsupported = (app: AppItem): boolean => unitMembers(app).some(member => drSupportStatus(member) === 'unsupported');
+  const isAgentNamespace = (app: AppItem): boolean => unitMembers(app).some(member => (member.namespace || member.name) === 'hypercdr-agent');
+  const isDRUnsupported = (app: AppItem): boolean => isAgentNamespace(app) || unitMembers(app).some(member => drSupportStatus(member) === 'unsupported');
   const formatUnsupportedStorageSummary = (support: DRSupportSummary): string => {
     const checks = (support.checks || []).filter(check => (check.status || '').toLowerCase() === 'unsupported');
     const detected = checks.map(check => {
@@ -659,6 +660,9 @@ export default function ApplicationDrPage(props: {
     ].filter(Boolean).join('\n');
   };
   const drSupportMetaForApp = (app: AppItem) => {
+    if (isAgentNamespace(app)) {
+      return { label: 'System namespace', tone: 'unsupported' as const, sort: 0, title: 'The HyperCDR Agent namespace is managed by the platform and cannot be protected as an application.' };
+    }
     const unsupported = unitMembers(app).filter(member => drSupportStatus(member) === 'unsupported');
     if (unsupported.length > 0) {
       const details = unsupported.map(member => {
