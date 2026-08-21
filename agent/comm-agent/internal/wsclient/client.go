@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -1392,6 +1393,37 @@ func (c *Client) executeProtectionCleanupTask(task protocol.TaskDispatchPayload)
 	mode := strings.TrimSpace(task.ProtectionCleanup.CleanupMode)
 	if mode == "" {
 		mode = "source"
+	}
+	if mode == "drill" {
+		waiter, ok := c.applier.(interface {
+			DeleteNamespaceAndWait(context.Context, string) error
+		})
+		if !ok {
+			_ = c.sendTaskFailed(task, "DRILL_CLEANUP_UNAVAILABLE", "namespace cleanup is not supported by this agent")
+			return
+		}
+		if len(task.ProtectionCleanup.DrillNamespaces) == 0 {
+			_ = c.sendTaskFailed(task, "DRILL_CLEANUP_TARGET_REQUIRED", "at least one drill namespace is required")
+			return
+		}
+		deletedNamespaces := []string{}
+		for _, targetNamespace := range task.ProtectionCleanup.DrillNamespaces {
+			targetNamespace = strings.TrimSpace(targetNamespace)
+			if targetNamespace == "" || targetNamespace == namespace || slices.Contains(task.ProtectionCleanup.SourceNamespaces, targetNamespace) {
+				_ = c.sendTaskFailed(task, "DRILL_CLEANUP_TARGET_UNSAFE", "refusing to delete an empty, agent, or source namespace")
+				return
+			}
+			if err := waiter.DeleteNamespaceAndWait(context.Background(), targetNamespace); err != nil {
+				_ = c.sendTaskFailedWithDetails(task, "DRILL_NAMESPACE_DELETE_FAILED", err.Error(), map[string]any{"targetNamespace": targetNamespace})
+				return
+			}
+			deletedNamespaces = append(deletedNamespaces, targetNamespace)
+			_ = c.sendTaskProgress(task, map[string]any{"kind": "DrillCleanup", "deletedNamespaces": deletedNamespaces}, 90, "drill namespace deleted")
+		}
+		if err := c.sendTaskCompleted(task, map[string]any{"kind": "DrillCleanup", "deletedNamespaces": deletedNamespaces}, "drill resources cleaned"); err != nil {
+			c.logger.Error("failed to send drill cleanup completed", "task_id", task.TaskID, "error", err)
+		}
+		return
 	}
 	deleted := []string{}
 	total := len(task.ProtectionCleanup.RestorePoints)

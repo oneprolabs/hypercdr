@@ -193,6 +193,37 @@ func (a *DynamicManifestApplier) ReplaceNamespaceAndWait(ctx context.Context, na
 	}
 }
 
+func (a *DynamicManifestApplier) DeleteNamespaceAndWait(ctx context.Context, namespace string) error {
+	if namespace == "" {
+		return fmt.Errorf("namespace is required")
+	}
+	resource := a.client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "namespaces"})
+	err := resource.Delete(ctx, namespace, v1.DeleteOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete drill namespace %q: %w", namespace, err)
+	}
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	timeout := time.NewTimer(5 * time.Minute)
+	defer timeout.Stop()
+	for {
+		_, err := resource.Get(ctx, namespace, v1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timeout.C:
+			return fmt.Errorf("timed out waiting for drill namespace %q to be deleted", namespace)
+		case <-ticker.C:
+		}
+	}
+}
+
 func (a *DynamicManifestApplier) WaitForVeleroBackup(ctx context.Context, namespace string, name string, timeoutDuration time.Duration) error {
 	if namespace == "" {
 		return fmt.Errorf("velero namespace is required")

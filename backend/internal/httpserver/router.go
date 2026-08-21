@@ -601,6 +601,7 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("GET /api/v1/tasks/{id}/events", r.tenantGuard("task", r.listTaskEvents))
 	r.mux.HandleFunc("POST /api/v1/tasks/{id}/cancel", r.tenantGuard("task", r.cancelTask))
 	r.mux.HandleFunc("POST /api/v1/tasks/{id}/retry", r.tenantGuard("task", r.retryRecoveryTask))
+	r.mux.HandleFunc("POST /api/v1/tasks/{id}/cleanup-drill", r.tenantGuard("task", r.cleanupDrillTask))
 	r.mux.HandleFunc("POST /api/v1/tasks/backup", r.createBackupTask)
 	r.mux.HandleFunc("POST /api/v1/tasks/restore", r.createRestoreTask)
 	r.mux.HandleFunc("POST /api/v1/tasks/drill", r.createDrillTask)
@@ -5042,6 +5043,7 @@ func protectionCleanupCommandFromPayload(payload map[string]any) *protocol.Prote
 		CleanupObjectStorage: boolPayload(payload, "cleanupObjectStorage"),
 		RestorePoints:        retentionRestorePointsFromAny(payload["restorePoints"]),
 		RestoreNames:         stringSlicePayload(payload, "restoreNames"),
+		DrillNamespaces:      stringSlicePayload(payload, "drillNamespaces"),
 	}
 }
 
@@ -6395,6 +6397,99 @@ func (r *Router) cancelTask(w http.ResponseWriter, req *http.Request) {
 		Message: "Force stop dispatched to source cluster agent.",
 	})
 	writeJSON(w, http.StatusAccepted, map[string]any{"task": task, "cancelTask": cancelTask})
+}
+
+func (r *Router) cleanupDrillTask(w http.ResponseWriter, req *http.Request) {
+	taskID := req.PathValue("id")
+	if taskID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "task_id_required"})
+		return
+	}
+	drill, ok, err := r.findTaskByID("", taskID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "get_task_failed", "message": err.Error()})
+		return
+	}
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "task_not_found"})
+		return
+	}
+	if drill.Type != "drill" {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "drill_cleanup_unsupported", "message": "Only DR drill tasks can be cleaned up."})
+		return
+	}
+	if isActiveTaskStatus(drill.Status) {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "drill_still_running", "message": "Wait for the drill to finish before cleaning up its resources."})
+		return
+	}
+	targetNamespaces := uniqueNonEmptyStrings(append(
+		[]string{stringPayload(drill.Payload, "targetNamespace")},
+		mapStringValues(stringMapPayload(drill.Payload, "targetNamespaces"))...,
+	))
+	sourceNamespaces := uniqueNonEmptyStrings(append(
+		[]string{stringPayload(drill.Payload, "sourceNamespace")},
+		stringSlicePayload(drill.Payload, "sourceNamespaces")...,
+	))
+	if len(targetNamespaces) == 0 {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "drill_target_namespace_missing", "message": "The drill task does not record a target namespace."})
+		return
+	}
+	for _, namespace := range targetNamespaces {
+		if namespace == r.agentNamespace() || slices.Contains(sourceNamespaces, namespace) {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "unsafe_drill_cleanup_target", "message": "Refusing to delete an agent or source namespace."})
+			return
+		}
+	}
+	items, err := r.store.ListTasks(drill.ClusterID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_tasks_failed", "message": err.Error()})
+		return
+	}
+	for _, item := range items {
+		if item.Type == "protection-cleanup" && stringPayload(item.Payload, "cleanupMode") == "drill" && stringPayload(item.Payload, "drillTaskId") == drill.ID {
+			if item.Status == "succeeded" || isActiveTaskStatus(item.Status) {
+				writeJSON(w, http.StatusOK, map[string]any{"task": item, "reused": true})
+				return
+			}
+		}
+	}
+	cleanup, err := r.store.CreateTask(store.TaskInput{
+		ClusterID:        drill.ClusterID,
+		ProtectionPlanID: drill.ProtectionPlanID,
+		Type:             "protection-cleanup",
+		Status:           "queued",
+		CommandID:        store.NewPublicID(),
+		Payload: map[string]any{
+			"planId":           drill.ProtectionPlanID,
+			"cleanupMode":      "drill",
+			"drillTaskId":      drill.ID,
+			"namespace":        r.agentNamespace(),
+			"sourceNamespaces": sourceNamespaces,
+			"drillNamespaces":  targetNamespaces,
+		},
+	})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "create_drill_cleanup_failed", "message": err.Error()})
+		return
+	}
+	conn, connected := r.hub.get(cleanup.ClusterID)
+	warning := ""
+	if !connected {
+		warning = "Target cluster agent is offline; drill cleanup remains queued."
+	} else if err := r.dispatchStoredTask(conn, cleanup); err != nil {
+		warning = "Drill cleanup was created but dispatch failed; it remains queued."
+	} else {
+		cleanup, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: cleanup.ID, Status: "dispatched", Progress: 0})
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"task": cleanup, "warning": warning})
+}
+
+func mapStringValues(values map[string]string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		result = append(result, value)
+	}
+	return result
 }
 
 func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
@@ -10285,6 +10380,9 @@ func (r *Router) finishRetentionCleanupTask(task store.Task, veleroPayload map[s
 }
 
 func (r *Router) finishProtectionCleanupTask(task store.Task, veleroPayload map[string]any) {
+	if stringPayload(task.Payload, "cleanupMode") == "drill" {
+		return
+	}
 	planID := firstNonEmptyString(task.ProtectionPlanID, stringPayload(task.Payload, "planId"))
 	if planID == "" {
 		r.logger.Warn("protection cleanup completed without plan id", "task_id", task.ID)

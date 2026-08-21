@@ -534,6 +534,7 @@ type ProtectionCleanupCommand struct {
 	CleanupObjectStorage bool                    `json:"cleanupObjectStorage,omitempty"`
 	RestorePoints        []RetentionRestorePoint `json:"restorePoints,omitempty"`
 	RestoreNames         []string                `json:"restoreNames,omitempty"`
+	DrillNamespaces      []string                `json:"drillNamespaces,omitempty"`
 }
 
 type RestoreCommand struct {

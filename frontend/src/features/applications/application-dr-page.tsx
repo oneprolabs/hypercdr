@@ -1614,6 +1614,13 @@ export default function ApplicationDrPage(props: {
   };
   const selectedRunActiveRecoveryTask = selectedRunRows.length === 1 ? recoveryTaskForUnit(selectedRunRows[0]) : undefined;
   const hasSelectedRunActiveRecoveryTask = isActiveTaskStatus(selectedRunActiveRecoveryTask?.status);
+  const selectedRunDrillTask = selectedRunRows.length === 1 ? recoveryTaskForUnit(selectedRunRows[0]) : undefined;
+  const canCleanupDrill = Boolean(
+    selectedRunDrillTask?.id
+    && selectedRunDrillTask.type === 'drill'
+    && !isActiveTaskStatus(selectedRunDrillTask.status)
+    && String(selectedRunDrillTask.payload?.targetNamespace || '').trim(),
+  );
   const canRestoreAction = selectedRunRows.length === 1 && isProtectionPlanReady(protectionPlanForApp(selectedRunRows[0])?.status) && restorePointsForApp(selectedRunRows[0]).length > 0 && !hasSelectedRunActiveRecoveryTask;
   const buildRecoveryDraft = (mode: 'drill' | 'takeover', app: AppItem, pointId: string): RecoveryWizardConfig => {
     const selectedPoint = restorePointsForApp(app).find(point => point.id === pointId);
@@ -2213,6 +2220,10 @@ export default function ApplicationDrPage(props: {
       toast('Selected resources are already being cleaned');
       return;
     }
+	const confirmed = window.confirm(
+	  'Remove the selected DR configuration? Scheduled sync, restore points, and this plan\'s object-storage data will be deleted. Restored drill or takeover workloads are not deleted.',
+	);
+	if (!confirmed) return;
 	cleanupSubmittingRef.current = true;
 	setCleaningPlanIds(prev => Array.from(new Set([...prev, ...planIds])));
 	// Persist the cleanup state in the local plan model before dispatch. An
@@ -2298,6 +2309,46 @@ export default function ApplicationDrPage(props: {
     };
     void refreshPlatformData();
     pollCleanup(40);
+  };
+
+  const cleanupDrillResources = async () => {
+    if (!selectedRunDrillTask?.id || !canCleanupDrill) {
+      toast('Select one completed drill with resources to clean up');
+      return;
+    }
+    const targetNamespace = String(selectedRunDrillTask.payload?.targetNamespace || '').trim();
+    if (!window.confirm(`Delete drill namespace ${targetNamespace} from the target cluster?`)) return;
+    try {
+      const response = await apiPost<ApiTaskResponse>(`/api/v1/tasks/${selectedRunDrillTask.id}/cleanup-drill`, {});
+      const cleanupTask = 'task' in response ? response.task : response;
+      const cleanupWarning = 'warning' in response ? response.warning : '';
+      toast(cleanupWarning || `Drill cleanup submitted for ${targetNamespace}`);
+      const cleanupTaskId = cleanupTask.id;
+      if (!cleanupTaskId) return;
+      const poll = (remaining: number) => {
+        window.setTimeout(async () => {
+          try {
+            const result = await apiGet<ApiList<ApiTask>>('/api/v1/tasks?types=protection-cleanup');
+            const task = listItems(result).find(item => item.id === cleanupTaskId);
+            if (task && isCompletedTaskStatus(task.status)) {
+              await refreshPlatformData();
+              toast(`Drill resources cleaned: ${targetNamespace}`);
+              return;
+            }
+            if (task && isFailedStatus(task.status)) {
+              toast(`Failed to clean drill resources: ${task.errorMessage || 'unknown error'}`);
+              return;
+            }
+            if (remaining > 0) poll(remaining - 1);
+          } catch {
+            if (remaining > 0) poll(remaining - 1);
+          }
+        }, 2000);
+      };
+      poll(150);
+    } catch (error) {
+      toast('Failed to clean drill resources: ' + (error instanceof Error ? error.message : 'unknown error'));
+    }
   };
   const pollProtectionPlanActivation = (planIds: string[], appNames: string[], remaining: number) => {
     if (planIds.length === 0 || remaining <= 0) return;
@@ -2758,6 +2809,16 @@ export default function ApplicationDrPage(props: {
                             <AlertCircle size={14} />Cancel Sync
                           </button>
                           <button
+                            disabled={!canCleanupDrill}
+                            onClick={() => {
+                              setAppBulkMenuOpen(false);
+                              void cleanupDrillResources();
+                            }}
+                            className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"
+                          >
+                            <Trash2 size={14} className="text-amber-500" />Cleanup Drill
+                          </button>
+                          <button
                             disabled={selectedRunApps.length === 0 || selectedRunHasCleanupRunning}
                             onClick={() => {
                               setAppBulkMenuOpen(false);
@@ -2765,7 +2826,7 @@ export default function ApplicationDrPage(props: {
                             }}
                             className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-rose-600 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"
                           >
-                            <ShieldOff size={14} />Cleanup Resources
+                            <ShieldOff size={14} />Remove DR Configuration
                           </button>
                         </>
                       )}

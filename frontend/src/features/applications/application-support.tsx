@@ -229,7 +229,12 @@ export function scriptPayload(script: { name: string; size: number; lastModified
 export function formatPolicySchedule(policy: Pick<PolicyItem, 'composition' | 'type' | 'intervalValue' | 'intervalUnit' | 'hour' | 'minute' | 'weekDay' | 'monthDay'>) {
   if (policy.composition === 'manual') return 'Manual trigger';
   if (policy.composition === 'retention') return 'Not scheduled';
-  if (policy.type === 'interval') return `Every ${policy.intervalValue} ${policy.intervalUnit === 'minutes' ? 'minutes' : 'hours'}`;
+  if (policy.type === 'interval') {
+    const unit = policy.intervalUnit === 'minutes'
+      ? policy.intervalValue === 1 ? 'minute' : 'minutes'
+      : policy.intervalValue === 1 ? 'hour' : 'hours';
+    return `Every ${policy.intervalValue} ${unit}`;
+  }
   if (policy.type === 'daily') return `Every day ${formatTime(policy.hour, policy.minute)}`;
   if (policy.type === 'weekly') return `Every week ${weekdays[policy.weekDay]} ${formatTime(policy.hour, policy.minute)}`;
   return `Every month ${policy.monthDay} Day ${formatTime(policy.hour, policy.minute)}`;
