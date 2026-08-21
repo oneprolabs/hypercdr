@@ -1176,6 +1176,7 @@ func (s *MemoryStore) DeleteCluster(clusterID string) (bool, error) {
 				task.Payload = map[string]any{}
 			}
 			task.Payload["archivedClusterId"] = clusterID
+			task.Payload["archivedClusterName"] = removed.Name
 			task.ClusterID = ""
 			s.tasks[taskID] = task
 		}

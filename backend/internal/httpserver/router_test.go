@@ -1240,6 +1240,20 @@ func TestFinishUnregisterDoesNotAccessObjectStorage(t *testing.T) {
 			t.Fatal("expected cluster to be deleted after object storage cleanup succeeds")
 		}
 	}
+	tasks, err := repo.ListTasks("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var archived *store.Task
+	for index := range tasks {
+		if tasks[index].Type == "unregister" {
+			archived = &tasks[index]
+			break
+		}
+	}
+	if archived == nil || archived.ClusterID != "" || archived.Payload["archivedClusterId"] != clusterID || archived.Payload["archivedClusterName"] != "source-cluster" {
+		t.Fatalf("expected archived unregister task to preserve cluster identity and name, got %#v", archived)
+	}
 }
 
 func TestFinishUnregisterDeletesClusterWithoutObjectStorageDependency(t *testing.T) {

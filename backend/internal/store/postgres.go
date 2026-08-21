@@ -1270,8 +1270,8 @@ func (s *PostgresStore) DeleteCluster(clusterID string) (bool, error) {
 	defer tx.Rollback()
 
 	var exists, wasDefault bool
-	var tenantID string
-	if err := tx.QueryRow(`select true, is_default, tenant_id from clusters where id = $1`, clusterID).Scan(&exists, &wasDefault, &tenantID); errors.Is(err, sql.ErrNoRows) {
+	var tenantID, clusterName string
+	if err := tx.QueryRow(`select true, is_default, tenant_id, name from clusters where id = $1`, clusterID).Scan(&exists, &wasDefault, &tenantID, &clusterName); errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	} else if err != nil {
 		return false, err
@@ -1328,10 +1328,13 @@ func (s *PostgresStore) DeleteCluster(clusterID string) (bool, error) {
 	}
 	if _, err := tx.Exec(`
 		update tasks
-		set payload = jsonb_set(coalesce(payload, '{}'::jsonb), '{archivedClusterId}', to_jsonb(cluster_id::text), true),
+		set payload = coalesce(payload, '{}'::jsonb) || jsonb_build_object(
+		        'archivedClusterId', cluster_id::text,
+		        'archivedClusterName', $2::text
+		    ),
 		    cluster_id = null
 		where cluster_id = $1
-	`, clusterID); err != nil {
+	`, clusterID, clusterName); err != nil {
 		return false, err
 	}
 	if _, err := tx.Exec(`delete from cluster_nodes where cluster_id = $1`, clusterID); err != nil {

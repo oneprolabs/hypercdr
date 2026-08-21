@@ -24,6 +24,12 @@ export default function ClusterActivityPanel({ logs, clusters, highlightedTaskId
       return clusterLogs.map(log => ({ cluster, clusterId, log }));
     })
     .sort((a, b) => (b.log.task.createdAt || '').localeCompare(a.log.task.createdAt || ''));
+  const clusterNamesById = new Map(clusters.map(cluster => [cluster.id, cluster.name]));
+  for (const entry of entries) {
+    const payloadClusterId = String(entry.log.task.payload?.clusterId || entry.log.task.payload?.archivedClusterId || entry.clusterId || '');
+    const payloadClusterName = String(entry.log.task.payload?.archivedClusterName || entry.log.task.payload?.clusterName || '');
+    if (payloadClusterId && payloadClusterName) clusterNamesById.set(payloadClusterId, payloadClusterName);
+  }
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [dockExpanded, setDockExpanded] = useState(() => {
     const saved = window.localStorage.getItem('hypercdr:clusters:recent-tasks-expanded');
@@ -56,7 +62,7 @@ export default function ClusterActivityPanel({ logs, clusters, highlightedTaskId
   const clusterDisplay = (entry: { cluster: Cluster | null; clusterId: string; log: ClusterTaskLog }) => {
     if (entry.cluster) return entry.cluster.name === 'unknown-cluster' ? 'Unnamed cluster' : entry.cluster.name;
     const archived = entry.log.task.payload?.archivedClusterId as string | undefined;
-    if (archived) return 'Unregistered cluster';
+    if (archived) return String(entry.log.task.payload?.archivedClusterName || entry.log.task.payload?.clusterName || clusterNamesById.get(archived) || 'Unregistered cluster');
     return (entry.log.task.payload?.clusterName as string) || 'Unnamed cluster';
   };
   const clusterInitials = (entry: { cluster: Cluster | null; clusterId: string; log: ClusterTaskLog }) => {
@@ -191,11 +197,11 @@ export default function ClusterActivityPanel({ logs, clusters, highlightedTaskId
         return (
           <div className="text-right text-slate-500">
             <p className="font-semibold">{formatDateTime(entry.log.task.createdAt)}</p>
-            <p className="text-[10px] text-slate-400">{entry.log.task.completedAt ? `Done ${formatDateTime(entry.log.task.completedAt)}` : (active ? `Updated ${formatDateTime(entry.log.task.createdAt)}` : '-')}</p>
+            <p className="text-[10px] text-slate-400">{active ? `Updated ${formatDateTime(entry.log.task.createdAt)}` : (entry.log.task.completedAt ? `Done ${formatDateTime(entry.log.task.completedAt)}` : '-')}</p>
           </div>
         );
       },
-      meta: { align: 'right', title: entry => entry.log.task.completedAt ? formatDateTime(entry.log.task.completedAt) : formatDateTime(entry.log.task.createdAt) },
+      meta: { align: 'right', title: entry => isActive(entry.log.task) ? formatDateTime(entry.log.task.createdAt) : (entry.log.task.completedAt ? formatDateTime(entry.log.task.completedAt) : '-') },
     },
   ];
   const renderActivityExpandedRow = (entry: typeof entries[number]) => {
