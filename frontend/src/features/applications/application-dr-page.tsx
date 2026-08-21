@@ -187,6 +187,7 @@ export default function ApplicationDrPage(props: {
 	const [restorePointMenuId, setRestorePointMenuId] = useState('');
   const [namespaceTaskPage, setNamespaceTaskPage] = useState(1);
   const [drSupportErrorDetail, setDrSupportErrorDetail] = useState<AppItem | null>(null);
+  const [operationConfirm, setOperationConfirm] = useState<'cancel-sync' | 'cleanup-drill' | 'remove-config' | null>(null);
   const openNamespaceDetail = (app: AppItem, tab: 'overview' | 'restorePoints' | 'tasks' | 'storage' = 'overview') => {
     setSelectedDetailApp(app);
     setNamespaceDetailTab(tab);
@@ -2165,13 +2166,6 @@ export default function ApplicationDrPage(props: {
       toast(selectedRunApps.length === 0 ? 'Select applications to cancel sync' : 'Selected applications have no running sync job');
       return;
     }
-    const taskCount = selectedRunCancelableSyncTasks.length;
-    const confirmed = window.confirm(
-      taskCount === 1
-        ? 'Cancel this sync task? The source cluster agent will delete the running Velero backup. No restore point will be created for this sync.'
-        : `Cancel ${taskCount} sync tasks? The source cluster agent will delete the running Velero backups. No restore point will be created for these syncs.`,
-    );
-    if (!confirmed) return;
     try {
       const responses = await Promise.all(selectedRunCancelableSyncTasks.map(task => apiPost<ApiTaskCancelResponse>(`/api/v1/tasks/${task.id}/cancel`, {})));
       setSyncTasks(prev => {
@@ -2220,10 +2214,6 @@ export default function ApplicationDrPage(props: {
       toast('Selected resources are already being cleaned');
       return;
     }
-	const confirmed = window.confirm(
-	  'Remove the selected DR configuration? Scheduled sync, restore points, and this plan\'s object-storage data will be deleted. Restored drill or takeover workloads are not deleted.',
-	);
-	if (!confirmed) return;
 	cleanupSubmittingRef.current = true;
 	setCleaningPlanIds(prev => Array.from(new Set([...prev, ...planIds])));
 	// Persist the cleanup state in the local plan model before dispatch. An
@@ -2317,7 +2307,6 @@ export default function ApplicationDrPage(props: {
       return;
     }
     const targetNamespace = String(selectedRunDrillTask.payload?.targetNamespace || '').trim();
-    if (!window.confirm(`Delete drill namespace ${targetNamespace} from the target cluster?`)) return;
     try {
       const response = await apiPost<ApiTaskResponse>(`/api/v1/tasks/${selectedRunDrillTask.id}/cleanup-drill`, {});
       const cleanupTask = 'task' in response ? response.task : response;
@@ -2802,7 +2791,7 @@ export default function ApplicationDrPage(props: {
                             disabled={!canStopSync}
                             onClick={() => {
                               setAppBulkMenuOpen(false);
-                              void stopSync();
+                              setOperationConfirm('cancel-sync');
                             }}
                             className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-rose-600 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"
                           >
@@ -2812,7 +2801,7 @@ export default function ApplicationDrPage(props: {
                             disabled={!canCleanupDrill}
                             onClick={() => {
                               setAppBulkMenuOpen(false);
-                              void cleanupDrillResources();
+                              setOperationConfirm('cleanup-drill');
                             }}
                             className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"
                           >
@@ -2822,7 +2811,7 @@ export default function ApplicationDrPage(props: {
                             disabled={selectedRunApps.length === 0 || selectedRunHasCleanupRunning}
                             onClick={() => {
                               setAppBulkMenuOpen(false);
-                              deleteDrConfiguration();
+                              setOperationConfirm('remove-config');
                             }}
                             className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-rose-600 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"
                           >
@@ -2906,6 +2895,70 @@ export default function ApplicationDrPage(props: {
           className="hbdr-dr-main-table"
         />
       </div>
+
+      <AnimatePresence>
+        {operationConfirm && (
+          <div className="fixed inset-0 z-50 flex justify-end">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="hbdr-filter-drawer-backdrop"
+              onClick={() => setOperationConfirm(null)}
+            />
+            <motion.aside
+              initial={{ opacity: 0, x: 32 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 32 }}
+              transition={{ duration: 0.18, ease: 'easeOut' }}
+              className="hbdr-filter-drawer"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="dr-operation-confirm-title"
+            >
+              <div className="hbdr-filter-drawer-head">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.16em] text-rose-500">Confirm operation</p>
+                  <h3 id="dr-operation-confirm-title" className="mt-1 text-lg font-black text-slate-950">
+                    {operationConfirm === 'cancel-sync' ? 'Cancel Sync' : operationConfirm === 'cleanup-drill' ? 'Cleanup Drill' : 'Remove DR Configuration'}
+                  </h3>
+                </div>
+                <button type="button" onClick={() => setOperationConfirm(null)} aria-label="Close confirmation"><X size={18} /></button>
+              </div>
+              <div className="hbdr-filter-drawer-body">
+                <div className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-900">
+                  {operationConfirm === 'cancel-sync' && (
+                    <p>The source cluster agent will stop {selectedRunCancelableSyncTasks.length === 1 ? 'this sync' : `${selectedRunCancelableSyncTasks.length} sync tasks`} and delete the running Velero backup. No restore point will be created.</p>
+                  )}
+                  {operationConfirm === 'cleanup-drill' && (
+                    <p>Delete drill namespace <strong>{String(selectedRunDrillTask?.payload?.targetNamespace || '-')}</strong> from target cluster <strong>{selectedRunDrillTask?.payload?.targetClusterName || selectedRunRows[0]?.targetCluster || 'configured target'}</strong>. The DR configuration, policy, restore points, source namespace, and object-storage data are retained.</p>
+                  )}
+                  {operationConfirm === 'remove-config' && (
+                    <p>Scheduled sync, restore points, this plan, and its object-storage data will be deleted. Existing drill or takeover workloads are not deleted.</p>
+                  )}
+                </div>
+                {operationConfirm === 'remove-config' && <p className="mt-4 text-xs font-semibold leading-5 text-slate-500">Clean up drill resources first if they are no longer required.</p>}
+              </div>
+              <div className="hbdr-filter-drawer-actions">
+                <button type="button" onClick={() => setOperationConfirm(null)}>Cancel</button>
+                <button
+                  type="button"
+                  className="!bg-rose-600 !text-white hover:!bg-rose-700"
+                  onClick={() => {
+                    const action = operationConfirm;
+                    setOperationConfirm(null);
+                    if (action === 'cancel-sync') void stopSync();
+                    if (action === 'cleanup-drill') void cleanupDrillResources();
+                    if (action === 'remove-config') void deleteDrConfiguration();
+                  }}
+                >
+                  {operationConfirm === 'cancel-sync' ? 'Cancel Sync' : operationConfirm === 'cleanup-drill' ? 'Delete Drill Namespace' : 'Remove Configuration'}
+                </button>
+              </div>
+            </motion.aside>
+          </div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {resourceDetail && (

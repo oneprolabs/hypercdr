@@ -134,22 +134,41 @@ import {
 } from './features/restore-points/restore-point-support';
 import { validateFrontendModules, type ExtensionViewId, type HyperCDRFrontendModule } from './app/extensions';
 
-const FailbackPage = React.lazy(() => import('./features/failback/failback-page'));
-const LazyEmailSettingsPage = React.lazy(() => import('./features/settings/email-settings-page'));
-const LazyCommunityUserManagementPage = React.lazy(() => import('./features/users/community-user-management-page'));
-const LazyOperationsCenterPage = React.lazy(() => import('./features/operations/operations-center-page'));
-const LazyActivityLogPage = React.lazy(() => import('./features/operations/activity-log-page'));
-const LazyDiagnosticLogsPage = React.lazy(() => import('./features/operations/diagnostic-logs-page'));
-const LazyUpgradeManagementPage = React.lazy(() => import('./features/upgrades/upgrade-management-page'));
-const LazyProfilePage = React.lazy(() => import('./features/profile/profile-page'));
-const LazyTagManagementPage = React.lazy(() => import('./features/tags/tag-management-page'));
-const LazyPolicyPage = React.lazy(() => import('./features/policies/policy-page'));
-const LazyStoragePage = React.lazy(() => import('./features/storage/storage-page'));
-const LazyClusterPage = React.lazy(() => import('./features/clusters/cluster-page'));
-const LazyOverviewPage = React.lazy(() => import('./features/dashboard/overview-page').then(module => ({ default: module.OverviewPage })));
-const LazyApplicationDrPage = React.lazy(() => import('./features/applications/application-dr-page'));
-const LazyRestorePointPage = React.lazy(() => import('./features/restore-points/restore-point-page'));
-const LazyBackupRecoveryTaskPage = React.lazy(() => import('./features/tasks/backup-recovery-task-page'));
+const lazyWithUpgradeRecovery = <T extends React.ComponentType<any>>(loader: () => Promise<{ default: T }>) => React.lazy(async () => {
+  const reloadKey = 'hypercdr.lazy-module-reload';
+  try {
+    const loaded = await loader();
+    window.sessionStorage.removeItem(reloadKey);
+    return loaded;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const isStaleBuild = /dynamically imported module|importing a module script failed|failed to fetch/i.test(message);
+    if (isStaleBuild && window.sessionStorage.getItem(reloadKey) !== '1') {
+      window.sessionStorage.setItem(reloadKey, '1');
+      window.location.reload();
+      return new Promise<never>(() => undefined);
+    }
+    window.sessionStorage.removeItem(reloadKey);
+    throw error;
+  }
+});
+
+const FailbackPage = lazyWithUpgradeRecovery(() => import('./features/failback/failback-page'));
+const LazyEmailSettingsPage = lazyWithUpgradeRecovery(() => import('./features/settings/email-settings-page'));
+const LazyCommunityUserManagementPage = lazyWithUpgradeRecovery(() => import('./features/users/community-user-management-page'));
+const LazyOperationsCenterPage = lazyWithUpgradeRecovery(() => import('./features/operations/operations-center-page'));
+const LazyActivityLogPage = lazyWithUpgradeRecovery(() => import('./features/operations/activity-log-page'));
+const LazyDiagnosticLogsPage = lazyWithUpgradeRecovery(() => import('./features/operations/diagnostic-logs-page'));
+const LazyUpgradeManagementPage = lazyWithUpgradeRecovery(() => import('./features/upgrades/upgrade-management-page'));
+const LazyProfilePage = lazyWithUpgradeRecovery(() => import('./features/profile/profile-page'));
+const LazyTagManagementPage = lazyWithUpgradeRecovery(() => import('./features/tags/tag-management-page'));
+const LazyPolicyPage = lazyWithUpgradeRecovery(() => import('./features/policies/policy-page'));
+const LazyStoragePage = lazyWithUpgradeRecovery(() => import('./features/storage/storage-page'));
+const LazyClusterPage = lazyWithUpgradeRecovery(() => import('./features/clusters/cluster-page'));
+const LazyOverviewPage = lazyWithUpgradeRecovery(() => import('./features/dashboard/overview-page').then(module => ({ default: module.OverviewPage })));
+const LazyApplicationDrPage = lazyWithUpgradeRecovery(() => import('./features/applications/application-dr-page'));
+const LazyRestorePointPage = lazyWithUpgradeRecovery(() => import('./features/restore-points/restore-point-page'));
+const LazyBackupRecoveryTaskPage = lazyWithUpgradeRecovery(() => import('./features/tasks/backup-recovery-task-page'));
 
 type View =
   | 'login'
