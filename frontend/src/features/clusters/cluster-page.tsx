@@ -798,7 +798,7 @@ export default function ClusterPage(props: {
         <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-14 text-center shadow-sm">
           <Server size={36} className="mx-auto mb-3 text-slate-300" />
           <h3 className="text-sm font-bold text-slate-800">No registered clusters yet</h3>
-          <p className="mt-1 text-xs text-slate-400">Register first Kubernetes cluster, Agent After reconnection, enter the Container DR console.</p>
+          <p className="mt-1 text-xs text-slate-400">Register your first Kubernetes cluster. The DR workspace becomes available after the Agent connects.</p>
           <button onClick={openRegister} className="mt-5 inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-100 transition-all hover:bg-blue-700"><Plus size={15} />Register Cluster</button>
         </div>
       )}
@@ -1044,7 +1044,7 @@ export default function ClusterPage(props: {
                       {registrationWaiting ? <RefreshCw size={20} className="animate-spin text-emerald-600" /> : <CheckCircle2 size={20} className="text-emerald-600" />}
                     </div>
                     <div className="text-sm">
-                      <p className="mb-1 font-bold text-emerald-900">3. Wait for connection</p>
+                      <p className="mb-1 font-bold text-emerald-900">{prepareNodeCommand ? '3' : '2'}. Wait for connection</p>
                       <p className="leading-relaxed text-emerald-700">Connection detection starts automatically. The cluster appears as soon as the agent registers.</p>
                     </div>
                   </div>
