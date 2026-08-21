@@ -105,7 +105,7 @@ if [[ -n "${COMPOSE_FILE}" && -f "${COMPOSE_FILE}" ]]; then
   compose_name="$(basename "${COMPOSE_FILE}")"
   (
     cd "${compose_dir}"
-    docker compose -f "${compose_name}" down --remove-orphans
+    docker compose --project-name hypercdr -f "${compose_name}" down --remove-orphans
   )
 else
   docker rm -f hypercdr-platform-frontend hypercdr-platform-api hypercdr-platform-upgrader hypercdr-postgres >/dev/null 2>&1 || true
