@@ -2746,17 +2746,20 @@ function RequiredPasswordChange({
   onSignOut: () => void;
 }) {
   const [currentPassword, setCurrentPassword] = useState('');
+  const [recoveryEmail, setRecoveryEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const valid = currentPassword.length > 0 && newPassword.length >= 8 && newPassword !== currentPassword && newPassword === confirmPassword;
+  const recoveryEmailRequired = session.user.systemAdmin;
+  const recoveryEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recoveryEmail.trim());
+  const valid = currentPassword.length > 0 && (!recoveryEmailRequired || recoveryEmailValid) && newPassword.length >= 8 && newPassword !== currentPassword && newPassword === confirmPassword;
   const submit = async () => {
     if (!valid || busy) return;
     setBusy(true);
     setError('');
     try {
-      await apiPost<ApiPlatformUser>('/api/v1/auth/change-password', { currentPassword, newPassword });
+      await apiPost<ApiPlatformUser>('/api/v1/auth/change-password', { currentPassword, newPassword, recoveryEmail: recoveryEmail.trim() });
       onChanged();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Password update failed');
@@ -2776,6 +2779,11 @@ function RequiredPasswordChange({
           </div>
           <div className="space-y-4 px-7 py-6">
             <EditField label="Current Password" type="password" value={currentPassword} onChange={setCurrentPassword} />
+            {recoveryEmailRequired && <div>
+              <EditField label="Recovery Email" type="email" value={recoveryEmail} onChange={setRecoveryEmail} />
+              <p className="mt-1.5 text-xs leading-5 text-slate-500">Password reset instructions for the built-in administrator will be sent to this address.</p>
+              {recoveryEmail && !recoveryEmailValid && <p className="mt-1 text-xs font-semibold text-rose-600">Enter a valid email address.</p>}
+            </div>}
             <EditField label="New Password" type="password" value={newPassword} onChange={setNewPassword} />
             <EditField label="Confirm New Password" type="password" value={confirmPassword} onChange={setConfirmPassword} />
             <PasswordValidation password={newPassword} confirmation={confirmPassword} />

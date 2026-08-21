@@ -1287,7 +1287,11 @@ func (r *Router) changeOwnPassword(w http.ResponseWriter, req *http.Request) {
 	if !ok {
 		return
 	}
-	var body struct{ CurrentPassword, NewPassword string }
+	var body struct {
+		CurrentPassword string `json:"currentPassword"`
+		NewPassword     string `json:"newPassword"`
+		RecoveryEmail   string `json:"recoveryEmail"`
+	}
 	if decodeJSON(req, &body) != nil || !validUserPassword(body.NewPassword) {
 		writeJSON(w, 400, map[string]any{"error": "password_invalid", "message": "Password must be 8 to 128 characters."})
 		return
@@ -1299,6 +1303,16 @@ func (r *Router) changeOwnPassword(w http.ResponseWriter, req *http.Request) {
 	if _, valid, _ := r.identityProvider.Authenticate(req.Context(), u.Email, body.CurrentPassword); !valid {
 		writeJSON(w, 400, map[string]any{"error": "current_password_invalid", "message": "Current password is incorrect."})
 		return
+	}
+	if u.SystemAdmin && u.MustChangePassword {
+		if !validUserEmail(body.RecoveryEmail) {
+			writeJSON(w, 400, map[string]any{"error": "recovery_email_required", "message": "Enter a valid recovery email before changing the temporary password."})
+			return
+		}
+		if _, found, err := r.store.SetAdminRecoveryEmail(u.ID, body.RecoveryEmail); err != nil || !found {
+			writeJSON(w, 500, map[string]any{"error": "recovery_email_update_failed", "message": "The recovery email could not be saved. Your password was not changed."})
+			return
+		}
 	}
 	updated, found, err := r.identityProvider.SetPassword(req.Context(), u.ID, body.NewPassword, false)
 	if err != nil || !found {
