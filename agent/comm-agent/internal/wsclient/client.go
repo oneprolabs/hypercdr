@@ -239,7 +239,14 @@ func (c *Client) Register() (protocol.RegisterAcceptedPayload, error) {
 		if err := json.Unmarshal(data, &accepted); err != nil {
 			return protocol.RegisterAcceptedPayload{}, err
 		}
+		// The client owns a copy of Config. Keep the credential returned by an
+		// install-token registration in that copy as well as in the Kubernetes
+		// Secret persisted by main. Handover Prepare reads this runtime value to
+		// build its rollback record; leaving it empty makes an automatic rollback
+		// restart against Community without any credential.
 		c.cfg.ClusterID = accepted.Payload.ClusterID
+		c.cfg.AgentCredential = accepted.Payload.AgentCredential
+		c.cfg.InstallToken = ""
 		return accepted.Payload, nil
 	case protocol.MessagePlatformRegisterRejected:
 		var rejected protocol.Message[protocol.RegisterRejectedPayload]
