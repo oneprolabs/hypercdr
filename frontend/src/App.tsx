@@ -1735,6 +1735,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
           ]
         : [
             ...(authSession?.user.systemAdmin ? [{ label: 'User Management', desc: 'Manage the built-in Community administrator', view: 'users' as View, icon: User }] : []),
+            ...visibleExtensionModules.filter(module => module.navigation.group === 'settings').map(module => ({ label: module.navigation.label, desc: module.navigation.description, view: module.view as View, icon: module.navigation.icon })),
             ...(authSession?.user.systemAdmin ? [{ label: 'Email Settings', desc: 'Configure password recovery email delivery', view: 'email_settings' as View, icon: Settings2 }] : []),
             ...(authSession?.user.systemAdmin ? [{ label: 'Upgrade', desc: 'Check and upgrade platform and cluster components', view: 'upgrades' as View, icon: Upload }] : []),
           ],
