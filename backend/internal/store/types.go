@@ -522,12 +522,13 @@ type ApplicationUpdateInput struct {
 }
 
 type RegisterClusterInput struct {
-	Token         string
-	ClusterName   string
-	KubeVersion   string
-	AgentVersion  string
-	VeleroVersion string
-	VeleroStatus  string
+	Token          string
+	ClusterName    string
+	ControlPlaneIP string
+	KubeVersion    string
+	AgentVersion   string
+	VeleroVersion  string
+	VeleroStatus   string
 }
 
 type AgentCredentialInput struct {

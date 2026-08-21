@@ -15,6 +15,7 @@ type Config struct {
 	AgentCredential         string
 	ClusterID               string
 	ClusterName             string
+	ControlPlaneIP          string
 	AgentID                 string
 	AgentVersion            string
 	AgentImage              string

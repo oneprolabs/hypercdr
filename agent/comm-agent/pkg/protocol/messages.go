@@ -73,6 +73,7 @@ type RegisterPayload struct {
 type ClusterSummary struct {
 	Fingerprint    string `json:"fingerprint,omitempty"`
 	Name           string `json:"name"`
+	ControlPlaneIP string `json:"controlPlaneIp,omitempty"`
 	KubeVersion    string `json:"kubeVersion"`
 	NodeCount      int    `json:"nodeCount"`
 	NamespaceCount int    `json:"namespaceCount"`

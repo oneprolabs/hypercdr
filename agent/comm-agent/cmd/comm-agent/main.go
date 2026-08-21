@@ -69,6 +69,18 @@ func main() {
 			logger.Error("failed to initialize kubernetes inventory reader", "error", err)
 			os.Exit(1)
 		}
+		if strings.TrimSpace(cfg.ClusterName) == "" || cfg.ClusterName == "unknown-cluster" || cfg.ClusterName == "unnamed cluster" {
+			detectCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			identity, detectErr := reader.DetectControlPlaneIdentity(detectCtx)
+			cancel()
+			if detectErr != nil {
+				logger.Warn("failed to detect default cluster name", "error", detectErr)
+			} else {
+				cfg.ClusterName = identity.Name
+				cfg.ControlPlaneIP = identity.InternalIP
+				logger.Info("detected default cluster name", "name", identity.Name, "control_plane_ip", identity.InternalIP)
+			}
+		}
 		collector = inventory.NewKubernetesCollector(cfg, reader)
 		logger.Info("kubernetes inventory collector initialized")
 	}

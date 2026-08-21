@@ -201,8 +201,9 @@ func (c *Client) Register() (protocol.RegisterAcceptedPayload, error) {
 		InstallToken:    c.cfg.InstallToken,
 		AgentCredential: c.cfg.AgentCredential,
 		Cluster: protocol.ClusterSummary{
-			Name:        c.cfg.ClusterName,
-			KubeVersion: "unknown",
+			Name:           c.cfg.ClusterName,
+			ControlPlaneIP: c.cfg.ControlPlaneIP,
+			KubeVersion:    "unknown",
 		},
 		Agent: protocol.AgentSummary{
 			Version:   c.cfg.AgentVersion,

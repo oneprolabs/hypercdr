@@ -7381,12 +7381,13 @@ func (r *Router) agentWebSocket(w http.ResponseWriter, req *http.Request) {
 		credential = register.Payload.AgentCredential
 	} else {
 		registered, issuedCredential, err := r.store.RegisterCluster(store.RegisterClusterInput{
-			Token:         register.Payload.InstallToken,
-			ClusterName:   register.Payload.Cluster.Name,
-			KubeVersion:   register.Payload.Cluster.KubeVersion,
-			AgentVersion:  register.Payload.Agent.Version,
-			VeleroVersion: register.Payload.Velero.Version,
-			VeleroStatus:  register.Payload.Velero.Status,
+			Token:          register.Payload.InstallToken,
+			ClusterName:    register.Payload.Cluster.Name,
+			ControlPlaneIP: register.Payload.Cluster.ControlPlaneIP,
+			KubeVersion:    register.Payload.Cluster.KubeVersion,
+			AgentVersion:   register.Payload.Agent.Version,
+			VeleroVersion:  register.Payload.Velero.Version,
+			VeleroStatus:   register.Payload.Velero.Status,
 		})
 		if err != nil {
 			reason := "TOKEN_INVALID"

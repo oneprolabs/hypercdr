@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -978,8 +979,29 @@ func (s *MemoryStore) RegisterCluster(input RegisterClusterInput) (Cluster, stri
 	}
 
 	clusterName := input.ClusterName
-	if clusterName == "" {
+	if strings.TrimSpace(clusterName) == "" || clusterName == "unknown-cluster" || clusterName == "unnamed cluster" {
 		clusterName = "registered-cluster"
+	}
+	clusterID := newID()
+	duplicateName := false
+	for _, existing := range s.clusters {
+		if existing.TenantID == token.TenantID && strings.EqualFold(existing.Name, clusterName) {
+			duplicateName = true
+			break
+		}
+	}
+	if duplicateName {
+		if strings.TrimSpace(input.ControlPlaneIP) != "" {
+			clusterName = fmt.Sprintf("%s (%s)", clusterName, strings.TrimSpace(input.ControlPlaneIP))
+		} else {
+			clusterName = fmt.Sprintf("%s-%s", clusterName, clusterID[:8])
+		}
+		for _, existing := range s.clusters {
+			if existing.TenantID == token.TenantID && strings.EqualFold(existing.Name, clusterName) {
+				clusterName = fmt.Sprintf("%s-%s", clusterName, clusterID[:8])
+				break
+			}
+		}
 	}
 
 	isFirstCluster := true
@@ -990,7 +1012,7 @@ func (s *MemoryStore) RegisterCluster(input RegisterClusterInput) (Cluster, stri
 		}
 	}
 	cluster := Cluster{
-		ID:               newID(),
+		ID:               clusterID,
 		TenantID:         token.TenantID,
 		Name:             clusterName,
 		KubeVersion:      input.KubeVersion,

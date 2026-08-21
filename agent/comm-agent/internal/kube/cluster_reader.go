@@ -32,6 +32,43 @@ type KubernetesClusterReader struct {
 	namespace string
 }
 
+type ControlPlaneIdentity struct {
+	Name       string
+	InternalIP string
+}
+
+// DetectControlPlaneIdentity returns a deterministic control-plane node name
+// and its InternalIP. Kubernetes has no standard cluster-name field, while
+// control-plane node identity is available to an in-cluster Agent.
+func (r *KubernetesClusterReader) DetectControlPlaneIdentity(ctx context.Context) (ControlPlaneIdentity, error) {
+	nodes, err := r.clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return ControlPlaneIdentity{}, err
+	}
+	candidates := make([]corev1.Node, 0)
+	for _, node := range nodes.Items {
+		if _, ok := node.Labels["node-role.kubernetes.io/control-plane"]; ok {
+			candidates = append(candidates, node)
+			continue
+		}
+		if _, ok := node.Labels["node-role.kubernetes.io/master"]; ok {
+			candidates = append(candidates, node)
+		}
+	}
+	if len(candidates) == 0 {
+		return ControlPlaneIdentity{}, fmt.Errorf("no control-plane node was detected")
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Name < candidates[j].Name })
+	identity := ControlPlaneIdentity{Name: candidates[0].Name}
+	for _, address := range candidates[0].Status.Addresses {
+		if address.Type == corev1.NodeInternalIP {
+			identity.InternalIP = address.Address
+			break
+		}
+	}
+	return identity, nil
+}
+
 func NewKubernetesClusterReader(kubeconfigPath string, namespace ...string) (*KubernetesClusterReader, error) {
 	cfg, err := BuildRESTConfig(kubeconfigPath)
 	if err != nil {

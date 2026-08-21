@@ -979,7 +979,7 @@ func (s *PostgresStore) RegisterCluster(input RegisterClusterInput) (Cluster, st
 		}
 		var cluster Cluster
 		var createdAt, updatedAt time.Time
-		err = tx.QueryRow(`update clusters set name=coalesce(nullif($3,''),name),kube_version=nullif($4,''),connection_status='online',agent_version=nullif($5,''),velero_version=nullif($6,''),velero_status=nullif($7,''),registered_at=coalesce(registered_at,$8),last_seen_at=$8,updated_at=$8 where id=$1 and tenant_id=$2 returning id,tenant_id,name,coalesce(kube_version,''),status,connection_status,coalesce(agent_version,''),coalesce(velero_version,''),coalesce(velero_status,''),role,is_default,registered_at,last_seen_at,created_at,updated_at`, token.ClusterID, token.TenantID, input.ClusterName, input.KubeVersion, input.AgentVersion, input.VeleroVersion, input.VeleroStatus, now).Scan(&cluster.ID, &cluster.TenantID, &cluster.Name, &cluster.KubeVersion, &cluster.Status, &cluster.ConnectionStatus, &cluster.AgentVersion, &cluster.VeleroVersion, &cluster.VeleroStatus, &cluster.Role, &cluster.IsDefault, &cluster.RegisteredAt, &cluster.LastSeenAt, &createdAt, &updatedAt)
+		err = tx.QueryRow(`update clusters set kube_version=nullif($3,''),connection_status='online',agent_version=nullif($4,''),velero_version=nullif($5,''),velero_status=nullif($6,''),registered_at=coalesce(registered_at,$7),last_seen_at=$7,updated_at=$7 where id=$1 and tenant_id=$2 returning id,tenant_id,name,coalesce(kube_version,''),status,connection_status,coalesce(agent_version,''),coalesce(velero_version,''),coalesce(velero_status,''),role,is_default,registered_at,last_seen_at,created_at,updated_at`, token.ClusterID, token.TenantID, input.KubeVersion, input.AgentVersion, input.VeleroVersion, input.VeleroStatus, now).Scan(&cluster.ID, &cluster.TenantID, &cluster.Name, &cluster.KubeVersion, &cluster.Status, &cluster.ConnectionStatus, &cluster.AgentVersion, &cluster.VeleroVersion, &cluster.VeleroStatus, &cluster.Role, &cluster.IsDefault, &cluster.RegisteredAt, &cluster.LastSeenAt, &createdAt, &updatedAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			return Cluster{}, "", errors.New("migration handover cluster is not staged")
 		}
@@ -1000,8 +1000,27 @@ func (s *PostgresStore) RegisterCluster(input RegisterClusterInput) (Cluster, st
 	}
 
 	clusterName := input.ClusterName
-	if clusterName == "" {
+	if strings.TrimSpace(clusterName) == "" || clusterName == "unknown-cluster" || clusterName == "unnamed cluster" {
 		clusterName = "registered-cluster"
+	}
+	clusterID := newID()
+	var duplicateName bool
+	if err := tx.QueryRow(`select exists(select 1 from clusters where tenant_id=$1 and lower(name)=lower($2))`, token.TenantID, clusterName).Scan(&duplicateName); err != nil {
+		return Cluster{}, "", err
+	}
+	if duplicateName {
+		if strings.TrimSpace(input.ControlPlaneIP) != "" {
+			clusterName = fmt.Sprintf("%s (%s)", clusterName, strings.TrimSpace(input.ControlPlaneIP))
+		} else {
+			clusterName = fmt.Sprintf("%s-%s", clusterName, clusterID[:8])
+		}
+		var duplicateResolvedName bool
+		if err := tx.QueryRow(`select exists(select 1 from clusters where tenant_id=$1 and lower(name)=lower($2))`, token.TenantID, clusterName).Scan(&duplicateResolvedName); err != nil {
+			return Cluster{}, "", err
+		}
+		if duplicateResolvedName {
+			clusterName = fmt.Sprintf("%s-%s", clusterName, clusterID[:8])
+		}
 	}
 
 	var clusterCount int
@@ -1011,7 +1030,7 @@ func (s *PostgresStore) RegisterCluster(input RegisterClusterInput) (Cluster, st
 	isFirstCluster := clusterCount == 0
 
 	cluster := Cluster{
-		ID:               newID(),
+		ID:               clusterID,
 		TenantID:         token.TenantID,
 		Name:             clusterName,
 		KubeVersion:      input.KubeVersion,
