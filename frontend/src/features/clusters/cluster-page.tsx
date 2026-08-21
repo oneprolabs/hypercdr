@@ -973,7 +973,7 @@ export default function ClusterPage(props: {
                   {prepareNodeCommand && <><div className="flex gap-3 rounded-xl border border-blue-100 bg-blue-50 p-3">
                     <div className="mt-1"><ShieldCheck size={20} className="text-blue-600" /></div>
                     <div className="text-sm">
-                      <p className="mb-1 font-bold text-blue-900">1. Install Harbor CA on every node</p>
+                      <p className="mb-1 font-bold text-blue-900">1. Install the registry CA on every node</p>
                       <p className="leading-relaxed text-blue-700">Run on every Kubernetes node to trust the internal registry.</p>
                     </div>
                   </div>

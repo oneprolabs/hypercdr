@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { AlertCircle, Archive, ArrowDown, CheckCircle2, ChevronDown, Clock, DatabaseBackup, Eye, Filter, HardDrive, History, MoreVertical, Play, RefreshCw, Search, Server, X, Zap } from 'lucide-react';
 import { HyperTable, type HyperTableColumn } from '../../components/table';
-import { ModalFrame } from '../../components/modal-frame';
 import { SearchBar } from '../../components/search-bar';
 import ListToolbarControls from '../../components/list-toolbar-controls';
 import { apiGet } from '../../api/client';
@@ -456,8 +455,36 @@ export default function BackupRecoveryTaskPage({
       </div>
       <AnimatePresence>
         {selectedRow && (
-          <ModalFrame title="Task Details" subtitle={`${selectedRow.operation} / ${selectedRow.namespace}`} icon={<History size={20} />} maxWidthClass="max-w-3xl" onClose={() => setSelectedTaskId(null)}>
-            <div className="hbdr-task-detail">
+          <div className="fixed inset-0 z-50 flex justify-end">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="hbdr-filter-drawer-backdrop"
+              onClick={() => setSelectedTaskId(null)}
+            />
+            <motion.aside
+              initial={{ opacity: 0, x: 32 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 32 }}
+              transition={{ duration: 0.18, ease: 'easeOut' }}
+              className="hbdr-filter-drawer hbdr-task-detail-drawer"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="backup-task-detail-title"
+            >
+              <div className="hbdr-filter-drawer-head">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.16em] text-blue-600">Backup &amp; Recovery</p>
+                  <h3 id="backup-task-detail-title" className="mt-1 flex items-center gap-2 text-lg font-black text-slate-950">
+                    <History size={18} /> Task Details
+                  </h3>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">{selectedRow.operation} / {selectedRow.namespace}</p>
+                </div>
+                <button type="button" onClick={() => setSelectedTaskId(null)} aria-label="Close task details"><X size={18} /></button>
+              </div>
+              <div className="hbdr-filter-drawer-body">
+                <div className="hbdr-task-detail">
               <div className="hbdr-task-detail-hero">
                 <div>
                   <span>{selectedRow.operation}</span>
@@ -531,8 +558,13 @@ export default function BackupRecoveryTaskPage({
                 <summary>Technical payload</summary>
                 <pre>{JSON.stringify(selectedRow.task.payload || {}, null, 2)}</pre>
               </details>
-            </div>
-          </ModalFrame>
+                </div>
+              </div>
+              <div className="hbdr-filter-drawer-actions">
+                <button type="button" onClick={() => setSelectedTaskId(null)}>Close</button>
+              </div>
+            </motion.aside>
+          </div>
         )}
       </AnimatePresence>
     </motion.div>
