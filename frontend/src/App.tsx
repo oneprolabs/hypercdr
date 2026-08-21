@@ -419,7 +419,9 @@ function clearStoredView() {
 function isAgentTokenUsable(token: ApiAgentToken | null) {
   if (!token?.installCommand) return false;
   const expiresAt = Date.parse(token.expiresAt);
-  return Number.isNaN(expiresAt) || expiresAt > Date.now() + 60_000;
+  // The command must remain valid throughout cluster-side preflight and
+  // installation. First-time image pulls can legitimately take minutes.
+  return Number.isNaN(expiresAt) || expiresAt > Date.now() + 10 * 60_000;
 }
 
 function shortDigest(digest?: string): string {
