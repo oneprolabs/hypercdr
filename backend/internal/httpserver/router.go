@@ -12479,7 +12479,7 @@ rules:
     verbs: ["create", "delete"]
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "list", "watch", "create", "patch", "update"]
+    verbs: ["get", "list", "watch", "create", "patch", "update", "delete"]
   - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["create", "patch", "update"]
