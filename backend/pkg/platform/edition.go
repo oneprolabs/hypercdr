@@ -160,6 +160,10 @@ type Route struct {
 	Handler func(http.ResponseWriter, *http.Request, Principal)
 }
 
+type AgentTaskDispatcher interface {
+	DispatchControlPlaneHandover(context.Context, string, string, string, time.Time) error
+}
+
 // Authorizer is the stable edition boundary for Enterprise governance policy.
 type Authorizer interface {
 	Authorize(context.Context, AuthorizationRequest) AuthorizationDecision
@@ -181,6 +185,7 @@ type Options struct {
 	DiagnosticLogRetention time.Duration
 	Migrations             []Migration
 	Routes                 []Route
+	RuntimeBinder          func(AgentTaskDispatcher)
 }
 
 func CommunityOptions() Options {

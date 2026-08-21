@@ -27,6 +27,12 @@ func (r *Router) schedulerLoop() {
 func (r *Router) runSchedulerTick(now time.Time) {
 	r.scheduleLogMaintenance(now)
 	r.reconcileComponentUpgradeTimeouts(now)
+	if frozen, err := r.store.HasCommunityMigrationFreeze(); err != nil {
+		r.logger.Error("failed to check Community migration freeze", "error", err)
+		return
+	} else if frozen {
+		return
+	}
 	r.reconcileProtectionCleanupPlans(now)
 	if jobs, err := r.store.ListPlatformUpgradeJobs(); err == nil {
 		for _, job := range jobs {

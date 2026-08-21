@@ -30,6 +30,7 @@ func main() {
 
 	var applier kube.ManifestApplier
 	var uninstaller kube.Uninstaller
+	var handoverManager kube.ControlPlaneHandoverManager
 	if strings.EqualFold(cfg.ExecutorMode, executor.ModeKubernetes) {
 		dynamicApplier, err := kube.NewDynamicManifestApplier(cfg.KubeconfigPath)
 		if err != nil {
@@ -44,6 +45,21 @@ func main() {
 			os.Exit(1)
 		}
 		uninstaller = kubeUninstaller
+		handover, err := kube.NewKubernetesControlPlaneHandoverManager(cfg.KubeconfigPath)
+		if err != nil {
+			logger.Error("failed to initialize control-plane handover manager", "error", err)
+			os.Exit(1)
+		}
+		handoverManager = handover
+		rolledBack, err := handoverManager.RollbackExpired(context.Background(), cfg.Namespace, time.Now().UTC())
+		if err != nil {
+			logger.Error("failed to reconcile pending control-plane handover", "error", err)
+			os.Exit(1)
+		}
+		if rolledBack {
+			logger.Warn("expired control-plane handover was rolled back; waiting for deployment restart")
+			return
+		}
 	}
 
 	var collector inventory.Collector
@@ -78,6 +94,9 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if handoverManager != nil {
+		go watchHandoverDeadline(ctx, logger, handoverManager, cfg.Namespace)
+	}
 
 	for {
 		client := wsclient.NewWithRuntimeDependencies(cfg, logger, applier, collector, uninstaller)
@@ -119,6 +138,27 @@ func main() {
 			continue
 		}
 		return
+	}
+}
+
+func watchHandoverDeadline(ctx context.Context, logger *slog.Logger, manager kube.ControlPlaneHandoverManager, namespace string) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			rolledBack, err := manager.RollbackExpired(ctx, namespace, now.UTC())
+			if err != nil {
+				logger.Error("failed to enforce control-plane handover deadline", "error", err)
+				continue
+			}
+			if rolledBack {
+				logger.Warn("control-plane handover deadline expired; rollback initiated")
+				return
+			}
+		}
 	}
 }
 

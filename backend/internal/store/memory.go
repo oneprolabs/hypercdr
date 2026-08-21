@@ -9,33 +9,35 @@ import (
 )
 
 type MemoryStore struct {
-	mu                  sync.Mutex
-	tokens              map[string]AgentToken
-	credentials         map[string]string
-	clusters            map[string]Cluster
-	applications        map[string]Application
-	tags                map[string]Tag
-	storage             map[string]StorageRepository
-	bindings            map[string]ClusterStorageBinding
-	policies            map[string]Policy
-	plans               map[string]ProtectionPlan
-	schedules           map[string]ProtectionPlanSchedule
-	restorePoints       map[string]RestorePoint
-	tasks               map[string]Task
-	taskEvents          []TaskEvent
-	diagnosticLogs      []DiagnosticLog
-	logCoverage         map[string]ClusterLogCoverage
-	auditLogs           []AuditLog
-	users               map[string]memoryUser
-	adminRecoveryEmail  string
-	resetTokens         map[string]memoryResetToken
-	platformSessions    map[string]PlatformSession
-	releases            map[string]ComponentRelease
-	platformReleases    map[string]PlatformRelease
-	platformUpgradeJobs map[string]PlatformUpgradeJob
-	platformSettings    *PlatformSettings
-	emailSettings       map[string]EmailSettings
-	tenants             map[string]Tenant
+	mu                      sync.Mutex
+	tokens                  map[string]AgentToken
+	migrationAuthorizations map[string]CommunityMigrationAuthorization
+	migrationSessions       map[string]CommunityMigrationSession
+	credentials             map[string]string
+	clusters                map[string]Cluster
+	applications            map[string]Application
+	tags                    map[string]Tag
+	storage                 map[string]StorageRepository
+	bindings                map[string]ClusterStorageBinding
+	policies                map[string]Policy
+	plans                   map[string]ProtectionPlan
+	schedules               map[string]ProtectionPlanSchedule
+	restorePoints           map[string]RestorePoint
+	tasks                   map[string]Task
+	taskEvents              []TaskEvent
+	diagnosticLogs          []DiagnosticLog
+	logCoverage             map[string]ClusterLogCoverage
+	auditLogs               []AuditLog
+	users                   map[string]memoryUser
+	adminRecoveryEmail      string
+	resetTokens             map[string]memoryResetToken
+	platformSessions        map[string]PlatformSession
+	releases                map[string]ComponentRelease
+	platformReleases        map[string]PlatformRelease
+	platformUpgradeJobs     map[string]PlatformUpgradeJob
+	platformSettings        *PlatformSettings
+	emailSettings           map[string]EmailSettings
+	tenants                 map[string]Tenant
 }
 
 func (s *MemoryStore) GetEmailSettings() (EmailSettings, bool, error) {
@@ -190,7 +192,14 @@ func (s *MemoryStore) UpsertPlatformSettings(input PlatformSettingsInput) (Platf
 	if s.platformSettings != nil {
 		createdAt = s.platformSettings.CreatedAt
 	}
-	item := PlatformSettings{TenantID: DefaultTenantID, ImageRegistry: strings.TrimRight(strings.TrimSpace(input.ImageRegistry), "/"), AgentNamespace: input.AgentNamespace, VeleroVersion: input.VeleroVersion, PublicEndpoint: strings.TrimRight(strings.TrimSpace(input.PublicEndpoint), "/"), CreatedAt: createdAt, UpdatedAt: now}
+	instanceID := input.InstanceID
+	if s.platformSettings != nil && instanceID == "" {
+		instanceID = s.platformSettings.InstanceID
+	}
+	if instanceID == "" {
+		instanceID = newID()
+	}
+	item := PlatformSettings{TenantID: DefaultTenantID, InstanceID: instanceID, ImageRegistry: strings.TrimRight(strings.TrimSpace(input.ImageRegistry), "/"), AgentNamespace: input.AgentNamespace, VeleroVersion: input.VeleroVersion, PublicEndpoint: strings.TrimRight(strings.TrimSpace(input.PublicEndpoint), "/"), CreatedAt: createdAt, UpdatedAt: now}
 	s.platformSettings = &item
 	return item, nil
 }
@@ -206,29 +215,31 @@ type memoryResetToken struct {
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		tokens:              map[string]AgentToken{},
-		credentials:         map[string]string{},
-		clusters:            map[string]Cluster{},
-		applications:        map[string]Application{},
-		tags:                map[string]Tag{},
-		storage:             map[string]StorageRepository{},
-		bindings:            map[string]ClusterStorageBinding{},
-		policies:            map[string]Policy{},
-		plans:               map[string]ProtectionPlan{},
-		schedules:           map[string]ProtectionPlanSchedule{},
-		restorePoints:       map[string]RestorePoint{},
-		tasks:               map[string]Task{},
-		taskEvents:          []TaskEvent{},
-		logCoverage:         map[string]ClusterLogCoverage{},
-		auditLogs:           []AuditLog{},
-		tenants:             map[string]Tenant{DefaultTenantID: {ID: DefaultTenantID, Name: "Admin", Status: "active", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}},
-		users:               map[string]memoryUser{DefaultAdminEmail: {User: User{ID: "00000000-0000-0000-0000-00000000a001", TenantID: DefaultTenantID, Email: DefaultAdminEmail, Role: "admin", Status: "active", AuthProvider: "password", SystemAdmin: true, MustChangePassword: true}, Password: DefaultAdminPassword}},
-		resetTokens:         map[string]memoryResetToken{},
-		platformSessions:    map[string]PlatformSession{},
-		releases:            map[string]ComponentRelease{},
-		platformReleases:    map[string]PlatformRelease{},
-		platformUpgradeJobs: map[string]PlatformUpgradeJob{},
-		emailSettings:       map[string]EmailSettings{},
+		tokens:                  map[string]AgentToken{},
+		migrationAuthorizations: map[string]CommunityMigrationAuthorization{},
+		migrationSessions:       map[string]CommunityMigrationSession{},
+		credentials:             map[string]string{},
+		clusters:                map[string]Cluster{},
+		applications:            map[string]Application{},
+		tags:                    map[string]Tag{},
+		storage:                 map[string]StorageRepository{},
+		bindings:                map[string]ClusterStorageBinding{},
+		policies:                map[string]Policy{},
+		plans:                   map[string]ProtectionPlan{},
+		schedules:               map[string]ProtectionPlanSchedule{},
+		restorePoints:           map[string]RestorePoint{},
+		tasks:                   map[string]Task{},
+		taskEvents:              []TaskEvent{},
+		logCoverage:             map[string]ClusterLogCoverage{},
+		auditLogs:               []AuditLog{},
+		tenants:                 map[string]Tenant{DefaultTenantID: {ID: DefaultTenantID, Name: "Admin", Status: "active", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}},
+		users:                   map[string]memoryUser{DefaultAdminEmail: {User: User{ID: "00000000-0000-0000-0000-00000000a001", TenantID: DefaultTenantID, Email: DefaultAdminEmail, Role: "admin", Status: "active", AuthProvider: "password", SystemAdmin: true, MustChangePassword: true}, Password: DefaultAdminPassword}},
+		resetTokens:             map[string]memoryResetToken{},
+		platformSessions:        map[string]PlatformSession{},
+		releases:                map[string]ComponentRelease{},
+		platformReleases:        map[string]PlatformRelease{},
+		platformUpgradeJobs:     map[string]PlatformUpgradeJob{},
+		emailSettings:           map[string]EmailSettings{},
 	}
 }
 
@@ -828,6 +839,125 @@ func (s *MemoryStore) ValidateAgentToken(value string) error {
 		return ErrTokenExpired
 	}
 	return nil
+}
+
+func (s *MemoryStore) ValidateDisasterHandoverToken(value string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	token, ok := s.tokens[value]
+	if !ok || !strings.HasPrefix(token.Description, "disaster-handover:") {
+		return ErrTokenInvalid
+	}
+	if !token.UsedAt.IsZero() {
+		return ErrTokenUsed
+	}
+	if time.Now().UTC().After(token.ExpiresAt) {
+		return ErrTokenExpired
+	}
+	return nil
+}
+
+func (s *MemoryStore) CreateCommunityMigrationAuthorization(createdBy string, ttl time.Duration) (CommunityMigrationAuthorization, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	item := CommunityMigrationAuthorization{ID: newID(), Token: "hcmig_" + newID() + newID(), CreatedBy: createdBy, ExpiresAt: now.Add(ttl)}
+	s.migrationAuthorizations[item.Token] = item
+	return item, nil
+}
+
+func (s *MemoryStore) ConsumeCommunityMigrationAuthorization(token, targetInstanceID, protocolVersion, targetPublicKey string, ttl time.Duration) (CommunityMigrationSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	authorization, ok := s.migrationAuthorizations[token]
+	if !ok {
+		return CommunityMigrationSession{}, ErrTokenInvalid
+	}
+	if time.Now().UTC().After(authorization.ExpiresAt) {
+		return CommunityMigrationSession{}, ErrTokenExpired
+	}
+	delete(s.migrationAuthorizations, token)
+	now := time.Now().UTC()
+	for sessionToken, existing := range s.migrationSessions {
+		if now.After(existing.ExpiresAt) && !isTerminalMigrationState(existing.State) {
+			existing.State, existing.Frozen, existing.UpdatedAt = "expired", false, now
+			s.migrationSessions[sessionToken] = existing
+		}
+		if !isTerminalMigrationState(existing.State) {
+			return CommunityMigrationSession{}, errors.New("another community migration is active")
+		}
+	}
+	settings := s.platformSettings
+	if settings == nil {
+		return CommunityMigrationSession{}, errors.New("platform settings are not initialized")
+	}
+	item := CommunityMigrationSession{ID: newID(), SessionToken: "hcms_" + newID() + newID(), SourceInstanceID: settings.InstanceID, TargetInstanceID: targetInstanceID, ProtocolVersion: protocolVersion, TargetPublicKey: targetPublicKey, State: "prechecking", ExpiresAt: now.Add(ttl), CreatedAt: now, UpdatedAt: now}
+	s.migrationSessions[item.SessionToken] = item
+	return item, nil
+}
+
+func (s *MemoryStore) AuthenticateCommunityMigrationSession(token string) (CommunityMigrationSession, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := s.migrationSessions[token]
+	if !ok || time.Now().UTC().After(item.ExpiresAt) {
+		return CommunityMigrationSession{}, false, nil
+	}
+	return item, true, nil
+}
+
+func (s *MemoryStore) UpdateCommunityMigrationState(id, state, reason, message string, frozen bool) (CommunityMigrationSession, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for token, item := range s.migrationSessions {
+		if item.ID != id {
+			continue
+		}
+		item.State, item.Frozen, item.UpdatedAt = state, frozen, time.Now().UTC()
+		if strings.Contains(state, "failed") {
+			item.LastErrorCode, item.LastErrorMessage = reason, message
+		}
+		s.migrationSessions[token] = item
+		return item, true, nil
+	}
+	return CommunityMigrationSession{}, false, nil
+}
+
+func (s *MemoryStore) ListCommunityMigrationSessions() ([]CommunityMigrationSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	items := make([]CommunityMigrationSession, 0, len(s.migrationSessions))
+	now := time.Now().UTC()
+	for token, item := range s.migrationSessions {
+		if now.After(item.ExpiresAt) && !isTerminalMigrationState(item.State) {
+			item.State, item.Frozen, item.UpdatedAt = "expired", false, now
+			s.migrationSessions[token] = item
+		}
+		item.SessionToken = ""
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+	return items, nil
+}
+
+func (s *MemoryStore) HasCommunityMigrationFreeze() (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, item := range s.migrationSessions {
+		if item.Frozen && time.Now().UTC().Before(item.ExpiresAt) && !isTerminalMigrationState(item.State) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func isTerminalMigrationState(state string) bool {
+	switch state {
+	case "committed", "rolled-back", "failed", "revoked", "expired":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *MemoryStore) RegisterCluster(input RegisterClusterInput) (Cluster, string, error) {

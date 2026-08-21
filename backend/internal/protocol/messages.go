@@ -370,21 +370,30 @@ type VeleroEventPayload struct {
 }
 
 type TaskDispatchPayload struct {
-	RequestMessageID  string                    `json:"-"`
-	TaskID            string                    `json:"taskId"`
-	CommandID         string                    `json:"commandId"`
-	Type              string                    `json:"type"`
-	Deadline          time.Time                 `json:"deadline"`
-	Backup            *BackupCommand            `json:"backup,omitempty"`
-	BackupCancel      *BackupCancelCommand      `json:"backupCancel,omitempty"`
-	Restore           *RestoreCommand           `json:"restore,omitempty"`
-	StorageSync       *StorageSyncCommand       `json:"storageSync,omitempty"`
-	ScheduleSync      *ScheduleSyncCommand      `json:"scheduleSync,omitempty"`
-	RetentionCleanup  *RetentionCleanupCommand  `json:"retentionCleanup,omitempty"`
-	ProtectionCleanup *ProtectionCleanupCommand `json:"protectionCleanup,omitempty"`
-	AgentUpgrade      *AgentUpgradeCommand      `json:"agentUpgrade,omitempty"`
-	VeleroUpgrade     *VeleroUpgradeCommand     `json:"veleroUpgrade,omitempty"`
-	Unregister        *UnregisterCommand        `json:"unregister,omitempty"`
+	RequestMessageID     string                       `json:"-"`
+	TaskID               string                       `json:"taskId"`
+	CommandID            string                       `json:"commandId"`
+	Type                 string                       `json:"type"`
+	Deadline             time.Time                    `json:"deadline"`
+	Backup               *BackupCommand               `json:"backup,omitempty"`
+	BackupCancel         *BackupCancelCommand         `json:"backupCancel,omitempty"`
+	Restore              *RestoreCommand              `json:"restore,omitempty"`
+	StorageSync          *StorageSyncCommand          `json:"storageSync,omitempty"`
+	ScheduleSync         *ScheduleSyncCommand         `json:"scheduleSync,omitempty"`
+	RetentionCleanup     *RetentionCleanupCommand     `json:"retentionCleanup,omitempty"`
+	ProtectionCleanup    *ProtectionCleanupCommand    `json:"protectionCleanup,omitempty"`
+	AgentUpgrade         *AgentUpgradeCommand         `json:"agentUpgrade,omitempty"`
+	VeleroUpgrade        *VeleroUpgradeCommand        `json:"veleroUpgrade,omitempty"`
+	Unregister           *UnregisterCommand           `json:"unregister,omitempty"`
+	ControlPlaneHandover *ControlPlaneHandoverCommand `json:"controlPlaneHandover,omitempty"`
+}
+
+type ControlPlaneHandoverCommand struct {
+	Action             string    `json:"action"`
+	MigrationID        string    `json:"migrationId"`
+	TargetEndpoint     string    `json:"targetEndpoint,omitempty"`
+	TargetInstallToken string    `json:"targetInstallToken,omitempty"`
+	RollbackDeadline   time.Time `json:"rollbackDeadline,omitempty"`
 }
 
 type AgentUpgradeCommand struct {

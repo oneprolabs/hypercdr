@@ -1,57 +1,55 @@
-# Community and Enterprise resource isolation
+# Agent ownership across Community and Enterprise
 
-Community and Enterprise may manage the same Kubernetes cluster at the same
-time. Isolation is based on ownership, not on assuming that only one Velero
-installation exists.
+Community and Enterprise use the same Community-owned Agent distribution. A
+Kubernetes cluster can be owned by exactly one HyperCDR control plane at a
+time. Namespace separation is not an edition boundary: Velero CRDs, cluster
+inventory, CSI APIs, and object-storage repositories cannot be made safe for
+concurrent control by installing a second Agent.
 
-## Ownership matrix
+## Canonical runtime
 
-| Resource | Community owner/name | Enterprise owner/name | Cleanup rule |
-| --- | --- | --- | --- |
-| Agent namespace | `hypercdr-agent` | `hypercdr-enterprise-agent` | Delete only the task namespace. |
-| comm-agent Deployment | `hypercdr-comm-agent` in its namespace | Same name in its namespace | Namespace-scoped. |
-| Velero Deployment | `velero` in its namespace | Same name in its namespace | Namespace-scoped. |
-| node-agent DaemonSet | `node-agent` in its namespace | Same name in its namespace | Namespace-scoped. |
-| Agent state PVC | `hypercdr-agent-state` in its namespace | Same name in its namespace | Namespace-scoped; the provisioned PV is owned through the PVC. |
-| Secrets and ServiceAccounts | Fixed names in the edition namespace | Fixed names in the edition namespace | Namespace-scoped. Never read or delete the peer namespace. |
-| Agent ClusterRole/Binding | `hypercdr-agent` | `hypercdr-agent-<sha256(namespace)[0:8]>` | Upgrade and uninstall resolve the name from the current namespace. |
-| Velero ClusterRole/Binding | `hypercdr-velero` | `hypercdr-velero-<sha256(namespace)[0:8]>` | Delete only the current namespace's derived name. |
-| Velero custom resources | Namespaced under the edition namespace | Namespaced under the edition namespace | Delete only CRs in the current namespace. |
-| Velero CRDs | Shared Kubernetes API definitions | Shared Kubernetes API definitions | Never delete during install rollback. During uninstall, retain while any peer Velero/HyperCDR controller or CR exists. |
-| Platform database, credentials and tasks | Community control-plane database | Enterprise control-plane database | Each platform mutates only records addressed by its authenticated agent connection and cluster ID. |
-| Object-storage data | `hypercdr/clusters/<source-cluster-id>/` | Same domain contract with an independently issued cluster ID | Delete only prefixes persisted in the current platform's storage bindings. A deliberate Community-to-Enterprise migration preserves IDs and transfers ownership; cloned databases must not run concurrently. |
+| Resource | Canonical owner/name | Edition handover rule |
+| --- | --- | --- |
+| Agent namespace | `hypercdr-agent` | Retain; namespaces are never renamed. |
+| comm-agent Deployment | `hypercdr-comm-agent` | Rotate endpoint and credential only. |
+| Velero Deployment | `velero` | Retain without reinstalling. |
+| node-agent DaemonSet | `node-agent` | Retain without reinstalling. |
+| Agent state PVC | `hypercdr-agent-state` | Retain the PVC and bound PV identity. |
+| Secrets and ServiceAccounts | Fixed names in `hypercdr-agent` | Snapshot the old control-plane credential before handover. |
+| Agent ClusterRole/Binding | `hypercdr-agent` | Reconcile in place; never create an edition-suffixed peer. |
+| Velero ClusterRole/Binding | `hypercdr-velero` | Reconcile in place. |
+| Velero custom resources and CRDs | Existing cluster resources | Retain BSL, repository, backup, restore, and data-mover state. |
+| Object-storage and Kopia state | Existing repository and prefix | Preserve in place; only control-plane ownership changes. |
 
 ## Required lifecycle invariants
 
-1. Installation may detect the peer Velero installation but must not reject it
-   or require `--allow-existing-velero`; only an installation in the same
-   namespace is treated as a reinstall.
-2. Upgrade permission reconciliation may modify only the current namespace's
-   derived ClusterRole.
-3. Normal unregister is ordered: object-storage cleanup, cluster-side cleanup,
-   agent success response, then platform-record deletion.
-4. Failure before the agent success response leaves the platform record and
-   task history retryable. The task event retains the underlying Kubernetes or
-   storage error.
-5. Force removal is platform-only and must state that cluster and storage
-   resources may remain.
-6. Removing one edition must leave the peer namespace, RBAC, workloads, PVC,
-   credentials, CRs, CRDs and agent connection healthy.
+1. The standard installer scans all namespaces before changing cluster state.
+   Any existing `hypercdr-comm-agent` causes installation to fail with guidance
+   to use Community Migration or Disaster Handover.
+2. Both editions generate commands for the canonical `hypercdr-agent`
+   namespace. There is no force flag for installing a second Agent.
+3. Community-to-Enterprise migration freezes Community writes, verifies that
+   no backup, restore, drill, delete, or repository-maintenance task is active,
+   and then changes only the Agent control-plane endpoint and credential.
+4. Velero, node-agent, Kopia, object-storage settings, PVCs, cluster identity,
+   and historical resources remain unchanged during handover.
+5. Before migration commit, an unsuccessful handover restores the encrypted
+   credential snapshot and reconnects the same Agent to Community.
+6. Disaster Handover is a separate audited recovery workflow for a permanently
+   unavailable source control plane. It is never an installer bypass.
+7. Normal unregister remains destructive and is not used for edition migration.
 
 ## Release validation
 
-Every change to installation, runtime RBAC, upgrade or unregister must test the
-cross-product, not only two independent happy paths:
+Every installation or handover change must prove:
 
-1. Install Community, then Enterprise; verify both become online.
-2. Unregister Community; verify Enterprise remains ready and can inventory the
-   cluster.
-3. Reinstall Community; verify both become online.
-4. Unregister Enterprise; verify Community remains ready and can inventory the
-   cluster.
-5. Reinstall Enterprise and verify both final namespaces, scoped RBAC objects,
-   PVCs, Velero CRs and platform records.
-
-Velero CRDs are intentionally shared cluster-scoped resources. Claiming that
-they are physically isolated per edition would be incorrect; their lifecycle
-is protected by peer-instance detection instead.
+1. A fresh Community or Enterprise control plane installs the same Agent into
+   `hypercdr-agent`.
+2. A second installation from either edition is rejected before namespace,
+   Secret, RBAC, workload, PVC, Velero, or object-storage mutation.
+3. A successful handover preserves Kubernetes cluster UID, namespace UID, PVC
+   UID, BSL, Kopia repository, and historical restore-point relationships.
+4. An injected target-connection or verification failure restores the source
+   endpoint and credential within the configured rollback timeout.
+5. Commit makes Enterprise the sole writer and leaves Community read-only for
+   the configured observation period.

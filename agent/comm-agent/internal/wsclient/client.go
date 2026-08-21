@@ -59,6 +59,7 @@ type Client struct {
 	deleteWaiter   kube.VeleroBackupDeletionWaiter
 	contentReader  kube.BackupContentReader
 	uninstaller    kube.Uninstaller
+	handover       kube.ControlPlaneHandoverManager
 	agentRuntime   interface {
 		kube.AgentRuntimeReader
 		kube.AgentUpgrader
@@ -124,6 +125,10 @@ func NewWithRuntimeDependencies(cfg config.Config, logger *slog.Logger, applier 
 	if runtime, err := kube.NewKubernetesAgentRuntime(cfg.KubeconfigPath); err == nil {
 		agentRuntime = runtime
 	}
+	var handover kube.ControlPlaneHandoverManager
+	if manager, err := kube.NewKubernetesControlPlaneHandoverManager(cfg.KubeconfigPath); err == nil {
+		handover = manager
+	}
 	return &Client{
 		cfg:               cfg,
 		logger:            logger,
@@ -140,6 +145,7 @@ func NewWithRuntimeDependencies(cfg config.Config, logger *slog.Logger, applier 
 		deleteWaiter:      deleteWaiter,
 		contentReader:     contentReader,
 		uninstaller:       uninstaller,
+		handover:          handover,
 		agentRuntime:      agentRuntime,
 		backupSamples:     map[string][]volumeProgressSample{},
 		backupEvents:      map[string]string{},
@@ -566,9 +572,54 @@ func (c *Client) executeTask(task protocol.TaskDispatchPayload) {
 		c.executeVeleroUpgradeTask(task)
 	case "unregister":
 		c.executeUnregisterTask(task)
+	case "control-plane-handover":
+		c.executeControlPlaneHandoverTask(task)
 	default:
 		_ = c.sendTaskFailed(task, "TASK_UNSUPPORTED", "unsupported task type: "+task.Type)
 	}
+}
+
+func (c *Client) executeControlPlaneHandoverTask(task protocol.TaskDispatchPayload) {
+	command := task.ControlPlaneHandover
+	if command == nil || strings.TrimSpace(command.MigrationID) == "" {
+		_ = c.sendTaskFailed(task, "HANDOVER_COMMAND_INVALID", "control-plane handover command and migration ID are required")
+		return
+	}
+	if c.handover == nil {
+		_ = c.sendTaskFailed(task, "HANDOVER_MANAGER_NOT_CONFIGURED", "control-plane handover manager is not configured")
+		return
+	}
+	if err := c.sendTaskAccepted(task); err != nil {
+		return
+	}
+	_ = c.sendTaskProgress(task, map[string]any{"kind": "ControlPlaneHandover", "migrationId": command.MigrationID, "action": command.Action}, 30, "control-plane handover accepted")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var err error
+	switch command.Action {
+	case "prepare":
+		err = c.handover.Prepare(ctx, kube.ControlPlaneHandoverInput{
+			MigrationID: command.MigrationID, Namespace: c.cfg.Namespace,
+			PreviousEndpoint: c.cfg.PlatformEndpoint, PreviousClusterID: c.cfg.ClusterID,
+			PreviousCredential: c.cfg.AgentCredential, TargetEndpoint: command.TargetEndpoint,
+			TargetInstallToken: command.TargetInstallToken, RollbackDeadline: command.RollbackDeadline,
+		})
+	case "confirm":
+		err = c.handover.Confirm(ctx, c.cfg.Namespace, command.MigrationID)
+	case "rollback":
+		err = c.handover.Rollback(ctx, c.cfg.Namespace, command.MigrationID)
+	case "commit":
+		err = c.handover.Commit(ctx, c.cfg.Namespace, command.MigrationID)
+	case "cleanup":
+		err = c.handover.Cleanup(ctx, c.cfg.Namespace, command.MigrationID)
+	default:
+		err = fmt.Errorf("unsupported handover action %q", command.Action)
+	}
+	if err != nil {
+		_ = c.sendTaskFailedWithDetails(task, "CONTROL_PLANE_HANDOVER_FAILED", "control-plane handover action failed", map[string]any{"action": command.Action, "migrationId": command.MigrationID, "error": err.Error()})
+		return
+	}
+	_ = c.sendTaskCompleted(task, map[string]any{"kind": "ControlPlaneHandover", "migrationId": command.MigrationID, "action": command.Action}, "control-plane handover action completed")
 }
 
 func (c *Client) executeAgentUpgradeTask(task protocol.TaskDispatchPayload) {

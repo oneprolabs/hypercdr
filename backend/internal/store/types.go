@@ -67,8 +67,15 @@ type Store interface {
 	FindOrCreateGoogleUser(email string) (User, error)
 	CreateAgentToken(tenantID, createdBy, description string, ttl time.Duration) (AgentToken, error)
 	ValidateAgentToken(token string) error
+	ValidateDisasterHandoverToken(token string) error
 	RegisterCluster(input RegisterClusterInput) (Cluster, string, error)
 	AuthenticateAgentCredential(input AgentCredentialInput) (Cluster, bool, error)
+	CreateCommunityMigrationAuthorization(createdBy string, ttl time.Duration) (CommunityMigrationAuthorization, error)
+	ConsumeCommunityMigrationAuthorization(token, targetInstanceID, protocolVersion, targetPublicKey string, ttl time.Duration) (CommunityMigrationSession, error)
+	AuthenticateCommunityMigrationSession(token string) (CommunityMigrationSession, bool, error)
+	UpdateCommunityMigrationState(id, state, reason, message string, frozen bool) (CommunityMigrationSession, bool, error)
+	ListCommunityMigrationSessions() ([]CommunityMigrationSession, error)
+	HasCommunityMigrationFreeze() (bool, error)
 	ListClusters() ([]Cluster, error)
 	UpdateCluster(input ClusterUpdateInput) (Cluster, bool, error)
 	SetClusterConnectionStatus(clusterID string, status string) (Cluster, bool, error)
@@ -139,6 +146,7 @@ type Store interface {
 
 type PlatformSettings struct {
 	TenantID       string    `json:"tenantId"`
+	InstanceID     string    `json:"instanceId"`
 	ImageRegistry  string    `json:"imageRegistry"`
 	AgentNamespace string    `json:"agentNamespace"`
 	VeleroVersion  string    `json:"veleroVersion"`
@@ -148,7 +156,7 @@ type PlatformSettings struct {
 }
 
 type PlatformSettingsInput struct {
-	ImageRegistry, AgentNamespace, VeleroVersion, PublicEndpoint string
+	ImageRegistry, AgentNamespace, VeleroVersion, PublicEndpoint, InstanceID string
 }
 
 type Tenant struct {
@@ -346,6 +354,19 @@ type AgentToken struct {
 	ExpiresAt   time.Time `json:"expiresAt"`
 	UsedAt      time.Time `json:"usedAt,omitempty"`
 	ClusterID   string    `json:"clusterId,omitempty"`
+}
+
+type CommunityMigrationAuthorization struct {
+	ID, Token, CreatedBy string
+	ExpiresAt            time.Time
+}
+
+type CommunityMigrationSession struct {
+	ID, SessionToken, SourceInstanceID, TargetInstanceID, ProtocolVersion string
+	TargetPublicKey                                                       string
+	State, LastErrorCode, LastErrorMessage                                string
+	Frozen                                                                bool
+	ExpiresAt, CreatedAt, UpdatedAt                                       time.Time
 }
 
 type Cluster struct {

@@ -115,6 +115,42 @@ func TestValidReleaseToken(t *testing.T) {
 	}
 }
 
+func TestDisasterHandoverRejectsOrdinaryAgentTokenAndPublishesRollbackScript(t *testing.T) {
+	repo := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := httptest.NewServer(NewRouter(config.Config{}, logger, repo))
+	defer server.Close()
+	ordinary, err := repo.CreateAgentToken(store.DefaultTenantID, "", "ordinary registration", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := postJSON(t, server.URL+"/api/v1/disaster-handovers/validate", map[string]string{"token": ordinary.Token})
+	response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("ordinary Agent token accepted for disaster handover: %d", response.StatusCode)
+	}
+	disaster, err := repo.CreateAgentToken(store.DefaultTenantID, "", "disaster-handover:migration-test", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response = postJSON(t, server.URL+"/api/v1/disaster-handovers/validate", map[string]string{"token": disaster.Token})
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("disaster token rejected: %d", response.StatusCode)
+	}
+	scriptResponse, err := http.Get(server.URL + "/disaster-handover.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer scriptResponse.Body.Close()
+	script, _ := io.ReadAll(scriptResponse.Body)
+	for _, required := range []string{`NAMESPACE="hypercdr-agent"`, "hypercdr-agent-handover", "PreviousEndpoint", "RollbackDeadline"} {
+		if !bytes.Contains(script, []byte(required)) {
+			t.Fatalf("disaster script is missing %q", required)
+		}
+	}
+}
+
 func TestPasswordResetFlow(t *testing.T) {
 	repo := store.NewMemoryStore()
 	if _, err := repo.CreateUser(store.DefaultTenantID, "reset-user@example.com", "old-password"); err != nil {
@@ -516,6 +552,28 @@ func TestUnregisterClusterOfflineIsBlockedBeforeTaskCreation(t *testing.T) {
 	defer server.Close()
 
 	clusterID := registerClusterViaWS(t, server.URL, "temporary-cluster")
+	// WebSocket close handling is asynchronous. Wait until the hub has removed
+	// the short-lived test connection before asserting the offline guard.
+	deadline := time.Now().Add(time.Second)
+	for {
+		precheck, precheckErr := http.Get(server.URL + "/api/v1/clusters/" + clusterID + "/unregister/precheck")
+		if precheckErr != nil {
+			t.Fatal(precheckErr)
+		}
+		var audit unregisterAudit
+		decodeErr := json.NewDecoder(precheck.Body).Decode(&audit)
+		precheck.Body.Close()
+		if decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		if !audit.AgentOnline {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("test agent remained online after WebSocket closed")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	resp, err := http.Post(server.URL+"/api/v1/clusters/"+clusterID+"/unregister", "application/json", strings.NewReader(`{"reason":"test cleanup"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -803,7 +861,10 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 	for _, expected := range []string{
 		"registry.local:5000/hypercdr/comm-agent:active",
 		`WAIT_TIMEOUT="300s"`,
-		"is_hypercdr_managed_namespace",
+		"single canonical namespace 'hypercdr-agent'",
+		"Checking whether this cluster is already managed by HyperCDR",
+		"Community and Enterprise use the same Agent and cannot coexist in one cluster.",
+		"Use Community Migration for a normal edition upgrade",
 		`create serviceaccount default --dry-run=client -o yaml`,
 		`serviceAccountName: default`,
 		`automountServiceAccountToken: false`,
@@ -852,8 +913,6 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 		"IMAGE_PULL_SECRETS_BLOCK",
 		"--reset-agent-credential",
 		"delete secret hypercdr-agent-credential",
-		`kubectl_retry kubectl -n "$NAMESPACE" rollout restart deployment/hypercdr-comm-agent`,
-		"Existing comm-agent deployment restarted with the new bootstrap token",
 		"name: HCDR_PLATFORM_TLS_INSECURE_SKIP_VERIFY",
 		"value: \"true\"",
 		"download_url \"$VELERO_CRDS_URL\" \"$crds_file\"",
@@ -874,6 +933,9 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 	}
 	if strings.Contains(text, "kubectl delete crd") {
 		t.Fatal("registration rollback must not delete cluster-scoped Velero CRDs shared by another HyperCDR edition")
+	}
+	if strings.Contains(text, "supports isolated Community and Enterprise Velero instances") {
+		t.Fatal("installer must not advertise dual-edition Agent coexistence")
 	}
 	command := exec.Command("bash", "-n")
 	command.Stdin = strings.NewReader(text)

@@ -355,7 +355,7 @@ func (s *PostgresStore) DeleteTenant(id string) (bool, bool, error) {
 
 func (s *PostgresStore) GetPlatformSettings() (PlatformSettings, bool, error) {
 	var item PlatformSettings
-	err := s.db.QueryRow(`select tenant_id,image_registry,agent_namespace,velero_version,coalesce(public_endpoint,''),created_at,updated_at from platform_settings where tenant_id=$1`, DefaultTenantID).Scan(&item.TenantID, &item.ImageRegistry, &item.AgentNamespace, &item.VeleroVersion, &item.PublicEndpoint, &item.CreatedAt, &item.UpdatedAt)
+	err := s.db.QueryRow(`select tenant_id,platform_instance_id,image_registry,agent_namespace,velero_version,coalesce(public_endpoint,''),created_at,updated_at from platform_settings where tenant_id=$1`, DefaultTenantID).Scan(&item.TenantID, &item.InstanceID, &item.ImageRegistry, &item.AgentNamespace, &item.VeleroVersion, &item.PublicEndpoint, &item.CreatedAt, &item.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return PlatformSettings{}, false, nil
 	}
@@ -364,7 +364,7 @@ func (s *PostgresStore) GetPlatformSettings() (PlatformSettings, bool, error) {
 
 func (s *PostgresStore) UpsertPlatformSettings(input PlatformSettingsInput) (PlatformSettings, error) {
 	var item PlatformSettings
-	err := s.db.QueryRow(`insert into platform_settings(tenant_id,image_registry,agent_namespace,velero_version,public_endpoint) values($1,$2,$3,$4,nullif($5,'')) on conflict(tenant_id) do update set image_registry=excluded.image_registry,agent_namespace=excluded.agent_namespace,velero_version=excluded.velero_version,public_endpoint=excluded.public_endpoint,updated_at=now() returning tenant_id,image_registry,agent_namespace,velero_version,coalesce(public_endpoint,''),created_at,updated_at`, DefaultTenantID, strings.TrimRight(strings.TrimSpace(input.ImageRegistry), "/"), input.AgentNamespace, input.VeleroVersion, strings.TrimRight(strings.TrimSpace(input.PublicEndpoint), "/")).Scan(&item.TenantID, &item.ImageRegistry, &item.AgentNamespace, &item.VeleroVersion, &item.PublicEndpoint, &item.CreatedAt, &item.UpdatedAt)
+	err := s.db.QueryRow(`insert into platform_settings(tenant_id,platform_instance_id,image_registry,agent_namespace,velero_version,public_endpoint) values($1,coalesce(nullif($2,''),md5(random()::text || clock_timestamp()::text)),$3,$4,$5,nullif($6,'')) on conflict(tenant_id) do update set image_registry=excluded.image_registry,agent_namespace=excluded.agent_namespace,velero_version=excluded.velero_version,public_endpoint=excluded.public_endpoint,updated_at=now() returning tenant_id,platform_instance_id,image_registry,agent_namespace,velero_version,coalesce(public_endpoint,''),created_at,updated_at`, DefaultTenantID, input.InstanceID, strings.TrimRight(strings.TrimSpace(input.ImageRegistry), "/"), input.AgentNamespace, input.VeleroVersion, strings.TrimRight(strings.TrimSpace(input.PublicEndpoint), "/")).Scan(&item.TenantID, &item.InstanceID, &item.ImageRegistry, &item.AgentNamespace, &item.VeleroVersion, &item.PublicEndpoint, &item.CreatedAt, &item.UpdatedAt)
 	return item, err
 }
 
@@ -819,6 +819,132 @@ func (s *PostgresStore) ValidateAgentToken(value string) error {
 	return nil
 }
 
+func (s *PostgresStore) ValidateDisasterHandoverToken(value string) error {
+	var description string
+	var expiresAt time.Time
+	var usedAt sql.NullTime
+	err := s.db.QueryRow(`select coalesce(description,''),expires_at,used_at from agent_tokens where token_hash=$1 and revoked_at is null`, value).Scan(&description, &expiresAt, &usedAt)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !strings.HasPrefix(description, "disaster-handover:")) {
+		return ErrTokenInvalid
+	}
+	if err != nil {
+		return err
+	}
+	if usedAt.Valid {
+		return ErrTokenUsed
+	}
+	if time.Now().UTC().After(expiresAt) {
+		return ErrTokenExpired
+	}
+	return nil
+}
+
+func migrationTokenHash(value string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(value))) }
+
+func (s *PostgresStore) CreateCommunityMigrationAuthorization(createdBy string, ttl time.Duration) (CommunityMigrationAuthorization, error) {
+	now := time.Now().UTC()
+	item := CommunityMigrationAuthorization{ID: newID(), Token: "hcmig_" + newID() + newID(), CreatedBy: createdBy, ExpiresAt: now.Add(ttl)}
+	_, err := s.db.Exec(`insert into community_migration_authorizations(id,token_hash,created_by,expires_at,created_at) values($1,$2,nullif($3,'')::uuid,$4,$5)`, item.ID, migrationTokenHash(item.Token), item.CreatedBy, item.ExpiresAt, now)
+	return item, err
+}
+
+func (s *PostgresStore) ConsumeCommunityMigrationAuthorization(token, targetInstanceID, protocolVersion, targetPublicKey string, ttl time.Duration) (CommunityMigrationSession, error) {
+	now := time.Now().UTC()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return CommunityMigrationSession{}, err
+	}
+	defer tx.Rollback()
+	var authorizationID string
+	var expiresAt time.Time
+	var usedAt sql.NullTime
+	err = tx.QueryRow(`select id,expires_at,used_at from community_migration_authorizations where token_hash=$1 and revoked_at is null for update`, migrationTokenHash(token)).Scan(&authorizationID, &expiresAt, &usedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CommunityMigrationSession{}, ErrTokenInvalid
+	}
+	if err != nil {
+		return CommunityMigrationSession{}, err
+	}
+	if usedAt.Valid {
+		return CommunityMigrationSession{}, ErrTokenUsed
+	}
+	if now.After(expiresAt) {
+		return CommunityMigrationSession{}, ErrTokenExpired
+	}
+	if _, err = tx.Exec(`update community_migration_sessions set state='expired',frozen=false,completed_at=$1,updated_at=$1 where expires_at<=$1 and state not in ('committed','rolled-back','failed','revoked','expired')`, now); err != nil {
+		return CommunityMigrationSession{}, err
+	}
+	var active int
+	if err = tx.QueryRow(`select count(*) from community_migration_sessions where state not in ('committed','rolled-back','failed','revoked')`).Scan(&active); err != nil {
+		return CommunityMigrationSession{}, err
+	}
+	if active > 0 {
+		return CommunityMigrationSession{}, errors.New("another community migration is active")
+	}
+	var sourceInstanceID string
+	if err = tx.QueryRow(`select platform_instance_id from platform_settings where tenant_id=$1`, DefaultTenantID).Scan(&sourceInstanceID); err != nil {
+		return CommunityMigrationSession{}, err
+	}
+	item := CommunityMigrationSession{ID: newID(), SessionToken: "hcms_" + newID() + newID(), SourceInstanceID: sourceInstanceID, TargetInstanceID: targetInstanceID, ProtocolVersion: protocolVersion, TargetPublicKey: targetPublicKey, State: "prechecking", ExpiresAt: now.Add(ttl), CreatedAt: now, UpdatedAt: now}
+	_, err = tx.Exec(`insert into community_migration_sessions(id,authorization_id,session_token_hash,source_instance_id,target_instance_id,protocol_version,target_public_key,state,expires_at,created_at,updated_at) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10)`, item.ID, authorizationID, migrationTokenHash(item.SessionToken), item.SourceInstanceID, item.TargetInstanceID, item.ProtocolVersion, item.TargetPublicKey, item.State, item.ExpiresAt, now)
+	if err != nil {
+		return CommunityMigrationSession{}, err
+	}
+	if _, err = tx.Exec(`update community_migration_authorizations set used_at=$1 where id=$2`, now, authorizationID); err != nil {
+		return CommunityMigrationSession{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return CommunityMigrationSession{}, err
+	}
+	return item, nil
+}
+
+func (s *PostgresStore) AuthenticateCommunityMigrationSession(token string) (CommunityMigrationSession, bool, error) {
+	var item CommunityMigrationSession
+	err := s.db.QueryRow(`select id,source_instance_id,target_instance_id,protocol_version,target_public_key,state,frozen,expires_at,coalesce(last_error_code,''),coalesce(last_error_message,''),created_at,updated_at from community_migration_sessions where session_token_hash=$1`, migrationTokenHash(token)).Scan(&item.ID, &item.SourceInstanceID, &item.TargetInstanceID, &item.ProtocolVersion, &item.TargetPublicKey, &item.State, &item.Frozen, &item.ExpiresAt, &item.LastErrorCode, &item.LastErrorMessage, &item.CreatedAt, &item.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && time.Now().UTC().After(item.ExpiresAt)) {
+		return CommunityMigrationSession{}, false, nil
+	}
+	return item, err == nil, err
+}
+
+func (s *PostgresStore) UpdateCommunityMigrationState(id, state, reason, message string, frozen bool) (CommunityMigrationSession, bool, error) {
+	var item CommunityMigrationSession
+	err := s.db.QueryRow(`update community_migration_sessions set state=$2,frozen=$3,last_error_code=nullif($4,''),last_error_message=nullif($5,''),updated_at=now(),completed_at=case when $2 in ('committed','rolled-back','failed','revoked') then now() else completed_at end,observation_ends_at=case when $2='committed' then now()+interval '7 days' else observation_ends_at end where id=$1 returning id,source_instance_id,target_instance_id,protocol_version,state,frozen,expires_at,coalesce(last_error_code,''),coalesce(last_error_message,''),created_at,updated_at`, id, state, frozen, reason, message).Scan(&item.ID, &item.SourceInstanceID, &item.TargetInstanceID, &item.ProtocolVersion, &item.State, &item.Frozen, &item.ExpiresAt, &item.LastErrorCode, &item.LastErrorMessage, &item.CreatedAt, &item.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CommunityMigrationSession{}, false, nil
+	}
+	if err != nil {
+		return item, false, err
+	}
+	_, err = s.db.Exec(`insert into community_migration_events(migration_id,state,reason,message) values($1,$2,$3,$4)`, id, state, reason, message)
+	return item, err == nil, err
+}
+
+func (s *PostgresStore) ListCommunityMigrationSessions() ([]CommunityMigrationSession, error) {
+	_, _ = s.db.Exec(`update community_migration_sessions set state='expired',frozen=false,completed_at=now(),updated_at=now() where expires_at<=now() and state not in ('committed','rolled-back','failed','revoked','expired')`)
+	rows, err := s.db.Query(`select id,source_instance_id,target_instance_id,protocol_version,state,frozen,expires_at,coalesce(last_error_code,''),coalesce(last_error_message,''),created_at,updated_at from community_migration_sessions order by created_at desc`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CommunityMigrationSession{}
+	for rows.Next() {
+		var item CommunityMigrationSession
+		if err = rows.Scan(&item.ID, &item.SourceInstanceID, &item.TargetInstanceID, &item.ProtocolVersion, &item.State, &item.Frozen, &item.ExpiresAt, &item.LastErrorCode, &item.LastErrorMessage, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *PostgresStore) HasCommunityMigrationFreeze() (bool, error) {
+	var frozen bool
+	err := s.db.QueryRow(`select exists(select 1 from community_migration_sessions where frozen=true and expires_at>now() and state not in ('committed','rolled-back','failed','revoked','expired'))`).Scan(&frozen)
+	return frozen, err
+}
+
 func (s *PostgresStore) RegisterCluster(input RegisterClusterInput) (Cluster, string, error) {
 	now := time.Now().UTC()
 	tx, err := s.db.Begin()
@@ -830,11 +956,11 @@ func (s *PostgresStore) RegisterCluster(input RegisterClusterInput) (Cluster, st
 	var token AgentToken
 	var usedAt sql.NullTime
 	err = tx.QueryRow(`
-		select id, tenant_id, token_hash, coalesce(description, ''), expires_at, used_at
+		select id, tenant_id, token_hash, coalesce(description, ''), expires_at, used_at, coalesce(cluster_id::text,'')
 		from agent_tokens
 		where token_hash = $1 and revoked_at is null
 		for update
-	`, input.Token).Scan(&token.ID, &token.TenantID, &token.Token, &token.Description, &token.ExpiresAt, &usedAt)
+	`, input.Token).Scan(&token.ID, &token.TenantID, &token.Token, &token.Description, &token.ExpiresAt, &usedAt, &token.ClusterID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Cluster{}, "", ErrTokenInvalid
 	}
@@ -846,6 +972,31 @@ func (s *PostgresStore) RegisterCluster(input RegisterClusterInput) (Cluster, st
 	}
 	if now.After(token.ExpiresAt) {
 		return Cluster{}, "", ErrTokenExpired
+	}
+	if token.ClusterID != "" {
+		if !strings.HasPrefix(token.Description, "community-migration-handover:") {
+			return Cluster{}, "", errors.New("pre-bound cluster token is not a migration handover token")
+		}
+		var cluster Cluster
+		var createdAt, updatedAt time.Time
+		err = tx.QueryRow(`update clusters set name=coalesce(nullif($3,''),name),kube_version=nullif($4,''),connection_status='online',agent_version=nullif($5,''),velero_version=nullif($6,''),velero_status=nullif($7,''),registered_at=coalesce(registered_at,$8),last_seen_at=$8,updated_at=$8 where id=$1 and tenant_id=$2 returning id,tenant_id,name,coalesce(kube_version,''),status,connection_status,coalesce(agent_version,''),coalesce(velero_version,''),coalesce(velero_status,''),role,is_default,registered_at,last_seen_at,created_at,updated_at`, token.ClusterID, token.TenantID, input.ClusterName, input.KubeVersion, input.AgentVersion, input.VeleroVersion, input.VeleroStatus, now).Scan(&cluster.ID, &cluster.TenantID, &cluster.Name, &cluster.KubeVersion, &cluster.Status, &cluster.ConnectionStatus, &cluster.AgentVersion, &cluster.VeleroVersion, &cluster.VeleroStatus, &cluster.Role, &cluster.IsDefault, &cluster.RegisteredAt, &cluster.LastSeenAt, &createdAt, &updatedAt)
+		if errors.Is(err, sql.ErrNoRows) {
+			return Cluster{}, "", errors.New("migration handover cluster is not staged")
+		}
+		if err != nil {
+			return Cluster{}, "", err
+		}
+		if _, err = tx.Exec(`update agent_tokens set used_at=$1 where id=$2`, now, token.ID); err != nil {
+			return Cluster{}, "", err
+		}
+		credential := "cred_" + newID() + newID()
+		if _, err = tx.Exec(`insert into agent_credentials(id,tenant_id,cluster_id,credential_hash,status,created_at) values($1,$2,$3,$4,'active',$5)`, newID(), token.TenantID, cluster.ID, credential, now); err != nil {
+			return Cluster{}, "", err
+		}
+		if err = tx.Commit(); err != nil {
+			return Cluster{}, "", err
+		}
+		return cluster, credential, nil
 	}
 
 	clusterName := input.ClusterName

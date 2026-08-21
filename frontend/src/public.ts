@@ -1,5 +1,5 @@
 export { default as HyperCDRApp } from './App';
-export { Building2, ScrollText, ShieldCheck, Terminal, Users } from 'lucide-react';
+export { ArrowRightLeft, Building2, ScrollText, ShieldCheck, Terminal, Users } from 'lucide-react';
 export { apiDelete, apiGet, apiHeaders, apiPatch, apiPost, apiPut, ensureApiResponse } from './api/client';
 export { readStoredAuthSession } from './auth/session';
 export type { ApiLoginResponse } from './auth/types';

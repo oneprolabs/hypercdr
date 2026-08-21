@@ -104,6 +104,7 @@ type EditionAuthorizationDecision struct {
 }
 
 type EditionAuthorizer func(context.Context, EditionAuthorizationRequest) EditionAuthorizationDecision
+type EditionAgentTaskDispatcher func(context.Context, string, string, string, time.Time) error
 
 type RouterOption func(*Router)
 
@@ -172,6 +173,14 @@ func WithIdentityProvider(provider EditionIdentityProvider) RouterOption {
 
 func WithAuditSink(sink EditionAuditSink) RouterOption {
 	return func(router *Router) { router.auditSink = sink }
+}
+
+func WithEditionRuntimeBinder(binder func(EditionAgentTaskDispatcher)) RouterOption {
+	return func(router *Router) {
+		if binder != nil {
+			binder(router.dispatchControlPlaneHandover)
+		}
+	}
 }
 
 type requestUserContextKey struct{}
@@ -286,7 +295,7 @@ func (r *Router) mountExtensionRoutes() {
 func (r *Router) withPlatformAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		path := req.URL.Path
-		publicAuth := path == "/api/v1/product-info" || path == "/api/v1/auth/captcha" || path == "/api/v1/auth/login" || path == "/api/v1/auth/forgot-password" || path == "/api/v1/auth/reset-password" || path == "/api/v1/auth/config"
+		publicAuth := path == "/api/v1/product-info" || path == "/api/v1/auth/captcha" || path == "/api/v1/auth/login" || path == "/api/v1/auth/forgot-password" || path == "/api/v1/auth/reset-password" || path == "/api/v1/auth/config" || path == "/api/v1/disaster-handovers/validate" || strings.HasPrefix(path, "/api/v1/community-migrations/source/")
 		if _, isMemory := r.store.(*store.MemoryStore); isMemory || !strings.HasPrefix(path, "/api/v1/") || publicAuth || path == "/api/v1/agent-tokens/validate" {
 			next.ServeHTTP(w, req)
 			return
@@ -317,6 +326,18 @@ func (r *Router) withPlatformAuth(next http.Handler) http.Handler {
 		if user.MustChangePassword && !passwordChangeAllowed {
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": "password_change_required", "message": "Change your temporary password before continuing."})
 			return
+		}
+		if req.Method != http.MethodGet && req.Method != http.MethodHead && req.Method != http.MethodOptions && !strings.HasPrefix(path, "/api/v1/community-migrations") && !strings.HasPrefix(path, "/api/v1/auth/") {
+			frozen, freezeErr := r.store.HasCommunityMigrationFreeze()
+			if freezeErr != nil {
+				r.logger.Error("migration freeze check failed", "error", freezeErr)
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "migration_freeze_check_failed"})
+				return
+			}
+			if frozen {
+				writeJSON(w, http.StatusLocked, map[string]any{"error": "community_migration_frozen", "message": "Community is frozen for Enterprise migration. Business mutations remain disabled until commit or rollback."})
+				return
+			}
 		}
 		if requiresAdmin(req) && user.Role != "admin" {
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": "administrator_required", "message": "Administrator permission is required."})
@@ -588,11 +609,28 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("POST /api/v1/agent-tokens/validate", r.validateAgentToken)
 	r.mux.HandleFunc("GET /prepare-node.sh", r.prepareNodeScript)
 	r.mux.HandleFunc("GET /install.sh", r.installScript)
+	r.mux.HandleFunc("GET /disaster-handover.sh", r.disasterHandoverScript)
+	r.mux.HandleFunc("POST /api/v1/disaster-handovers/validate", r.validateDisasterHandoverToken)
 	r.mux.HandleFunc("GET "+veleroCRDsPath, r.veleroCRDs)
 	// Keep the previous asset URL available while installed agents roll forward.
 	r.mux.HandleFunc("GET /assets/velero/v1.17.1/crds.yaml", r.veleroCRDs)
 	r.mux.HandleFunc("GET /assets/registry/ca.crt", r.registryCA)
 	r.mux.HandleFunc("GET /ws/agent", r.agentWebSocket)
+	if r.productInfo.Edition == "community" {
+		r.mux.HandleFunc("POST /api/v1/community-migrations/authorizations", r.createCommunityMigrationAuthorization)
+		r.mux.HandleFunc("GET /api/v1/community-migrations", r.listCommunityMigrations)
+		r.mux.HandleFunc("POST /api/v1/community-migrations/source/sessions", r.openCommunityMigrationSession)
+		r.mux.HandleFunc("GET /api/v1/community-migrations/source/{id}/inventory", r.communityMigrationInventory)
+		r.mux.HandleFunc("POST /api/v1/community-migrations/source/{id}/freeze", r.freezeCommunityMigration)
+		r.mux.HandleFunc("POST /api/v1/community-migrations/source/{id}/backup", r.backupCommunityMigration)
+		r.mux.HandleFunc("GET /api/v1/community-migrations/source/{id}/manifest", r.communityMigrationManifest)
+		r.mux.HandleFunc("GET /api/v1/community-migrations/source/{id}/export/{table}", r.communityMigrationExportBatch)
+		r.mux.HandleFunc("GET /api/v1/community-migrations/source/{id}/credentials", r.communityMigrationCredentials)
+		r.mux.HandleFunc("GET /api/v1/community-migrations/source/{id}/smtp", r.communityMigrationSMTP)
+		r.mux.HandleFunc("POST /api/v1/community-migrations/source/{id}/handover", r.prepareCommunityMigrationHandover)
+		r.mux.HandleFunc("POST /api/v1/community-migrations/source/{id}/commit", r.commitCommunityMigration)
+		r.mux.HandleFunc("POST /api/v1/community-migrations/source/{id}/rollback", r.rollbackCommunityMigration)
+	}
 	if strings.TrimSpace(r.cfg.FrontendDir) != "" {
 		r.mux.HandleFunc("GET /", r.frontend)
 	}
@@ -4634,6 +4672,28 @@ func (r *Router) dispatchStoredTask(conn *websocket.Conn, task store.Task) error
 	return conn.WriteJSON(dispatch)
 }
 
+func (r *Router) dispatchControlPlaneHandover(ctx context.Context, clusterID, action, migrationID string, rollbackDeadline time.Time) error {
+	if action != "confirm" && action != "commit" && action != "rollback" {
+		return errors.New("unsupported control-plane handover action")
+	}
+	if strings.TrimSpace(clusterID) == "" || strings.TrimSpace(migrationID) == "" {
+		return errors.New("cluster ID and migration ID are required")
+	}
+	task, err := r.store.CreateTask(store.TaskInput{ClusterID: clusterID, Type: "control-plane-handover", Status: "queued", CommandID: store.NewPublicID(), Payload: map[string]any{"action": action, "migrationId": migrationID, "rollbackDeadline": rollbackDeadline.Format(time.RFC3339Nano)}})
+	if err != nil {
+		return err
+	}
+	conn, ok := r.hub.get(clusterID)
+	if !ok {
+		return errors.New("agent is not connected")
+	}
+	if err = r.dispatchStoredTask(conn, task); err != nil {
+		return err
+	}
+	_, _, err = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "dispatched", Progress: 0})
+	return err
+}
+
 func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[protocol.TaskDispatchPayload], error) {
 	commandID := task.CommandID
 	if commandID == "" {
@@ -4809,6 +4869,22 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 		}
 		if payload.Unregister.Namespace == "" {
 			payload.Unregister.Namespace = r.agentNamespace()
+		}
+	case "control-plane-handover":
+		rollbackDeadline, err := time.Parse(time.RFC3339Nano, stringPayload(task.Payload, "rollbackDeadline"))
+		if err != nil {
+			return protocol.Message[protocol.TaskDispatchPayload]{}, errors.New("control-plane handover rollback deadline is invalid")
+		}
+		payload.Deadline = rollbackDeadline
+		payload.ControlPlaneHandover = &protocol.ControlPlaneHandoverCommand{
+			Action:             stringPayload(task.Payload, "action"),
+			MigrationID:        stringPayload(task.Payload, "migrationId"),
+			TargetEndpoint:     stringPayload(task.Payload, "targetEndpoint"),
+			TargetInstallToken: stringPayload(task.Payload, "targetInstallToken"),
+			RollbackDeadline:   rollbackDeadline,
+		}
+		if payload.ControlPlaneHandover.Action == "" || payload.ControlPlaneHandover.MigrationID == "" {
+			return protocol.Message[protocol.TaskDispatchPayload]{}, errors.New("control-plane handover action and migration ID are required")
 		}
 	default:
 		return protocol.Message[protocol.TaskDispatchPayload]{}, errors.New("unsupported task type for redispatch")
@@ -11387,22 +11463,17 @@ fi
 if [[ -z "$ENDPOINT" ]]; then
   fail "Missing required argument: --endpoint" 2
 fi
+if [[ "$NAMESPACE" != "hypercdr-agent" ]]; then
+  fail "HyperCDR uses the single canonical namespace 'hypercdr-agent'. Community and Enterprise Agent installations are identical; use the control-plane handover workflow to change editions." 2
+fi
 if ! command -v curl >/dev/null 2>&1; then
   fail "curl is required but was not found in PATH"
 fi
 if ! command -v kubectl >/dev/null 2>&1; then
   fail "kubectl is required but was not found in PATH"
 fi
-RBAC_SCOPE_SUFFIX=""
-if [[ "$NAMESPACE" != "hypercdr-agent" ]]; then
-  if command -v sha256sum >/dev/null 2>&1; then
-    RBAC_SCOPE_SUFFIX="-$(printf '%s' "$NAMESPACE" | sha256sum | cut -c1-8)"
-  else
-    RBAC_SCOPE_SUFFIX="-$(printf '%s' "$NAMESPACE" | cksum | awk '{print $1}' | cut -c1-8)"
-  fi
-fi
-AGENT_RBAC_NAME="hypercdr-agent${RBAC_SCOPE_SUFFIX}"
-VELERO_RBAC_NAME="hypercdr-velero${RBAC_SCOPE_SUFFIX}"
+AGENT_RBAC_NAME="hypercdr-agent"
+VELERO_RBAC_NAME="hypercdr-velero"
 print_install_summary
 
 log_section "Preflight checks"
@@ -11434,6 +11505,16 @@ if ! kubectl cluster-info >/dev/null 2>&1; then
   exit 1
 fi
 log_ok "Kubernetes API is reachable"
+
+log_info "Checking whether this cluster is already managed by HyperCDR"
+existing_agents="$(kubectl get deployments -A -o jsonpath='{range .items[?(@.metadata.name=="hypercdr-comm-agent")]}{.metadata.namespace}{"\n"}{end}' 2>/dev/null | sed '/^[[:space:]]*$/d' | sort -u || true)"
+if [[ -n "$existing_agents" ]]; then
+  log_error "This cluster is already managed by a HyperCDR Agent in namespace(s): $(echo "$existing_agents" | paste -sd ', ' -)."
+  log_error "Community and Enterprise use the same Agent and cannot coexist in one cluster."
+  log_error "Use Community Migration for a normal edition upgrade, or Disaster Handover only when the original control plane is permanently unavailable."
+  exit 1
+fi
+log_ok "No existing HyperCDR Agent installation was found"
 
 select_agent_storage_class() {
   log_section "Storage preflight"
@@ -12042,8 +12123,8 @@ check_existing_velero_installation() {
   if [[ ${#conflicts[@]} -gt 0 ]]; then
     echo "existing Velero installation or Velero resources were found in this cluster:" >&2
     printf '  - %s\n' "${conflicts[@]}" >&2
-    echo "HyperCDR supports isolated Community and Enterprise Velero instances, but an unknown or third-party Velero installation cannot be reused safely." >&2
-    echo "If this is a deliberate reinstall of a HyperCDR-managed Velero instance, rerun with --allow-existing-velero true." >&2
+    echo "A non-HyperCDR or residual Velero installation cannot be reused safely by the standard installer." >&2
+    echo "Remove the residual installation, or use the documented disaster recovery workflow when preserving an existing repository is required." >&2
     exit 1
   fi
 }

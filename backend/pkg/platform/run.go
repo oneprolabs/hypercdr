@@ -89,7 +89,7 @@ func Run(options Options) error {
 		return current
 	}
 	handler := httpserver.NewRouterWithProductInfo(cfg, logger, repo, productInfo,
-		editionAuthorizer(options.Authorizer), httpserver.WithProductInfoProvider(productInfoProvider), httpserver.WithDiagnosticLogRetention(options.DiagnosticLogRetention), httpserver.WithExtensionRoutes(editionRoutes(options.Routes)), httpserver.WithIdentityProvider(editionIdentityProvider(options.IdentityProvider)), httpserver.WithAuditSink(editionAuditSink(options.AuditSink)))
+		editionAuthorizer(options.Authorizer), httpserver.WithProductInfoProvider(productInfoProvider), httpserver.WithDiagnosticLogRetention(options.DiagnosticLogRetention), httpserver.WithExtensionRoutes(editionRoutes(options.Routes)), httpserver.WithIdentityProvider(editionIdentityProvider(options.IdentityProvider)), httpserver.WithAuditSink(editionAuditSink(options.AuditSink)), httpserver.WithEditionRuntimeBinder(editionRuntimeBinder(options.RuntimeBinder)))
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	errCh := make(chan error, 1)
 	go func() {
@@ -115,6 +115,22 @@ func Run(options Options) error {
 	ctx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 	return server.Shutdown(ctx)
+}
+
+type agentTaskDispatcherAdapter struct {
+	dispatch httpserver.EditionAgentTaskDispatcher
+}
+
+func (a agentTaskDispatcherAdapter) DispatchControlPlaneHandover(ctx context.Context, clusterID, action, migrationID string, deadline time.Time) error {
+	return a.dispatch(ctx, clusterID, action, migrationID, deadline)
+}
+func editionRuntimeBinder(binder func(AgentTaskDispatcher)) func(httpserver.EditionAgentTaskDispatcher) {
+	if binder == nil {
+		return nil
+	}
+	return func(dispatch httpserver.EditionAgentTaskDispatcher) {
+		binder(agentTaskDispatcherAdapter{dispatch: dispatch})
+	}
 }
 
 func missingRegistryBackfill(settings store.PlatformSettings, cfg config.Config) (store.PlatformSettingsInput, bool) {
