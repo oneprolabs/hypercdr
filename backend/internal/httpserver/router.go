@@ -4687,7 +4687,7 @@ func (r *Router) dispatchStoredTask(conn *websocket.Conn, task store.Task) error
 }
 
 func (r *Router) dispatchControlPlaneHandover(ctx context.Context, clusterID, action, migrationID string, rollbackDeadline time.Time) error {
-	if action != "confirm" && action != "commit" && action != "rollback" {
+	if !supportedControlPlaneHandoverAction(action) {
 		return errors.New("unsupported control-plane handover action")
 	}
 	if strings.TrimSpace(clusterID) == "" || strings.TrimSpace(migrationID) == "" {
@@ -4706,6 +4706,15 @@ func (r *Router) dispatchControlPlaneHandover(ctx context.Context, clusterID, ac
 	}
 	_, _, err = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "dispatched", Progress: 0})
 	return err
+}
+
+func supportedControlPlaneHandoverAction(action string) bool {
+	switch action {
+	case "confirm", "commit", "rollback", "cleanup":
+		return true
+	default:
+		return false
+	}
 }
 
 func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[protocol.TaskDispatchPayload], error) {
