@@ -6230,14 +6230,35 @@ func uniqueNonEmptyStrings(values []string) []string {
 }
 
 func (r *Router) listTasks(w http.ResponseWriter, req *http.Request) {
-	items, err := r.store.ListTasks(req.URL.Query().Get("clusterId"))
+	query := req.URL.Query()
+	filter := store.TaskFilter{ClusterID: query.Get("clusterId")}
+	if user, ok := requestUser(req); ok && !user.SystemAdmin {
+		filter.TenantID = user.TenantID
+	}
+	for _, value := range strings.Split(query.Get("types"), ",") {
+		if value = strings.TrimSpace(value); value != "" {
+			filter.Types = append(filter.Types, value)
+		}
+	}
+	for _, value := range strings.Split(query.Get("statuses"), ",") {
+		if value = strings.TrimSpace(value); value != "" {
+			filter.Statuses = append(filter.Statuses, value)
+		}
+	}
+	if limit, parseErr := strconv.Atoi(query.Get("limit")); parseErr == nil && limit > 0 {
+		if limit > 1000 {
+			limit = 1000
+		}
+		filter.Limit = limit
+	}
+	items, err := r.store.ListTasksFiltered(filter)
 	if err != nil {
 		r.logger.Error("failed to list tasks", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_tasks_failed"})
 		return
 	}
 	typeFilter := map[string]struct{}{}
-	for _, taskType := range strings.Split(req.URL.Query().Get("types"), ",") {
+	for _, taskType := range strings.Split(query.Get("types"), ",") {
 		if taskType = strings.TrimSpace(taskType); taskType != "" {
 			typeFilter[taskType] = struct{}{}
 		}
@@ -6250,9 +6271,6 @@ func (r *Router) listTasks(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 	items = visible
-	if limit, parseErr := strconv.Atoi(req.URL.Query().Get("limit")); parseErr == nil && limit > 0 && len(items) > limit {
-		items = items[:limit]
-	}
 	items = r.enrichCleanupTaskRestorePointTimes(items)
 	writeJSON(w, http.StatusOK, map[string]any{"items": nonNilSlice(items)})
 }

@@ -3117,6 +3117,14 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 }
 
 func (s *PostgresStore) ListTasks(clusterID string) ([]Task, error) {
+	return s.listTasks(TaskFilter{ClusterID: clusterID})
+}
+
+func (s *PostgresStore) ListTasksFiltered(filter TaskFilter) ([]Task, error) {
+	return s.listTasks(filter)
+}
+
+func (s *PostgresStore) listTasks(filter TaskFilter) ([]Task, error) {
 	query := `
 		select id, tenant_id, cluster_id, coalesce(app_id::text, ''), coalesce(protection_plan_id::text, ''),
 		       coalesce(restore_point_id::text, ''), type, status, progress, coalesce(command_id::text, ''),
@@ -3128,11 +3136,39 @@ func (s *PostgresStore) ListTasks(clusterID string) ([]Task, error) {
 		from tasks
 	`
 	args := []any{}
-	if clusterID != "" {
-		query += ` where cluster_id = $1`
-		args = append(args, clusterID)
+	conditions := []string{}
+	if filter.TenantID != "" {
+		args = append(args, filter.TenantID)
+		conditions = append(conditions, fmt.Sprintf("tenant_id = $%d", len(args)))
+	}
+	if filter.ClusterID != "" {
+		args = append(args, filter.ClusterID)
+		conditions = append(conditions, fmt.Sprintf("cluster_id = $%d", len(args)))
+	}
+	if len(filter.Types) > 0 {
+		placeholders := make([]string, 0, len(filter.Types))
+		for _, value := range filter.Types {
+			args = append(args, value)
+			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+		}
+		conditions = append(conditions, "type in ("+strings.Join(placeholders, ",")+")")
+	}
+	if len(filter.Statuses) > 0 {
+		placeholders := make([]string, 0, len(filter.Statuses))
+		for _, value := range filter.Statuses {
+			args = append(args, value)
+			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+		}
+		conditions = append(conditions, "status in ("+strings.Join(placeholders, ",")+")")
+	}
+	if len(conditions) > 0 {
+		query += " where " + strings.Join(conditions, " and ")
 	}
 	query += ` order by created_at desc`
+	if filter.Limit > 0 {
+		args = append(args, filter.Limit)
+		query += fmt.Sprintf(" limit $%d", len(args))
+	}
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {

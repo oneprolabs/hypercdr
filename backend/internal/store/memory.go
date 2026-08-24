@@ -2168,16 +2168,35 @@ func (s *MemoryStore) CreateTask(input TaskInput) (Task, error) {
 }
 
 func (s *MemoryStore) ListTasks(clusterID string) ([]Task, error) {
+	return s.ListTasksFiltered(TaskFilter{ClusterID: clusterID})
+}
+
+func (s *MemoryStore) ListTasksFiltered(filter TaskFilter) ([]Task, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	items := make([]Task, 0, len(s.tasks))
 	for _, item := range s.tasks {
-		if clusterID == "" || item.ClusterID == clusterID {
+		if (filter.TenantID == "" || item.TenantID == filter.TenantID) &&
+			(filter.ClusterID == "" || item.ClusterID == filter.ClusterID) &&
+			(len(filter.Types) == 0 || containsString(filter.Types, item.Type)) &&
+			(len(filter.Statuses) == 0 || containsString(filter.Statuses, item.Status)) {
 			items = append(items, item)
 		}
 	}
+	if filter.Limit > 0 && len(items) > filter.Limit {
+		items = items[:filter.Limit]
+	}
 	return items, nil
+}
+
+func containsString(values []string, value string) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *MemoryStore) UpdateTaskStatus(input TaskStatusInput) (Task, bool, error) {

@@ -1566,7 +1566,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       }).catch(() => {
         // The complete refresh below keeps the previously rendered data visible.
       });
-      const [clusterRes, appRes, storageRes, policyRes, planRes, taskRes, tagRes] = await Promise.all([
+      const [clusterRes, appRes, storageRes, policyRes, planRes, taskRes, tagRes, restorePointRes] = await Promise.all([
         clusterRequest,
         apiGet<ApiList<ApiApplication>>('/api/v1/applications'),
         apiGet<ApiList<ApiStorageRepo>>('/api/v1/storage-repositories'),
@@ -1574,8 +1574,8 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
         apiGet<ApiList<ApiProtectionPlan>>('/api/v1/protection-plans'),
         apiGet<ApiList<ApiTask>>('/api/v1/tasks?types=backup,restore,drill,takeover'),
         apiGet<ApiList<TagItem>>('/api/v1/tags'),
+        apiGet<ApiList<ApiRestorePoint>>('/api/v1/restore-points'),
       ]);
-      const restorePointRes = await apiGet<ApiList<ApiRestorePoint>>('/api/v1/restore-points');
       if (resourceSessionOwnerRef.current !== owner) return [];
       const apiClusters = listItems(clusterRes);
       const apiApps = listItems(appRes);

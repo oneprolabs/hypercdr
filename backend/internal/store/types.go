@@ -122,6 +122,7 @@ type Store interface {
 	UpdateRestorePointState(input RestorePointStateInput) (RestorePoint, bool, error)
 	CreateTask(input TaskInput) (Task, error)
 	ListTasks(clusterID string) ([]Task, error)
+	ListTasksFiltered(filter TaskFilter) ([]Task, error)
 	UpdateTaskStatus(input TaskStatusInput) (Task, bool, error)
 	AddTaskEvent(input TaskEventInput) error
 	ListTaskEvents(taskID string) ([]TaskEvent, error)
@@ -142,6 +143,16 @@ type Store interface {
 	ListPlatformUpgradeJobs() ([]PlatformUpgradeJob, error)
 	CreatePlatformUpgradeJob(input PlatformUpgradeJobInput) (PlatformUpgradeJob, error)
 	UpdatePlatformUpgradeJob(input PlatformUpgradeJobUpdate) (PlatformUpgradeJob, bool, error)
+}
+
+// TaskFilter keeps list endpoints from loading and decoding the complete task
+// history when a page only needs a small, recent operational view.
+type TaskFilter struct {
+	TenantID  string
+	ClusterID string
+	Types     []string
+	Statuses  []string
+	Limit     int
 }
 
 type PlatformSettings struct {
