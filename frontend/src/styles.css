@@ -22887,6 +22887,8 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 .hbdr-recovery-nodeport-input input:focus { border-color: #6da5d3; outline: 2px solid rgba(59, 130, 246, .12); outline-offset: 0; }
 .hbdr-recovery-nodeport-note { margin: 0; color: #7c8da0; font-size: 9px; line-height: 1.4; }
 .hbdr-recovery-inline-status, .hbdr-recovery-preflight-ok { display: flex; align-items: center; gap: 6px; margin: 0; padding: 8px 10px; border-radius: 8px; background: #f0fdf4; color: #15803d; font-size: 11px; }
+.hbdr-recovery-content-status-slot { min-height: 30px; display: flex; align-items: center; }
+.hbdr-recovery-content-status-slot .hbdr-recovery-inline-status { width: 100%; box-sizing: border-box; }
 .hbdr-recovery-preflight-pending { display: flex; align-items: center; gap: 6px; margin: 0; padding: 8px 10px; border-radius: 8px; background: #f8fafc; color: #475569; font-size: 11px; }
 .hbdr-recovery-inline-error, .hbdr-recovery-preflight-warning { margin: 0; padding: 8px 10px; border-radius: 8px; background: #fff7ed; color: #c2410c; font-size: 11px; line-height: 1.45; }
 .hbdr-recovery-inline-error { background: #fef2f2; color: #b91c1c; }

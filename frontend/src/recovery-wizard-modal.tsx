@@ -581,7 +581,9 @@ export function RecoveryWizardModal(props: Props) {
                     disabled={contentsLoading || Boolean(contentsError)}
                     namespaceResources={restoreNamespaceOptions}
                   />
-                  {contentsLoading && <p className="hbdr-recovery-inline-status"><RefreshCw size={13} className="animate-spin" /> Reading the selected restore point…</p>}
+                  <div className={`hbdr-recovery-content-status-slot${contentsLoading ? ' is-loading' : ''}`} aria-live="polite">
+                    {contentsLoading && <p className="hbdr-recovery-inline-status"><RefreshCw size={13} className="animate-spin" /> Reading the selected restore point…</p>}
+                  </div>
                   {contentsError && (
                     <div className="hbdr-recovery-content-failure">
                       <p className="hbdr-recovery-inline-error">{restorePointUnavailable
