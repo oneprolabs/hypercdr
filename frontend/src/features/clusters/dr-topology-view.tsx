@@ -65,10 +65,13 @@ export default function DRTopologyView({ clusters, model, selectedRelationshipId
           });
           const directionOffset = relationship.id.localeCompare('') % 2 === 0 ? -11 : 11;
           const offset = midpointHitsNode ? directionOffset : reverse ? (relationship.sourceClusterId.localeCompare(relationship.targetClusterId) < 0 ? -5 : 5) : 0;
+          const labelRatio = midpointHitsNode ? (source.x < target.x ? 0.3 : 0.7) : 0.5;
+          const labelX = source.x + (target.x - source.x) * labelRatio;
+          const labelY = source.y + (target.y - source.y) * labelRatio + offset;
           const meta = statusMeta[relationship.status];
           const Icon = meta.icon;
           const DirectionArrow = target.x < source.x ? ArrowLeft : ArrowRight;
-          return <button key={relationship.id} type="button" className={`hbdr-dr-edge-label is-${relationship.status} ${selectedRelationshipId === relationship.id ? 'is-selected' : ''}`} style={{ left: `${(source.x + target.x) / 2}%`, top: `${(source.y + target.y) / 2 + offset}%` }} onClick={() => onSelectRelationship(relationship)} title={`${clusterById.get(relationship.sourceClusterId)?.name} to ${clusterById.get(relationship.targetClusterId)?.name}: ${relationship.appIds.length} namespaces`} aria-label={`${clusterById.get(relationship.sourceClusterId)?.name} to ${clusterById.get(relationship.targetClusterId)?.name}, ${relationship.appIds.length} ${relationship.appIds.length === 1 ? 'namespace' : 'namespaces'}`}><Icon size={12} /><DirectionArrow size={12} />{relationship.appIds.length} {relationship.appIds.length === 1 ? 'namespace' : 'namespaces'}</button>;
+          return <button key={relationship.id} type="button" className={`hbdr-dr-edge-label is-${relationship.status} ${selectedRelationshipId === relationship.id ? 'is-selected' : ''}`} style={{ left: `${labelX}%`, top: `${labelY}%` }} onClick={() => onSelectRelationship(relationship)} title={`${clusterById.get(relationship.sourceClusterId)?.name} to ${clusterById.get(relationship.targetClusterId)?.name}: ${relationship.appIds.length} namespaces`} aria-label={`${clusterById.get(relationship.sourceClusterId)?.name} to ${clusterById.get(relationship.targetClusterId)?.name}, ${relationship.appIds.length} ${relationship.appIds.length === 1 ? 'namespace' : 'namespaces'}`}><Icon size={12} /><DirectionArrow size={12} />{relationship.appIds.length} {relationship.appIds.length === 1 ? 'namespace' : 'namespaces'}</button>;
         })}
         {clusters.map(cluster => {
           const position = positions.get(cluster.id)!;
