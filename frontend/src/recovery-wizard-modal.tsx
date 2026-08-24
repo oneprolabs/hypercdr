@@ -232,8 +232,6 @@ export function RecoveryWizardModal(props: Props) {
   const [contents, setContents] = React.useState<BackupContentResource[]>([]);
   const [contentsLoading, setContentsLoading] = React.useState(false);
   const [contentsError, setContentsError] = React.useState('');
-  const [contentsReload, setContentsReload] = React.useState(0);
-  const [customResourcesRequested, setCustomResourcesRequested] = React.useState(false);
   const [imageMappingHistory, setImageMappingHistory] = React.useState<Record<string, string[]>>({});
 
   useEffect(() => {
@@ -267,22 +265,25 @@ export function RecoveryWizardModal(props: Props) {
     setConfig(prev => (prev ? { ...prev, ...patch } : prev));
   };
 
-  useEffect(() => {
-    let cancelled = false;
-    if (!customResourcesRequested || !config.pointId || !loadContents) { setContents([]); setContentsLoading(false); return; }
+  const loadCustomResources = async () => {
+    if (!config.pointId || !loadContents) return false;
     setContentsLoading(true); setContentsError('');
     updateConfig({ contentCatalogLoaded: false, persistentDataExpected: false, forceStart: false });
-    loadContents(config.pointId).then(result => {
-      if (!cancelled) {
-        const resources = result.resources || [];
-        setContents(resources);
-        updateConfig({ contentCatalogLoaded: true, persistentDataExpected: resources.some(item => ['PersistentVolumeClaim', 'PersistentVolume', 'VolumeSnapshot'].includes(item.kind)) });
-      }
-    }).catch(error => {
-      if (!cancelled) { setContents([]); updateConfig({ contentCatalogLoaded: false }); setContentsError(error instanceof Error ? error.message : 'Restore point contents could not be loaded.'); }
-    }).finally(() => { if (!cancelled) setContentsLoading(false); });
-    return () => { cancelled = true; };
-  }, [customResourcesRequested, config.pointId, contentsReload]);
+    try {
+      const result = await loadContents(config.pointId);
+      const resources = result.resources || [];
+      setContents(resources);
+      updateConfig({ contentCatalogLoaded: true, persistentDataExpected: resources.some(item => ['PersistentVolumeClaim', 'PersistentVolume', 'VolumeSnapshot'].includes(item.kind)) });
+      return true;
+    } catch (error) {
+      setContents([]);
+      updateConfig({ contentCatalogLoaded: false });
+      setContentsError(error instanceof Error ? error.message : 'Restore point contents could not be loaded.');
+      return false;
+    } finally {
+      setContentsLoading(false);
+    }
+  };
 
   const uniqueContents = Array.from(contents.reduce((items, item) => {
     const identity = [item.apiVersion, item.kind, item.namespace || '', item.name].join('|');
@@ -582,10 +583,7 @@ export function RecoveryWizardModal(props: Props) {
                     disabled={contentsLoading || Boolean(contentsError)}
                     namespaceResources={restoreNamespaceOptions}
                     customResourcesLoaded={config.contentCatalogLoaded}
-                    onRequestCustomResources={async () => {
-                      setCustomResourcesRequested(true);
-                      return true;
-                    }}
+                    onRequestCustomResources={loadCustomResources}
                   />
                   <div className={`hbdr-recovery-content-status-slot${contentsLoading ? ' is-loading' : ''}`} aria-live="polite">
                     {contentsLoading && <p className="hbdr-recovery-inline-status"><RefreshCw size={13} className="animate-spin" /> Reading the selected restore point…</p>}
@@ -595,7 +593,7 @@ export function RecoveryWizardModal(props: Props) {
                       <p className="hbdr-recovery-inline-error">{restorePointUnavailable
                         ? 'Selected restore point is no longer available. Refresh the restore point list and select another restore point.'
                         : `Restore scope unavailable: ${contentsError}.`}</p>
-                      {!restorePointUnavailable && <button type="button" onClick={() => setContentsReload(value => value + 1)}><RefreshCw size={12} />Retry content inspection</button>}
+                      {!restorePointUnavailable && <button type="button" onClick={() => { void loadCustomResources(); }}><RefreshCw size={12} />Retry content inspection</button>}
                     </div>
                   )}
                 </div>
