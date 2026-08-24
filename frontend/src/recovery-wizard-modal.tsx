@@ -583,11 +583,22 @@ export function RecoveryWizardModal(props: Props) {
                         {!config.contentCatalogLoaded && <p className="hbdr-recovery-muted">Mappings are unavailable until restore point content inspection succeeds.</p>}
                       </section>
                       {backupServicePorts.length > 0 && <section>
-                          <header><strong>Service NodePort mappings</strong><span>Leave blank to let the target cluster allocate a port automatically.</span></header>
-                          {backupServicePorts.map(port => <label className="hbdr-recovery-mapping" key={`nodeport-${port.key}`}>
-                            <span>Service <b>{port.service}</b><em>{port.name ? `${port.name} · ` : ''}Service port {port.port}/{port.protocol || 'TCP'}{port.nodePort ? ` · Current NodePort ${port.nodePort}` : ''}</em></span>
-                            <input type="number" min={30000} max={32767} placeholder="Automatic" value={config.serviceNodePortMappings?.[port.key] ?? ''} onChange={event => updateNodePort(port.key, event.target.value)} />
-                          </label>)}
+                          <header><strong>Service NodePort mappings</strong><span>Set the external port exposed by each restored Service, or leave it automatic.</span></header>
+                          <div className="hbdr-recovery-nodeport-list">
+                            <div className="hbdr-recovery-nodeport-head" aria-hidden="true">
+                              <span>Service</span><span>Service port</span><span>Current</span><span>Target NodePort</span>
+                            </div>
+                            {backupServicePorts.map(port => {
+                              const protocol = port.protocol || 'TCP';
+                              return <label className="hbdr-recovery-nodeport-row" key={`nodeport-${port.key}`}>
+                                <span className="hbdr-recovery-nodeport-service"><strong title={port.service}>{port.service}</strong>{port.name && <em>{port.name}</em>}</span>
+                                <span className="hbdr-recovery-nodeport-value"><b>{port.port}</b><em>{protocol}</em></span>
+                                <span className="hbdr-recovery-nodeport-current">{port.nodePort || <em>None</em>}</span>
+                                <span className="hbdr-recovery-nodeport-input"><input aria-label={`Target NodePort for ${port.service} service port ${port.port}`} type="number" min={30000} max={32767} placeholder="Automatic" value={config.serviceNodePortMappings?.[port.key] ?? ''} onChange={event => updateNodePort(port.key, event.target.value)} /></span>
+                              </label>;
+                            })}
+                          </div>
+                          <p className="hbdr-recovery-nodeport-note">Valid range: 30000–32767. Automatic lets Kubernetes choose an available port.</p>
                           {nodePortError && <p className="hbdr-recovery-inline-error">{nodePortError[0] === 'duplicate' ? 'Each Service must use a different NodePort.' : 'NodePort must be an integer between 30000 and 32767.'}</p>}
                         </section>}
                       {mode !== 'drill' && <section>

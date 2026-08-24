@@ -22873,6 +22873,19 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 .hbdr-recovery-image-mapping em { color: #64748b; font-size: 10px; font-style: normal; font-weight: 700; }
 .hbdr-recovery-image-mapping b { color: #334155; font-size: 11px; font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; word-break: break-word; }
 .hbdr-recovery-image-mapping input { width: 100%; min-width: 0; min-height: 36px; padding: 7px 9px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: #334155; font-size: 11px; }
+.hbdr-recovery-nodeport-list { overflow: hidden; border: 1px solid #dfe7ef; border-radius: 9px; background: #fff; }
+.hbdr-recovery-nodeport-head, .hbdr-recovery-nodeport-row { display: grid; grid-template-columns: minmax(150px, 1.4fr) minmax(88px, .72fr) minmax(76px, .62fr) minmax(132px, 1fr); align-items: center; column-gap: 10px; }
+.hbdr-recovery-nodeport-head { min-height: 30px; padding: 0 10px; border-bottom: 1px solid #dfe7ef; background: #f8fafc; color: #64748b; font-size: 9px; font-weight: 750; letter-spacing: .045em; text-transform: uppercase; }
+.hbdr-recovery-nodeport-row { min-height: 48px; padding: 6px 10px; border-bottom: 1px solid #edf1f5; cursor: default; }
+.hbdr-recovery-nodeport-row:last-child { border-bottom: 0; }
+.hbdr-recovery-nodeport-service { display: grid; min-width: 0; gap: 1px; }
+.hbdr-recovery-nodeport-service strong { overflow: hidden; color: #26384b; font-size: 11px; font-weight: 720; text-overflow: ellipsis; white-space: nowrap; }
+.hbdr-recovery-nodeport-service em, .hbdr-recovery-nodeport-value em, .hbdr-recovery-nodeport-current em { color: #94a3b8; font-size: 9px; font-style: normal; }
+.hbdr-recovery-nodeport-value { display: flex; align-items: baseline; gap: 4px; color: #334155; }
+.hbdr-recovery-nodeport-value b, .hbdr-recovery-nodeport-current { color: #475569; font-size: 11px; font-weight: 650; }
+.hbdr-recovery-nodeport-input input { width: 100%; min-height: 32px; padding: 5px 8px; border: 1px solid #cbd7e3; border-radius: 7px; background: #fff; color: #1e293b; font-size: 11px; }
+.hbdr-recovery-nodeport-input input:focus { border-color: #6da5d3; outline: 2px solid rgba(59, 130, 246, .12); outline-offset: 0; }
+.hbdr-recovery-nodeport-note { margin: 0; color: #7c8da0; font-size: 9px; line-height: 1.4; }
 .hbdr-recovery-inline-status, .hbdr-recovery-preflight-ok { display: flex; align-items: center; gap: 6px; margin: 0; padding: 8px 10px; border-radius: 8px; background: #f0fdf4; color: #15803d; font-size: 11px; }
 .hbdr-recovery-preflight-pending { display: flex; align-items: center; gap: 6px; margin: 0; padding: 8px 10px; border-radius: 8px; background: #f8fafc; color: #475569; font-size: 11px; }
 .hbdr-recovery-inline-error, .hbdr-recovery-preflight-warning { margin: 0; padding: 8px 10px; border-radius: 8px; background: #fff7ed; color: #c2410c; font-size: 11px; line-height: 1.45; }
@@ -22881,7 +22894,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 .hbdr-recovery-content-failure button { display: inline-flex; width: fit-content; align-items: center; gap: 5px; border: 0; background: transparent; color: #2563eb; font-size: 11px; font-weight: 800; }
 .hbdr-task-detail-error-actions { display: flex; justify-content: flex-end; padding: 10px 14px 14px; }
 .hbdr-task-detail-error-actions button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border: 0; border-radius: 8px; background: #0f172a; color: #fff; font-size: 11px; font-weight: 800; }
-@media (max-width: 760px) { .hbdr-recovery-resource-list { grid-template-columns: 1fr; } .hbdr-recovery-mapping { grid-template-columns: 1fr; gap: 5px; } .hbdr-recovery-image-mapping > span { grid-template-columns: 72px minmax(0, 1fr); gap: 8px; } }
+@media (max-width: 760px) { .hbdr-recovery-resource-list { grid-template-columns: 1fr; } .hbdr-recovery-mapping { grid-template-columns: 1fr; gap: 5px; } .hbdr-recovery-image-mapping > span { grid-template-columns: 72px minmax(0, 1fr); gap: 8px; } .hbdr-recovery-nodeport-head { display: none; } .hbdr-recovery-nodeport-row { grid-template-columns: minmax(0, 1fr) 72px 72px; row-gap: 5px; } .hbdr-recovery-nodeport-input { grid-column: 1 / -1; } }
 
 .hbdr-task-detail-events section {
   border-top: 1px solid #eef2f7;
