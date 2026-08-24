@@ -82,8 +82,8 @@ export default function BackupRecoveryTaskPage({
 
   const load = async () => {
     const [taskRes, pointRes, clusterRes, appRes, storageRes] = await Promise.all([
-      apiGet<ApiList<ApiTask>>('/api/v1/tasks'),
-      apiGet<ApiList<ApiRestorePoint>>('/api/v1/restore-points'),
+      apiGet<ApiList<ApiTask>>('/api/v1/tasks?view=summary&limit=500'),
+      apiGet<ApiList<ApiRestorePoint>>('/api/v1/restore-points?view=summary&pageSize=500'),
       apiGet<ApiList<ApiCluster>>('/api/v1/clusters'),
       apiGet<ApiList<ApiApplication>>('/api/v1/applications'),
       apiGet<ApiList<ApiStorageRepo>>('/api/v1/storage-repositories'),
@@ -211,17 +211,18 @@ export default function BackupRecoveryTaskPage({
     let cancelled = false;
     const idSet = new Set(ids);
     const pollActiveTasks = async () => {
+      if (document.visibilityState === 'hidden') return;
       try {
         const [taskRes, pointRes] = await Promise.all([
-          apiGet<ApiList<ApiTask>>('/api/v1/tasks'),
-          apiGet<ApiList<ApiRestorePoint>>('/api/v1/restore-points'),
+          apiGet<ApiList<ApiTask>>('/api/v1/tasks?view=summary&types=backup,restore,drill,takeover&statuses=queued,dispatched,accepted,running,syncing,finalizing,canceling&limit=100'),
+          apiGet<ApiList<ApiRestorePoint>>('/api/v1/restore-points?view=summary&pageSize=500'),
         ]);
         if (cancelled) return;
         const latestTasks = new Map(listItems(taskRes).map(task => [task.id, task]));
         setTasks(prev => prev.map(task => {
           if (!idSet.has(task.id)) return task;
           const next = latestTasks.get(task.id);
-          return next ? { ...task, ...next } : task;
+          return next ? { ...task, ...next, payload: { ...task.payload, ...next.payload } } : task;
         }));
         setRestorePoints(listItems(pointRes));
       } catch {
@@ -287,6 +288,9 @@ export default function BackupRecoveryTaskPage({
       return;
     }
     let cancelled = false;
+    apiGet<ApiTask>(`/api/v1/tasks/${selectedTaskId}`)
+      .then(task => { if (!cancelled) setTasks(items => items.map(item => item.id === task.id ? task : item)); })
+      .catch(() => undefined);
     apiGet<ApiList<ApiTaskEvent>>(`/api/v1/tasks/${selectedTaskId}/events`)
       .then(result => {
         if (!cancelled) setSelectedTaskEvents(listItems(result));

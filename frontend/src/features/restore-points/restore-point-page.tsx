@@ -107,11 +107,11 @@ export default function RealRestorePointPage({
 
   const load = async () => {
     const [pointRes, clusterRes, storageRes, planRes, taskRes] = await Promise.all([
-      apiGet<ApiList<ApiRestorePoint>>('/api/v1/restore-points'),
+      apiGet<ApiList<ApiRestorePoint>>('/api/v1/restore-points?view=summary&pageSize=500'),
       apiGet<ApiList<ApiCluster>>('/api/v1/clusters'),
       apiGet<ApiList<ApiStorageRepo>>('/api/v1/storage-repositories'),
       apiGet<ApiList<ApiProtectionPlan>>('/api/v1/protection-plans'),
-      apiGet<ApiList<ApiTask>>('/api/v1/tasks'),
+      apiGet<ApiList<ApiTask>>('/api/v1/tasks?view=summary&limit=500'),
     ]);
     setPoints(listItems(pointRes));
     setClusters(listItems(clusterRes));
@@ -339,17 +339,18 @@ export default function RealRestorePointPage({
     let cancelled = false;
     const idSet = new Set(ids);
     const pollActiveRecoveryTasks = async () => {
+      if (document.visibilityState === 'hidden') return;
       try {
         const [taskRes, pointRes] = await Promise.all([
-          apiGet<ApiList<ApiTask>>('/api/v1/tasks'),
-          apiGet<ApiList<ApiRestorePoint>>('/api/v1/restore-points'),
+          apiGet<ApiList<ApiTask>>('/api/v1/tasks?view=summary&types=restore,drill,takeover&statuses=queued,dispatched,accepted,running,syncing,finalizing,canceling&limit=100'),
+          apiGet<ApiList<ApiRestorePoint>>('/api/v1/restore-points?view=summary&pageSize=500'),
         ]);
         if (cancelled) return;
         const latestTasks = new Map(listItems(taskRes).map(task => [task.id, task]));
         setTasks(prev => prev.map(task => {
           if (!idSet.has(task.id)) return task;
           const next = latestTasks.get(task.id);
-          return next ? { ...task, ...next } : task;
+          return next ? { ...task, ...next, payload: { ...task.payload, ...next.payload } } : task;
         }));
         setPoints(listItems(pointRes));
       } catch {

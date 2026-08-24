@@ -49,7 +49,7 @@ export default function OperationsCenterPage({ toast, openLogs, openClusters }: 
     const requests = [
       apiGet<ApiList<ApiCluster>>('/api/v1/clusters'),
       apiGet<ApiList<ApiStorage>>('/api/v1/storage-repositories'),
-      apiGet<ApiList<ApiTask>>('/api/v1/tasks?types=backup,restore,drill,takeover,failback,agent-upgrade,velero-upgrade&statuses=queued,dispatched,accepted,running,syncing,finalizing,canceling,failed&limit=30'),
+      apiGet<ApiList<ApiTask>>('/api/v1/tasks?view=summary&types=backup,restore,drill,takeover,failback,agent-upgrade,velero-upgrade&statuses=queued,dispatched,accepted,running,syncing,finalizing,canceling,failed&limit=30'),
     ] as const;
     const results = await Promise.allSettled(requests);
     const errors: string[] = [];

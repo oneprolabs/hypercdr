@@ -1444,19 +1444,43 @@ func applyClusterMetadata(cluster *Cluster, metadataRaw []byte) {
 }
 
 func (s *PostgresStore) ListApplications(clusterID string) ([]Application, error) {
+	return s.ListApplicationsFiltered(ApplicationFilter{ClusterID: clusterID})
+}
+
+func (s *PostgresStore) ListApplicationsFiltered(filter ApplicationFilter) ([]Application, error) {
+	labelsExpr, resourceExpr := "a.labels", "a.resource_summary"
+	if filter.Summary {
+		labelsExpr, resourceExpr = "'{}'::jsonb", "'{}'::jsonb"
+	}
 	query := `
-		select id, cluster_id, namespace, name, status, labels,
+		select a.id, a.cluster_id, a.namespace, a.name, a.status, ` + labelsExpr + `,
 		       workload_count, service_count, ingress_count, configmap_count, secret_count,
-		       pvc_count, pv_capacity_bytes, resource_summary, coalesce(last_collected_at, created_at), protection_status,
-		       coalesce((select jsonb_agg(at.tag_id::text) from application_tags at where at.application_id=applications.id),'[]'::jsonb)
-		from applications
+		       pvc_count, pv_capacity_bytes, ` + resourceExpr + `, coalesce(a.last_collected_at, a.created_at), protection_status,
+		       coalesce((select jsonb_agg(at.tag_id::text) from application_tags at where at.application_id=a.id),'[]'::jsonb)
+		from applications a join clusters c on c.id=a.cluster_id
 	`
 	args := []any{}
-	if clusterID != "" {
-		query += ` where cluster_id = $1`
-		args = append(args, clusterID)
+	conditions := []string{}
+	if filter.TenantID != "" {
+		args = append(args, filter.TenantID)
+		conditions = append(conditions, fmt.Sprintf("c.tenant_id=$%d", len(args)))
 	}
-	query += ` order by namespace`
+	if filter.ClusterID != "" {
+		args = append(args, filter.ClusterID)
+		conditions = append(conditions, fmt.Sprintf("a.cluster_id=$%d", len(args)))
+	}
+	if len(conditions) > 0 {
+		query += " where " + strings.Join(conditions, " and ")
+	}
+	query += ` order by a.namespace`
+	if filter.Limit > 0 {
+		args = append(args, filter.Limit)
+		query += fmt.Sprintf(" limit $%d", len(args))
+	}
+	if filter.Offset > 0 {
+		args = append(args, filter.Offset)
+		query += fmt.Sprintf(" offset $%d", len(args))
+	}
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -2935,6 +2959,15 @@ func (s *PostgresStore) CreateRestorePoint(input RestorePointInput) (RestorePoin
 }
 
 func (s *PostgresStore) ListRestorePoints(filter RestorePointFilter) ([]RestorePoint, error) {
+	metadataExpr := "metadata"
+	if filter.Summary {
+		metadataExpr = `jsonb_strip_nulls(jsonb_build_object(
+			'sourceNamespace',metadata->'sourceNamespace','labelSelector',metadata->'labelSelector',
+			'backupTaskId',metadata->'backupTaskId','backupStorageName',metadata->'backupStorageName',
+			'includedNamespaces',metadata->'includedNamespaces','scheduled',metadata->'scheduled',
+			'retentionState',metadata->'retentionState','retentionWarning',metadata->'retentionWarning',
+			'protectionCleanupState',metadata->'protectionCleanupState'))`
+	}
 	query := `
 		select id, tenant_id, coalesce(protection_plan_id::text, ''), source_cluster_id,
 		       coalesce(app_id::text, ''), coalesce(storage_repo_id::text, ''),
@@ -2942,11 +2975,15 @@ func (s *PostgresStore) ListRestorePoints(filter RestorePointFilter) ([]RestoreP
 		       coalesce(started_at, '0001-01-01'::timestamptz),
 		       coalesce(completed_at, '0001-01-01'::timestamptz),
 		       coalesce(expires_at, '0001-01-01'::timestamptz),
-		       coalesce(task_created_at, created_at), metadata, created_at, size_metrics_v2
+		       coalesce(task_created_at, created_at), ` + metadataExpr + `, created_at, size_metrics_v2
 		from restore_points
 	`
 	args := []any{}
 	conditions := []string{}
+	if filter.TenantID != "" {
+		args = append(args, filter.TenantID)
+		conditions = append(conditions, "tenant_id = $"+strconv.Itoa(len(args)))
+	}
 	if filter.ClusterID != "" {
 		args = append(args, filter.ClusterID)
 		conditions = append(conditions, "source_cluster_id = $"+strconv.Itoa(len(args)))
@@ -2970,6 +3007,14 @@ func (s *PostgresStore) ListRestorePoints(filter RestorePointFilter) ([]RestoreP
 		query += " where " + strings.Join(conditions, " and ")
 	}
 	query += ` order by created_at desc`
+	if filter.Limit > 0 {
+		args = append(args, filter.Limit)
+		query += fmt.Sprintf(" limit $%d", len(args))
+	}
+	if filter.Offset > 0 {
+		args = append(args, filter.Offset)
+		query += fmt.Sprintf(" offset $%d", len(args))
+	}
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -3124,11 +3169,27 @@ func (s *PostgresStore) ListTasksFiltered(filter TaskFilter) ([]Task, error) {
 	return s.listTasks(filter)
 }
 
+func (s *PostgresStore) GetTask(id string) (Task, bool, error) {
+	return s.getTask(id)
+}
+
 func (s *PostgresStore) listTasks(filter TaskFilter) ([]Task, error) {
+	payloadExpr := "payload"
+	if filter.Summary {
+		payloadExpr = `jsonb_strip_nulls(jsonb_build_object(
+			'namespace',payload->'namespace','sourceNamespace',payload->'sourceNamespace',
+			'applicationName',payload->'applicationName','stage',payload->'stage',
+			'archivedClusterId',payload->'archivedClusterId','archivedClusterName',payload->'archivedClusterName',
+			'restorePointId',payload->'restorePointId','archivedRestorePointId',payload->'archivedRestorePointId',
+			'pointId',payload->'pointId','veleroBackupName',payload->'veleroBackupName','backupName',payload->'backupName',
+			'storageRepoId',payload->'storageRepoId','repositoryId',payload->'repositoryId',
+			'storageRepo',payload->'storageRepo','backupStorageName',payload->'backupStorageName',
+			'storageLocation',payload->'storageLocation','repository',payload->'repository','name',payload->'name'))`
+	}
 	query := `
 		select id, tenant_id, cluster_id, coalesce(app_id::text, ''), coalesce(protection_plan_id::text, ''),
 		       coalesce(restore_point_id::text, ''), type, status, progress, coalesce(command_id::text, ''),
-		       coalesce(error_code, ''), coalesce(error_message, ''), payload,
+		       coalesce(error_code, ''), coalesce(error_message, ''), ` + payloadExpr + `,
 		       created_at, coalesce(dispatched_at, '0001-01-01'::timestamptz),
 		       coalesce(accepted_at, '0001-01-01'::timestamptz),
 		       coalesce(started_at, '0001-01-01'::timestamptz),

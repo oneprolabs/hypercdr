@@ -1185,14 +1185,31 @@ func (s *MemoryStore) DeleteCluster(clusterID string) (bool, error) {
 }
 
 func (s *MemoryStore) ListApplications(clusterID string) ([]Application, error) {
+	return s.ListApplicationsFiltered(ApplicationFilter{ClusterID: clusterID})
+}
+
+func (s *MemoryStore) ListApplicationsFiltered(filter ApplicationFilter) ([]Application, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	apps := make([]Application, 0)
 	for _, app := range s.applications {
-		if clusterID == "" || app.ClusterID == clusterID {
+		cluster := s.clusters[app.ClusterID]
+		if (filter.TenantID == "" || cluster.TenantID == filter.TenantID) && (filter.ClusterID == "" || app.ClusterID == filter.ClusterID) {
+			if filter.Summary {
+				app.Labels = nil
+				app.ResourceSummary = nil
+			}
 			apps = append(apps, app)
 		}
+	}
+	if filter.Offset > 0 && filter.Offset < len(apps) {
+		apps = apps[filter.Offset:]
+	} else if filter.Offset >= len(apps) {
+		apps = nil
+	}
+	if filter.Limit > 0 && len(apps) > filter.Limit {
+		apps = apps[:filter.Limit]
 	}
 	return apps, nil
 }
@@ -2081,6 +2098,9 @@ func (s *MemoryStore) ListRestorePoints(filter RestorePointFilter) ([]RestorePoi
 
 	items := make([]RestorePoint, 0, len(s.restorePoints))
 	for _, item := range s.restorePoints {
+		if filter.TenantID != "" && item.TenantID != filter.TenantID {
+			continue
+		}
 		if !filter.IncludeDeleted && item.Status == "deleted" {
 			continue
 		}
@@ -2099,7 +2119,24 @@ func (s *MemoryStore) ListRestorePoints(filter RestorePointFilter) ([]RestorePoi
 		if filter.ProtectionPlanID != "" && item.ProtectionPlanID != filter.ProtectionPlanID {
 			continue
 		}
+		if filter.Summary {
+			summary := map[string]any{}
+			for _, key := range []string{"sourceNamespace", "labelSelector", "backupTaskId", "backupStorageName", "includedNamespaces", "scheduled", "retentionState", "retentionWarning", "protectionCleanupState"} {
+				if value, ok := item.Metadata[key]; ok {
+					summary[key] = value
+				}
+			}
+			item.Metadata = summary
+		}
 		items = append(items, item)
+	}
+	if filter.Offset > 0 && filter.Offset < len(items) {
+		items = items[filter.Offset:]
+	} else if filter.Offset >= len(items) {
+		items = nil
+	}
+	if filter.Limit > 0 && len(items) > filter.Limit {
+		items = items[:filter.Limit]
 	}
 	return items, nil
 }
@@ -2171,6 +2208,14 @@ func (s *MemoryStore) ListTasks(clusterID string) ([]Task, error) {
 	return s.ListTasksFiltered(TaskFilter{ClusterID: clusterID})
 }
 
+func (s *MemoryStore) GetTask(id string) (Task, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	task, ok := s.tasks[id]
+	return task, ok, nil
+}
+
 func (s *MemoryStore) ListTasksFiltered(filter TaskFilter) ([]Task, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2181,6 +2226,15 @@ func (s *MemoryStore) ListTasksFiltered(filter TaskFilter) ([]Task, error) {
 			(filter.ClusterID == "" || item.ClusterID == filter.ClusterID) &&
 			(len(filter.Types) == 0 || containsString(filter.Types, item.Type)) &&
 			(len(filter.Statuses) == 0 || containsString(filter.Statuses, item.Status)) {
+			if filter.Summary {
+				summary := map[string]any{}
+				for _, key := range []string{"namespace", "sourceNamespace", "applicationName", "stage", "archivedClusterId", "archivedClusterName", "restorePointId", "archivedRestorePointId", "pointId", "veleroBackupName", "backupName", "storageRepoId", "repositoryId", "storageRepo", "backupStorageName", "storageLocation", "repository", "name"} {
+					if value, ok := item.Payload[key]; ok {
+						summary[key] = value
+					}
+				}
+				item.Payload = summary
+			}
 			items = append(items, item)
 		}
 	}

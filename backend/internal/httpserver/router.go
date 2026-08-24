@@ -598,6 +598,7 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("GET /api/v1/restore-points/{id}/contents", r.getRestorePointContents)
 	r.mux.HandleFunc("POST /api/v1/restore-points/delete", r.deleteRestorePoints)
 	r.mux.HandleFunc("GET /api/v1/tasks", r.listTasks)
+	r.mux.HandleFunc("GET /api/v1/tasks/{id}", r.getTask)
 	r.mux.HandleFunc("GET /api/v1/tasks/{id}/events", r.tenantGuard("task", r.listTaskEvents))
 	r.mux.HandleFunc("POST /api/v1/tasks/{id}/cancel", r.tenantGuard("task", r.cancelTask))
 	r.mux.HandleFunc("POST /api/v1/tasks/{id}/retry", r.tenantGuard("task", r.retryRecoveryTask))
@@ -2094,7 +2095,16 @@ func (r *Router) listClusters(w http.ResponseWriter, req *http.Request) {
 	}
 	latestAgentVersion, latestAgentImage, latestAgentDigest := agentTarget.Version, agentTarget.Image, agentTarget.ImageDigest
 	latestVeleroImage, latestVeleroDigest := veleroTarget.Image, veleroTarget.ImageDigest
-	upgradeTasks, taskErr := r.store.ListTasks("")
+	upgradeTaskFilter := store.TaskFilter{
+		Types:    []string{"agent-upgrade", "velero-upgrade"},
+		Statuses: []string{"queued", "dispatched", "accepted", "running", "syncing", "finalizing"},
+		Limit:    100,
+		Summary:  true,
+	}
+	if user, ok := requestUser(req); ok && !user.SystemAdmin {
+		upgradeTaskFilter.TenantID = user.TenantID
+	}
+	upgradeTasks, taskErr := r.store.ListTasksFiltered(upgradeTaskFilter)
 	if taskErr != nil {
 		r.logger.Warn("failed to load agent upgrade status", "error", taskErr)
 	}
@@ -3308,7 +3318,21 @@ func (r *Router) agentNamespace() string {
 }
 
 func (r *Router) listApplications(w http.ResponseWriter, req *http.Request) {
-	apps, err := r.store.ListApplications(req.URL.Query().Get("clusterId"))
+	query := req.URL.Query()
+	filter := store.ApplicationFilter{ClusterID: query.Get("clusterId"), Summary: query.Get("view") == "summary"}
+	if user, ok := requestUser(req); ok && !user.SystemAdmin {
+		filter.TenantID = user.TenantID
+	}
+	if pageSize, err := strconv.Atoi(query.Get("pageSize")); err == nil && pageSize > 0 {
+		if pageSize > 500 {
+			pageSize = 500
+		}
+		filter.Limit = pageSize
+		if page, pageErr := strconv.Atoi(query.Get("page")); pageErr == nil && page > 1 {
+			filter.Offset = (page - 1) * pageSize
+		}
+	}
+	apps, err := r.store.ListApplicationsFiltered(filter)
 	if err != nil {
 		r.logger.Error("failed to list applications", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_applications_failed"})
@@ -6115,11 +6139,26 @@ func clampMonthDay(value int) int {
 }
 
 func (r *Router) listRestorePoints(w http.ResponseWriter, req *http.Request) {
-	items, err := r.store.ListRestorePoints(store.RestorePointFilter{
+	query := req.URL.Query()
+	filter := store.RestorePointFilter{
 		ClusterID:        req.URL.Query().Get("clusterId"),
 		AppID:            req.URL.Query().Get("appId"),
 		ProtectionPlanID: req.URL.Query().Get("protectionPlanId"),
-	})
+		Summary:          query.Get("view") == "summary",
+	}
+	if user, ok := requestUser(req); ok && !user.SystemAdmin {
+		filter.TenantID = user.TenantID
+	}
+	if pageSize, parseErr := strconv.Atoi(query.Get("pageSize")); parseErr == nil && pageSize > 0 {
+		if pageSize > 500 {
+			pageSize = 500
+		}
+		filter.Limit = pageSize
+		if page, pageErr := strconv.Atoi(query.Get("page")); pageErr == nil && page > 1 {
+			filter.Offset = (page - 1) * pageSize
+		}
+	}
+	items, err := r.store.ListRestorePoints(filter)
 	if err != nil {
 		r.logger.Error("failed to list restore points", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_restore_points_failed"})
@@ -6232,6 +6271,7 @@ func uniqueNonEmptyStrings(values []string) []string {
 func (r *Router) listTasks(w http.ResponseWriter, req *http.Request) {
 	query := req.URL.Query()
 	filter := store.TaskFilter{ClusterID: query.Get("clusterId")}
+	filter.Summary = query.Get("view") == "summary"
 	if user, ok := requestUser(req); ok && !user.SystemAdmin {
 		filter.TenantID = user.TenantID
 	}
@@ -6273,6 +6313,20 @@ func (r *Router) listTasks(w http.ResponseWriter, req *http.Request) {
 	items = visible
 	items = r.enrichCleanupTaskRestorePointTimes(items)
 	writeJSON(w, http.StatusOK, map[string]any{"items": nonNilSlice(items)})
+}
+
+func (r *Router) getTask(w http.ResponseWriter, req *http.Request) {
+	id := req.PathValue("id")
+	item, ok, err := r.store.GetTask(id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "get_task_failed"})
+		return
+	}
+	if ok && tenantVisible(req, item.TenantID) {
+		writeJSON(w, http.StatusOK, item)
+		return
+	}
+	writeJSON(w, http.StatusNotFound, map[string]any{"error": "task_not_found"})
 }
 
 // enrichCleanupTaskRestorePointTimes keeps restore-point labels derivable for
@@ -10727,7 +10781,11 @@ func (r *Router) withAccessLog(next http.Handler) http.Handler {
 			"status", status,
 			"request_id", requestID,
 			"duration_ms", duration,
+			"response_bytes", recorder.bytes,
 		)
+		if duration >= 500 {
+			r.logger.Info("slow http request", "method", req.Method, "path", req.URL.Path, "query", req.URL.RawQuery, "request_id", requestID, "duration_ms", duration, "response_bytes", recorder.bytes)
+		}
 		if strings.HasPrefix(req.URL.Path, "/api/v1/") && !strings.HasPrefix(req.URL.Path, "/api/v1/diagnostic-logs") && (status >= 400 || req.Method != http.MethodGet) {
 			operation := req.Method + " " + req.URL.Path
 			input := store.DiagnosticLogInput{Scope: "system", Level: "info", Component: "platform-api", Operation: operation, Message: operation + " completed", RequestID: requestID, Status: strconv.Itoa(status), DurationMS: duration, Details: map[string]any{"method": req.Method, "path": req.URL.Path, "httpStatus": status}}
@@ -10763,6 +10821,7 @@ type diagnosticResponseWriter struct {
 	http.ResponseWriter
 	status int
 	body   bytes.Buffer
+	bytes  int
 }
 
 func (w *diagnosticResponseWriter) WriteHeader(status int) {
@@ -10782,7 +10841,9 @@ func (w *diagnosticResponseWriter) Write(body []byte) (int, error) {
 		}
 		_, _ = w.body.Write(body[:remaining])
 	}
-	return w.ResponseWriter.Write(body)
+	written, err := w.ResponseWriter.Write(body)
+	w.bytes += written
+	return written, err
 }
 
 func (r *Router) diagnosticLogFilter(req *http.Request) (store.DiagnosticLogFilter, error) {

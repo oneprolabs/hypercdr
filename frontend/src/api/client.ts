@@ -43,10 +43,19 @@ export function apiHeaders(json = false, token = readStoredAuthSession()?.sessio
   return headers;
 }
 
+const getRequests = new Map<string, Promise<unknown>>();
+
 export async function apiGet<T>(path: string): Promise<T> {
   const token = readStoredAuthSession()?.session.token || '';
-  const response = await ensureApiResponse(await fetch(path, { cache: 'no-store', headers: apiHeaders(false, token) }), path, token);
-  return response.json() as Promise<T>;
+  const key = `${token}\n${path}`;
+  const existing = getRequests.get(key);
+  if (existing) return existing as Promise<T>;
+  const request = (async () => {
+    const response = await ensureApiResponse(await fetch(path, { cache: 'no-store', headers: apiHeaders(false, token) }), path, token);
+    return response.json() as Promise<T>;
+  })().finally(() => getRequests.delete(key));
+  getRequests.set(key, request);
+  return request;
 }
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {

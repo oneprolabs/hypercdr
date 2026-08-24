@@ -82,6 +82,7 @@ type Store interface {
 	SetDefaultCluster(clusterID string) (Cluster, bool, error)
 	DeleteCluster(clusterID string) (bool, error)
 	ListApplications(clusterID string) ([]Application, error)
+	ListApplicationsFiltered(filter ApplicationFilter) ([]Application, error)
 	UpdateApplication(input ApplicationUpdateInput) (Application, bool, error)
 	ListTags() ([]Tag, error)
 	CreateTag(tenantID, name string) (Tag, error)
@@ -123,6 +124,7 @@ type Store interface {
 	CreateTask(input TaskInput) (Task, error)
 	ListTasks(clusterID string) ([]Task, error)
 	ListTasksFiltered(filter TaskFilter) ([]Task, error)
+	GetTask(id string) (Task, bool, error)
 	UpdateTaskStatus(input TaskStatusInput) (Task, bool, error)
 	AddTaskEvent(input TaskEventInput) error
 	ListTaskEvents(taskID string) ([]TaskEvent, error)
@@ -153,6 +155,7 @@ type TaskFilter struct {
 	Types     []string
 	Statuses  []string
 	Limit     int
+	Summary   bool
 }
 
 type PlatformSettings struct {
@@ -519,6 +522,14 @@ type Application struct {
 	Tags             []string          `json:"tags,omitempty"`
 }
 
+type ApplicationFilter struct {
+	TenantID  string
+	ClusterID string
+	Summary   bool
+	Limit     int
+	Offset    int
+}
+
 type Tag struct {
 	ID        string    `json:"id"`
 	TenantID  string    `json:"tenantId"`
@@ -883,10 +894,14 @@ type RestorePointStateInput struct {
 }
 
 type RestorePointFilter struct {
+	TenantID         string
 	ClusterID        string
 	AppID            string
 	ProtectionPlanID string
 	IncludeDeleted   bool
+	Limit            int
+	Offset           int
+	Summary          bool
 }
 
 type TaskInput struct {

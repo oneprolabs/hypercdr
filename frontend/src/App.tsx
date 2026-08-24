@@ -1102,6 +1102,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   const prefetchingAgentTokenRef = useRef<Promise<ApiAgentToken | null> | null>(null);
   const agentTokenOwnerRef = useRef('');
   const refreshInFlightRef = useRef<Promise<Cluster[]> | null>(null);
+  const refreshInFlightViewRef = useRef<View | null>(null);
   const refreshLastStartedAtRef = useRef(0);
   const refreshLastResultRef = useRef<Cluster[]>([]);
   const resourceSessionOwnerRef = useRef(authSession?.session.token || '');
@@ -1393,6 +1394,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
 
   const clearTenantResourceState = useCallback(() => {
     refreshInFlightRef.current = null;
+    refreshInFlightViewRef.current = null;
     refreshLastStartedAtRef.current = 0;
     refreshLastResultRef.current = [];
     prefetchedAgentTokenRef.current = null;
@@ -1470,8 +1472,9 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     }
     let cancelled = false;
     const loadTasks = async () => {
+      if (document.visibilityState === 'hidden') return;
       try {
-        const res = await apiGet<ApiList<ApiTask>>('/api/v1/tasks?types=register,unregister,agent-upgrade,velero-upgrade');
+        const res = await apiGet<ApiList<ApiTask>>('/api/v1/tasks?view=summary&types=register,unregister,agent-upgrade,velero-upgrade&limit=100');
         const tasks = listItems(res);
         const clusterTasks = tasks
           .filter(task => ['register', 'unregister', 'agent-upgrade', 'velero-upgrade'].includes(task.type))
@@ -1519,6 +1522,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     if (ids.length === 0) return;
     let cancelled = false;
     const loadEvents = async () => {
+      if (document.visibilityState === 'hidden') return;
       for (const taskId of ids) {
         try {
           const res = await apiGet<ApiList<ApiTaskEvent>>(`/api/v1/tasks/${taskId}/events`);
@@ -1544,16 +1548,62 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     };
   }, [activeClusterTaskIds, authSession, view]);
 
-  const refreshPlatformData = useCallback(() => {
+  const refreshPlatformData = useCallback((targetView: View = view) => {
     const owner = authSession?.session.token || '';
     if (!owner || resourceSessionOwnerRef.current !== owner) return Promise.resolve([]);
     const now = Date.now();
-    if (refreshInFlightRef.current) return refreshInFlightRef.current;
-    if (refreshLastResultRef.current.length > 0 && now - refreshLastStartedAtRef.current < 1200) {
+    if (refreshInFlightRef.current && refreshInFlightViewRef.current === targetView) return refreshInFlightRef.current;
+    if (refreshInFlightViewRef.current === targetView && refreshLastResultRef.current.length > 0 && now - refreshLastStartedAtRef.current < 1200) {
       return Promise.resolve(refreshLastResultRef.current);
     }
     refreshLastStartedAtRef.current = now;
     const request = (async () => {
+      if (targetView === 'clusters' || targetView === 'upgrades' || targetView === 'dr_tasks' || targetView === 'restore_points' || targetView === 'failback') {
+        const clusterRes = await apiGet<ApiList<ApiCluster>>('/api/v1/clusters');
+        if (resourceSessionOwnerRef.current !== owner) return [];
+        const apiClusters = listItems(clusterRes);
+        const nextClusters = apiClusters.map(cluster => mapCluster(
+          cluster,
+          [],
+        ));
+        setLiveApiClusters(apiClusters);
+        setLiveClusters(nextClusters);
+        setClusters(nextClusters);
+        return nextClusters;
+      }
+      if (targetView === 'storage') {
+        const [clusterRes, storageRes] = await Promise.all([
+          apiGet<ApiList<ApiCluster>>('/api/v1/clusters'),
+          apiGet<ApiList<ApiStorageRepo>>('/api/v1/storage-repositories'),
+        ]);
+        if (resourceSessionOwnerRef.current !== owner) return [];
+        const apiClusters = listItems(clusterRes);
+        const nextClusters = apiClusters.map(cluster => mapCluster(cluster, []));
+        const apiStorage = listItems(storageRes);
+        const nextStorage = apiStorage.map(mapStorageRepo);
+        setLiveApiClusters(apiClusters); setLiveClusters(nextClusters); setClusters(nextClusters);
+        setLiveApiStorageRepos(apiStorage); setLiveStorage(nextStorage); setStorage(nextStorage);
+        return nextClusters;
+      }
+      if (targetView === 'policies') {
+        const policyRes = await apiGet<ApiList<ApiPolicy>>('/api/v1/policies');
+        if (resourceSessionOwnerRef.current !== owner) return [];
+        const nextPolicies = listItems(policyRes).map(mapPolicy);
+        setLiveApiPolicies(listItems(policyRes)); setLivePolicies(nextPolicies); setPolicies(nextPolicies);
+        return refreshLastResultRef.current;
+      }
+      if (targetView === 'tags') {
+        const [clusterRes, appRes, tagRes] = await Promise.all([
+          apiGet<ApiList<ApiCluster>>('/api/v1/clusters'),
+          apiGet<ApiList<ApiApplication>>('/api/v1/applications?view=summary'),
+          apiGet<ApiList<TagItem>>('/api/v1/tags'),
+        ]);
+        if (resourceSessionOwnerRef.current !== owner) return [];
+        const apiClusters = listItems(clusterRes); const apiApps = listItems(appRes);
+        const nextClusters = apiClusters.map(cluster => mapCluster(cluster, mapApps(apiApps.filter(app => app.clusterId === cluster.id), [], [], [], apiClusters)));
+        setTags(listItems(tagRes)); setLiveApiApps(apiApps); setLiveApiClusters(apiClusters); setLiveClusters(nextClusters); setClusters(nextClusters);
+        return nextClusters;
+      }
       const clusterRequest = apiGet<ApiList<ApiCluster>>('/api/v1/clusters');
       void clusterRequest.then(clusterRes => {
         if (resourceSessionOwnerRef.current !== owner) return;
@@ -1572,9 +1622,9 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
         apiGet<ApiList<ApiStorageRepo>>('/api/v1/storage-repositories'),
         apiGet<ApiList<ApiPolicy>>('/api/v1/policies'),
         apiGet<ApiList<ApiProtectionPlan>>('/api/v1/protection-plans'),
-        apiGet<ApiList<ApiTask>>('/api/v1/tasks?types=backup,restore,drill,takeover'),
+        apiGet<ApiList<ApiTask>>('/api/v1/tasks?view=summary&types=backup,restore,drill,takeover&limit=500'),
         apiGet<ApiList<TagItem>>('/api/v1/tags'),
-        apiGet<ApiList<ApiRestorePoint>>('/api/v1/restore-points'),
+        apiGet<ApiList<ApiRestorePoint>>('/api/v1/restore-points?view=summary&pageSize=500'),
       ]);
       if (resourceSessionOwnerRef.current !== owner) return [];
       const apiClusters = listItems(clusterRes);
@@ -1643,28 +1693,54 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       return nextClusters;
     })().finally(() => {
       if (refreshInFlightRef.current === request) refreshInFlightRef.current = null;
+      if (refreshInFlightViewRef.current === targetView) refreshInFlightViewRef.current = null;
     });
     refreshInFlightRef.current = request;
+    refreshInFlightViewRef.current = targetView;
     return request;
-  }, [authSession?.session.token]);
+  }, [authSession?.session.token, view]);
 
   useEffect(() => {
     if (!authSession || !PLATFORM_DATA_VIEWS.has(view)) return;
     let cancelled = false;
     const realtimeViews = new Set<View>(['dashboard', 'applications', 'clusters']);
     const loadPlatformData = async () => {
+      if (document.visibilityState === 'hidden') return;
       try {
-        await refreshPlatformData();
+        await refreshPlatformData(view);
       } catch {
         if (!cancelled) {
           // Keep the current state visible if the backend is temporarily unavailable.
         }
       }
     };
+    const loadApplicationActivity = async () => {
+      if (document.visibilityState === 'hidden') return;
+      try {
+        const [taskRes, restorePointRes] = await Promise.all([
+          apiGet<ApiList<ApiTask>>('/api/v1/tasks?view=summary&types=backup,restore,drill,takeover&limit=500'),
+          apiGet<ApiList<ApiRestorePoint>>('/api/v1/restore-points?view=summary&pageSize=500'),
+        ]);
+        if (cancelled) return;
+        const apiTasks = listItems(taskRes);
+        const apiRestorePoints = listItems(restorePointRes);
+        const apiRestorePointViews = apiRestorePoints.map(mapRestorePoint);
+        setLiveApiTasks(apiTasks);
+        setLiveAppTasks(buildAppTaskMap(apiTasks, liveApiApps, ['backup'], apiRestorePointViews, liveApiPlans));
+        setLiveRecoveryTasks(buildAppTaskMap(apiTasks, liveApiApps, ['restore', 'drill', 'takeover'], apiRestorePointViews, liveApiPlans));
+        setRestorePointCount(apiRestorePointViews.length);
+        setLiveRestorePoints(apiRestorePointViews);
+        setLiveApiRestorePointViews(apiRestorePointViews);
+        setLiveApiRestorePoints(apiRestorePoints);
+      } catch {
+        // Keep the current application state visible if a status poll fails.
+      }
+    };
     loadPlatformData();
     const shouldPoll = realtimeViews.has(view);
     const pollIntervalMs = view === 'applications' ? 3000 : 10000;
-    const timer = shouldPoll ? window.setInterval(loadPlatformData, pollIntervalMs) : undefined;
+    const poll = view === 'applications' ? loadApplicationActivity : loadPlatformData;
+    const timer = shouldPoll ? window.setInterval(poll, pollIntervalMs) : undefined;
     return () => {
       cancelled = true;
       if (timer) window.clearInterval(timer);
