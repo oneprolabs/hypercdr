@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft, ArrowRight, Boxes, CheckCircle2, GitBranch, LoaderCircle, XCircle } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Boxes, CheckCircle2, GitBranch, LoaderCircle, XCircle } from 'lucide-react';
 import type { Cluster } from './types';
 import { orderClustersForTopology, topologyLayout, type DRRelationship, type DRTopologyModel } from './dr-topology';
 
@@ -67,10 +67,9 @@ export default function DRTopologyView({ clusters, model, selectedRelationshipId
           if (!geometry) return null;
           const meta = statusMeta[relationship.status];
           const Icon = meta.icon;
-          const DirectionArrow = geometry.target.x < geometry.source.x ? ArrowLeft : ArrowRight;
           const sourceName = clusterById.get(relationship.sourceClusterId)?.name || 'Unknown source';
           const targetName = clusterById.get(relationship.targetClusterId)?.name || 'Unknown target';
-          return <button key={relationship.id} type="button" className={`hbdr-dr-edge-label is-${relationship.status} ${selectedRelationshipId === relationship.id ? 'is-selected' : ''}`} style={{ left: `${geometry.labelX}%`, top: `${geometry.labelY}%` }} onClick={() => onSelectRelationship(relationship)} title={`${sourceName} → ${targetName}: ${relationship.appIds.length} namespaces`} aria-label={`${sourceName} to ${targetName}, ${relationship.appIds.length} ${relationship.appIds.length === 1 ? 'namespace' : 'namespaces'}`}><span className="hbdr-dr-edge-label-route"><strong>{sourceName}</strong><DirectionArrow size={11} /><strong>{targetName}</strong></span><span className="hbdr-dr-edge-label-count"><Icon size={11} />{relationship.appIds.length} {relationship.appIds.length === 1 ? 'namespace' : 'namespaces'}</span></button>;
+          return <button key={relationship.id} type="button" className={`hbdr-dr-edge-label is-${relationship.status} ${selectedRelationshipId === relationship.id ? 'is-selected' : ''}`} style={{ left: `${geometry.labelX}%`, top: `${geometry.labelY}%` }} onClick={() => onSelectRelationship(relationship)} title={`${sourceName} → ${targetName}: ${relationship.appIds.length} namespaces`} aria-label={`${sourceName} to ${targetName}, ${relationship.appIds.length} ${relationship.appIds.length === 1 ? 'namespace' : 'namespaces'}`}><span className="hbdr-dr-edge-label-route"><strong>{sourceName}</strong><ArrowRight size={11} /><strong>{targetName}</strong></span><span className="hbdr-dr-edge-label-count"><Icon size={11} />{relationship.appIds.length} {relationship.appIds.length === 1 ? 'namespace' : 'namespaces'}</span></button>;
         })}
         {clusters.map(cluster => {
           const position = positions.get(cluster.id)!;
