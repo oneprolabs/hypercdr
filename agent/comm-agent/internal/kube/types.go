@@ -39,6 +39,14 @@ type ResourceModifierWaiter interface {
 	WaitForResourceModifier(ctx context.Context, namespace string, name string, timeout time.Duration) error
 }
 
+// WorkloadImageMapper applies durable image mappings to workload templates
+// after Velero has restored Pod volume data. Applying these mappings during
+// restore changes controller hashes and can delete the exact Pod UID referenced
+// by PodVolumeRestore before Kopia starts.
+type WorkloadImageMapper interface {
+	ApplyWorkloadImageMappings(ctx context.Context, namespace string, mappings map[string]string) (int, error)
+}
+
 type VeleroBackupDeletionWaiter interface {
 	WaitForVeleroBackupDeleted(ctx context.Context, namespace string, name string, timeout time.Duration) error
 }

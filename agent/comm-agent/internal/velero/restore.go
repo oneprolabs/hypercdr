@@ -18,15 +18,15 @@ type RestoreManifest struct {
 }
 
 type RestoreManifestSpec struct {
-	BackupName               string                     `json:"backupName"`
-	IncludedNamespaces       []string                   `json:"includedNamespaces,omitempty"`
-	NamespaceMapping         map[string]string          `json:"namespaceMapping,omitempty"`
-	IncludeClusterResources  bool                       `json:"includeClusterResources"`
-	ExistingResourcePolicy   string                     `json:"existingResourcePolicy,omitempty"`
-	PreserveNodePorts        *bool                      `json:"preserveNodePorts,omitempty"`
-	ResourceModifier         *TypedLocalObjectReference `json:"resourceModifier,omitempty"`
-	IncludedResources        []string                   `json:"includedResources,omitempty"`
-	ExcludedResources        []string                   `json:"excludedResources,omitempty"`
+	BackupName              string                     `json:"backupName"`
+	IncludedNamespaces      []string                   `json:"includedNamespaces,omitempty"`
+	NamespaceMapping        map[string]string          `json:"namespaceMapping,omitempty"`
+	IncludeClusterResources bool                       `json:"includeClusterResources"`
+	ExistingResourcePolicy  string                     `json:"existingResourcePolicy,omitempty"`
+	PreserveNodePorts       *bool                      `json:"preserveNodePorts,omitempty"`
+	ResourceModifier        *TypedLocalObjectReference `json:"resourceModifier,omitempty"`
+	IncludedResources       []string                   `json:"includedResources,omitempty"`
+	ExcludedResources       []string                   `json:"excludedResources,omitempty"`
 }
 
 type RestoreBuildInput struct {
@@ -84,13 +84,13 @@ func BuildRestoreManifest(input RestoreBuildInput) (RestoreManifest, error) {
 			},
 		},
 		Spec: RestoreManifestSpec{
-			BackupName:               input.Command.VeleroBackupName,
-			IncludedNamespaces:       sourceNamespaces,
-			IncludeClusterResources:  input.Command.IncludeClusterScoped,
-			ExistingResourcePolicy:   existingResourcePolicy(input.Command.ConflictPolicy),
-			PreserveNodePorts:        boolPtr(shouldPreserveNodePorts(input.Command)),
-			IncludedResources:        input.Command.IncludedResources,
-			ExcludedResources:        input.Command.ExcludedResources,
+			BackupName:              input.Command.VeleroBackupName,
+			IncludedNamespaces:      sourceNamespaces,
+			IncludeClusterResources: input.Command.IncludeClusterScoped,
+			ExistingResourcePolicy:  existingResourcePolicy(input.Command.ConflictPolicy),
+			PreserveNodePorts:       boolPtr(shouldPreserveNodePorts(input.Command)),
+			IncludedResources:       input.Command.IncludedResources,
+			ExcludedResources:       input.Command.ExcludedResources,
 		},
 		StorageClassMappings: input.Command.StorageClassMappings,
 		ImageMappings:        input.Command.ImageMappings,
@@ -168,7 +168,10 @@ func restoreResourceModifierYAML(namespaces []string, preserveNodePorts bool, st
 		yaml += "  patches:\n  - operation: replace\n    path: /spec/storageClassName\n    value: " + yamlString(storageMappings[source]) + "\n"
 	}
 	for _, source := range sortedMappingKeys(imageMappings) {
-		for _, resource := range []struct{ group, path string }{{"deployments.apps", "/spec/template/spec"}, {"statefulsets.apps", "/spec/template/spec"}, {"daemonsets.apps", "/spec/template/spec"}, {"jobs.batch", "/spec/template/spec"}, {"cronjobs.batch", "/spec/jobTemplate/spec/template/spec"}, {"pods", "/spec"}} {
+		// Map only the concrete restored Pod at this stage. Mutating a workload
+		// PodTemplate changes its controller hash and can delete the Pod UID used
+		// by PodVolumeRestore. Controller templates are updated after restoration.
+		for _, resource := range []struct{ group, path string }{{"pods", "/spec"}} {
 			for _, containers := range []string{"containers", "initContainers"} {
 				for index := 0; index < 10; index++ {
 					path := fmt.Sprintf("%s/%s/%d/image", resource.path, containers, index)

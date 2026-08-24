@@ -56,6 +56,7 @@ type Client struct {
 	backupReader   kube.VeleroBackupReader
 	scheduleReader kube.VeleroScheduleReader
 	readiness      kube.RestoreReadinessReader
+	imageMapper    kube.WorkloadImageMapper
 	applier        kube.ManifestApplier
 	deleteWaiter   kube.VeleroBackupDeletionWaiter
 	contentReader  kube.BackupContentReader
@@ -107,6 +108,7 @@ func NewWithRuntimeDependencies(cfg config.Config, logger *slog.Logger, applier 
 	backupReader, _ := applier.(kube.VeleroBackupReader)
 	scheduleReader, _ := applier.(kube.VeleroScheduleReader)
 	readiness, _ := applier.(kube.RestoreReadinessReader)
+	imageMapper, _ := applier.(kube.WorkloadImageMapper)
 	deleteWaiter, _ := applier.(kube.VeleroBackupDeletionWaiter)
 	contentReader, _ := applier.(kube.BackupContentReader)
 	outbox, err := newEventOutbox(cfg.StateDir)
@@ -142,6 +144,7 @@ func NewWithRuntimeDependencies(cfg config.Config, logger *slog.Logger, applier 
 		backupReader:      backupReader,
 		scheduleReader:    scheduleReader,
 		readiness:         readiness,
+		imageMapper:       imageMapper,
 		applier:           applier,
 		deleteWaiter:      deleteWaiter,
 		contentReader:     contentReader,
@@ -1771,6 +1774,24 @@ func (c *Client) pollVeleroStatus(task protocol.TaskDispatchPayload, object kube
 
 func (c *Client) pollRestoreStatus(task protocol.TaskDispatchPayload, object kube.AppliedObject, basePayload map[string]any) {
 	c.pollVeleroStatusWithSuccess(task, object, basePayload, restoreStatusResult, func(payload map[string]any, message string) {
+		if task.Restore != nil && len(task.Restore.ImageMappings) > 0 {
+			payload["imageMappingStage"] = "running"
+			if err := c.sendTaskProgress(task, payload, 92, "Persistent data restoration completed; applying durable workload image mappings."); err != nil {
+				c.logger.Error("failed to send post-restore image mapping progress", "task_id", task.TaskID, "error", err)
+				return
+			}
+			if c.imageMapper == nil {
+				_ = c.sendTaskFailedWithDetails(task, "RESTORE_IMAGE_MAPPING_UNAVAILABLE", "workload image mapping is not supported by this agent", map[string]any{"velero": payload})
+				return
+			}
+			updated, err := c.imageMapper.ApplyWorkloadImageMappings(context.Background(), restoreTargetNamespace(task), task.Restore.ImageMappings)
+			if err != nil {
+				_ = c.sendTaskFailedWithDetails(task, "RESTORE_IMAGE_MAPPING_FAILED", err.Error(), map[string]any{"velero": payload})
+				return
+			}
+			payload["imageMappingStage"] = "succeeded"
+			payload["imageMapping"] = map[string]any{"updatedContainers": updated, "namespace": restoreTargetNamespace(task)}
+		}
 		if c.readiness == nil || task.Restore == nil || !task.Restore.WaitForWorkloads {
 			payload["readinessStage"] = "skipped"
 			payload["applicationValidationStage"] = "skipped"

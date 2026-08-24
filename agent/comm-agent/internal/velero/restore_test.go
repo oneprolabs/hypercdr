@@ -90,10 +90,13 @@ func TestBuildRestoreResourceModifierConfigMapIncludesEnvironmentMappings(t *tes
 		t.Fatal(err)
 	}
 	yaml := BuildRestoreResourceModifierConfigMap(manifest).Data["resource-modifiers.yaml"]
-	for _, expected := range []string{"source-sc", "target-sc", "docker.io/library/nginx:latest", "registry.local/nginx:v1", "/spec/template/spec/containers/0/image"} {
+	for _, expected := range []string{"source-sc", "target-sc", "docker.io/library/nginx:latest", "registry.local/nginx:v1", "groupResource: pods", "/spec/containers/0/image"} {
 		if !strings.Contains(yaml, expected) {
 			t.Fatalf("modifier does not contain %q: %s", expected, yaml)
 		}
+	}
+	if strings.Contains(yaml, "/spec/template/spec/containers/0/image") {
+		t.Fatalf("controller image mapping must be deferred until volume restoration completes: %s", yaml)
 	}
 }
 
