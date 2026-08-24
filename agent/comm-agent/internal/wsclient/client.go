@@ -443,7 +443,11 @@ func (c *Client) handleBackupContentRequest(request protocol.Message[protocol.Ba
 		} else {
 			report.Truncated = truncated
 			for _, item := range resources {
-				report.Resources = append(report.Resources, protocol.BackupResourceSummary{APIVersion: item.APIVersion, Kind: item.Kind, Namespace: item.Namespace, Name: item.Name, Group: item.Group, Resource: item.Resource, ClusterScoped: item.ClusterScoped, Images: item.Images, StorageClasses: item.StorageClasses})
+				ports := make([]protocol.BackupServicePortSummary, 0, len(item.ServicePorts))
+				for _, port := range item.ServicePorts {
+					ports = append(ports, protocol.BackupServicePortSummary{Name: port.Name, Port: port.Port, Protocol: port.Protocol, NodePort: port.NodePort})
+				}
+				report.Resources = append(report.Resources, protocol.BackupResourceSummary{APIVersion: item.APIVersion, Kind: item.Kind, Namespace: item.Namespace, Name: item.Name, Group: item.Group, Resource: item.Resource, ClusterScoped: item.ClusterScoped, Images: item.Images, StorageClasses: item.StorageClasses, ServicePorts: ports})
 			}
 		}
 	}

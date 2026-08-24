@@ -7175,6 +7175,10 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 	}
 	body.ConflictPolicy = recoveryConflictPolicy(taskType, body.NamespaceMode, body.SourceNamespace, body.TargetNamespace, body.ConflictPolicy)
 	if taskType == "drill" {
+		if err := r.validateServiceNodePortMappings(body.ClusterID, body.TargetNamespace, body.ServiceNodePortMappings); err != nil {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "service_nodeport_conflict", "message": err.Error()})
+			return
+		}
 		activeTask, found, err := r.findActiveRecoveryTask("drill", body.ClusterID, body.SourceNamespace)
 		if err != nil {
 			r.logger.Error("failed to check active drill tasks", "cluster_id", body.ClusterID, "source_namespace", body.SourceNamespace, "error", err)
@@ -7239,6 +7243,78 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 	}
 	go r.dispatchRecoveryTaskAfterStorageSync(task, body.StorageRepo, storageRepoID, storageSourceClusterID)
 	writeJSON(w, http.StatusCreated, task)
+}
+
+var nodePortFieldPattern = regexp.MustCompile(`:(3[0-2][0-9]{3})/(?:TCP|UDP|SCTP)\b`)
+
+func (r *Router) validateServiceNodePortMappings(clusterID, replacedNamespace string, mappings map[string]int) error {
+	if len(mappings) == 0 {
+		return nil
+	}
+	requested := map[int]string{}
+	for key, port := range mappings {
+		parts := strings.Split(key, "|")
+		if len(parts) != 3 || strings.TrimSpace(parts[0]) == "" {
+			return fmt.Errorf("invalid Service port mapping %q", key)
+		}
+		servicePort, err := strconv.Atoi(parts[1])
+		if err != nil || servicePort < 1 || servicePort > 65535 {
+			return fmt.Errorf("invalid Service port in mapping %q", key)
+		}
+		protocol := strings.ToUpper(strings.TrimSpace(parts[2]))
+		if protocol != "TCP" && protocol != "UDP" && protocol != "SCTP" {
+			return fmt.Errorf("unsupported protocol %q for Service %s", parts[2], parts[0])
+		}
+		if port < 30000 || port > 32767 {
+			return fmt.Errorf("NodePort %d for Service %s must be between 30000 and 32767", port, parts[0])
+		}
+		if previous := requested[port]; previous != "" {
+			return fmt.Errorf("NodePort %d is requested by both %s and %s", port, previous, parts[0])
+		}
+		requested[port] = parts[0]
+	}
+	apps, err := r.store.ListApplications(clusterID)
+	if err != nil {
+		return fmt.Errorf("target cluster NodePort preflight failed: %w", err)
+	}
+	used := map[int]string{}
+	for _, app := range apps {
+		if app.Namespace == replacedNamespace {
+			continue
+		}
+		collectNodePorts(app.ResourceSummary, app.Namespace, used)
+	}
+	for port, service := range requested {
+		if owner := used[port]; owner != "" {
+			return fmt.Errorf("NodePort %d requested for Service %s is already used by %s on the target cluster", port, service, owner)
+		}
+	}
+	return nil
+}
+
+func collectNodePorts(value any, namespace string, result map[int]string) {
+	switch typed := value.(type) {
+	case map[string]any:
+		name, _ := typed["name"].(string)
+		ports := ""
+		if fields, ok := typed["fields"].(map[string]any); ok {
+			ports, _ = fields["PORT(S)"].(string)
+		}
+		if fields, ok := typed["fields"].(map[string]string); ok {
+			ports = fields["PORT(S)"]
+		}
+		for _, match := range nodePortFieldPattern.FindAllStringSubmatch(ports, -1) {
+			port, _ := strconv.Atoi(match[1])
+			result[port] = namespace + "/" + firstNonEmptyString(name, "Service")
+		}
+		for _, child := range typed {
+			collectNodePorts(child, namespace, result)
+		}
+	case []any:
+		for _, child := range typed {
+			collectNodePorts(child, namespace, result)
+		}
+	}
 }
 
 func recoveryConflictPolicy(taskType string, namespaceMode string, sourceNamespace string, targetNamespace string, requested string) string {
@@ -10918,7 +10994,7 @@ func (r *Router) getRestorePointContents(w http.ResponseWriter, req *http.Reques
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "cluster_not_found"})
 		return
 	}
-	if index, ok := restorePointContentIndex(point); ok && index.Status == "ready" {
+	if index, ok := restorePointContentIndex(point); ok && index.Status == "ready" && index.SchemaVersion >= 2 {
 		writeJSON(w, http.StatusOK, map[string]any{"restorePointId": point.ID, "veleroBackupName": point.VeleroBackupName, "clusterId": clusterID, "resources": index.Resources, "truncated": index.Truncated, "indexedAt": index.IndexedAt, "source": "index"})
 		return
 	}
@@ -10936,6 +11012,7 @@ func (r *Router) getRestorePointContents(w http.ResponseWriter, req *http.Reques
 }
 
 type restorePointIndex struct {
+	SchemaVersion    int                              `json:"schemaVersion,omitempty"`
 	Status           string                           `json:"status"`
 	Resources        []protocol.BackupResourceSummary `json:"resources"`
 	Truncated        bool                             `json:"truncated,omitempty"`
@@ -10994,7 +11071,7 @@ func normalizeBackupResourceSummaries(resources []protocol.BackupResourceSummary
 }
 
 func (r *Router) persistRestorePointContentIndex(point store.RestorePoint, report protocol.BackupContentReportPayload, status string, message string) {
-	index := restorePointIndex{Status: status, Resources: normalizeBackupResourceSummaries(report.Resources), Truncated: report.Truncated, GeneratorVersion: r.clusterAgentVersion(point.SourceClusterID), LastError: message}
+	index := restorePointIndex{SchemaVersion: 2, Status: status, Resources: normalizeBackupResourceSummaries(report.Resources), Truncated: report.Truncated, GeneratorVersion: r.clusterAgentVersion(point.SourceClusterID), LastError: message}
 	if status == "ready" {
 		index.IndexedAt = time.Now().UTC()
 		index.LastError = ""
@@ -11023,7 +11100,7 @@ func (r *Router) scheduleRestorePointContentIndex(point store.RestorePoint) {
 	if point.ID == "" || point.Status != "available" {
 		return
 	}
-	if index, ok := restorePointContentIndex(point); ok && index.Status == "ready" {
+	if index, ok := restorePointContentIndex(point); ok && index.Status == "ready" && index.SchemaVersion >= 2 {
 		currentVersion := r.clusterAgentVersion(point.SourceClusterID)
 		if currentVersion == "" || index.GeneratorVersion == currentVersion {
 			return

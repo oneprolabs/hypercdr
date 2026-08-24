@@ -327,15 +327,23 @@ type BackupContentRequestPayload struct {
 }
 
 type BackupResourceSummary struct {
-	APIVersion     string   `json:"apiVersion"`
-	Kind           string   `json:"kind"`
-	Namespace      string   `json:"namespace,omitempty"`
-	Name           string   `json:"name"`
-	Group          string   `json:"group,omitempty"`
-	Resource       string   `json:"resource,omitempty"`
-	ClusterScoped  bool     `json:"clusterScoped"`
-	Images         []string `json:"images,omitempty"`
-	StorageClasses []string `json:"storageClasses,omitempty"`
+	APIVersion     string                     `json:"apiVersion"`
+	Kind           string                     `json:"kind"`
+	Namespace      string                     `json:"namespace,omitempty"`
+	Name           string                     `json:"name"`
+	Group          string                     `json:"group,omitempty"`
+	Resource       string                     `json:"resource,omitempty"`
+	ClusterScoped  bool                       `json:"clusterScoped"`
+	Images         []string                   `json:"images,omitempty"`
+	StorageClasses []string                   `json:"storageClasses,omitempty"`
+	ServicePorts   []BackupServicePortSummary `json:"servicePorts,omitempty"`
+}
+
+type BackupServicePortSummary struct {
+	Name     string `json:"name,omitempty"`
+	Port     int64  `json:"port"`
+	Protocol string `json:"protocol"`
+	NodePort int64  `json:"nodePort,omitempty"`
 }
 
 type BackupContentReportPayload struct {

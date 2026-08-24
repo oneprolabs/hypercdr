@@ -124,13 +124,40 @@ func (a *DynamicManifestApplier) ReadVeleroBackupContents(ctx context.Context, n
 		}
 		seenResources[identity] = struct{}{}
 		images, storageClasses := resourceReferences(object)
-		items = append(items, BackupContentResource{APIVersion: apiVersion, Kind: kind, Namespace: namespaceValue, Name: nameValue, Group: group, Resource: resourceName, ClusterScoped: archiveItem.clusterScoped, Images: images, StorageClasses: storageClasses})
+		items = append(items, BackupContentResource{APIVersion: apiVersion, Kind: kind, Namespace: namespaceValue, Name: nameValue, Group: group, Resource: resourceName, ClusterScoped: archiveItem.clusterScoped, Images: images, StorageClasses: storageClasses, ServicePorts: backupServicePorts(object)})
 		if len(items) >= limit {
 			truncated = true
 			break
 		}
 	}
 	return items, truncated, nil
+}
+
+func backupServicePorts(object map[string]any) []BackupServicePort {
+	kind, _, _ := unstructured.NestedString(object, "kind")
+	if kind != "Service" {
+		return nil
+	}
+	ports, _, _ := unstructured.NestedSlice(object, "spec", "ports")
+	result := make([]BackupServicePort, 0, len(ports))
+	for _, raw := range ports {
+		port, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		value, _, _ := unstructured.NestedInt64(port, "port")
+		if value <= 0 {
+			continue
+		}
+		name, _, _ := unstructured.NestedString(port, "name")
+		protocol, _, _ := unstructured.NestedString(port, "protocol")
+		if protocol == "" {
+			protocol = "TCP"
+		}
+		nodePort, _, _ := unstructured.NestedInt64(port, "nodePort")
+		result = append(result, BackupServicePort{Name: name, Port: value, Protocol: protocol, NodePort: nodePort})
+	}
+	return result
 }
 
 type veleroArchiveRole uint8

@@ -29,6 +29,14 @@ type BackupContentResource struct {
 	ClusterScoped  bool
 	Images         []string
 	StorageClasses []string
+	ServicePorts   []BackupServicePort
+}
+
+type BackupServicePort struct {
+	Name     string
+	Port     int64
+	Protocol string
+	NodePort int64
 }
 
 type BackupContentReader interface {

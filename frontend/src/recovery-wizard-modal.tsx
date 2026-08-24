@@ -76,6 +76,7 @@ export type BackupContentResource = {
   clusterScoped: boolean;
   images?: string[];
   storageClasses?: string[];
+  servicePorts?: Array<{ name?: string; port: number; protocol: string; nodePort?: number }>;
 };
 
 type RepositoryOption = {
@@ -217,7 +218,7 @@ export function RecoveryWizardModal(props: Props) {
   const targetClusterOption = clusterOptions.find(item => item.name === config.targetCluster);
   const backupStorageClasses = Array.from(new Set(contents.flatMap(item => item.storageClasses || []))).sort();
   const backupImages = Array.from(new Set(contents.flatMap(item => item.images || []))).sort();
-  const backupServices = Array.from(new Set(contents.filter(item => item.kind === 'Service').map(item => item.name))).sort();
+  const backupServicePorts = contents.filter(item => item.kind === 'Service').flatMap(item => (item.servicePorts || []).map(port => ({ service: item.name, ...port, key: `${item.name}|${port.port}|${port.protocol || 'TCP'}` }))).sort((a,b) => a.service.localeCompare(b.service) || a.port-b.port);
   const restorePointUnavailable = Boolean(contentsError && /restore.?point.?not.?found|no longer available/i.test(contentsError));
   const nodePortEntries = Object.entries(config.serviceNodePortMappings || {});
   const nodePortError = nodePortEntries.find(([, port]) => !Number.isInteger(port) || port < 30000 || port > 32767)
@@ -573,17 +574,17 @@ export function RecoveryWizardModal(props: Props) {
                           <span><em>Source image</em><b title={source}>{source}</b></span>
                           <span><em>Target image</em><input title={config.imageMappings?.[source] || ''} value={config.imageMappings?.[source] || ''} onChange={event => updateMapping('imageMappings', source, event.target.value)} placeholder="Keep original image" /></span>
                         </label>)}
-                        {backupServices.length > 0 && <>
-                          <header><strong>Service NodePort mappings</strong><span>Leave blank to let the target cluster allocate a port automatically.</span></header>
-                          {backupServices.map(service => <label className="hbdr-recovery-mapping" key={`nodeport-${service}`}>
-                            <span>Service <b>{service}</b></span>
-                            <input type="number" min={30000} max={32767} placeholder="Automatic" value={config.serviceNodePortMappings?.[service] ?? ''} onChange={event => updateNodePort(service, event.target.value)} />
-                          </label>)}
-                          {nodePortError && <p className="hbdr-recovery-inline-error">{nodePortError[0] === 'duplicate' ? 'Each Service must use a different NodePort.' : 'NodePort must be an integer between 30000 and 32767.'}</p>}
-                        </>}
                         {config.contentCatalogLoaded && backupStorageClasses.length === 0 && backupImages.length === 0 && <p className="hbdr-recovery-muted">No StorageClass or container image references were found in the inspected backup.</p>}
                         {!config.contentCatalogLoaded && <p className="hbdr-recovery-muted">Mappings are unavailable until restore point content inspection succeeds.</p>}
                       </section>
+                      {backupServicePorts.length > 0 && <section>
+                          <header><strong>Service NodePort mappings</strong><span>Leave blank to let the target cluster allocate a port automatically.</span></header>
+                          {backupServicePorts.map(port => <label className="hbdr-recovery-mapping" key={`nodeport-${port.key}`}>
+                            <span>Service <b>{port.service}</b><em>{port.name ? `${port.name} · ` : ''}${port.port}/${port.protocol || 'TCP'}</em></span>
+                            <input type="number" min={30000} max={32767} placeholder="Automatic" value={config.serviceNodePortMappings?.[port.key] ?? ''} onChange={event => updateNodePort(port.key, event.target.value)} />
+                          </label>)}
+                          {nodePortError && <p className="hbdr-recovery-inline-error">{nodePortError[0] === 'duplicate' ? 'Each Service must use a different NodePort.' : 'NodePort must be an integer between 30000 and 32767.'}</p>}
+                        </section>}
                       {mode !== 'drill' && <section>
                         <header><strong>Validation</strong><span>These checks run after Kubernetes resources and persistent data are restored.</span></header>
                         <label className="hbdr-recovery-confirm-check"><input type="checkbox" checked={config.waitForWorkloads} onChange={event => updateConfig({ waitForWorkloads: event.target.checked })} /><span>Wait for workloads and pods to become ready</span></label>
