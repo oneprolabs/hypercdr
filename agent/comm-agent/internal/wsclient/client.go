@@ -1724,16 +1724,8 @@ func (c *Client) pollVeleroStatus(task protocol.TaskDispatchPayload, object kube
 		if volumePayload, volumeProgress, volumeMessage, ready := c.buildVolumeProgressPayload(context.Background(), object, &samples); volumePayload != nil {
 			payload["volumeProgress"] = volumePayload
 			if failedCount := int64FromAny(volumePayload["failedCount"]); object.Kind == "Restore" && failedCount > 0 {
-				failureMessage := "Volume data restore validation failed."
-				if items, ok := volumePayload["items"].([]map[string]any); ok {
-					for _, item := range items {
-						if detail := strings.TrimSpace(fmt.Sprint(item["message"])); detail != "" {
-							failureMessage = detail
-							break
-						}
-					}
-				}
-				_ = c.sendTaskFailedWithDetails(task, "RESTORE_VOLUME_DEPENDENCY_MISSING", failureMessage, map[string]any{"velero": payload})
+				failureCode, failureMessage := restoreVolumeFailureDetails(volumePayload)
+				_ = c.sendTaskFailedWithDetails(task, failureCode, failureMessage, map[string]any{"velero": payload})
 				return
 			}
 			volumeReady = ready
@@ -1838,16 +1830,8 @@ func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, 
 		if volumePayload, volumeProgress, volumeMessage, ready := c.buildVolumeProgressPayload(context.Background(), object, &samples); volumePayload != nil {
 			payload["volumeProgress"] = volumePayload
 			if failedCount := int64FromAny(volumePayload["failedCount"]); object.Kind == "Restore" && failedCount > 0 {
-				failureMessage := "Volume data restoration did not start because a required dependency is unavailable."
-				if items, ok := volumePayload["items"].([]map[string]any); ok {
-					for _, item := range items {
-						if detail := strings.TrimSpace(fmt.Sprint(item["message"])); detail != "" {
-							failureMessage = detail
-							break
-						}
-					}
-				}
-				_ = c.sendTaskFailedWithDetails(task, "RESTORE_VOLUME_DEPENDENCY_MISSING", failureMessage, map[string]any{"velero": payload})
+				failureCode, failureMessage := restoreVolumeFailureDetails(volumePayload)
+				_ = c.sendTaskFailedWithDetails(task, failureCode, failureMessage, map[string]any{"velero": payload})
 				return
 			}
 			volumeReady = ready
@@ -2255,6 +2239,9 @@ func (c *Client) buildVolumeProgressPayload(ctx context.Context, object kube.App
 			"incrementalKnown": item.IncrementalKnown,
 			"knownTotal":       item.KnownTotal,
 			"message":          item.Message,
+			"errorCode":        item.ErrorCode,
+			"createdAt":        item.CreatedAt,
+			"elapsedSeconds":   item.ElapsedSeconds,
 		})
 	}
 	payload := map[string]any{
@@ -2278,6 +2265,23 @@ func (c *Client) buildVolumeProgressPayload(ctx context.Context, object kube.App
 	}
 	ready := len(progress.Items) > 0
 	return payload, taskProgress, volumeProgressMessage(operation, progress, speedBytesPerSecond, etaSeconds, percent), ready
+}
+
+func restoreVolumeFailureDetails(volumePayload map[string]any) (string, string) {
+	code := "RESTORE_VOLUME_DEPENDENCY_MISSING"
+	message := "Volume data restore validation failed."
+	if items, ok := volumePayload["items"].([]map[string]any); ok {
+		for _, item := range items {
+			if itemCode := strings.TrimSpace(fmt.Sprint(item["errorCode"])); itemCode != "" && itemCode != "<nil>" {
+				code = itemCode
+			}
+			if detail := strings.TrimSpace(fmt.Sprint(item["message"])); detail != "" && detail != "<nil>" {
+				message = detail
+				break
+			}
+		}
+	}
+	return code, message
 }
 
 func (c *Client) attachBackupSizeStats(ctx context.Context, object kube.AppliedObject, payload map[string]any) {

@@ -70,3 +70,13 @@ func TestWithRecoveryStagesLeavesBackupPayloadUnchanged(t *testing.T) {
 		t.Fatalf("backup unexpectedly received recovery stages: %#v", got)
 	}
 }
+
+func TestRestoreVolumeFailureDetailsPreservesStartTimeout(t *testing.T) {
+	code, message := restoreVolumeFailureDetails(map[string]any{"items": []map[string]any{{
+		"errorCode": "RESTORE_VOLUME_START_TIMEOUT",
+		"message":   "pod volume restore pvr-a did not start within 10m0s",
+	}}})
+	if code != "RESTORE_VOLUME_START_TIMEOUT" || message != "pod volume restore pvr-a did not start within 10m0s" {
+		t.Fatalf("got (%q, %q)", code, message)
+	}
+}

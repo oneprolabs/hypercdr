@@ -373,6 +373,13 @@ export const ERROR_MESSAGE_CATALOG: ErrorMessageDefinition[] = [
     detail: 'Inspect deleting Velero Restore and PodVolumeRestore objects on the target cluster. Resolve stuck finalizers or controllers, confirm the stale objects are removed, and then retry the drill.',
     match: message => message.toLowerCase().includes('timed out waiting for stale restore state to be deleted'),
   },
+  {
+    code: '140009',
+    aliases: ['RESTORE_VOLUME_START_TIMEOUT'],
+    title: 'Volume restoration did not start',
+    description: 'Persistent volume data restoration did not start within the allowed observation window.',
+    detail: 'Check the PodVolumeRestore name and elapsed time in task details. Verify that the restored PVC exists and is Bound, the target StorageClass and Longhorn replicas are healthy, and the workload volume can be mounted on a target node.',
+  },
 ];
 
 export const ERROR_MESSAGE_BY_CODE = new Map(ERROR_MESSAGE_CATALOG.map(item => [item.code, item]));

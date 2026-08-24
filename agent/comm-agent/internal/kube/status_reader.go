@@ -13,6 +13,11 @@ import (
 	"k8s.io/client-go/dynamic"
 )
 
+const (
+	restoreVolumeStartGrace     = 10 * time.Minute
+	restoreWorkloadStartupGrace = 5 * time.Minute
+)
+
 type ManifestStatusReader interface {
 	GetManifestStatus(ctx context.Context, object AppliedObject) (ManifestStatus, error)
 }
@@ -110,6 +115,9 @@ type VolumeProgressItem struct {
 	IncrementalKnown bool
 	KnownTotal       bool
 	Message          string
+	ErrorCode        string
+	CreatedAt        time.Time
+	ElapsedSeconds   int64
 }
 
 type VeleroBackupSummary struct {
@@ -306,15 +314,22 @@ func (a *DynamicManifestApplier) getVolumeProgress(ctx context.Context, namespac
 				continue
 			}
 			progress := volumeProgressFromItem(resource.Kind, item)
-			if resource.Kind == "PodVolumeRestore" && progress.Phase == "" && time.Since(item.GetCreationTimestamp().Time) >= 30*time.Second {
+			age := time.Since(item.GetCreationTimestamp().Time)
+			progress.CreatedAt = item.GetCreationTimestamp().Time
+			if age > 0 {
+				progress.ElapsedSeconds = int64(age / time.Second)
+			}
+			if resource.Kind == "PodVolumeRestore" && progress.Phase == "" && age >= restoreVolumeStartGrace {
 				if message := a.podVolumeRestoreDependencyFailure(ctx, item); message != "" {
 					progress.Phase = "FailedValidation"
 					progress.Message = message
+					progress.ErrorCode = "RESTORE_VOLUME_DEPENDENCY_MISSING"
 				}
 			}
-			if resource.Kind == "PodVolumeRestore" && progress.Phase == "" && time.Since(item.GetCreationTimestamp().Time) >= 2*time.Minute {
+			if resource.Kind == "PodVolumeRestore" && progress.Phase == "" && age >= restoreVolumeStartGrace {
 				progress.Phase = "FailedValidation"
-				progress.Message = "volume data restoration did not start within 2 minutes; verify that the restored PVC exists, is bound, and can be mounted by a target node"
+				progress.Message = fmt.Sprintf("volume data restoration did not start within %s; verify that the restored PVC exists, is bound, and can be mounted by a target node", restoreVolumeStartGrace)
+				progress.ErrorCode = "RESTORE_VOLUME_START_TIMEOUT"
 			}
 			result.Items = append(result.Items, progress)
 			result.BytesDone += progress.BytesDone
@@ -521,6 +536,9 @@ func imagePullFailureEventMessage(events []unstructured.Unstructured) string {
 }
 
 func podTerminalReadinessFailure(object map[string]any) (string, string) {
+	if createdAt, ok := nestedTime(object, "metadata", "creationTimestamp"); ok && time.Since(createdAt) < restoreWorkloadStartupGrace {
+		return "", ""
+	}
 	podName, _, _ := unstructured.NestedString(object, "metadata", "name")
 	for _, statusPath := range [][]string{{"status", "initContainerStatuses"}, {"status", "containerStatuses"}} {
 		statuses, _, _ := unstructured.NestedSlice(object, statusPath...)

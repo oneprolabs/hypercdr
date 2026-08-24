@@ -3,9 +3,34 @@ package kube
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
+
+func TestPodTerminalReadinessFailureObservesRecentImagePull(t *testing.T) {
+	object := map[string]any{
+		"metadata": map[string]any{"name": "demo-web-abc", "creationTimestamp": time.Now().Add(-time.Minute).Format(time.RFC3339)},
+		"status": map[string]any{"containerStatuses": []any{map[string]any{
+			"name": "web", "state": map[string]any{"waiting": map[string]any{"reason": "ImagePullBackOff"}},
+		}}},
+	}
+	if code, message := podTerminalReadinessFailure(object); code != "" || message != "" {
+		t.Fatalf("recent image pull must remain observable, got %q %q", code, message)
+	}
+}
+
+func TestPodTerminalReadinessFailureReportsPersistentImagePull(t *testing.T) {
+	object := map[string]any{
+		"metadata": map[string]any{"name": "demo-web-abc", "creationTimestamp": time.Now().Add(-restoreWorkloadStartupGrace - time.Minute).Format(time.RFC3339)},
+		"status": map[string]any{"containerStatuses": []any{map[string]any{
+			"name": "web", "state": map[string]any{"waiting": map[string]any{"reason": "ImagePullBackOff"}},
+		}}},
+	}
+	if code, _ := podTerminalReadinessFailure(object); code != "RESTORE_WORKLOAD_IMAGE_PULL_FAILED" {
+		t.Fatalf("persistent image pull code = %q", code)
+	}
+}
 
 func TestPodTerminalReadinessFailureReportsImagePull(t *testing.T) {
 	object := map[string]any{
