@@ -580,7 +580,7 @@ export function RecoveryWizardModal(props: Props) {
                       {backupServicePorts.length > 0 && <section>
                           <header><strong>Service NodePort mappings</strong><span>Leave blank to let the target cluster allocate a port automatically.</span></header>
                           {backupServicePorts.map(port => <label className="hbdr-recovery-mapping" key={`nodeport-${port.key}`}>
-                            <span>Service <b>{port.service}</b><em>{port.name ? `${port.name} · ` : ''}${port.port}/${port.protocol || 'TCP'}</em></span>
+                            <span>Service <b>{port.service}</b><em>{port.name ? `${port.name} · ` : ''}Service port {port.port}/{port.protocol || 'TCP'}{port.nodePort ? ` · Current NodePort ${port.nodePort}` : ''}</em></span>
                             <input type="number" min={30000} max={32767} placeholder="Automatic" value={config.serviceNodePortMappings?.[port.key] ?? ''} onChange={event => updateNodePort(port.key, event.target.value)} />
                           </label>)}
                           {nodePortError && <p className="hbdr-recovery-inline-error">{nodePortError[0] === 'duplicate' ? 'Each Service must use a different NodePort.' : 'NodePort must be an integer between 30000 and 32767.'}</p>}
