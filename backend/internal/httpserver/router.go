@@ -4853,31 +4853,32 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 			sourceNamespaces = []string{sourceNamespace}
 		}
 		payload.Restore = &protocol.RestoreCommand{
-			RestorePointID:         stringPayload(task.Payload, "restorePointId"),
-			VeleroBackupName:       stringPayload(task.Payload, "veleroBackupName"),
-			StorageRepo:            stringPayload(task.Payload, "storageRepo"),
-			SourceNamespace:        sourceNamespace,
-			SourceNamespaces:       sourceNamespaces,
-			TargetNamespace:        stringPayload(task.Payload, "targetNamespace"),
-			TargetNamespaces:       stringMapPayload(task.Payload, "targetNamespaces"),
-			TargetMode:             stringPayload(task.Payload, "targetMode"),
-			RestoreMode:            stringPayload(task.Payload, "restoreMode"),
-			ArtifactMode:           stringPayload(task.Payload, "artifactMode"),
-			ConflictPolicy:         stringPayload(task.Payload, "conflictPolicy"),
-			IncludeClusterScoped:   boolPayload(task.Payload, "includeClusterScoped"),
-			UseTransforms:          boolPayload(task.Payload, "useTransforms"),
-			TransformPreset:        stringPayload(task.Payload, "transformPreset"),
-			StorageProfileMode:     stringPayload(task.Payload, "storageProfileMode"),
-			AlternateProfileID:     stringPayload(task.Payload, "alternateProfileId"),
-			IncludedResources:      stringSlicePayload(task.Payload, "includedResources"),
-			ExcludedResources:      stringSlicePayload(task.Payload, "excludedResources"),
-			StorageClassMappings:   stringMapPayload(task.Payload, "storageClassMappings"),
-			ImageMappings:          stringMapPayload(task.Payload, "imageMappings"),
-			WaitForWorkloads:       boolPayload(task.Payload, "waitForWorkloads"),
-			RunValidation:          boolPayload(task.Payload, "runValidation"),
-			ForceStart:             boolPayload(task.Payload, "forceStart"),
-			ContentCatalogLoaded:   boolPayload(task.Payload, "contentCatalogLoaded"),
-			PersistentDataExpected: boolPayload(task.Payload, "persistentDataExpected"),
+			RestorePointID:          stringPayload(task.Payload, "restorePointId"),
+			VeleroBackupName:        stringPayload(task.Payload, "veleroBackupName"),
+			StorageRepo:             stringPayload(task.Payload, "storageRepo"),
+			SourceNamespace:         sourceNamespace,
+			SourceNamespaces:        sourceNamespaces,
+			TargetNamespace:         stringPayload(task.Payload, "targetNamespace"),
+			TargetNamespaces:        stringMapPayload(task.Payload, "targetNamespaces"),
+			TargetMode:              stringPayload(task.Payload, "targetMode"),
+			RestoreMode:             stringPayload(task.Payload, "restoreMode"),
+			ArtifactMode:            stringPayload(task.Payload, "artifactMode"),
+			ConflictPolicy:          stringPayload(task.Payload, "conflictPolicy"),
+			IncludeClusterScoped:    boolPayload(task.Payload, "includeClusterScoped"),
+			UseTransforms:           boolPayload(task.Payload, "useTransforms"),
+			TransformPreset:         stringPayload(task.Payload, "transformPreset"),
+			StorageProfileMode:      stringPayload(task.Payload, "storageProfileMode"),
+			AlternateProfileID:      stringPayload(task.Payload, "alternateProfileId"),
+			IncludedResources:       stringSlicePayload(task.Payload, "includedResources"),
+			ExcludedResources:       stringSlicePayload(task.Payload, "excludedResources"),
+			StorageClassMappings:    stringMapPayload(task.Payload, "storageClassMappings"),
+			ImageMappings:           stringMapPayload(task.Payload, "imageMappings"),
+			ServiceNodePortMappings: intMapPayload(task.Payload, "serviceNodePortMappings"),
+			WaitForWorkloads:        boolPayload(task.Payload, "waitForWorkloads"),
+			RunValidation:           boolPayload(task.Payload, "runValidation"),
+			ForceStart:              boolPayload(task.Payload, "forceStart"),
+			ContentCatalogLoaded:    boolPayload(task.Payload, "contentCatalogLoaded"),
+			PersistentDataExpected:  boolPayload(task.Payload, "persistentDataExpected"),
 		}
 	case "unregister":
 		payload.Deadline = time.Now().UTC().Add(10 * time.Minute)
@@ -5021,6 +5022,25 @@ func stringMapPayload(payload map[string]any, key string) map[string]string {
 		return nil
 	}
 	return values
+}
+
+func intMapPayload(payload map[string]any, key string) map[string]int {
+	result := map[string]int{}
+	value, ok := payload[key].(map[string]any)
+	if !ok {
+		return result
+	}
+	for name, raw := range value {
+		switch port := raw.(type) {
+		case int:
+			result[name] = port
+		case int64:
+			result[name] = int(port)
+		case float64:
+			result[name] = int(port)
+		}
+	}
+	return result
 }
 
 func retentionCleanupCommandFromPayload(payload map[string]any) *protocol.RetentionCleanupCommand {
@@ -7035,6 +7055,7 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 		ExcludedResources          []string          `json:"excludedResources"`
 		StorageClassMappings       map[string]string `json:"storageClassMappings"`
 		ImageMappings              map[string]string `json:"imageMappings"`
+		ServiceNodePortMappings    map[string]int    `json:"serviceNodePortMappings"`
 		WaitForWorkloads           *bool             `json:"waitForWorkloads"`
 		RunValidation              *bool             `json:"runValidation"`
 		ForceStart                 bool              `json:"forceStart"`
@@ -7203,6 +7224,7 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 			"excludedResources":          body.ExcludedResources,
 			"storageClassMappings":       body.StorageClassMappings,
 			"imageMappings":              body.ImageMappings,
+			"serviceNodePortMappings":    body.ServiceNodePortMappings,
 			"waitForWorkloads":           waitForWorkloads,
 			"runValidation":              runValidation,
 			"forceStart":                 body.ForceStart,

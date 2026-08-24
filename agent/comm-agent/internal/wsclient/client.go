@@ -57,6 +57,7 @@ type Client struct {
 	scheduleReader kube.VeleroScheduleReader
 	readiness      kube.RestoreReadinessReader
 	imageMapper    kube.WorkloadImageMapper
+	serviceMapper  kube.ServiceNodePortMapper
 	applier        kube.ManifestApplier
 	deleteWaiter   kube.VeleroBackupDeletionWaiter
 	contentReader  kube.BackupContentReader
@@ -109,6 +110,7 @@ func NewWithRuntimeDependencies(cfg config.Config, logger *slog.Logger, applier 
 	scheduleReader, _ := applier.(kube.VeleroScheduleReader)
 	readiness, _ := applier.(kube.RestoreReadinessReader)
 	imageMapper, _ := applier.(kube.WorkloadImageMapper)
+	serviceMapper, _ := applier.(kube.ServiceNodePortMapper)
 	deleteWaiter, _ := applier.(kube.VeleroBackupDeletionWaiter)
 	contentReader, _ := applier.(kube.BackupContentReader)
 	outbox, err := newEventOutbox(cfg.StateDir)
@@ -145,6 +147,7 @@ func NewWithRuntimeDependencies(cfg config.Config, logger *slog.Logger, applier 
 		scheduleReader:    scheduleReader,
 		readiness:         readiness,
 		imageMapper:       imageMapper,
+		serviceMapper:     serviceMapper,
 		applier:           applier,
 		deleteWaiter:      deleteWaiter,
 		contentReader:     contentReader,
@@ -1791,6 +1794,18 @@ func (c *Client) pollRestoreStatus(task protocol.TaskDispatchPayload, object kub
 			}
 			payload["imageMappingStage"] = "succeeded"
 			payload["imageMapping"] = map[string]any{"updatedContainers": updated, "namespace": restoreTargetNamespace(task)}
+		}
+		if task.Restore != nil && len(task.Restore.ServiceNodePortMappings) > 0 {
+			if c.serviceMapper == nil {
+				_ = c.sendTaskFailed(task, "RESTORE_SERVICE_MAPPING_UNAVAILABLE", "service NodePort mapping is not supported by this agent")
+				return
+			}
+			updated, err := c.serviceMapper.ApplyServiceNodePortMappings(context.Background(), restoreTargetNamespace(task), task.Restore.ServiceNodePortMappings)
+			if err != nil {
+				_ = c.sendTaskFailedWithDetails(task, "RESTORE_SERVICE_MAPPING_FAILED", err.Error(), map[string]any{"velero": payload})
+				return
+			}
+			payload["serviceNodePortMapping"] = map[string]any{"updatedServices": updated, "namespace": restoreTargetNamespace(task)}
 		}
 		if c.readiness == nil || task.Restore == nil || !task.Restore.WaitForWorkloads {
 			payload["readinessStage"] = "skipped"

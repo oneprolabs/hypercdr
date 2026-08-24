@@ -47,6 +47,10 @@ type WorkloadImageMapper interface {
 	ApplyWorkloadImageMappings(ctx context.Context, namespace string, mappings map[string]string) (int, error)
 }
 
+type ServiceNodePortMapper interface {
+	ApplyServiceNodePortMappings(ctx context.Context, namespace string, mappings map[string]int) (int, error)
+}
+
 type VeleroBackupDeletionWaiter interface {
 	WaitForVeleroBackupDeleted(ctx context.Context, namespace string, name string, timeout time.Duration) error
 }

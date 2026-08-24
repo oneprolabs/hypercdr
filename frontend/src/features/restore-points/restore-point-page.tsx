@@ -464,6 +464,7 @@ export default function RealRestorePointPage({
 	  resourceSelection: { mode: 'all', namespaceScoped: [], clusterScoped: [] },
       storageClassMappings: {},
       imageMappings: {},
+      serviceNodePortMappings: {},
       waitForWorkloads: true,
       runValidation: mode === 'drill',
       forceStart: false,
