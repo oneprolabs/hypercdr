@@ -56,7 +56,15 @@ export default function DRTopologyView({ clusters, model, selectedRelationshipId
           const target = positions.get(relationship.targetClusterId);
           if (!source || !target) return null;
           const reverse = model.relationships.some(item => item.sourceClusterId === relationship.targetClusterId && item.targetClusterId === relationship.sourceClusterId);
-          const offset = reverse ? (relationship.sourceClusterId.localeCompare(relationship.targetClusterId) < 0 ? -5 : 5) : 0;
+          const midpointX = (source.x + target.x) / 2;
+          const midpointY = (source.y + target.y) / 2;
+          const midpointHitsNode = orderedClusters.some(cluster => {
+            if (cluster.id === relationship.sourceClusterId || cluster.id === relationship.targetClusterId) return false;
+            const position = positions.get(cluster.id);
+            return Boolean(position && Math.abs(position.x - midpointX) < 14 && Math.abs(position.y - midpointY) < 16);
+          });
+          const directionOffset = relationship.id.localeCompare('') % 2 === 0 ? -11 : 11;
+          const offset = midpointHitsNode ? directionOffset : reverse ? (relationship.sourceClusterId.localeCompare(relationship.targetClusterId) < 0 ? -5 : 5) : 0;
           const meta = statusMeta[relationship.status];
           const Icon = meta.icon;
           const DirectionArrow = target.x < source.x ? ArrowLeft : ArrowRight;
