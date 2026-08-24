@@ -11028,9 +11028,10 @@ type restorePointIndex struct {
 	RetryAt          time.Time                        `json:"retryAt,omitempty"`
 }
 
-// Version 3 guarantees that cached catalogs include Service port metadata.
+// Version 4 guarantees that cached catalogs were generated after JSON numeric
+// Service ports were decoded correctly by comm-agent.
 // Earlier catalogs can be structurally valid but cannot drive NodePort mapping UI.
-const restorePointContentIndexSchemaVersion = 3
+const restorePointContentIndexSchemaVersion = 4
 
 func restorePointContentIndex(point store.RestorePoint) (restorePointIndex, bool) {
 	value, ok := point.Metadata["contentIndex"]

@@ -33,7 +33,7 @@ func TestRestorePointContentIndexRejectsMissingOrInvalidIndex(t *testing.T) {
 }
 
 func TestRestorePointContentIndexSchemaRequiresServicePorts(t *testing.T) {
-	if restorePointContentIndexSchemaVersion < 3 {
+	if restorePointContentIndexSchemaVersion < 4 {
 		t.Fatalf("content index schema must invalidate catalogs created before Service port indexing")
 	}
 }
