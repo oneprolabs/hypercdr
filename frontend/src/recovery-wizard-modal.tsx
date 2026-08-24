@@ -620,7 +620,7 @@ export function RecoveryWizardModal(props: Props) {
                           <header><strong>Service NodePort mappings</strong><span>Set the external port exposed by each restored Service, or leave it automatic.</span></header>
                           <div className="hbdr-recovery-nodeport-list">
                             <div className="hbdr-recovery-nodeport-head" aria-hidden="true">
-                              <span>Service</span><span>Service port</span><span>Current</span><span>Target NodePort</span>
+                              <span>Service</span><span>Service port</span><span>Source NodePort</span><span>Target NodePort</span>
                             </div>
                             {backupServicePorts.map(port => {
                               const protocol = port.protocol || 'TCP';
