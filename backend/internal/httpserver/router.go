@@ -5026,6 +5026,12 @@ func stringMapPayload(payload map[string]any, key string) map[string]string {
 
 func intMapPayload(payload map[string]any, key string) map[string]int {
 	result := map[string]int{}
+	if typed, ok := payload[key].(map[string]int); ok {
+		for name, value := range typed {
+			result[name] = value
+		}
+		return result
+	}
 	value, ok := payload[key].(map[string]any)
 	if !ok {
 		return result
@@ -10994,7 +11000,7 @@ func (r *Router) getRestorePointContents(w http.ResponseWriter, req *http.Reques
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "cluster_not_found"})
 		return
 	}
-	if index, ok := restorePointContentIndex(point); ok && index.Status == "ready" && index.SchemaVersion >= 2 {
+	if index, ok := restorePointContentIndex(point); ok && index.Status == "ready" && index.SchemaVersion >= restorePointContentIndexSchemaVersion {
 		writeJSON(w, http.StatusOK, map[string]any{"restorePointId": point.ID, "veleroBackupName": point.VeleroBackupName, "clusterId": clusterID, "resources": index.Resources, "truncated": index.Truncated, "indexedAt": index.IndexedAt, "source": "index"})
 		return
 	}
@@ -11021,6 +11027,10 @@ type restorePointIndex struct {
 	LastError        string                           `json:"lastError,omitempty"`
 	RetryAt          time.Time                        `json:"retryAt,omitempty"`
 }
+
+// Version 3 guarantees that cached catalogs include Service port metadata.
+// Earlier catalogs can be structurally valid but cannot drive NodePort mapping UI.
+const restorePointContentIndexSchemaVersion = 3
 
 func restorePointContentIndex(point store.RestorePoint) (restorePointIndex, bool) {
 	value, ok := point.Metadata["contentIndex"]
@@ -11071,7 +11081,7 @@ func normalizeBackupResourceSummaries(resources []protocol.BackupResourceSummary
 }
 
 func (r *Router) persistRestorePointContentIndex(point store.RestorePoint, report protocol.BackupContentReportPayload, status string, message string) {
-	index := restorePointIndex{SchemaVersion: 2, Status: status, Resources: normalizeBackupResourceSummaries(report.Resources), Truncated: report.Truncated, GeneratorVersion: r.clusterAgentVersion(point.SourceClusterID), LastError: message}
+	index := restorePointIndex{SchemaVersion: restorePointContentIndexSchemaVersion, Status: status, Resources: normalizeBackupResourceSummaries(report.Resources), Truncated: report.Truncated, GeneratorVersion: r.clusterAgentVersion(point.SourceClusterID), LastError: message}
 	if status == "ready" {
 		index.IndexedAt = time.Now().UTC()
 		index.LastError = ""
@@ -11100,7 +11110,7 @@ func (r *Router) scheduleRestorePointContentIndex(point store.RestorePoint) {
 	if point.ID == "" || point.Status != "available" {
 		return
 	}
-	if index, ok := restorePointContentIndex(point); ok && index.Status == "ready" && index.SchemaVersion >= 2 {
+	if index, ok := restorePointContentIndex(point); ok && index.Status == "ready" && index.SchemaVersion >= restorePointContentIndexSchemaVersion {
 		currentVersion := r.clusterAgentVersion(point.SourceClusterID)
 		if currentVersion == "" || index.GeneratorVersion == currentVersion {
 			return

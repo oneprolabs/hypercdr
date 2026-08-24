@@ -32,6 +32,12 @@ func TestRestorePointContentIndexRejectsMissingOrInvalidIndex(t *testing.T) {
 	}
 }
 
+func TestRestorePointContentIndexSchemaRequiresServicePorts(t *testing.T) {
+	if restorePointContentIndexSchemaVersion < 3 {
+		t.Fatalf("content index schema must invalidate catalogs created before Service port indexing")
+	}
+}
+
 func TestNormalizeBackupResourceSummariesRepairsLegacyVeleroPaths(t *testing.T) {
 	resources := normalizeBackupResourceSummaries([]protocol.BackupResourceSummary{
 		{APIVersion: "actions.kio.kasten.io/v1alpha1", Kind: "BackupAction", Namespace: "demo", Name: "manual", Group: "backupactions.actions.kio.kasten.io", Resource: "namespaces"},
