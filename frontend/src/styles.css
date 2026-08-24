@@ -24676,9 +24676,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 .premium-app .hbdr-dr-node-title i { width:8px; height:8px; flex:0 0 auto; border-radius:50%; background:#20a26a; box-shadow:0 0 0 3px #e5f7ef; }
 .premium-app .hbdr-dr-node.is-offline .hbdr-dr-node-title i { background:#d4525d; box-shadow:0 0 0 3px #fdecef; }
 .premium-app .hbdr-dr-node > span:nth-child(2) { display:block; margin-top:7px; color:#637487; font-size:10px; }
-.premium-app .hbdr-dr-edge-label { position:absolute; z-index:6; display:grid; justify-items:center; gap:2px; min-width:108px; min-height:38px; max-width:152px; padding:5px 8px; transform:translate(-50%,-50%) !important; pointer-events:auto; border:1px solid #c7d9e7; border-radius:8px; background:rgba(255,255,255,.97); color:#3478a8; font-size:9px; font-weight:750; box-shadow:0 3px 10px rgba(24,54,83,.1); transition:border-color 140ms ease,background-color 140ms ease,box-shadow 140ms ease; }
-.premium-app .hbdr-dr-edge-label-route { display:flex; align-items:center; justify-content:center; gap:4px; width:100%; color:#243b53; font-size:9px; }
-.premium-app .hbdr-dr-edge-label-route strong { max-width:56px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.premium-app .hbdr-dr-edge-label { position:absolute; z-index:6; display:flex; align-items:center; justify-content:center; min-width:72px; min-height:28px; padding:4px 8px; transform:translate(-50%,-50%) !important; pointer-events:auto; border:1px solid #c7d9e7; border-radius:999px; background:rgba(255,255,255,.97); color:#3478a8; font-size:9px; font-weight:750; box-shadow:0 3px 10px rgba(24,54,83,.1); transition:border-color 140ms ease,background-color 140ms ease,box-shadow 140ms ease; }
 .premium-app .hbdr-dr-edge-label-count { display:flex; align-items:center; gap:3px; color:#3478a8; font-size:9px; }
 .premium-app .hbdr-dr-edge-label:hover,
 .premium-app .hbdr-dr-edge-label:focus,
@@ -24693,7 +24691,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 .premium-app .hbdr-dr-topology-empty { position:absolute; z-index:2; top:12px; left:50%; display:flex; align-items:center; gap:6px; padding:6px 9px; transform:translateX(-50%); border:1px solid #dce6ef; border-radius:999px; background:rgba(255,255,255,.94); color:#8a99aa; box-shadow:0 3px 10px rgba(25,55,87,.06); white-space:nowrap; }
 .premium-app .hbdr-dr-topology-empty strong { color:#556779; font-size:10px; }
 .premium-app .hbdr-dr-topology-empty span { font-size:9px; }
-.premium-app .hbdr-dr-relationship-detail { position:absolute; z-index:8; right:12px; bottom:12px; left:12px; display:grid; grid-template-columns:minmax(170px,220px) 1fr; align-items:start; gap:18px; min-height:70px; padding:11px 13px; border:1px solid #d8e4ed; border-radius:9px; background:rgba(248,250,252,.98); box-shadow:0 8px 24px rgba(28,49,72,.14); }
+.premium-app .hbdr-dr-relationship-detail { position:relative; z-index:1; display:grid; grid-template-columns:minmax(170px,220px) minmax(0,1fr); align-items:start; gap:18px; min-height:70px; margin:12px; padding:11px 13px; border:1px solid #d8e4ed; border-radius:9px; background:#f8fafc; box-shadow:0 4px 14px rgba(28,49,72,.08); }
 .premium-app .hbdr-dr-relationship-summary strong { display:flex; align-items:center; gap:7px; color:#203247; font-size:12px; }
 .premium-app .hbdr-dr-relationship-summary > span { display:block; margin-top:4px; color:#718096; font-size:10px; }
 .premium-app .hbdr-dr-relationship-namespace-list { min-width:0; }
