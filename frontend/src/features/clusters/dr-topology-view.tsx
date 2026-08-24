@@ -22,6 +22,29 @@ export default function DRTopologyView({ clusters, model, selectedRelationshipId
   const layout = topologyLayout(orderedClusters.map(cluster => cluster.id), model);
   const canvasHeight = layout.canvasHeight;
   const positions = new Map(Object.entries(layout.positions));
+  const edgeGeometry = (relationship: DRRelationship) => {
+    const source = positions.get(relationship.sourceClusterId);
+    const target = positions.get(relationship.targetClusterId);
+    if (!source || !target) return null;
+    const reverse = model.relationships.some(item => item.sourceClusterId === relationship.targetClusterId && item.targetClusterId === relationship.sourceClusterId);
+    const sourceX = source.x * 10, sourceY = source.y * 5, targetX = target.x * 10, targetY = target.y * 5;
+    const dx = targetX - sourceX, dy = targetY - sourceY;
+    const distance = Math.max(1, Math.hypot(dx, dy));
+    const endpointInset = Math.min(96, distance * 0.22);
+    const x1 = sourceX + dx / distance * endpointInset;
+    const y1 = sourceY + dy / distance * endpointInset;
+    const x2 = targetX - dx / distance * endpointInset;
+    const y2 = targetY - dy / distance * endpointInset;
+    const pairDirection = relationship.sourceClusterId.localeCompare(relationship.targetClusterId) < 0 ? -1 : 1;
+    const bend = reverse ? 56 * pairDirection : distance > 520 ? 34 * pairDirection : 0;
+    const controlX = (x1 + x2) / 2 - (y2 - y1) / distance * bend;
+    const controlY = (y1 + y2) / 2 + (x2 - x1) / distance * bend;
+    const labelT = reverse ? (pairDirection < 0 ? .43 : .57) : .5;
+    const inverseT = 1 - labelT;
+    const labelSvgX = inverseT * inverseT * x1 + 2 * inverseT * labelT * controlX + labelT * labelT * x2;
+    const labelSvgY = inverseT * inverseT * y1 + 2 * inverseT * labelT * controlY + labelT * labelT * y2;
+    return { source, target, x1, y1, x2, y2, controlX, controlY, labelX: labelSvgX / 10, labelY: labelSvgY / 5 };
+  };
 
   return (
     <section className="hbdr-dr-topology" aria-label="DR Topology">
@@ -34,46 +57,20 @@ export default function DRTopologyView({ clusters, model, selectedRelationshipId
         <svg className="hbdr-dr-topology-lines" viewBox="0 0 1000 500" preserveAspectRatio="none" aria-hidden="true">
           <defs><marker id="dr-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth"><path className="hbdr-dr-arrow-head" d="M1,1 L7,4 L1,7" /></marker></defs>
           {model.relationships.map(relationship => {
-            const source = positions.get(relationship.sourceClusterId);
-            const target = positions.get(relationship.targetClusterId);
-            if (!source || !target) return null;
-            const reverse = model.relationships.some(item => item.sourceClusterId === relationship.targetClusterId && item.targetClusterId === relationship.sourceClusterId);
-            const offset = reverse ? (relationship.sourceClusterId.localeCompare(relationship.targetClusterId) < 0 ? -18 : 18) : 0;
-            const sourceX = source.x * 10, sourceY = source.y * 5, targetX = target.x * 10, targetY = target.y * 5;
-            const dx = targetX - sourceX, dy = targetY - sourceY;
-            const distance = Math.max(1, Math.hypot(dx, dy));
-            const endpointInset = Math.min(96, distance * 0.22);
-            const x1 = sourceX + dx / distance * endpointInset;
-            const y1 = sourceY + dy / distance * endpointInset;
-            const x2 = targetX - dx / distance * endpointInset;
-            const y2 = targetY - dy / distance * endpointInset;
-            const mx = (x1 + x2) / 2, my = (y1 + y2) / 2 + offset;
-            return <path key={relationship.id} className={`is-${relationship.status} ${selectedRelationshipId === relationship.id ? 'is-selected' : ''}`} d={`M ${x1} ${y1} Q ${mx} ${my} ${x2} ${y2}`} markerEnd="url(#dr-arrow)" />;
+            const geometry = edgeGeometry(relationship);
+            if (!geometry) return null;
+            return <path key={relationship.id} className={`is-${relationship.status} ${selectedRelationshipId === relationship.id ? 'is-selected' : ''}`} d={`M ${geometry.x1} ${geometry.y1} Q ${geometry.controlX} ${geometry.controlY} ${geometry.x2} ${geometry.y2}`} markerEnd="url(#dr-arrow)" />;
           })}
         </svg>
         {model.relationships.map(relationship => {
-          const source = positions.get(relationship.sourceClusterId);
-          const target = positions.get(relationship.targetClusterId);
-          if (!source || !target) return null;
-          const reverse = model.relationships.some(item => item.sourceClusterId === relationship.targetClusterId && item.targetClusterId === relationship.sourceClusterId);
-          const midpointX = (source.x + target.x) / 2;
-          const midpointY = (source.y + target.y) / 2;
-          const midpointHitsNode = orderedClusters.some(cluster => {
-            if (cluster.id === relationship.sourceClusterId || cluster.id === relationship.targetClusterId) return false;
-            const position = positions.get(cluster.id);
-            return Boolean(position && Math.abs(position.x - midpointX) < 14 && Math.abs(position.y - midpointY) < 16);
-          });
-          const directionOffset = relationship.id.localeCompare('') % 2 === 0 ? -11 : 11;
-          const offset = midpointHitsNode ? directionOffset : reverse ? (relationship.sourceClusterId.localeCompare(relationship.targetClusterId) < 0 ? -5 : 5) : 0;
-          const labelRatio = midpointHitsNode ? (source.x < target.x ? 0.3 : 0.7) : 0.5;
-          const labelX = source.x + (target.x - source.x) * labelRatio;
-          const labelY = source.y + (target.y - source.y) * labelRatio + offset;
+          const geometry = edgeGeometry(relationship);
+          if (!geometry) return null;
           const meta = statusMeta[relationship.status];
           const Icon = meta.icon;
-          const DirectionArrow = target.x < source.x ? ArrowLeft : ArrowRight;
+          const DirectionArrow = geometry.target.x < geometry.source.x ? ArrowLeft : ArrowRight;
           const sourceName = clusterById.get(relationship.sourceClusterId)?.name || 'Unknown source';
           const targetName = clusterById.get(relationship.targetClusterId)?.name || 'Unknown target';
-          return <button key={relationship.id} type="button" className={`hbdr-dr-edge-label is-${relationship.status} ${selectedRelationshipId === relationship.id ? 'is-selected' : ''}`} style={{ left: `${labelX}%`, top: `${labelY}%` }} onClick={() => onSelectRelationship(relationship)} title={`${sourceName} → ${targetName}: ${relationship.appIds.length} namespaces`} aria-label={`${sourceName} to ${targetName}, ${relationship.appIds.length} ${relationship.appIds.length === 1 ? 'namespace' : 'namespaces'}`}><span className="hbdr-dr-edge-label-route"><strong>{sourceName}</strong><DirectionArrow size={11} /><strong>{targetName}</strong></span><span className="hbdr-dr-edge-label-count"><Icon size={11} />{relationship.appIds.length} {relationship.appIds.length === 1 ? 'namespace' : 'namespaces'}</span></button>;
+          return <button key={relationship.id} type="button" className={`hbdr-dr-edge-label is-${relationship.status} ${selectedRelationshipId === relationship.id ? 'is-selected' : ''}`} style={{ left: `${geometry.labelX}%`, top: `${geometry.labelY}%` }} onClick={() => onSelectRelationship(relationship)} title={`${sourceName} → ${targetName}: ${relationship.appIds.length} namespaces`} aria-label={`${sourceName} to ${targetName}, ${relationship.appIds.length} ${relationship.appIds.length === 1 ? 'namespace' : 'namespaces'}`}><span className="hbdr-dr-edge-label-route"><strong>{sourceName}</strong><DirectionArrow size={11} /><strong>{targetName}</strong></span><span className="hbdr-dr-edge-label-count"><Icon size={11} />{relationship.appIds.length} {relationship.appIds.length === 1 ? 'namespace' : 'namespaces'}</span></button>;
         })}
         {clusters.map(cluster => {
           const position = positions.get(cluster.id)!;
