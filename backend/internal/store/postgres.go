@@ -3162,10 +3162,19 @@ func (s *PostgresStore) ListTasks(clusterID string) ([]Task, error) {
 
 func (s *PostgresStore) UpdateTaskStatus(input TaskStatusInput) (Task, bool, error) {
 	now := time.Now().UTC()
+	payload := make(map[string]any, len(input.Payload)+1)
+	for key, value := range input.Payload {
+		payload[key] = value
+	}
+	// Persist platform-observed task activity independently of progress. Some
+	// restore phases legitimately report the same percentage repeatedly, and
+	// an agent restart can otherwise leave the platform with no reliable way
+	// to distinguish a slow task from an abandoned one.
+	payload["lastStatusAt"] = now.Format(time.RFC3339Nano)
 	payloadRaw := []byte("{}")
-	if input.Payload != nil {
+	if payload != nil {
 		var err error
-		payloadRaw, err = json.Marshal(input.Payload)
+		payloadRaw, err = json.Marshal(payload)
 		if err != nil {
 			return Task{}, false, err
 		}

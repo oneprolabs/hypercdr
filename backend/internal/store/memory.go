@@ -2189,6 +2189,11 @@ func (s *MemoryStore) UpdateTaskStatus(input TaskStatusInput) (Task, bool, error
 		return Task{}, false, nil
 	}
 	now := time.Now().UTC()
+	payload := make(map[string]any, len(input.Payload)+1)
+	for key, value := range input.Payload {
+		payload[key] = value
+	}
+	payload["lastStatusAt"] = now.Format(time.RFC3339Nano)
 	if input.Status != "" {
 		if task.CompletedAt.IsZero() || !isActiveStatus(input.Status) {
 			task.Status = input.Status
@@ -2214,11 +2219,11 @@ func (s *MemoryStore) UpdateTaskStatus(input TaskStatusInput) (Task, bool, error
 	if task.Status == "dispatched" && task.DispatchedAt.IsZero() {
 		task.DispatchedAt = now
 	}
-	if len(input.Payload) > 0 {
+	if len(payload) > 0 {
 		if task.Payload == nil {
 			task.Payload = map[string]any{}
 		}
-		for key, value := range input.Payload {
+		for key, value := range payload {
 			task.Payload[key] = value
 		}
 	}

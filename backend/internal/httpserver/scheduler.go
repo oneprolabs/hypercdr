@@ -9,6 +9,7 @@ import (
 
 const schedulerTickInterval = 30 * time.Second
 const componentUpgradeVerificationTimeout = 10 * time.Minute
+const recoveryTaskInactivityTimeout = 15 * time.Minute
 
 func (r *Router) startScheduler() {
 	r.schedulerOnce.Do(func() {
@@ -27,6 +28,7 @@ func (r *Router) schedulerLoop() {
 func (r *Router) runSchedulerTick(now time.Time) {
 	r.scheduleLogMaintenance(now)
 	r.reconcileComponentUpgradeTimeouts(now)
+	r.reconcileAbandonedRecoveryTasks(now)
 	if frozen, err := r.store.HasCommunityMigrationFreeze(); err != nil {
 		r.logger.Error("failed to check Community migration freeze", "error", err)
 		return
@@ -50,6 +52,44 @@ func (r *Router) runSchedulerTick(now time.Time) {
 	for _, schedule := range due {
 		r.fireProtectionPlanSchedule(schedule, now)
 	}
+}
+
+func (r *Router) reconcileAbandonedRecoveryTasks(now time.Time) {
+	tasks, err := r.store.ListTasks("")
+	if err != nil {
+		r.logger.Warn("failed to reconcile abandoned recovery tasks", "error", err)
+		return
+	}
+	for _, task := range tasks {
+		if !recoveryTaskTimedOut(task, now) {
+			continue
+		}
+		message := "No restore status was received from the cluster agent for 15 minutes. The agent may have restarted or the Velero restore may no longer exist. Source data and backup data were preserved; check the agent and Velero logs, then retry the drill."
+		if _, _, err := r.store.UpdateTaskStatus(store.TaskStatusInput{
+			TaskID: task.ID, Status: "failed", Progress: task.Progress, MarkDone: true,
+			ErrorCode: "RESTORE_STATUS_TIMEOUT", ErrorMessage: message,
+		}); err != nil {
+			r.logger.Warn("failed to expire abandoned recovery task", "task_id", task.ID, "error", err)
+			continue
+		}
+		_ = r.addTaskEventIfChanged(store.TaskEventInput{
+			TaskID: task.ID, Level: "error", Reason: "restore_status_timeout", Message: message,
+		})
+	}
+}
+
+func recoveryTaskTimedOut(task store.Task, now time.Time) bool {
+	if (task.Type != "restore" && task.Type != "drill") || !isActiveTaskStatus(task.Status) {
+		return false
+	}
+	raw, ok := task.Payload["lastStatusAt"].(string)
+	if !ok {
+		// Do not expire tasks created by platform versions that did not persist
+		// activity timestamps.
+		return false
+	}
+	lastActivity, err := time.Parse(time.RFC3339Nano, raw)
+	return err == nil && !now.Before(lastActivity.Add(recoveryTaskInactivityTimeout))
 }
 
 func (r *Router) reconcileProtectionCleanupPlans(now time.Time) {
