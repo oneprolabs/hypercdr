@@ -1824,6 +1824,7 @@ func (c *Client) pollRestoreStatus(task protocol.TaskDispatchPayload, object kub
 }
 
 func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, object kube.AppliedObject, basePayload map[string]any, decide veleroStatusDecision, onSuccess func(map[string]any, string)) {
+	const veleroStalledAfter = 5 * time.Minute
 	interval := veleroPollInterval(object)
 	deadline := task.Deadline
 	if deadline.IsZero() {
@@ -1833,6 +1834,7 @@ func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, 
 	progress := 0
 	samples := make([]volumeProgressSample, 0, 12)
 	var statusReadErrorSince time.Time
+	var volumeReadySince time.Time
 	for {
 		status, err := c.statusReader.GetManifestStatus(context.Background(), object)
 		if err != nil {
@@ -1875,6 +1877,13 @@ func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, 
 				return
 			}
 			volumeReady = ready
+			if ready {
+				if volumeReadySince.IsZero() {
+					volumeReadySince = time.Now().UTC()
+				}
+			} else {
+				volumeReadySince = time.Time{}
+			}
 			if ready && volumeProgress > progress {
 				progress = volumeProgress
 			}
@@ -1893,6 +1902,11 @@ func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, 
 				code = object.Kind + "_FAILED"
 			}
 			_ = c.sendTaskFailedWithDetails(task, code, message, map[string]any{"velero": payload})
+			return
+		}
+		if object.Kind == "Restore" && status.Phase == "InProgress" && volumeReady && !volumeReadySince.IsZero() && time.Since(volumeReadySince) >= veleroStalledAfter {
+			message := "Velero restore remains InProgress after volume restoration completed"
+			_ = c.sendTaskFailedWithDetails(task, "RESTORE_VELERO_STALLED", message, map[string]any{"velero": payload})
 			return
 		}
 		if time.Now().UTC().After(deadline) {
