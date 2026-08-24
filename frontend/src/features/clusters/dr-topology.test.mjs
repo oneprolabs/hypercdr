@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildDRTopology, orderClustersForTopology } from './dr-topology.ts';
+import { buildDRTopology, orderClustersForTopology, topologyGrid, topologyLayout } from './dr-topology.ts';
 
 function cluster(id, appIds) {
   return {
@@ -80,4 +80,25 @@ test('places one-way source clusters before their targets while keeping mutual p
     plan('p3', 'right', 'left', ['app-r'], 'ready'),
   ]);
   assert.deepEqual(orderClustersForTopology(peers, mutual).map(item => item.id), ['left', 'right']);
+});
+
+test('uses readable topology grids from one to many clusters', () => {
+  assert.deepEqual(topologyGrid(1), { columns: 1, rows: 1, canvasHeight: 260 });
+  assert.deepEqual(topologyGrid(2), { columns: 2, rows: 1, canvasHeight: 260 });
+  assert.deepEqual(topologyGrid(3), { columns: 3, rows: 1, canvasHeight: 260 });
+  assert.deepEqual(topologyGrid(4), { columns: 2, rows: 2, canvasHeight: 390 });
+  assert.deepEqual(topologyGrid(7), { columns: 3, rows: 3, canvasHeight: 535 });
+  assert.deepEqual(topologyGrid(16), { columns: 3, rows: 6, canvasHeight: 970 });
+});
+
+test('places sources left and targets right to keep relationship lines readable', () => {
+  const clusters = [cluster('source-a', ['a']), cluster('target-a', []), cluster('source-b', ['b']), cluster('target-b', [])];
+  const model = buildDRTopology(clusters, [plan('a', 'source-a', 'target-a', ['a']), plan('b', 'source-b', 'target-b', ['b'])]);
+  const layout = topologyLayout(['source-a', 'source-b', 'target-a', 'target-b'], model);
+  assert.equal(layout.positions['source-a'].x, 24);
+  assert.equal(layout.positions['source-b'].x, 24);
+  assert.equal(layout.positions['target-a'].x, 76);
+  assert.equal(layout.positions['target-b'].x, 76);
+  assert.equal(layout.positions['source-a'].y, layout.positions['target-a'].y);
+  assert.equal(layout.positions['source-b'].y, layout.positions['target-b'].y);
 });

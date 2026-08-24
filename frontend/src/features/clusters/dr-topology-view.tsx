@@ -1,6 +1,6 @@
 import { AlertTriangle, ArrowLeft, ArrowRight, Boxes, CheckCircle2, GitBranch, LoaderCircle, XCircle } from 'lucide-react';
 import type { Cluster } from './types';
-import { orderClustersForTopology, type DRRelationship, type DRTopologyModel } from './dr-topology';
+import { orderClustersForTopology, topologyLayout, type DRRelationship, type DRTopologyModel } from './dr-topology';
 
 const statusMeta = {
   healthy: { label: 'Healthy', icon: CheckCircle2 },
@@ -19,14 +19,9 @@ export default function DRTopologyView({ clusters, model, selectedRelationshipId
 }) {
   const clusterById = new Map(clusters.map(cluster => [cluster.id, cluster]));
   const orderedClusters = orderClustersForTopology(clusters, model);
-  const columns = Math.max(1, Math.min(clusters.length, 4));
-  const positions = new Map(orderedClusters.map((cluster, index) => {
-    const col = index % columns;
-    const row = Math.floor(index / columns);
-    const x = columns === 1 ? 50 : 22 + (56 * col / (columns - 1));
-    const y = clusters.length <= columns ? 40 : 22 + row * 42;
-    return [cluster.id, { x, y }];
-  }));
+  const layout = topologyLayout(orderedClusters.map(cluster => cluster.id), model);
+  const canvasHeight = layout.canvasHeight;
+  const positions = new Map(Object.entries(layout.positions));
 
   return (
     <section className="hbdr-dr-topology" aria-label="DR Topology">
@@ -34,8 +29,8 @@ export default function DRTopologyView({ clusters, model, selectedRelationshipId
         <div><h3>DR Topology</h3><p>Namespace protection relationships between registered clusters</p></div>
         <div className="hbdr-dr-topology-legend"><span className="is-healthy" />Healthy<span className="is-warning" />Attention<span className="is-configuring" />Configuring</div>
       </div>
-      <div className="hbdr-dr-topology-canvas" style={{ minHeight: clusters.length > 4 ? 310 : 220 }}>
-        {model.relationships.length === 0 && <div className="hbdr-dr-topology-empty"><GitBranch size={25} /><strong>No DR relationships yet</strong><span>Configure namespace DR to connect clusters.</span></div>}
+      <div className="hbdr-dr-topology-canvas" style={{ minHeight: canvasHeight }}>
+        {model.relationships.length === 0 && <div className="hbdr-dr-topology-empty"><GitBranch size={15} /><strong>No DR relationships yet</strong><span>Clusters remain selectable below.</span></div>}
         <svg className="hbdr-dr-topology-lines" viewBox="0 0 1000 500" preserveAspectRatio="none" aria-hidden="true">
           <defs><marker id="dr-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth"><path className="hbdr-dr-arrow-head" d="M1,1 L7,4 L1,7" /></marker></defs>
           {model.relationships.map(relationship => {

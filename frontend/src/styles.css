@@ -24641,9 +24641,8 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 .premium-app .hbdr-cluster-topology-trigger { display:inline-flex; align-items:center; gap:6px; min-height:32px; padding:7px 11px; border:1px solid #cfdce7; border-radius:8px; background:#fff; color:#49647c; font-size:10px; font-weight:750; transition:border-color 150ms ease,background 150ms ease,color 150ms ease; }
 .premium-app .hbdr-cluster-topology-trigger:hover { border-color:#9bbbd3; background:#f2f8fc; color:#25689f; }
 .premium-app .hbdr-topology-drawer { width:min(680px,calc(100vw - 120px)); }
-.premium-app .hbdr-topology-drawer-body { padding:18px; overflow:hidden; }
-.premium-app .hbdr-topology-drawer .hbdr-dr-topology { height:100%; }
-.premium-app .hbdr-topology-drawer .hbdr-dr-topology-canvas { min-height:calc(100vh - 170px) !important; }
+.premium-app .hbdr-topology-drawer-body { padding:18px; overflow:auto; }
+.premium-app .hbdr-topology-drawer .hbdr-dr-topology { min-height:100%; height:auto; }
 .premium-app .hbdr-dr-topology {
   position:relative;
   min-width: 0;
@@ -24687,9 +24686,9 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 .premium-app .hbdr-dr-edge-label.is-warning { border-color:#ecd19f; color:#a56618; }
 .premium-app .hbdr-dr-edge-label.is-failed { border-color:#efb7bd; color:#b73845; }
 .premium-app .hbdr-dr-edge-label.is-selected { outline:3px solid rgba(52,120,168,.14); }
-.premium-app .hbdr-dr-topology-empty { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; color:#8a99aa; }
-.premium-app .hbdr-dr-topology-empty strong { color:#556779; font-size:13px; }
-.premium-app .hbdr-dr-topology-empty span { font-size:11px; }
+.premium-app .hbdr-dr-topology-empty { position:absolute; z-index:2; top:12px; left:50%; display:flex; align-items:center; gap:6px; padding:6px 9px; transform:translateX(-50%); border:1px solid #dce6ef; border-radius:999px; background:rgba(255,255,255,.94); color:#8a99aa; box-shadow:0 3px 10px rgba(25,55,87,.06); white-space:nowrap; }
+.premium-app .hbdr-dr-topology-empty strong { color:#556779; font-size:10px; }
+.premium-app .hbdr-dr-topology-empty span { font-size:9px; }
 .premium-app .hbdr-dr-relationship-detail { position:absolute; z-index:8; right:12px; bottom:12px; left:12px; display:grid; grid-template-columns:minmax(170px,220px) 1fr; align-items:start; gap:18px; min-height:70px; padding:11px 13px; border:1px solid #d8e4ed; border-radius:9px; background:rgba(248,250,252,.98); box-shadow:0 8px 24px rgba(28,49,72,.14); }
 .premium-app .hbdr-dr-relationship-summary strong { display:flex; align-items:center; gap:7px; color:#203247; font-size:12px; }
 .premium-app .hbdr-dr-relationship-summary > span { display:block; margin-top:4px; color:#718096; font-size:10px; }
@@ -24703,7 +24702,6 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 @media (max-width:900px) {
   .premium-app .hbdr-topology-drawer { width:calc(100vw - 24px); }
   .premium-app .hbdr-topology-drawer-body { padding:12px; }
-  .premium-app .hbdr-topology-drawer .hbdr-dr-topology-canvas { min-height:calc(100vh - 150px) !important; }
   .premium-app .hbdr-dr-topology-legend { display:none; }
   .premium-app .hbdr-dr-node { width:145px; }
 }
