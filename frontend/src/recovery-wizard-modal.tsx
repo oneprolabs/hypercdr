@@ -561,10 +561,15 @@ export function RecoveryWizardModal(props: Props) {
                 </div>
 
                 <div className="hbdr-protect-section hbdr-recovery-advanced">
-                  <button type="button" className="hbdr-recovery-advanced-toggle" onClick={() => setAdvancedOpen(value => !value)}>
+                  <label className="hbdr-recovery-advanced-toggle">
                     <span><strong>Advanced options</strong><em>Mappings and conflict handling</em></span>
-                    <b>{advancedOpen ? 'Hide' : 'Show'}</b>
-                  </button>
+                    <input
+                      type="checkbox"
+                      checked={advancedOpen}
+                      onChange={event => setAdvancedOpen(event.target.checked)}
+                      aria-label="Show advanced options"
+                    />
+                  </label>
                   {advancedOpen && (
                     <div className="hbdr-recovery-advanced-content">
                       <section>

@@ -23639,19 +23639,19 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 }
 
 .hbdr-recovery-dialog.hbdr-protect-drawer .hbdr-protect-body {
-  padding: 22px 24px 28px !important;
+  padding: 14px 18px 18px !important;
   background:
     radial-gradient(circle at 100% 0, rgba(219, 234, 254, 0.42), transparent 34%),
     #f6f8fb !important;
 }
 
 .hbdr-recovery-single-page {
-  gap: 16px !important;
+  gap: 10px !important;
 }
 
 .hbdr-recovery-body .hbdr-protect-section {
-  gap: 16px !important;
-  padding: 18px !important;
+  gap: 10px !important;
+  padding: 12px 14px !important;
   border-color: #dbe4ee !important;
   border-radius: 12px !important;
   box-shadow: 0 8px 22px rgba(15, 23, 42, 0.045), 0 1px 2px rgba(15, 23, 42, 0.03) !important;
@@ -23665,7 +23665,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   gap: 10px !important;
   min-height: 0 !important;
   margin: 0 !important;
-  padding: 0 0 13px !important;
+  padding: 0 0 8px !important;
   border: 0 !important;
   border-bottom: 1px solid #e8edf3 !important;
   border-radius: 0 !important;
@@ -23714,7 +23714,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 
 .hbdr-recovery-point-picker select,
 .hbdr-recovery-plain-field select {
-  min-height: 42px !important;
+  min-height: 36px !important;
   border-color: #cbd7e3 !important;
   border-radius: 8px !important;
   background-color: #ffffff !important;
@@ -23724,7 +23724,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 .hbdr-recovery-plain-field {
   grid-template-columns: 120px minmax(0, 1fr) !important;
   gap: 14px !important;
-  padding: 12px 14px !important;
+  padding: 8px 10px !important;
   border: 1px solid #e0e7ef !important;
   border-radius: 10px !important;
   background: #f8fafc !important;
@@ -23752,8 +23752,8 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 }
 
 .hbdr-recovery-namespace-options button {
-  min-height: 66px !important;
-  padding: 12px !important;
+  min-height: 54px !important;
+  padding: 8px 10px !important;
   border-color: #e3e9f0 !important;
   border-radius: 8px !important;
   background: #ffffff !important;
@@ -23781,10 +23781,88 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 }
 
 .hbdr-recovery-dialog.hbdr-protect-drawer .hbdr-protect-footer {
-  min-height: 66px !important;
-  padding: 13px 24px !important;
+  min-height: 58px !important;
+  padding: 10px 18px !important;
   border-top-color: #dfe7ef !important;
   box-shadow: 0 -8px 22px rgba(15, 23, 42, 0.035) !important;
+}
+
+/* The drill form is a dense operational flow: keep the primary choices in
+   view and make advanced settings an explicit, accessible checkbox. */
+.hbdr-recovery-dialog.hbdr-protect-drawer {
+  max-height: 100dvh !important;
+}
+
+.hbdr-recovery-dialog.hbdr-protect-drawer .hbdr-recovery-body {
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+}
+
+.hbdr-recovery-advanced-toggle {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  min-height: 42px !important;
+  padding: 8px 2px !important;
+  cursor: pointer !important;
+  user-select: none;
+}
+
+.hbdr-recovery-advanced-toggle span {
+  display: grid !important;
+  gap: 1px !important;
+  min-width: 0;
+}
+
+.hbdr-recovery-advanced-toggle strong {
+  font-size: 12px !important;
+}
+
+.hbdr-recovery-advanced-toggle em {
+  font-size: 10px !important;
+  font-style: normal !important;
+}
+
+.hbdr-recovery-advanced-toggle input {
+  width: 16px !important;
+  height: 16px !important;
+  flex: 0 0 auto;
+  accent-color: #3478b4;
+}
+
+.hbdr-recovery-advanced-content > section {
+  gap: 7px !important;
+  padding: 11px 0 !important;
+}
+
+.hbdr-recovery-advanced-content header span {
+  line-height: 1.35;
+}
+
+@media (max-height: 760px) {
+  .hbdr-recovery-dialog.hbdr-protect-drawer .hbdr-protect-header {
+    min-height: 58px !important;
+    padding: 10px 18px !important;
+  }
+  .hbdr-recovery-dialog .hbdr-protect-title-icon {
+    width: 34px !important;
+    height: 34px !important;
+  }
+  .hbdr-recovery-dialog.hbdr-protect-drawer .hbdr-protect-footer {
+    min-height: 52px !important;
+    padding: 8px 18px !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .hbdr-recovery-dialog.hbdr-protect-drawer {
+    width: min(100vw, 760px) !important;
+  }
+  .hbdr-recovery-dialog.hbdr-protect-drawer .hbdr-protect-body {
+    padding: 10px 12px 14px !important;
+  }
 }
 
 .hbdr-recovery-dialog .hbdr-protect-footer button {
