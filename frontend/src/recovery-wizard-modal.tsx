@@ -233,6 +233,7 @@ export function RecoveryWizardModal(props: Props) {
   const [contentsLoading, setContentsLoading] = React.useState(false);
   const [contentsError, setContentsError] = React.useState('');
   const [contentsReload, setContentsReload] = React.useState(0);
+  const [customResourcesRequested, setCustomResourcesRequested] = React.useState(false);
   const [imageMappingHistory, setImageMappingHistory] = React.useState<Record<string, string[]>>({});
 
   useEffect(() => {
@@ -268,7 +269,7 @@ export function RecoveryWizardModal(props: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    if (!config.pointId || !loadContents) { setContents([]); return; }
+    if (!customResourcesRequested || !config.pointId || !loadContents) { setContents([]); setContentsLoading(false); return; }
     setContentsLoading(true); setContentsError('');
     updateConfig({ contentCatalogLoaded: false, persistentDataExpected: false, forceStart: false });
     loadContents(config.pointId).then(result => {
@@ -281,7 +282,7 @@ export function RecoveryWizardModal(props: Props) {
       if (!cancelled) { setContents([]); updateConfig({ contentCatalogLoaded: false }); setContentsError(error instanceof Error ? error.message : 'Restore point contents could not be loaded.'); }
     }).finally(() => { if (!cancelled) setContentsLoading(false); });
     return () => { cancelled = true; };
-  }, [config.pointId, contentsReload]);
+  }, [customResourcesRequested, config.pointId, contentsReload]);
 
   const uniqueContents = Array.from(contents.reduce((items, item) => {
     const identity = [item.apiVersion, item.kind, item.namespace || '', item.name].join('|');
@@ -580,6 +581,11 @@ export function RecoveryWizardModal(props: Props) {
                     onChange={updateRestoreSelection}
                     disabled={contentsLoading || Boolean(contentsError)}
                     namespaceResources={restoreNamespaceOptions}
+                    customResourcesLoaded={config.contentCatalogLoaded}
+                    onRequestCustomResources={async () => {
+                      setCustomResourcesRequested(true);
+                      return true;
+                    }}
                   />
                   <div className={`hbdr-recovery-content-status-slot${contentsLoading ? ' is-loading' : ''}`} aria-live="polite">
                     {contentsLoading && <p className="hbdr-recovery-inline-status"><RefreshCw size={13} className="animate-spin" /> Reading the selected restore point…</p>}
