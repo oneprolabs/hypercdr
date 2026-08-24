@@ -145,7 +145,7 @@ func backupServicePorts(object map[string]any) []BackupServicePort {
 		if !ok {
 			continue
 		}
-		value, _, _ := unstructured.NestedInt64(port, "port")
+		value := jsonInteger(port["port"])
 		if value <= 0 {
 			continue
 		}
@@ -154,10 +154,26 @@ func backupServicePorts(object map[string]any) []BackupServicePort {
 		if protocol == "" {
 			protocol = "TCP"
 		}
-		nodePort, _, _ := unstructured.NestedInt64(port, "nodePort")
+		nodePort := jsonInteger(port["nodePort"])
 		result = append(result, BackupServicePort{Name: name, Port: value, Protocol: protocol, NodePort: nodePort})
 	}
 	return result
+}
+
+func jsonInteger(value any) int64 {
+	switch number := value.(type) {
+	case int:
+		return int64(number)
+	case int32:
+		return int64(number)
+	case int64:
+		return number
+	case float64:
+		if number == float64(int64(number)) {
+			return int64(number)
+		}
+	}
+	return 0
 }
 
 type veleroArchiveRole uint8
