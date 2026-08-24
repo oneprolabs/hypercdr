@@ -112,6 +112,33 @@ type Props = {
   loadContents?: (restorePointId: string) => Promise<{ resources: BackupContentResource[]; truncated?: boolean }>;
 };
 
+const imageMappingHistoryKey = 'hypercdr.recovery.imageMappingHistory.v1';
+const imageMappingHistoryLimit = 5;
+
+function readImageMappingHistory(): Record<string, string[]> {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(imageMappingHistoryKey) || '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).map(([source, values]) => [source, Array.isArray(values) ? values.filter(value => typeof value === 'string').slice(0, imageMappingHistoryLimit) : []]));
+  } catch {
+    return {};
+  }
+}
+
+function rememberImageMappings(mappings: Record<string, string>) {
+  try {
+    const history = readImageMappingHistory();
+    Object.entries(mappings).forEach(([source, target]) => {
+      const normalized = target.trim();
+      if (!normalized || normalized === source) return;
+      history[source] = [normalized, ...(history[source] || []).filter(item => item !== normalized)].slice(0, imageMappingHistoryLimit);
+    });
+    window.localStorage.setItem(imageMappingHistoryKey, JSON.stringify(history));
+  } catch {
+    // Browser privacy settings can disable local storage; manual input remains available.
+  }
+}
+
 function sourceMeta(type: RecoveryWizardConfig['sourceType']) {
   if (type === 'snapshot') {
     return {
@@ -206,6 +233,11 @@ export function RecoveryWizardModal(props: Props) {
   const [contentsLoading, setContentsLoading] = React.useState(false);
   const [contentsError, setContentsError] = React.useState('');
   const [contentsReload, setContentsReload] = React.useState(0);
+  const [imageMappingHistory, setImageMappingHistory] = React.useState<Record<string, string[]>>({});
+
+  useEffect(() => {
+    if (open) setImageMappingHistory(readImageMappingHistory());
+  }, [open]);
 
   const currentClusterOption = clusterOptions.find(item => item.name === currentClusterName) || clusterOptions.find(item => item.isCurrent);
   const currentTargetClusterName = currentClusterOption?.name || currentClusterName;
@@ -575,9 +607,11 @@ export function RecoveryWizardModal(props: Props) {
                       <section>
                         <header><strong>Environment mappings</strong><span>Leave blank to preserve the value stored in the backup.</span></header>
                         {backupStorageClasses.map(source => <label className="hbdr-recovery-mapping" key={`sc-${source}`}><span>StorageClass <b>{source}</b></span><select value={config.storageClassMappings?.[source] || ''} onChange={event => updateMapping('storageClassMappings', source, event.target.value)}><option value="">Keep original</option>{(targetClusterOption?.storageClasses || []).map(item => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label>)}
-                        {backupImages.map(source => <label className="hbdr-recovery-image-mapping" key={`image-${source}`}>
+                        {backupImages.map((source, index) => <label className="hbdr-recovery-image-mapping" key={`image-${source}`}>
                           <span><em>Source image</em><b title={source}>{source}</b></span>
-                          <span><em>Target image</em><input title={config.imageMappings?.[source] || ''} value={config.imageMappings?.[source] || ''} onChange={event => updateMapping('imageMappings', source, event.target.value)} placeholder="Keep original image" /></span>
+                          <span><em>Target image</em><input list={`hbdr-image-history-${index}`} autoComplete="off" title={config.imageMappings?.[source] || ''} value={config.imageMappings?.[source] || ''} onChange={event => updateMapping('imageMappings', source, event.target.value)} placeholder="Keep original image" />
+                            <datalist id={`hbdr-image-history-${index}`}>{(imageMappingHistory[source] || []).map(value => <option key={value} value={value} />)}</datalist>
+                          </span>
                         </label>)}
                         {config.contentCatalogLoaded && backupStorageClasses.length === 0 && backupImages.length === 0 && <p className="hbdr-recovery-muted">No StorageClass or container image references were found in the inspected backup.</p>}
                         {!config.contentCatalogLoaded && <p className="hbdr-recovery-muted">Mappings are unavailable until restore point content inspection succeeds.</p>}
@@ -627,6 +661,7 @@ export function RecoveryWizardModal(props: Props) {
                 disabled={submitDisabled || submitting}
                 onClick={() => {
                   if (submitDisabled || submitting) return;
+                  rememberImageMappings(config.imageMappings || {});
                   onSubmit();
                 }}
               >
