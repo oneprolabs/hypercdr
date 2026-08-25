@@ -100,6 +100,7 @@ type Node struct {
 	KubeletVersion string
 	Capacity       map[string]string
 	AgeSeconds     int64
+	Unschedulable  bool
 }
 
 type StorageClass struct {

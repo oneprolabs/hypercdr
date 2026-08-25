@@ -193,6 +193,7 @@ type NodeInventory struct {
 	KubeletVersion string            `json:"kubeletVersion,omitempty"`
 	Capacity       map[string]string `json:"capacity,omitempty"`
 	AgeSeconds     int64             `json:"ageSeconds,omitempty"`
+	Unschedulable  bool              `json:"unschedulable,omitempty"`
 }
 
 type StorageClassInventory struct {

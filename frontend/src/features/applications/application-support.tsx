@@ -314,7 +314,7 @@ export function matchesColumnFilterToken(token: string, valueForField: (field: s
 
 export function ErrorDetailModalFrame({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
+    <div className="fixed inset-0 z-[230] flex justify-end">
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-slate-950/18" onClick={onClose} />
       <motion.aside initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }} transition={{ duration: 0.18, ease: 'easeOut' }} className="hbdr-error-detail-drawer" role="dialog" aria-modal="true" aria-label={title}>
         <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">

@@ -169,6 +169,44 @@ type Authorizer interface {
 	Authorize(context.Context, AuthorizationRequest) AuthorizationDecision
 }
 
+// AdmissionRequest describes a capacity-consuming mutation after its concrete
+// resource identity and measured size are known. It is intentionally edition
+// neutral: Community permits it, while Enterprise may enforce a license.
+type AdmissionRequest struct {
+	Operation   string
+	TenantID    string
+	ClusterID   string
+	WorkerNodes int
+	Required    LicenseUsageDelta
+	ReleaseDate time.Time
+}
+
+type LicenseUsageDelta struct {
+	WorkerNodes int
+	Clusters    int
+	Tenants     int
+}
+
+type AdmissionController interface {
+	Admit(context.Context, AdmissionRequest) AuthorizationDecision
+}
+
+type MeteredNode struct {
+	Name     string
+	Billable bool
+}
+
+type MeteringEvent struct {
+	Operation string
+	TenantID  string
+	ClusterID string
+	Nodes     []MeteredNode
+}
+
+type MeteringObserver interface {
+	ObserveMetering(context.Context, MeteringEvent) error
+}
+
 // Options controls edition assembly without exposing internal server types.
 type Options struct {
 	Edition Edition
@@ -179,6 +217,8 @@ type Options struct {
 	License                LicenseStatus
 	LicenseStatusProvider  LicenseStatusProvider
 	Authorizer             Authorizer
+	AdmissionController    AdmissionController
+	MeteringObserver       MeteringObserver
 	IdentityProvider       IdentityProvider
 	AuditSink              AuditSink
 	DiagnosticSink         DiagnosticSink

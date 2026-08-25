@@ -1021,6 +1021,7 @@ func (s *MemoryStore) RegisterCluster(input RegisterClusterInput) (Cluster, stri
 		AgentVersion:     input.AgentVersion,
 		VeleroVersion:    input.VeleroVersion,
 		VeleroStatus:     input.VeleroStatus,
+		NodeCount:        input.NodeCount,
 		Role:             "both",
 		IsDefault:        isFirstCluster,
 		RegisteredAt:     now,
@@ -1151,8 +1152,7 @@ func (s *MemoryStore) DeleteCluster(clusterID string) (bool, error) {
 	delete(s.credentials, clusterID)
 	for tokenKey, token := range s.tokens {
 		if token.ClusterID == clusterID {
-			token.ClusterID = ""
-			s.tokens[tokenKey] = token
+			delete(s.tokens, tokenKey)
 		}
 	}
 	for key, app := range s.applications {

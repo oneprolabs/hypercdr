@@ -89,7 +89,7 @@ func Run(options Options) error {
 		return current
 	}
 	handler := httpserver.NewRouterWithProductInfo(cfg, logger, repo, productInfo,
-		editionAuthorizer(options.Authorizer), httpserver.WithProductInfoProvider(productInfoProvider), httpserver.WithDiagnosticLogRetention(options.DiagnosticLogRetention), httpserver.WithExtensionRoutes(editionRoutes(options.Routes)), httpserver.WithIdentityProvider(editionIdentityProvider(options.IdentityProvider)), httpserver.WithAuditSink(editionAuditSink(options.AuditSink)), httpserver.WithEditionRuntimeBinder(editionRuntimeBinder(options.RuntimeBinder)))
+		editionAuthorizer(options.Authorizer), httpserver.WithEditionAdmissionController(editionAdmissionController(options.AdmissionController)), httpserver.WithEditionMeteringObserver(editionMeteringObserver(options.MeteringObserver)), httpserver.WithProductInfoProvider(productInfoProvider), httpserver.WithDiagnosticLogRetention(options.DiagnosticLogRetention), httpserver.WithExtensionRoutes(editionRoutes(options.Routes)), httpserver.WithIdentityProvider(editionIdentityProvider(options.IdentityProvider)), httpserver.WithAuditSink(editionAuditSink(options.AuditSink)), httpserver.WithEditionRuntimeBinder(editionRuntimeBinder(options.RuntimeBinder)))
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	errCh := make(chan error, 1)
 	go func() {
@@ -189,6 +189,29 @@ func editionAuthorizer(authorizer Authorizer) httpserver.EditionAuthorizer {
 			},
 		})
 		return httpserver.EditionAuthorizationDecision{Allowed: decision.Allowed, Code: decision.Code, Message: decision.Message}
+	}
+}
+
+func editionAdmissionController(controller AdmissionController) httpserver.EditionAdmissionController {
+	if controller == nil {
+		return nil
+	}
+	return func(ctx context.Context, request httpserver.EditionAdmissionRequest) httpserver.EditionAuthorizationDecision {
+		decision := controller.Admit(ctx, AdmissionRequest{Operation: request.Operation, TenantID: request.TenantID, ClusterID: request.ClusterID, WorkerNodes: request.WorkerNodes, Required: LicenseUsageDelta{WorkerNodes: request.Required.WorkerNodes, Clusters: request.Required.Clusters, Tenants: request.Required.Tenants}, ReleaseDate: request.ReleaseDate})
+		return httpserver.EditionAuthorizationDecision{Allowed: decision.Allowed, Code: decision.Code, Message: decision.Message}
+	}
+}
+
+func editionMeteringObserver(observer MeteringObserver) httpserver.EditionMeteringObserver {
+	if observer == nil {
+		return nil
+	}
+	return func(ctx context.Context, event httpserver.EditionMeteringEvent) error {
+		nodes := make([]MeteredNode, 0, len(event.Nodes))
+		for _, node := range event.Nodes {
+			nodes = append(nodes, MeteredNode{Name: node.Name, Billable: node.Billable})
+		}
+		return observer.ObserveMetering(ctx, MeteringEvent{Operation: event.Operation, TenantID: event.TenantID, ClusterID: event.ClusterID, Nodes: nodes})
 	}
 }
 

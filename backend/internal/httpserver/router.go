@@ -75,6 +75,8 @@ type Router struct {
 	productInfo            ProductInfo
 	productInfoProvider    func() ProductInfo
 	editionAuthorizer      EditionAuthorizer
+	editionAdmission       EditionAdmissionController
+	editionMetering        EditionMeteringObserver
 	identityProvider       EditionIdentityProvider
 	auditSink              EditionAuditSink
 }
@@ -104,9 +106,42 @@ type EditionAuthorizationDecision struct {
 }
 
 type EditionAuthorizer func(context.Context, EditionAuthorizationRequest) EditionAuthorizationDecision
+type EditionAdmissionRequest struct {
+	Operation   string
+	TenantID    string
+	ClusterID   string
+	WorkerNodes int
+	Required    EditionLicenseUsageDelta
+	ReleaseDate time.Time
+}
+type EditionLicenseUsageDelta struct {
+	WorkerNodes int
+	Clusters    int
+	Tenants     int
+}
+type EditionAdmissionController func(context.Context, EditionAdmissionRequest) EditionAuthorizationDecision
+type EditionMeteredNode struct {
+	Name     string
+	Billable bool
+}
+type EditionMeteringEvent struct {
+	Operation string
+	TenantID  string
+	ClusterID string
+	Nodes     []EditionMeteredNode
+}
+type EditionMeteringObserver func(context.Context, EditionMeteringEvent) error
 type EditionAgentTaskDispatcher func(context.Context, string, string, string, time.Time) error
 
 type RouterOption func(*Router)
+
+func WithEditionAdmissionController(controller EditionAdmissionController) RouterOption {
+	return func(router *Router) { router.editionAdmission = controller }
+}
+
+func WithEditionMeteringObserver(observer EditionMeteringObserver) RouterOption {
+	return func(router *Router) { router.editionMetering = observer }
+}
 
 type ExtensionRoute struct {
 	Pattern string
@@ -611,6 +646,7 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("POST /api/v1/agent-tokens/validate", r.validateAgentToken)
 	r.mux.HandleFunc("GET /prepare-node.sh", r.prepareNodeScript)
 	r.mux.HandleFunc("GET /install.sh", r.installScript)
+	r.mux.HandleFunc("GET /uninstall-agent.sh", r.agentUninstallScript)
 	r.mux.HandleFunc("GET /disaster-handover.sh", r.disasterHandoverScript)
 	r.mux.HandleFunc("POST /api/v1/disaster-handovers/validate", r.validateDisasterHandoverToken)
 	r.mux.HandleFunc("GET "+veleroCRDsPath, r.veleroCRDs)
@@ -1125,6 +1161,13 @@ func (r *Router) createPlatformUpgrade(w http.ResponseWriter, req *http.Request)
 	if !passed {
 		writeJSON(w, 409, map[string]any{"error": "platform_precheck_failed", "checks": checks})
 		return
+	}
+	if r.editionAdmission != nil {
+		decision := r.editionAdmission(req.Context(), EditionAdmissionRequest{Operation: "platform.upgrade", ReleaseDate: release.PublishedAt})
+		if !decision.Allowed {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": decision.Code, "message": decision.Message, "releaseId": release.ID, "publishedAt": release.PublishedAt})
+			return
+		}
 	}
 	job, err := r.store.CreatePlatformUpgradeJob(store.PlatformUpgradeJobInput{Release: release, FromVersion: buildinfo.Version, RequestedBy: "admin"})
 	if err != nil {
@@ -2085,6 +2128,18 @@ func (r *Router) listClusters(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 	clusters = visibleClusters
+	if req.URL.Query().Get("view") == "summary" {
+		type clusterSummary struct {
+			ID        string `json:"id"`
+			IsDefault bool   `json:"isDefault"`
+		}
+		items := make([]clusterSummary, 0, len(clusters))
+		for _, item := range clusters {
+			items = append(items, clusterSummary{ID: item.ID, IsDefault: item.IsDefault})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"items": items})
+		return
+	}
 	agentTarget, agentTargetErr := r.componentTarget(req.Context(), "comm-agent")
 	if agentTargetErr != nil {
 		r.logger.Warn("failed to load comm-agent target release", "error", agentTargetErr)
@@ -3652,6 +3707,7 @@ func (r *Router) installScript(w http.ResponseWriter, req *http.Request) {
 	script = strings.ReplaceAll(script, "{{AGENT_NAMESPACE}}", r.cfg.AgentNamespace)
 	script = strings.ReplaceAll(script, "{{AGENT_WS_ENDPOINT}}", r.agentWSEndpoint(req))
 	script = strings.ReplaceAll(script, "{{TOKEN_VALIDATE_URL}}", r.publicBaseURL(req)+"/api/v1/agent-tokens/validate")
+	script = strings.ReplaceAll(script, "{{AGENT_UNINSTALL_URL}}", r.publicBaseURL(req)+"/uninstall-agent.sh")
 	script = strings.ReplaceAll(script, "{{VELERO_CRDS_URL}}", r.publicBaseURL(req)+veleroCRDsPath)
 	script = strings.ReplaceAll(script, "{{REGISTRY_CA_URL}}", r.publicBaseURL(req)+"/assets/registry/ca.crt")
 	script = strings.ReplaceAll(script, "{{VELERO_IMAGE}}", veleroTarget.Image)
@@ -7686,6 +7742,7 @@ func (r *Router) agentWebSocket(w http.ResponseWriter, req *http.Request) {
 			AgentVersion:   register.Payload.Agent.Version,
 			VeleroVersion:  register.Payload.Velero.Version,
 			VeleroStatus:   register.Payload.Velero.Status,
+			NodeCount:      register.Payload.Cluster.NodeCount,
 		})
 		if err != nil {
 			reason := "TOKEN_INVALID"
@@ -7697,6 +7754,21 @@ func (r *Router) agentWebSocket(w http.ResponseWriter, req *http.Request) {
 			}
 			_ = conn.WriteJSON(newRejectedMessage(reason, err.Error()))
 			return
+		}
+		if r.editionAdmission != nil {
+			decision := r.editionAdmission(req.Context(), EditionAdmissionRequest{Operation: "cluster.register", TenantID: registered.TenantID, ClusterID: registered.ID, WorkerNodes: register.Payload.Cluster.NodeCount})
+			if !decision.Allowed {
+				if _, deleteErr := r.store.DeleteCluster(registered.ID); deleteErr != nil {
+					r.logger.Error("failed to roll back license-rejected cluster registration", "cluster_id", registered.ID, "error", deleteErr)
+					decision.Message += "; platform rollback failed and residual cluster records may remain"
+				}
+				reason := strings.TrimSpace(decision.Code)
+				if reason == "" {
+					reason = "LICENSE_CAPACITY_EXCEEDED"
+				}
+				_ = conn.WriteJSON(newRejectedMessage(reason, decision.Message))
+				return
+			}
 		}
 		cluster = registered
 		credential = issuedCredential
@@ -7946,6 +8018,16 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 			if !ok {
 				r.logger.Warn("inventory for unknown cluster", "cluster_id", clusterID)
 				return
+			}
+			if r.editionMetering != nil && inventory.Payload.Full && inventory.Payload.Scope == "" {
+				nodes := make([]EditionMeteredNode, 0, len(inventory.Payload.Nodes))
+				for _, node := range inventory.Payload.Nodes {
+					billable := !(node.Role == "control-plane" && node.Unschedulable)
+					nodes = append(nodes, EditionMeteredNode{Name: node.Name, Billable: billable})
+				}
+				if meterErr := r.editionMetering(context.Background(), EditionMeteringEvent{Operation: "cluster.inventory", TenantID: updated.TenantID, ClusterID: updated.ID, Nodes: nodes}); meterErr != nil {
+					r.logger.Error("failed to record edition metering inventory", "cluster_id", updated.ID, "error", meterErr)
+				}
 			}
 			r.logger.Info("agent inventory applied",
 				"cluster_id", updated.ID,
@@ -11574,6 +11656,7 @@ set -euo pipefail
 TOKEN=""
 ENDPOINT="{{AGENT_WS_ENDPOINT}}"
 TOKEN_VALIDATE_URL="{{TOKEN_VALIDATE_URL}}"
+AGENT_UNINSTALL_URL="{{AGENT_UNINSTALL_URL}}"
 NAMESPACE="{{AGENT_NAMESPACE}}"
 AGENT_IMAGE="{{AGENT_IMAGE}}"
 VELERO_IMAGE="{{VELERO_IMAGE}}"
@@ -12285,10 +12368,10 @@ wait_agent_registration() {
     pod="$(kubectl -n "$NAMESPACE" get pods -l app.kubernetes.io/name=hypercdr-comm-agent -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
     if [[ -n "$pod" ]]; then
       logs="$(kubectl -n "$NAMESPACE" logs "$pod" --tail=40 2>/dev/null || true)"
-      if echo "$logs" | grep -Eq 'TOKEN_USED|TOKEN_EXPIRED|TOKEN_INVALID|TOKEN_NOT_FOUND|CREDENTIAL_AUTH_FAILED|CREDENTIAL_INVALID'; then
+      if echo "$logs" | grep -Eq 'TOKEN_USED|TOKEN_EXPIRED|TOKEN_INVALID|TOKEN_NOT_FOUND|CREDENTIAL_AUTH_FAILED|CREDENTIAL_INVALID|LICENSE_[A-Z_]+|TENANT_LICENSE_[A-Z_]+'; then
         log_error "comm-agent registration was rejected by the platform. See agent logs below."
         echo "$logs" >&2
-        exit 1
+        return 1
       fi
     fi
     sleep 3
@@ -12301,7 +12384,7 @@ wait_agent_registration() {
   if [[ -n "$pod" ]]; then
     kubectl -n "$NAMESPACE" logs "$pod" --tail=80 >&2 || true
   fi
-  exit 1
+  return 1
 }
 
 kubectl_retry() {
@@ -12493,6 +12576,16 @@ log_section "Namespace and credentials"
 log_info "Creating or updating namespace ${NAMESPACE}"
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl_apply_retry
 log_ok "Namespace ${NAMESPACE} is ready"
+log_info "Installing the offline Agent uninstaller in the cluster"
+uninstaller_file="$(mktemp)"
+if curl -k -fsSL "$AGENT_UNINSTALL_URL" -o "$uninstaller_file" && head -n 1 "$uninstaller_file" | grep -qx '#!/usr/bin/env bash' && kubectl -n "$NAMESPACE" create configmap hypercdr-agent-uninstaller --from-file=uninstall-agent.sh="$uninstaller_file" --dry-run=client -o yaml | kubectl_apply_retry; then
+  kubectl -n "$NAMESPACE" label configmap hypercdr-agent-uninstaller app.kubernetes.io/managed-by=hypercdr --overwrite >/dev/null
+  rm -f "$uninstaller_file"
+  log_ok "Offline uninstaller is available in configmap/hypercdr-agent-uninstaller"
+else
+  rm -f "$uninstaller_file"
+  fail "Unable to install the offline Agent uninstaller" 1
+fi
 log_info "Ensuring the namespace default service account is ready"
 kubectl -n "$NAMESPACE" create serviceaccount default --dry-run=client -o yaml | kubectl_apply_retry
 log_ok "Namespace service account is ready"

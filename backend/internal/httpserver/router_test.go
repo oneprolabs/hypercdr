@@ -924,6 +924,11 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 		"Reason: a required container image could not be pulled.",
 		"If this cluster is already Online in HyperCDR, do not register it again.",
 		"generate a new registration command in HyperCDR before retrying",
+		"TENANT_LICENSE_[A-Z_]+",
+		"rollback_failed_registration",
+		"Failed first-time installation was rolled back",
+		"configmap hypercdr-agent-uninstaller",
+		"/uninstall-agent.sh",
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("expected install script to contain %q", expected)
@@ -942,6 +947,28 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 	command.Stdin = strings.NewReader(text)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("generated install script has invalid shell syntax: %v\n%s", err, output)
+	}
+}
+
+func TestAgentOfflineUninstallScriptIsSafeByDefault(t *testing.T) {
+	repo := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	server := httptest.NewServer(NewRouter(config.Config{}, logger, repo))
+	defer server.Close()
+	resp, err := http.Get(server.URL + "/uninstall-agent.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, expected := range []string{"Dry-run only", "--execute", "--force-finalizers", "Refusing cleanup", "Application namespaces, Longhorn"} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("offline uninstaller missing %q", expected)
+		}
 	}
 }
 
@@ -1749,6 +1776,44 @@ func registerTestAgent(t *testing.T, wsURL string, payload protocol.RegisterPayl
 		t.Fatalf("expected register accepted, got %s", accepted.Type)
 	}
 	return accepted
+}
+
+func TestLicenseRejectedAgentRegistrationRollsBackPlatformResources(t *testing.T) {
+	repo := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	admission := EditionAdmissionController(func(_ context.Context, request EditionAdmissionRequest) EditionAuthorizationDecision {
+		if request.Operation != "cluster.register" || request.WorkerNodes != 11 {
+			t.Fatalf("unexpected admission request: %#v", request)
+		}
+		return EditionAuthorizationDecision{Allowed: false, Code: "LICENSE_NODE_CAPACITY_EXCEEDED", Message: "licensed 10 Worker Nodes, registration requires 11"}
+	})
+	handler := NewRouterWithProductInfo(config.Config{AgentNamespace: "hypercdr-agent"}, logger, repo, ProductInfo{}, WithEditionAdmissionController(admission))
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	token := createTestAgentToken(t, server.URL)
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/ws/agent", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	message := protocol.Message[protocol.RegisterPayload]{Version: protocol.Version, MessageID: "license-rejected", Type: protocol.MessageAgentRegister, AgentID: "agent-license-test", Timestamp: time.Now().UTC(), Payload: protocol.RegisterPayload{InstallToken: token, Cluster: protocol.ClusterSummary{Name: "over-limit", NodeCount: 11}}}
+	if err = conn.WriteJSON(message); err != nil {
+		t.Fatal(err)
+	}
+	var rejected protocol.Message[protocol.RegisterRejectedPayload]
+	if err = conn.ReadJSON(&rejected); err != nil {
+		t.Fatal(err)
+	}
+	if rejected.Type != protocol.MessagePlatformRegisterRejected || rejected.Payload.Reason != "LICENSE_NODE_CAPACITY_EXCEEDED" {
+		t.Fatalf("rejected response = %#v", rejected)
+	}
+	clusters, err := repo.ListClusters()
+	if err != nil || len(clusters) != 0 {
+		t.Fatalf("license-rejected registration left clusters: %#v err=%v", clusters, err)
+	}
+	if err = repo.ValidateAgentToken(token); !errors.Is(err, store.ErrTokenInvalid) {
+		t.Fatalf("license-rejected token was not removed: %v", err)
+	}
 }
 
 func TestValidUserEmail(t *testing.T) {

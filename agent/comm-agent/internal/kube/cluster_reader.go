@@ -895,6 +895,7 @@ func nodeState(node corev1.Node) Node {
 			"cpu":    node.Status.Capacity.Cpu().String(),
 			"memory": node.Status.Capacity.Memory().String(),
 		},
+		Unschedulable: node.Spec.Unschedulable,
 	}
 }
 

@@ -31,6 +31,22 @@ type recordingAuthorizer struct {
 	request AuthorizationRequest
 }
 
+type recordingAdmissionController struct{ request AdmissionRequest }
+
+func (a *recordingAdmissionController) Admit(_ context.Context, request AdmissionRequest) AuthorizationDecision {
+	a.request = request
+	return AuthorizationDecision{Allowed: false, Code: "LICENSE_NODE_CAPACITY_EXCEEDED", Message: "licensed 10 nodes"}
+}
+
+func TestEditionAdmissionMapsMeasuredRegistration(t *testing.T) {
+	recorder := &recordingAdmissionController{}
+	adapter := editionAdmissionController(recorder)
+	decision := adapter(context.Background(), httpserver.EditionAdmissionRequest{Operation: "cluster.register", TenantID: "tenant-1", ClusterID: "cluster-1", WorkerNodes: 3})
+	if decision.Allowed || decision.Code != "LICENSE_NODE_CAPACITY_EXCEEDED" || recorder.request.WorkerNodes != 3 || recorder.request.ClusterID != "cluster-1" {
+		t.Fatalf("decision=%#v request=%#v", decision, recorder.request)
+	}
+}
+
 func TestEditionRoutesMapAuthenticatedPrincipal(t *testing.T) {
 	var got Principal
 	routes := editionRoutes([]Route{{Pattern: "GET /api/v1/enterprise/check", Handler: func(w http.ResponseWriter, _ *http.Request, principal Principal) {

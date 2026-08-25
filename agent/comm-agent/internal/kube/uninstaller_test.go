@@ -292,8 +292,18 @@ func TestKubernetesUninstallerDeletesVeleroCRsBeforeNamespace(t *testing.T) {
 	if _, err := dynamicClient.Resource(pvbGVR).Namespace("hypercdr-agent").Get(context.Background(), "stale-pvb", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
 		t.Fatalf("expected pod volume backup deleted, got %v", err)
 	}
-	assertPatchedFinalizers(t, dynamicClient.Actions(), restoreGVR, "stale-restore")
-	assertPatchedFinalizers(t, dynamicClient.Actions(), pvbGVR, "stale-pvb")
+	assertFinalizersNotForced(t, dynamicClient.Actions(), restoreGVR, "stale-restore")
+	assertFinalizersNotForced(t, dynamicClient.Actions(), pvbGVR, "stale-pvb")
+}
+
+func assertFinalizersNotForced(t *testing.T, actions []k8stesting.Action, gvr schema.GroupVersionResource, name string) {
+	t.Helper()
+	for _, action := range actions {
+		patch, ok := action.(k8stesting.PatchAction)
+		if ok && patch.GetResource() == gvr && patch.GetName() == name {
+			t.Fatalf("normal Velero deletion unexpectedly forced finalizers for %s", name)
+		}
+	}
 }
 
 func assertPatchedFinalizers(t *testing.T, actions []k8stesting.Action, gvr schema.GroupVersionResource, name string) {

@@ -44,7 +44,7 @@ func (c *KubernetesCollector) Collect() (Snapshot, error) {
 		Cluster: protocol.ClusterSummary{
 			Name:           state.Name,
 			KubeVersion:    state.KubeVersion,
-			NodeCount:      len(state.Nodes),
+			NodeCount:      billableNodeCount(state.Nodes),
 			NamespaceCount: len(state.Namespaces),
 		},
 		Nodes:                buildNodeInventory(state.Nodes),
@@ -128,12 +128,25 @@ func buildNodeInventory(nodes []kube.Node) []protocol.NodeInventory {
 			KubeletVersion: node.KubeletVersion,
 			Capacity:       cloneStringMap(node.Capacity),
 			AgeSeconds:     node.AgeSeconds,
+			Unschedulable:  node.Unschedulable,
 		})
 	}
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].Name < items[j].Name
 	})
 	return items
+}
+
+func billableNodeCount(nodes []kube.Node) int {
+	count := 0
+	for _, node := range nodes {
+		role := nodeRole(node.Labels)
+		if role == "control-plane" && node.Unschedulable {
+			continue
+		}
+		count++
+	}
+	return count
 }
 
 func buildStorageClassInventory(storageClasses []kube.StorageClass) []protocol.StorageClassInventory {

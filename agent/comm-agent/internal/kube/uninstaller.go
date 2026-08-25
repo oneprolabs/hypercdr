@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,6 +20,7 @@ type UninstallOptions struct {
 	Namespace       string
 	DeleteVelero    bool
 	DeleteNamespace bool
+	Progress        func(stage, message string)
 }
 
 type Uninstaller interface {
@@ -63,6 +65,7 @@ func (u *KubernetesUninstaller) Uninstall(ctx context.Context, options Uninstall
 	// cleanup fails, keep the agent namespace alive so a retry can finish the job.
 	var preSelfRemovalErrs []error
 	if options.DeleteVelero {
+		reportUninstallProgress(options, "velero_resources_cleaning", "deleting Velero resources and waiting for finalizers")
 		if err := u.deleteVeleroNamespacedResources(ctx, options.Namespace); err != nil {
 			preSelfRemovalErrs = append(preSelfRemovalErrs, err)
 		}
@@ -73,6 +76,7 @@ func (u *KubernetesUninstaller) Uninstall(ctx context.Context, options Uninstall
 		}
 	}
 	for _, name := range uninstallExternalClusterRBACNames(options.Namespace, options.DeleteVelero) {
+		reportUninstallProgress(options, "external_rbac_cleaning", "deleting Velero cluster RBAC")
 		if err := u.client.RbacV1().ClusterRoleBindings().Delete(ctx, name, metav1.DeleteOptions{}); ignoreNotFound(err) != nil {
 			preSelfRemovalErrs = append(preSelfRemovalErrs, err)
 		}
@@ -81,6 +85,7 @@ func (u *KubernetesUninstaller) Uninstall(ctx context.Context, options Uninstall
 		}
 	}
 	if options.DeleteVelero {
+		reportUninstallProgress(options, "velero_crd_check", "checking whether Velero CRDs are shared")
 		if err := u.deleteVeleroCRDs(ctx, options.Namespace); err != nil {
 			preSelfRemovalErrs = append(preSelfRemovalErrs, err)
 		}
@@ -91,6 +96,7 @@ func (u *KubernetesUninstaller) Uninstall(ctx context.Context, options Uninstall
 
 	var errs []error
 	if options.DeleteNamespace {
+		reportUninstallProgress(options, "namespace_deleting", "deleting the dedicated Agent namespace")
 		if err := u.attachAgentRBACOwnerReferences(ctx, options.Namespace); err != nil {
 			return err
 		}
@@ -108,6 +114,12 @@ func (u *KubernetesUninstaller) Uninstall(ctx context.Context, options Uninstall
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func reportUninstallProgress(options UninstallOptions, stage, message string) {
+	if options.Progress != nil {
+		options.Progress(stage, message)
+	}
 }
 
 func (u *KubernetesUninstaller) attachAgentRBACOwnerReferences(ctx context.Context, namespace string) error {
@@ -148,7 +160,11 @@ func (u *KubernetesUninstaller) deleteVeleroNamespacedResources(ctx context.Cont
 		return nil
 	}
 	var errs []error
-	for _, gvr := range veleroNamespacedResources() {
+	gvrs := veleroNamespacedResources()
+	// First request deletion for every Velero kind. Some finalizers depend on
+	// related objects, so waiting one kind at a time can deadlock the natural
+	// controller cleanup order.
+	for _, gvr := range gvrs {
 		resource := u.dynamicClient.Resource(gvr).Namespace(namespace)
 		list, err := resource.List(ctx, metav1.ListOptions{})
 		if ignoreNotFound(err) != nil {
@@ -160,14 +176,49 @@ func (u *KubernetesUninstaller) deleteVeleroNamespacedResources(ctx context.Cont
 		}
 		for _, item := range list.Items {
 			name := item.GetName()
-			if len(item.GetFinalizers()) > 0 {
-				_, err := resource.Patch(ctx, name, types.MergePatchType, []byte(`{"metadata":{"finalizers":[]}}`), metav1.PatchOptions{})
-				if ignoreNotFound(err) != nil {
-					errs = append(errs, err)
-				}
-			}
 			if err := resource.Delete(ctx, name, metav1.DeleteOptions{}); ignoreNotFound(err) != nil {
 				errs = append(errs, err)
+			}
+		}
+	}
+	// Give the still-running Velero controller one shared grace period to
+	// perform normal finalization before applying the namespace-scoped fallback.
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		remainingCount := 0
+		for _, gvr := range gvrs {
+			remaining, err := u.dynamicClient.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{})
+			if err == nil {
+				remainingCount += len(remaining.Items)
+			} else if !apierrors.IsNotFound(err) {
+				errs = append(errs, fmt.Errorf("wait for %s cleanup: %w", gvr.Resource, err))
+			}
+		}
+		if remainingCount == 0 {
+			return errors.Join(errs...)
+		}
+		select {
+		case <-ctx.Done():
+			return errors.Join(append(errs, ctx.Err())...)
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	for _, gvr := range gvrs {
+		resource := u.dynamicClient.Resource(gvr).Namespace(namespace)
+		remaining, err := resource.List(ctx, metav1.ListOptions{})
+		if ignoreNotFound(err) != nil {
+			errs = append(errs, fmt.Errorf("inspect remaining %s: %w", gvr.Resource, err))
+			continue
+		}
+		if err != nil {
+			continue
+		}
+		for _, item := range remaining.Items {
+			if len(item.GetFinalizers()) == 0 {
+				continue
+			}
+			if _, err := resource.Patch(ctx, item.GetName(), types.MergePatchType, []byte(`{"metadata":{"finalizers":[]}}`), metav1.PatchOptions{}); ignoreNotFound(err) != nil {
+				errs = append(errs, fmt.Errorf("remove stale finalizers from %s/%s: %w", gvr.Resource, item.GetName(), err))
 			}
 		}
 	}

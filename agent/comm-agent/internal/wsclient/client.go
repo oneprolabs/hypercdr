@@ -186,6 +186,25 @@ func (c *Client) Register() (protocol.RegisterAcceptedPayload, error) {
 	if c.cfg.AgentCredential != "" && c.cfg.ClusterID == "" {
 		return protocol.RegisterAcceptedPayload{}, errors.New("HCDR_CLUSTER_ID is required when HCDR_AGENT_CREDENTIAL is set")
 	}
+	clusterSummary := protocol.ClusterSummary{Name: c.cfg.ClusterName, ControlPlaneIP: c.cfg.ControlPlaneIP, KubeVersion: "unknown"}
+	// A fresh Enterprise registration needs an authoritative Worker Node count
+	// before the platform can accept and persist its license consumption.
+	if c.cfg.AgentCredential == "" && c.collector != nil {
+		if snapshot, collectErr := c.collector.Collect(); collectErr != nil {
+			if c.logger != nil {
+				c.logger.Warn("failed to collect registration inventory", "error", collectErr)
+			}
+		} else {
+			c.lastInventory = snapshot
+			clusterSummary = snapshot.Report.Cluster
+			if clusterSummary.Name == "" {
+				clusterSummary.Name = c.cfg.ClusterName
+			}
+			if clusterSummary.ControlPlaneIP == "" {
+				clusterSummary.ControlPlaneIP = c.cfg.ControlPlaneIP
+			}
+		}
+	}
 
 	dialer := websocket.DefaultDialer
 	if c.cfg.PlatformTLSSkipVerify {
@@ -207,11 +226,7 @@ func (c *Client) Register() (protocol.RegisterAcceptedPayload, error) {
 	register := protocol.NewMessage(protocol.MessageKindRequest, protocol.MessageAgentRegister, c.cfg.ClusterID, c.cfg.AgentID, protocol.RegisterPayload{
 		InstallToken:    c.cfg.InstallToken,
 		AgentCredential: c.cfg.AgentCredential,
-		Cluster: protocol.ClusterSummary{
-			Name:           c.cfg.ClusterName,
-			ControlPlaneIP: c.cfg.ControlPlaneIP,
-			KubeVersion:    "unknown",
-		},
+		Cluster:         clusterSummary,
 		Agent: protocol.AgentSummary{
 			Version:   c.cfg.AgentVersion,
 			Namespace: c.cfg.Namespace,
@@ -852,6 +867,15 @@ func (c *Client) executeUnregisterTask(task protocol.TaskDispatchPayload) {
 		Namespace:       task.Unregister.Namespace,
 		DeleteVelero:    task.Unregister.DeleteVelero,
 		DeleteNamespace: task.Unregister.DeleteNamespace,
+		Progress: func(stage, message string) {
+			progress := map[string]int{"velero_resources_cleaning": 50, "external_rbac_cleaning": 65, "velero_crd_check": 75, "namespace_deleting": 85}[stage]
+			if progress == 0 {
+				progress = 50
+			}
+			if err := c.sendTaskProgress(task, map[string]any{"kind": "Unregister", "namespace": task.Unregister.Namespace, "stage": stage}, progress, message); err != nil {
+				c.logger.Warn("failed to send unregister stage progress", "task_id", task.TaskID, "stage", stage, "error", err)
+			}
+		},
 	}); err != nil {
 		c.logger.Error("cluster-side unregister cleanup failed", "task_id", task.TaskID, "error", err)
 		_ = c.sendTaskFailedWithDetails(task, "UNREGISTER_CLEANUP_FAILED", "cluster-side cleanup failed", map[string]any{

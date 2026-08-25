@@ -798,7 +798,7 @@ export default function RealRestorePointPage({
       <AnimatePresence>
         {deleteDialog && (
           <motion.div
-            className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/35 px-4 py-8 backdrop-blur-sm"
+            className="fixed inset-0 z-[230] flex items-center justify-center bg-slate-950/35 px-4 py-8 backdrop-blur-sm"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}

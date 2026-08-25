@@ -17,7 +17,7 @@ import { formatDateTime, formatLocalDateTime } from '../../lib/date-time';
 import type { AppItem, Cluster, DRSupportSummary, ResourceCategory, ResourceCategoryKey } from '../clusters/types';
 import {
   listItems,
-  type ApiApplication, type ApiList, type ApiProtectionPlan, type ApiRestorePointView,
+  type ApiApplication, type ApiList, type ApiProtectionPlan, type ApiRestorePoint, type ApiRestorePointView,
   type ApiTask, type ApiTaskCancelResponse, type ApiTaskEvent, type ApiTaskResponse,
   type PolicyItem, type StorageRepo, type TagItem,
 } from '../recovery/types';
@@ -186,6 +186,10 @@ export default function ApplicationDrPage(props: {
   const [namespaceRestorePointPage, setNamespaceRestorePointPage] = useState(1);
 	const [restorePointMenuId, setRestorePointMenuId] = useState('');
   const [namespaceTaskPage, setNamespaceTaskPage] = useState(1);
+  const [namespaceDetailRestorePoints, setNamespaceDetailRestorePoints] = useState<ApiRestorePointView[] | null>(null);
+  const [namespaceDetailTasks, setNamespaceDetailTasks] = useState<ApiTask[] | null>(null);
+  const [namespaceDetailLoading, setNamespaceDetailLoading] = useState(false);
+  const [namespaceDetailLoadError, setNamespaceDetailLoadError] = useState('');
   const [drSupportErrorDetail, setDrSupportErrorDetail] = useState<AppItem | null>(null);
   const [operationConfirm, setOperationConfirm] = useState<'cancel-sync' | 'cleanup-drill' | 'remove-config' | null>(null);
   const openNamespaceDetail = (app: AppItem, tab: 'overview' | 'restorePoints' | 'tasks' | 'storage' = 'overview') => {
@@ -194,7 +198,61 @@ export default function ApplicationDrPage(props: {
     setNamespaceDetailTaskId('');
     setNamespaceRestorePointPage(1);
     setNamespaceTaskPage(1);
+    setNamespaceDetailRestorePoints(null);
+    setNamespaceDetailTasks(null);
+    setNamespaceDetailLoadError('');
   };
+  const selectedDetailPlanId = selectedDetailApp?.protectionPlanId
+    || protectionPlans.find(plan => plan.appId === selectedDetailApp?.apiId || plan.appIds?.includes(selectedDetailApp?.apiId || ''))?.id
+    || '';
+  useEffect(() => {
+    if (!selectedDetailApp || !selectedDetailPlanId || namespaceDetailTab === 'overview' || namespaceDetailTab === 'storage') return;
+    if (namespaceDetailTab === 'restorePoints' && namespaceDetailRestorePoints !== null) return;
+    if (namespaceDetailTab === 'tasks' && namespaceDetailTasks !== null) return;
+    let cancelled = false;
+    const loadTab = async () => {
+      setNamespaceDetailLoading(true);
+      setNamespaceDetailLoadError('');
+      try {
+        if (namespaceDetailTab === 'restorePoints') {
+          const response = await apiGet<ApiList<ApiRestorePoint>>(`/api/v1/restore-points?protectionPlanId=${encodeURIComponent(selectedDetailPlanId)}&pageSize=500`);
+          if (cancelled) return;
+          setNamespaceDetailRestorePoints(listItems(response).map(point => ({
+            id: point.id,
+            sourceClusterId: point.sourceClusterId,
+            protectionPlanId: point.protectionPlanId,
+            appId: point.appId,
+            storageRepoId: point.storageRepoId,
+            backupTaskId: String(point.metadata?.backupTaskId || ''),
+            sourceNamespace: point.sourceNamespace || String(point.metadata?.sourceNamespace || ''),
+            taskCreatedAt: point.taskCreatedAt,
+            createdAt: point.createdAt,
+            title: point.veleroBackupName || point.id,
+            time: point.completedAt || point.createdAt,
+            pointType: point.pointType?.toLowerCase().includes('local') ? 'local' : 'remote',
+            status: point.status,
+            sizeBytes: point.sizeBytes,
+            completedAt: point.completedAt,
+            expiresAt: point.expiresAt,
+            backupStorageName: point.backupStorageName || String(point.metadata?.backupStorageName || ''),
+            veleroBackupName: point.veleroBackupName,
+            includedNamespaces: Array.isArray(point.metadata?.includedNamespaces) ? point.metadata.includedNamespaces as string[] : [],
+            metadata: point.metadata || {},
+            sizeMetricsV2: point.sizeMetricsV2 || point.metadata?.sizeMetricsV2,
+          })));
+        } else {
+          const response = await apiGet<ApiList<ApiTask>>('/api/v1/tasks?view=summary&types=backup,restore,drill,takeover,retention-cleanup,protection-cleanup&limit=500');
+          if (!cancelled) setNamespaceDetailTasks(listItems(response).filter(task => task.protectionPlanId === selectedDetailPlanId));
+        }
+      } catch (error) {
+        if (!cancelled) setNamespaceDetailLoadError(error instanceof Error ? error.message : 'Unable to load this detail section.');
+      } finally {
+        if (!cancelled) setNamespaceDetailLoading(false);
+      }
+    };
+    void loadTab();
+    return () => { cancelled = true; };
+  }, [namespaceDetailRestorePoints, namespaceDetailTab, namespaceDetailTasks, selectedDetailApp, selectedDetailPlanId]);
   const currentClusterIdRef = useRef(currentClusterId);
   useEffect(() => {
     if (currentClusterIdRef.current === currentClusterId) return;
@@ -2904,7 +2962,7 @@ export default function ApplicationDrPage(props: {
 
       <AnimatePresence>
         {operationConfirm && (
-          <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="fixed inset-0 z-[230] flex justify-end">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -2968,7 +3026,7 @@ export default function ApplicationDrPage(props: {
 
       <AnimatePresence>
         {resourceDetail && (
-          <div className="fixed inset-0 z-50">
+          <div className="fixed inset-0 z-[230]">
             {(() => {
               const namespace = resourceDetail.app.namespace || resourceDetail.app.name;
               const clusterId = resourceDetail.app.clusterId || currentClusterId || '';
@@ -3115,7 +3173,7 @@ export default function ApplicationDrPage(props: {
 
 	  <AnimatePresence>
         {tagAction && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[230] flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-slate-900/45 backdrop-blur-sm" onClick={() => setTagAction(null)} />
             <motion.div initial={{ opacity: 0, y: 14, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 14, scale: 0.98 }} className="hbdr-tag-action-modal">
               <div className="hbdr-tag-action-head">
@@ -3318,12 +3376,14 @@ export default function ApplicationDrPage(props: {
                 ['PVCs', String(selectedDetailApp.pvcCount || selectedDetailApp.resourceSummary?.pvcs || 0)],
                 ['Storage Request', formatBytes(capacityBytes)],
               ];
-          const detailRestorePoints = liveRestorePoints
+          const detailRestorePoints = (namespaceDetailRestorePoints || [])
             .filter(point => Boolean(detailPlanId && point.protectionPlanId === detailPlanId))
             .sort((a, b) => (b.taskCreatedAt || b.createdAt || b.time || '').localeCompare(a.taskCreatedAt || a.createdAt || a.time || ''));
-          const detailTasks = platformTasks
+          const detailTasks = (namespaceDetailTasks || [])
             .filter(task => Boolean(detailPlanId && task.protectionPlanId === detailPlanId))
             .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+          const restorePointSummaryCount = liveRestorePoints.filter(point => Boolean(detailPlanId && point.protectionPlanId === detailPlanId)).length;
+          const taskSummaryCount = platformTasks.filter(task => Boolean(detailPlanId && task.protectionPlanId === detailPlanId)).length;
           const detailRepository = storage.find(repo => repo.id === detailPlan?.storageRepoId)
             || storage.find(repo => repo.name === selectedDetailApp.storage);
           const selectedNamespaceTask = detailTasks.find(task => task.id === namespaceDetailTaskId) || null;
@@ -3351,13 +3411,13 @@ export default function ApplicationDrPage(props: {
           const detailTabs = detailStage === 'run'
             ? [
               { id: 'overview' as const, label: 'Overview' },
-              { id: 'restorePoints' as const, label: 'Restore Points', count: detailRestorePoints.length },
-              { id: 'tasks' as const, label: 'Tasks', count: detailTasks.length },
+              { id: 'restorePoints' as const, label: 'Restore Points', count: namespaceDetailRestorePoints === null ? restorePointSummaryCount : detailRestorePoints.length },
+              { id: 'tasks' as const, label: 'Tasks', count: namespaceDetailTasks === null ? taskSummaryCount : detailTasks.length },
               { id: 'storage' as const, label: 'Storage' },
             ]
             : [{ id: 'overview' as const, label: 'Overview' }];
           return (
-            <div className="fixed inset-0 z-50 flex justify-end">
+            <div className="fixed inset-0 z-[230] flex justify-end">
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -3540,7 +3600,11 @@ export default function ApplicationDrPage(props: {
                         <div><strong>Restore Points</strong><span>Recovery points stored for this namespace or DR plan.</span></div>
                         <em>{detailRestorePoints.length}</em>
                       </div>
-                      {detailRestorePoints.length > 0 ? (
+                      {namespaceDetailLoading ? (
+                        <div className="hbdr-namespace-detail-empty" role="status"><RefreshCw className="animate-spin" size={22} /><strong>Loading restore points...</strong><span>Recovery-point details are loaded only when this tab is opened.</span></div>
+                      ) : namespaceDetailLoadError ? (
+                        <div className="hbdr-namespace-detail-empty" role="alert"><AlertCircle size={22} /><strong>Unable to load restore points</strong><span>{namespaceDetailLoadError}</span></div>
+                      ) : detailRestorePoints.length > 0 ? (
                         <div className="hbdr-namespace-detail-list">
                           {pagedDetailRestorePoints.map(point => {
 							const metrics = recordFromUnknown(point.sizeMetricsV2 || point.metadata?.sizeMetricsV2);
@@ -3604,7 +3668,11 @@ export default function ApplicationDrPage(props: {
 
                   {namespaceDetailTab === 'tasks' && (
                     <div className="hbdr-namespace-detail-panel">
-                      {selectedNamespaceTask ? (
+                      {namespaceDetailLoading ? (
+                        <div className="hbdr-namespace-detail-empty" role="status"><RefreshCw className="animate-spin" size={22} /><strong>Loading tasks...</strong><span>Task details are loaded only when this tab is opened.</span></div>
+                      ) : namespaceDetailLoadError ? (
+                        <div className="hbdr-namespace-detail-empty" role="alert"><AlertCircle size={22} /><strong>Unable to load tasks</strong><span>{namespaceDetailLoadError}</span></div>
+                      ) : selectedNamespaceTask ? (
                         <div className="hbdr-namespace-task-detail">
                           <button type="button" className="hbdr-namespace-task-back" onClick={() => setNamespaceDetailTaskId('')}>← Back to tasks</button>
                           <div className="hbdr-namespace-task-summary">

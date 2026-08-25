@@ -551,6 +551,7 @@ type RegisterClusterInput struct {
 	AgentVersion   string
 	VeleroVersion  string
 	VeleroStatus   string
+	NodeCount      int
 }
 
 type AgentCredentialInput struct {

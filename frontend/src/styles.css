@@ -4182,7 +4182,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 .hbdr-filter-drawer-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 70;
+  z-index: 240;
   background: rgba(15, 23, 42, 0.28);
 }
 
@@ -4190,7 +4190,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   position: fixed;
   top: 0;
   right: 0;
-  z-index: 80;
+  z-index: 250;
   display: flex;
   width: min(680px, calc(100vw - 120px));
   height: 100vh;
@@ -5624,7 +5624,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 .hbdr-protect-modal {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: 230;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -11137,11 +11137,48 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 .hbdr-dr-action-danger,
 .hbdr-dr-more,
 .hbdr-dr-action-secondary {
+  display: inline-flex !important;
+  flex: 0 0 auto !important;
   height: 32px !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
   border-radius: 2px !important;
   padding: 0 12px !important;
   font-size: 12px !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
   box-shadow: none !important;
+}
+
+.hbdr-dr-action-primary > svg,
+.hbdr-dr-action-danger > svg,
+.hbdr-dr-more > svg,
+.hbdr-dr-action-secondary > svg {
+  flex: 0 0 auto !important;
+}
+
+/*
+ * Page headers and their first content region share one vertical rhythm.
+ * Tailwind `space-y-*` utilities on legacy page wrappers otherwise add a
+ * second, page-specific gap on top of the header's own margin.
+ */
+.premium-app.hbdr-workspace .premium-content .hbdr-page-hero {
+  margin-bottom: 16px !important;
+}
+
+.premium-app.hbdr-workspace .premium-content .hbdr-page-hero + * {
+  margin-top: 0 !important;
+}
+
+.premium-app.hbdr-workspace .premium-content .hbdr-page-hero > div > div:last-child button {
+  flex: 0 0 auto !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+}
+
+.premium-app.hbdr-workspace .premium-content .hbdr-page-hero > div > div:last-child button > svg {
+  flex: 0 0 auto !important;
 }
 
 .hbdr-dr-query-group select,
@@ -15200,7 +15237,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 .hbdr-config-modal {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: 230;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -18869,7 +18906,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 .hbdr-protect-modal {
   position: fixed;
   inset: 0;
-  z-index: 70;
+  z-index: 230;
 }
 
 .hbdr-protect-drawer.hbdr-protect-dialog-v2 {
@@ -23190,7 +23227,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   top: 0 !important;
   right: 0 !important;
   left: auto !important;
-  z-index: 80 !important;
+  z-index: 250 !important;
   width: min(760px, calc(100vw - 80px)) !important;
   height: 100vh !important;
   max-height: none !important;
@@ -23246,7 +23283,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 .hbdr-config-modal {
   position: fixed !important;
   inset: 0 !important;
-  z-index: 80 !important;
+  z-index: 230 !important;
   display: block !important;
   padding: 0 !important;
 }
@@ -23256,7 +23293,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   top: 0 !important;
   right: 0 !important;
   left: auto !important;
-  z-index: 80 !important;
+  z-index: 250 !important;
   display: flex !important;
   width: min(680px, calc(100vw - 72px)) !important;
   max-width: none !important;
@@ -25447,6 +25484,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 @media (max-width:760px) { .premium-app .hbdr-scoped-resource-summary { align-items:flex-start; } .premium-app .hbdr-scoped-resource-mode { margin-left:0; } }
 
 .premium-app .hbdr-release-notes-unread { width:7px; height:7px; margin-left:auto; border-radius:999px; background:#2b72b8; box-shadow:0 0 0 3px #e8f2fc; }
+.hbdr-toast { z-index:10000 !important; pointer-events:none; }
 .premium-app .hbdr-release-notes-layer { position:fixed; inset:0; z-index:300; display:grid; place-items:center; padding:24px; }
 .premium-app .hbdr-release-notes-backdrop { position:absolute; inset:0; width:100%; height:100%; border:0; background:rgba(18,30,45,.42); backdrop-filter:blur(3px); }
 .premium-app .hbdr-release-notes-modal { position:relative; display:flex; flex-direction:column; width:min(680px,100%); max-height:min(760px,88vh); overflow:hidden; border:1px solid rgba(219,228,238,.95); border-radius:18px; background:#fff; box-shadow:0 28px 80px rgba(18,37,57,.24); }

@@ -1039,6 +1039,7 @@ func (s *PostgresStore) RegisterCluster(input RegisterClusterInput) (Cluster, st
 		AgentVersion:     input.AgentVersion,
 		VeleroVersion:    input.VeleroVersion,
 		VeleroStatus:     input.VeleroStatus,
+		NodeCount:        input.NodeCount,
 		Role:             "both",
 		IsDefault:        isFirstCluster,
 		RegisteredAt:     now,
@@ -1049,12 +1050,12 @@ func (s *PostgresStore) RegisterCluster(input RegisterClusterInput) (Cluster, st
 		insert into clusters (
 			id, tenant_id, name, kube_version, status, connection_status,
 			agent_version, velero_version, velero_status, registered_at, last_seen_at,
-			role, is_default, created_at, updated_at
+			role, is_default, node_count, created_at, updated_at
 		)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $15)
 	`, cluster.ID, cluster.TenantID, cluster.Name, cluster.KubeVersion, cluster.Status,
 		cluster.ConnectionStatus, cluster.AgentVersion, cluster.VeleroVersion, cluster.VeleroStatus,
-		cluster.RegisteredAt, cluster.LastSeenAt, cluster.Role, cluster.IsDefault, now)
+		cluster.RegisteredAt, cluster.LastSeenAt, cluster.Role, cluster.IsDefault, cluster.NodeCount, now)
 	if err != nil {
 		return Cluster{}, "", err
 	}
@@ -1343,7 +1344,7 @@ func (s *PostgresStore) DeleteCluster(clusterID string) (bool, error) {
 	if _, err := tx.Exec(`delete from agent_sessions where cluster_id = $1`, clusterID); err != nil {
 		return false, err
 	}
-	if _, err := tx.Exec(`update agent_tokens set cluster_id = null where cluster_id = $1`, clusterID); err != nil {
+	if _, err := tx.Exec(`delete from agent_tokens where cluster_id = $1`, clusterID); err != nil {
 		return false, err
 	}
 	result, err := tx.Exec(`delete from clusters where id = $1`, clusterID)
@@ -3187,7 +3188,7 @@ func (s *PostgresStore) listTasks(filter TaskFilter) ([]Task, error) {
 			'storageLocation',payload->'storageLocation','repository',payload->'repository','name',payload->'name'))`
 	}
 	query := `
-		select id, tenant_id, cluster_id, coalesce(app_id::text, ''), coalesce(protection_plan_id::text, ''),
+		select id, tenant_id, coalesce(cluster_id::text, ''), coalesce(app_id::text, ''), coalesce(protection_plan_id::text, ''),
 		       coalesce(restore_point_id::text, ''), type, status, progress, coalesce(command_id::text, ''),
 		       coalesce(error_code, ''), coalesce(error_message, ''), ` + payloadExpr + `,
 		       created_at, coalesce(dispatched_at, '0001-01-01'::timestamptz),
@@ -3472,7 +3473,7 @@ func (s *PostgresStore) getTask(taskID string) (Task, bool, error) {
 	var task Task
 	var payloadRaw []byte
 	err := s.db.QueryRow(`
-		select id, tenant_id, cluster_id, coalesce(app_id::text, ''), coalesce(protection_plan_id::text, ''),
+		select id, tenant_id, coalesce(cluster_id::text, ''), coalesce(app_id::text, ''), coalesce(protection_plan_id::text, ''),
 		       coalesce(restore_point_id::text, ''), type, status, progress, coalesce(command_id::text, ''),
 		       coalesce(error_code, ''), coalesce(error_message, ''), payload,
 		       created_at, coalesce(dispatched_at, '0001-01-01'::timestamptz),

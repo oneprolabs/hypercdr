@@ -184,6 +184,7 @@ export type ApiRestorePoint = {
   sourceNamespace?: string;
   backupStorageName?: string;
   metadata?: Record<string, any>;
+  sizeMetricsV2?: Record<string, any>;
   createdAt: string;
 };
 

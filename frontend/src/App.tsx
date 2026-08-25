@@ -1053,6 +1053,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   }, [authSession, releaseNotesAdminAudience]);
   const [clusters, setClusters] = useState<Cluster[]>(initialClusters);
   const [liveClusters, setLiveClusters] = useState<Cluster[] | null>(null);
+  const [clusterRegistrationState, setClusterRegistrationState] = useState<'loading' | 'register' | 'default' | 'ready' | 'error'>('loading');
   const [storage, setStorage] = useState<StorageRepo[]>(initialStorage);
   const [liveStorage, setLiveStorage] = useState<StorageRepo[] | null>(null);
   const [policies, setPolicies] = useState<PolicyItem[]>(initialPolicies);
@@ -1106,6 +1107,28 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   const refreshLastStartedAtRef = useRef(0);
   const refreshLastResultRef = useRef<Cluster[]>([]);
   const resourceSessionOwnerRef = useRef(authSession?.session.token || '');
+
+  useEffect(() => {
+    const owner = authSession?.session.token || '';
+    if (!owner) {
+      setClusterRegistrationState('loading');
+      return;
+    }
+    let cancelled = false;
+    setClusterRegistrationState('loading');
+    void apiGet<ApiList<Pick<ApiCluster, 'id' | 'isDefault'>>>('/api/v1/clusters?view=summary')
+      .then(response => {
+        if (cancelled || resourceSessionOwnerRef.current !== owner) return;
+        const items = listItems(response);
+        setClusterRegistrationState(items.length === 0
+          ? 'register'
+          : items.some(cluster => cluster.isDefault) ? 'ready' : 'default');
+      })
+      .catch(() => {
+        if (!cancelled && resourceSessionOwnerRef.current === owner) setClusterRegistrationState('error');
+      });
+    return () => { cancelled = true; };
+  }, [authSession?.session.token]);
 
   const [appStage, setAppStage] = useState<'select' | 'config' | 'run'>('select');
   const [search, setSearch] = useState('');
@@ -1796,7 +1819,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   const drStorage = liveStorage ?? storage;
   const drPolicies = livePolicies ?? policies;
   const onboarding: 'register' | 'default' | 'ready' | 'loading' = liveClusters === null
-    ? 'loading'
+    ? (clusterRegistrationState === 'error' ? 'loading' : clusterRegistrationState)
     : liveClusters.length === 0
       ? 'register'
       : (liveClusters.some(cluster => cluster.isDefault) ? 'ready' : 'default');
@@ -2517,7 +2540,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       <ReleaseNotesModal open={releaseNotesOpen} isAdmin={releaseNotesAdminAudience} onClose={() => setReleaseNotesOpen(false)} />
 
       {toast && (
-        <div className="fixed right-5 top-20 z-50 rounded border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 shadow-xl">
+        <div className="hbdr-toast fixed right-5 top-20 rounded border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 shadow-xl" role="status" aria-live="polite">
           {toast}
         </div>
       )}
