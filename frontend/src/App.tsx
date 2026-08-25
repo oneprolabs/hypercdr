@@ -1562,13 +1562,19 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
         const clusterRes = await apiGet<ApiList<ApiCluster>>('/api/v1/clusters');
         if (resourceSessionOwnerRef.current !== owner) return [];
         const apiClusters = listItems(clusterRes);
-        const nextClusters = apiClusters.map(cluster => mapCluster(
-          cluster,
-          [],
-        ));
+        const nextClusters = apiClusters.map(cluster => mapCluster(cluster, []));
         setLiveApiClusters(apiClusters);
-        setLiveClusters(nextClusters);
-        setClusters(nextClusters);
+        // A cluster-only poll must not discard applications loaded on demand
+        // for the open DR topology. Otherwise relationships briefly appear and
+        // disappear again on the next 10-second cluster refresh.
+        setLiveClusters(previous => apiClusters.map(cluster => mapCluster(
+          cluster,
+          previous?.find(item => item.id === cluster.id)?.apps || [],
+        )));
+        setClusters(previous => apiClusters.map(cluster => mapCluster(
+          cluster,
+          previous.find(item => item.id === cluster.id)?.apps || [],
+        )));
         return nextClusters;
       }
       if (targetView === 'storage') {
@@ -1699,6 +1705,25 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     refreshInFlightViewRef.current = targetView;
     return request;
   }, [authSession?.session.token, view]);
+
+  const loadClusterTopology = useCallback(async () => {
+    const [clusterRes, appRes, planRes] = await Promise.all([
+      apiGet<ApiList<ApiCluster>>('/api/v1/clusters'),
+      apiGet<ApiList<ApiApplication>>('/api/v1/applications?view=summary'),
+      apiGet<ApiList<ApiProtectionPlan>>('/api/v1/protection-plans'),
+    ]);
+    const apiClusters = listItems(clusterRes);
+    const apiApps = listItems(appRes);
+    const apiPlans = listItems(planRes);
+    const nextClusters = apiClusters.map(cluster => mapCluster(cluster, mapApps(
+      apiApps.filter(app => app.clusterId === cluster.id), apiPlans, [], [], apiClusters,
+    )));
+    setLiveApiClusters(apiClusters);
+    setLiveApiApps(apiApps);
+    setLiveApiPlans(apiPlans);
+    setLiveClusters(nextClusters);
+    setClusters(nextClusters);
+  }, []);
 
   useEffect(() => {
     if (!authSession || !PLATFORM_DATA_VIEWS.has(view)) return;
@@ -2350,6 +2375,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
                 clusters={liveClusters ?? clusters}
                 loading={liveClusters === null}
                 protectionPlans={liveApiPlans}
+                onLoadTopology={loadClusterTopology}
                 canUpgrade={authSession?.user.role === 'admin'}
                 defaultClusterId={defaultClusterId}
                 clusterMenuId={clusterMenuId}

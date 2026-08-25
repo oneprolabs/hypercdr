@@ -30,7 +30,10 @@ export default function DRTopologyView({ clusters, model, selectedRelationshipId
     const sourceX = source.x * 10, sourceY = source.y * 5, targetX = target.x * 10, targetY = target.y * 5;
     const dx = targetX - sourceX, dy = targetY - sourceY;
     const distance = Math.max(1, Math.hypot(dx, dy));
-    const endpointInset = Math.min(96, distance * 0.22);
+    // Keep the arrowhead outside the node card.  The node is 176px wide and
+    // centered on its layout point; the previous 96px inset left the marker
+    // underneath the card (especially on short horizontal edges).
+    const endpointInset = Math.min(128, distance * 0.30);
     const x1 = sourceX + dx / distance * endpointInset;
     const y1 = sourceY + dy / distance * endpointInset;
     const x2 = targetX - dx / distance * endpointInset;
@@ -55,7 +58,7 @@ export default function DRTopologyView({ clusters, model, selectedRelationshipId
       <div className="hbdr-dr-topology-canvas" style={{ minHeight: canvasHeight }}>
         {model.relationships.length === 0 && <div className="hbdr-dr-topology-empty"><GitBranch size={15} /><strong>No DR relationships yet</strong><span>Clusters remain selectable below.</span></div>}
         <svg className="hbdr-dr-topology-lines" viewBox="0 0 1000 500" preserveAspectRatio="none" aria-hidden="true">
-          <defs><marker id="dr-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth"><path className="hbdr-dr-arrow-head" d="M1,1 L7,4 L1,7" /></marker></defs>
+          <defs><marker id="dr-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="userSpaceOnUse" overflow="visible"><path className="hbdr-dr-arrow-head" d="M1,1 L10,6 L1,11" /></marker></defs>
           {model.relationships.map(relationship => {
             const geometry = edgeGeometry(relationship);
             if (!geometry) return null;

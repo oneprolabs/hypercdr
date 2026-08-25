@@ -48,6 +48,7 @@ export default function ClusterPage(props: {
   clusters: Cluster[];
   loading: boolean;
   protectionPlans: ApiProtectionPlan[];
+  onLoadTopology: () => Promise<void>;
   canUpgrade: boolean;
   defaultClusterId: string | null;
   clusterMenuId: string | null;
@@ -67,7 +68,7 @@ export default function ClusterPage(props: {
   openDashboard: () => void;
   toast: (msg: string) => void;
 }) {
-  const { clusters, loading, protectionPlans, canUpgrade, defaultClusterId, clusterMenuId, setClusterMenuId, setSelectedCluster, setDefaultCluster, clearDefaultCluster, unregisterCluster, onRenameCluster, onUpgradeCluster, onUpgradeVelero, onRegisterCluster, onRefreshRegistration, clusterTaskLogs, getAgentTokenForRegistration, prefetchAgentToken, openDashboard, toast } = props;
+  const { clusters, loading, protectionPlans, onLoadTopology, canUpgrade, defaultClusterId, clusterMenuId, setClusterMenuId, setSelectedCluster, setDefaultCluster, clearDefaultCluster, unregisterCluster, onRenameCluster, onUpgradeCluster, onUpgradeVelero, onRegisterCluster, onRefreshRegistration, clusterTaskLogs, getAgentTokenForRegistration, prefetchAgentToken, openDashboard, toast } = props;
   const [registerOpen, setRegisterOpen] = useState(false);
   const [registerStep, setRegisterStep] = useState<1 | 2 | 3>(1);
   const [copied, setCopied] = useState(false);
@@ -100,10 +101,26 @@ export default function ClusterPage(props: {
   const [clusterResourceDetail, setClusterResourceDetail] = useState<{ cluster: Cluster; type: 'overview' | 'namespaces' | 'nodes' | 'storageClasses' } | null>(null);
   const [actionCopied, setActionCopied] = useState(false);
   const [topologyOpen, setTopologyOpen] = useState(false);
+  const [topologyLoading, setTopologyLoading] = useState(false);
+  const [topologyLoadError, setTopologyLoadError] = useState('');
   const [selectedRelationshipId, setSelectedRelationshipId] = useState<string | null>(null);
   const [selectedTopologyClusterId, setSelectedTopologyClusterId] = useState<string | null>(null);
   const topology = useMemo(() => buildDRTopology(clusters, protectionPlans), [clusters, protectionPlans]);
   const selectRelationship = (relationship: DRRelationship) => { setSelectedRelationshipId(relationship.id); setSelectedTopologyClusterId(null); };
+  const openTopology = async () => {
+    setSelectedRelationshipId(null);
+    setSelectedTopologyClusterId(null);
+    setTopologyLoadError('');
+    setTopologyOpen(true);
+    setTopologyLoading(true);
+    try {
+      await onLoadTopology();
+    } catch (error) {
+      setTopologyLoadError(error instanceof Error ? error.message : 'Unable to load DR topology.');
+    } finally {
+      setTopologyLoading(false);
+    }
+  };
   const registryCACommandRef = useRef<HTMLTextAreaElement | null>(null);
   const installCommandRef = useRef<HTMLTextAreaElement | null>(null);
   const actionCommandRef = useRef<HTMLTextAreaElement | null>(null);
@@ -621,7 +638,7 @@ export default function ClusterPage(props: {
               <h3>Registered Clusters</h3>
             </div>
             <div className="hbdr-cluster-toolbar-actions">
-              <button type="button" onClick={() => { setSelectedRelationshipId(null); setSelectedTopologyClusterId(null); setTopologyOpen(true); }} className="hbdr-cluster-topology-trigger"><GitBranch size={14} />DR Topology</button>
+              <button type="button" onClick={() => void openTopology()} className="hbdr-cluster-topology-trigger"><GitBranch size={14} />DR Topology</button>
               <button type="button" onClick={openRegister} className="hbdr-dr-action-primary inline-flex items-center gap-1.5"><Plus size={14} />Register Cluster</button>
             </div>
           </div>
@@ -816,7 +833,13 @@ export default function ClusterPage(props: {
                 <button type="button" onClick={() => setTopologyOpen(false)} aria-label="Close DR topology"><X size={18} /></button>
               </div>
               <div className="hbdr-filter-drawer-body hbdr-topology-drawer-body">
-                <DRTopologyView clusters={clusters} model={topology} selectedRelationshipId={selectedRelationshipId} selectedClusterId={selectedTopologyClusterId} onSelectRelationship={selectRelationship} onSelectCluster={(clusterId) => { setSelectedTopologyClusterId(clusterId); setSelectedRelationshipId(null); }} />
+                {topologyLoading ? (
+                  <div className="hbdr-section-card flex min-h-48 items-center justify-center text-xs font-semibold text-slate-400" role="status">Loading DR topology...</div>
+                ) : topologyLoadError ? (
+                  <div className="hbdr-section-card flex min-h-48 flex-col items-center justify-center gap-3 text-xs text-rose-700" role="alert"><span>{topologyLoadError}</span><button type="button" className="hbdr-cluster-topology-trigger" onClick={() => void openTopology()}><RefreshCw size={14} />Retry</button></div>
+                ) : (
+                  <DRTopologyView clusters={clusters} model={topology} selectedRelationshipId={selectedRelationshipId} selectedClusterId={selectedTopologyClusterId} onSelectRelationship={selectRelationship} onSelectCluster={(clusterId) => { setSelectedTopologyClusterId(clusterId); setSelectedRelationshipId(null); }} />
+                )}
               </div>
             </motion.aside>
           </>

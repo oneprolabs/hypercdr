@@ -24663,7 +24663,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 .premium-app .hbdr-dr-topology-canvas { position:relative; overflow:hidden; background:radial-gradient(circle at 1px 1px, #dce6ef 1px, transparent 1px); background-size:24px 24px; }
 .premium-app .hbdr-topology-drawer .hbdr-dr-topology-canvas { overflow:visible; }
 .premium-app .hbdr-dr-topology-lines { position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; }
-.premium-app .hbdr-dr-topology-lines marker .hbdr-dr-arrow-head { fill:none; stroke:#397ead; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+.premium-app .hbdr-dr-topology-lines marker .hbdr-dr-arrow-head { fill:#397ead; stroke:#397ead; stroke-width:1.2; stroke-linecap:round; stroke-linejoin:round; vector-effect:non-scaling-stroke; }
 .premium-app .hbdr-dr-topology-lines path { fill:none; stroke:#397ead; stroke-width:2.2; opacity:.72; vector-effect:non-scaling-stroke; }
 .premium-app .hbdr-dr-topology-lines path.is-warning { stroke:#d68a28; }
 .premium-app .hbdr-dr-topology-lines path.is-configuring { stroke:#8292a3; stroke-dasharray:7 5; }
