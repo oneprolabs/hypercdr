@@ -3180,7 +3180,7 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 	if err != nil {
 		return Task{}, err
 	}
-	if task.ProtectionPlanID != "" {
+	if task.ProtectionPlanID != "" && !input.SuppressLatestPointer {
 		column := ""
 		switch task.Type {
 		case "backup":
@@ -3328,13 +3328,13 @@ func (s *PostgresStore) UpdateTaskStatus(input TaskStatusInput) (Task, bool, err
 	result, err := s.db.Exec(`
 		update tasks
 		set status = case
-		        when completed_at is not null and $2 in ('queued', 'dispatched', 'accepted', 'running', 'syncing', 'finalizing', 'canceling') then status
+		        when completed_at is not null then status
 		        else coalesce(nullif($2, ''), status)
 		    end,
-		    restore_point_id = coalesce(nullif($11, '')::uuid, restore_point_id),
+		    restore_point_id = case when completed_at is not null then restore_point_id else coalesce(nullif($11, '')::uuid, restore_point_id) end,
 		    progress = greatest(progress, $3),
-		    error_code = nullif($4, ''),
-		    error_message = nullif($5, ''),
+		    error_code = case when completed_at is not null then error_code else nullif($4, '') end,
+		    error_message = case when completed_at is not null then error_message else nullif($5, '') end,
 		    payload = coalesce(payload, '{}'::jsonb) || coalesce($10::jsonb, '{}'::jsonb),
 		    accepted_at = case when $6 then coalesce(accepted_at, $9) else accepted_at end,
 		    started_at = case when $7 then coalesce(started_at, $9) else started_at end,

@@ -9441,11 +9441,17 @@ func (r *Router) ingestVeleroBackupsFromInventory(clusterID string, backups []ma
 					"veleroBackupName": name,
 					"phase":            phase,
 				},
+				SuppressLatestPointer: true,
 			})
 			if err != nil {
 				r.logger.Error("failed to create scheduled backup task from inventory", "backup", name, "error", err)
 				continue
 			}
+		} else if !task.CompletedAt.IsZero() {
+			// Inventory is eventually consistent and can report completion after a
+			// task has already reached a terminal state (notably after force stop).
+			// Terminal task state and restore-point outcome are immutable.
+			continue
 		}
 		task, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{
 			TaskID:      task.ID,
@@ -9534,7 +9540,9 @@ func (r *Router) handleVeleroBackupEvent(clusterID string, event protocol.Velero
 		r.logger.Error("failed to upsert velero backup task", "backup", event.BackupName, "error", err)
 		return store.Task{}, err
 	}
-	if !isTerminalVeleroPhase(event.Phase) && !task.CompletedAt.IsZero() {
+	if !task.CompletedAt.IsZero() {
+		// A late Velero event must not resurrect a canceled/failed operation or
+		// create a restore point after its task reached any terminal outcome.
 		return task, nil
 	}
 	status := "running"

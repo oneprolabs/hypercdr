@@ -2213,7 +2213,7 @@ func (s *MemoryStore) CreateTask(input TaskInput) (Task, error) {
 		}
 	}
 	s.tasks[task.ID] = task
-	if plan, ok := s.plans[task.ProtectionPlanID]; ok {
+	if plan, ok := s.plans[task.ProtectionPlanID]; ok && !input.SuppressLatestPointer {
 		switch task.Type {
 		case "backup":
 			plan.LatestSyncTaskID = task.ID
@@ -2284,31 +2284,32 @@ func (s *MemoryStore) UpdateTaskStatus(input TaskStatusInput) (Task, bool, error
 		return Task{}, false, nil
 	}
 	now := time.Now().UTC()
+	terminal := !task.CompletedAt.IsZero()
 	payload := make(map[string]any, len(input.Payload)+1)
 	for key, value := range input.Payload {
 		payload[key] = value
 	}
 	payload["lastStatusAt"] = now.Format(time.RFC3339Nano)
-	if input.Status != "" {
-		if task.CompletedAt.IsZero() || !isActiveStatus(input.Status) {
-			task.Status = input.Status
-		}
+	if input.Status != "" && !terminal {
+		task.Status = input.Status
 	}
 	if input.Progress > task.Progress {
 		task.Progress = input.Progress
 	}
-	if input.RestorePointID != "" {
+	if input.RestorePointID != "" && !terminal {
 		task.RestorePointID = input.RestorePointID
 	}
-	task.ErrorCode = input.ErrorCode
-	task.ErrorMessage = input.ErrorMessage
+	if !terminal {
+		task.ErrorCode = input.ErrorCode
+		task.ErrorMessage = input.ErrorMessage
+	}
 	if input.MarkAccepted {
 		task.AcceptedAt = now
 	}
 	if input.MarkStarted && task.StartedAt.IsZero() {
 		task.StartedAt = now
 	}
-	if input.MarkDone {
+	if input.MarkDone && task.CompletedAt.IsZero() {
 		task.CompletedAt = now
 	}
 	if task.Status == "dispatched" && task.DispatchedAt.IsZero() {

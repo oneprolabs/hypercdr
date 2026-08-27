@@ -46,6 +46,29 @@ func TestCreateTaskUpdatesOnlyMatchingProtectionPlanLatestPointer(t *testing.T) 
 	}
 }
 
+func TestHistoricalReconciliationTaskDoesNotPublishLatestPointer(t *testing.T) {
+	repo := NewMemoryStore()
+	plan, err := repo.CreateProtectionPlan(ProtectionPlanInput{TenantID: "tenant-1", SourceClusterID: "cluster-1", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := repo.CreateTask(TaskInput{ProtectionPlanID: plan.ID, Type: "backup", Status: "succeeded"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	historical, err := repo.CreateTask(TaskInput{ProtectionPlanID: plan.ID, Type: "backup", Status: "succeeded", SuppressLatestPointer: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, ok, err := repo.GetProtectionPlan(plan.ID)
+	if err != nil || !ok {
+		t.Fatalf("get plan: ok=%v err=%v", ok, err)
+	}
+	if updated.LatestSyncTaskID != current.ID || updated.LatestSyncTaskID == historical.ID {
+		t.Fatalf("historical reconciliation changed pointer: got %q, current %q historical %q", updated.LatestSyncTaskID, current.ID, historical.ID)
+	}
+}
+
 func TestConcurrentTaskCreationPublishesOneCompleteTask(t *testing.T) {
 	repo := NewMemoryStore()
 	plan, err := repo.CreateProtectionPlan(ProtectionPlanInput{TenantID: "tenant-1", SourceClusterID: "cluster-1", AppID: "app-1", Status: "active"})
@@ -158,5 +181,28 @@ func TestTaskStatusChangesDoNotChangeProtectionPlanLatestPointer(t *testing.T) {
 	current, _, _ := repo.GetProtectionPlan(plan.ID)
 	if current.LatestSyncTaskID != task.ID {
 		t.Fatalf("status update changed latest sync pointer: got %q want %q", current.LatestSyncTaskID, task.ID)
+	}
+}
+
+func TestTerminalTaskStateIsImmutable(t *testing.T) {
+	repo := NewMemoryStore()
+	plan, err := repo.CreateProtectionPlan(ProtectionPlanInput{TenantID: "tenant-1", SourceClusterID: "cluster-1", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := repo.CreateTask(TaskInput{ProtectionPlanID: plan.ID, Type: "backup", Status: "running"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal, ok, err := repo.UpdateTaskStatus(TaskStatusInput{TaskID: task.ID, Status: "canceled", Progress: 20, ErrorCode: "SYNC_FORCE_STOPPED", ErrorMessage: "stopped", MarkDone: true})
+	if err != nil || !ok {
+		t.Fatalf("terminal update: ok=%v err=%v", ok, err)
+	}
+	late, ok, err := repo.UpdateTaskStatus(TaskStatusInput{TaskID: task.ID, Status: "succeeded", Progress: 100, RestorePointID: "late-point", MarkDone: true})
+	if err != nil || !ok {
+		t.Fatalf("late update: ok=%v err=%v", ok, err)
+	}
+	if late.Status != "canceled" || late.ErrorCode != "SYNC_FORCE_STOPPED" || late.ErrorMessage != "stopped" || late.RestorePointID != "" || !late.CompletedAt.Equal(terminal.CompletedAt) {
+		t.Fatalf("late completion mutated terminal task: %#v", late)
 	}
 }

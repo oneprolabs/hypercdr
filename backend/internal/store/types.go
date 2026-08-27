@@ -917,6 +917,9 @@ type TaskInput struct {
 	Status           string         `json:"status"`
 	CommandID        string         `json:"commandId"`
 	Payload          map[string]any `json:"payload"`
+	// SuppressLatestPointer is reserved for reconciliation/import paths that
+	// materialize historical tasks without making them the plan's current task.
+	SuppressLatestPointer bool `json:"-"`
 }
 
 type TaskStatusInput struct {
