@@ -655,6 +655,7 @@ func (r *Router) routes() {
 	// Keep the previous asset URL available while installed agents roll forward.
 	r.mux.HandleFunc("GET /assets/velero/v1.17.1/crds.yaml", r.veleroCRDs)
 	r.mux.HandleFunc("GET /assets/registry/ca.crt", r.registryCA)
+	r.mux.HandleFunc("GET /assets/platform/ca.crt", r.platformCA)
 	r.mux.HandleFunc("GET /ws/agent", r.agentWebSocket)
 	if r.productInfo.Edition == "community" {
 		r.mux.HandleFunc("POST /api/v1/community-migrations/authorizations", r.createCommunityMigrationAuthorization)
@@ -3585,7 +3586,7 @@ func formatUnsupportedDRStorageMessage(drSupport map[string]any) string {
 		detected = "unsupported persistent volume storage"
 	}
 	return fmt.Sprintf(
-		"Storage type is not supported for DR. Supported storage: stateless namespaces, or PVCs backed by portable CSI storage such as Longhorn. Unsupported storage: local-path, hostPath, and local PV. Detected storage: %s.",
+		"Storage type is not supported for DR. Supported storage: stateless namespaces, or PVCs backed by dynamically provisioned CSI storage available on the source and target clusters (for example cloud disk/file CSI or Longhorn). Unsupported storage: local-path, hostPath, and local PV. Detected storage: %s.",
 		detected,
 	)
 }
@@ -3628,6 +3629,7 @@ func (r *Router) createAgentToken(w http.ResponseWriter, req *http.Request) {
 	var body struct {
 		Description string `json:"description"`
 		TTLSeconds  int    `json:"ttlSeconds"`
+		ClusterType string `json:"clusterType"`
 	}
 	if req.Body != nil {
 		_ = json.NewDecoder(req.Body).Decode(&body)
@@ -3643,7 +3645,8 @@ func (r *Router) createAgentToken(w http.ResponseWriter, req *http.Request) {
 	if tenantID == "" {
 		tenantID = store.DefaultTenantID
 	}
-	token, err := r.store.CreateAgentToken(tenantID, actor.ID, body.Description, ttl)
+	clusterType := storeClusterType(body.ClusterType)
+	token, err := r.store.CreateAgentToken(tenantID, actor.ID, body.Description, ttl, clusterType)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"error": "token_create_failed",
@@ -3657,19 +3660,43 @@ func (r *Router) createAgentToken(w http.ResponseWriter, req *http.Request) {
 		curlCommand = "curl -k -sSL "
 	}
 
+	installCommand := curlCommand + baseURL + "/install.sh | bash -s -- --token " +
+		token.Token + " --endpoint " + r.agentWSEndpoint(req) +
+		" --namespace " + r.cfg.AgentNamespace +
+		" --executor-mode kubernetes --install-registry-ca false"
+	if clusterType == "huaweicloud-cce" {
+		installCommand = curlCommand + baseURL + "/install.sh | bash -s -- --token " + token.Token +
+			" --cluster-type huaweicloud-cce --namespace " + r.cfg.AgentNamespace + " --executor-mode kubernetes --install-registry-ca false"
+		if endpoint := strings.TrimSpace(r.cfg.AgentPrivateWSEndpoint); endpoint != "" {
+			installCommand += " --endpoint-private " + endpoint
+		}
+		if endpoint := strings.TrimSpace(r.cfg.AgentPublicWSEndpoint); endpoint != "" {
+			installCommand += " --endpoint-public " + endpoint
+		} else if endpoint := strings.TrimSpace(r.cfg.AgentWSEndpoint); endpoint != "" {
+			installCommand += " --endpoint-public " + endpoint
+		}
+		if !strings.Contains(installCommand, "--endpoint-private") && !strings.Contains(installCommand, "--endpoint-public") {
+			installCommand += " --endpoint-public " + r.agentWSEndpoint(req)
+		}
+	}
 	response := map[string]any{
-		"id":        token.ID,
-		"token":     token.Token,
-		"expiresAt": token.ExpiresAt,
-		"installCommand": curlCommand + baseURL + "/install.sh | bash -s -- --token " +
-			token.Token + " --endpoint " + r.agentWSEndpoint(req) +
-			" --namespace " + r.cfg.AgentNamespace +
-			" --executor-mode kubernetes --install-registry-ca false",
+		"id":             token.ID,
+		"token":          token.Token,
+		"expiresAt":      token.ExpiresAt,
+		"clusterType":    clusterType,
+		"installCommand": installCommand,
 	}
 	if r.cfg.RegistryCAPath != "" {
 		response["prepareNodeCommand"] = curlCommand + baseURL + "/prepare-node.sh | bash"
 	}
 	writeJSON(w, http.StatusCreated, response)
+}
+
+func storeClusterType(value string) string {
+	if strings.TrimSpace(value) == "huaweicloud-cce" {
+		return "huaweicloud-cce"
+	}
+	return "native-kubernetes"
 }
 
 func (r *Router) validateAgentToken(w http.ResponseWriter, req *http.Request) {
@@ -3707,6 +3734,7 @@ func (r *Router) prepareNodeScript(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	script := strings.ReplaceAll(prepareNodeScriptTemplate, "{{REGISTRY_HOST}}", r.registryHost())
 	script = strings.ReplaceAll(script, "{{REGISTRY_CA_URL}}", r.publicBaseURL(req)+"/assets/registry/ca.crt")
+	script = strings.ReplaceAll(script, "{{PLATFORM_CA_URL}}", r.publicBaseURL(req)+"/assets/platform/ca.crt")
 	_, _ = w.Write([]byte(script))
 }
 
@@ -3727,6 +3755,7 @@ func (r *Router) installScript(w http.ResponseWriter, req *http.Request) {
 	script = strings.ReplaceAll(script, "{{AGENT_UNINSTALL_URL}}", r.publicBaseURL(req)+"/uninstall-agent.sh")
 	script = strings.ReplaceAll(script, "{{VELERO_CRDS_URL}}", r.publicBaseURL(req)+veleroCRDsPath)
 	script = strings.ReplaceAll(script, "{{REGISTRY_CA_URL}}", r.publicBaseURL(req)+"/assets/registry/ca.crt")
+	script = strings.ReplaceAll(script, "{{PLATFORM_CA_URL}}", r.publicBaseURL(req)+"/assets/platform/ca.crt")
 	script = strings.ReplaceAll(script, "{{VELERO_IMAGE}}", veleroTarget.Image)
 	script = strings.ReplaceAll(script, "{{VELERO_AWS_PLUGIN_IMAGE}}", r.cfg.VeleroAWSPlugin)
 	script = strings.ReplaceAll(script, "{{VELERO_AZURE_PLUGIN_IMAGE}}", r.cfg.VeleroAzurePlugin)
@@ -3755,6 +3784,21 @@ func (r *Router) registryCA(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		r.logger.Error("failed to read registry ca", "path", r.cfg.RegistryCAPath, "error", err)
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "registry_ca_not_found"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-pem-file; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
+func (r *Router) platformCA(w http.ResponseWriter, req *http.Request) {
+	if strings.TrimSpace(r.cfg.TLSCertFile) == "" {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "platform_ca_not_configured"})
+		return
+	}
+	data, err := os.ReadFile(r.cfg.TLSCertFile)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "platform_ca_not_found"})
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-pem-file; charset=utf-8")
@@ -4178,6 +4222,20 @@ func (r *Router) cleanupClusterObjectStorage(ctx context.Context, clusterID stri
 	if err != nil {
 		return nil, err
 	}
+	clusters, err := r.store.ListClusters()
+	if err != nil {
+		return nil, err
+	}
+	clusterTenantID := ""
+	for _, cluster := range clusters {
+		if cluster.ID == clusterID {
+			clusterTenantID = cluster.TenantID
+			break
+		}
+	}
+	if clusterTenantID == "" {
+		return nil, errors.New("cluster tenant could not be resolved for object storage cleanup")
+	}
 	if !audit.ObjectStorageNeeded {
 		return []objectStorageCleanupResult{}, nil
 	}
@@ -4192,6 +4250,20 @@ func (r *Router) cleanupClusterObjectStorageRepositories(ctx context.Context, cl
 	if len(repositoryIDs) == 0 {
 		return nil, errors.New("restore points exist but no storage repository is associated with them")
 	}
+	clusters, err := r.store.ListClusters()
+	if err != nil {
+		return nil, err
+	}
+	clusterTenantID := ""
+	for _, cluster := range clusters {
+		if cluster.ID == clusterID {
+			clusterTenantID = cluster.TenantID
+			break
+		}
+	}
+	if clusterTenantID == "" {
+		return nil, errors.New("cluster tenant could not be resolved for object storage cleanup")
+	}
 	repositories, err := r.store.ListStorageRepositories()
 	if err != nil {
 		return nil, err
@@ -4200,12 +4272,17 @@ func (r *Router) cleanupClusterObjectStorageRepositories(ctx context.Context, cl
 	for _, id := range repositoryIDs {
 		wanted[id] = struct{}{}
 	}
-	prefix := strings.TrimSuffix(storageDomainPrefix(clusterID), "/") + "/"
+	// Repositories are tenant scoped; use their tenant at deletion time and
+	// verify every selected repository belongs to the same cluster tenant.
 	results := make([]objectStorageCleanupResult, 0, len(repositoryIDs))
 	for _, repo := range repositories {
 		if _, ok := wanted[repo.ID]; !ok {
 			continue
 		}
+		if repo.TenantID != clusterTenantID {
+			return results, fmt.Errorf("repository %s does not belong to cluster tenant", repo.Name)
+		}
+		prefix := strings.TrimSuffix(storageDomainPrefix(clusterTenantID, clusterID), "/") + "/"
 		result, err := cleanObjectStoragePrefix(ctx, repo, prefix)
 		if err != nil {
 			return results, fmt.Errorf("cleanup repository %s prefix %s: %w", repo.Name, prefix, err)
@@ -4234,7 +4311,7 @@ func deleteObjectStoragePrefix(ctx context.Context, repo store.StorageRepository
 	if prefix == "" || prefix == "/" {
 		return result, errors.New("refusing to delete empty object storage prefix")
 	}
-	if !strings.HasPrefix(prefix, "hypercdr/clusters/") || !strings.HasSuffix(prefix, "/") {
+	if !validStorageDomainPrefix(prefix) || !strings.HasSuffix(prefix, "/") {
 		return result, fmt.Errorf("refusing to delete unexpected object storage prefix %q", prefix)
 	}
 	if strings.TrimSpace(repo.Endpoint) == "" {
@@ -4311,7 +4388,7 @@ func (r *Router) syncStorageRepository(w http.ResponseWriter, req *http.Request)
 	}
 	repo.Region = normalizedStorageRegion(repo.Type, repo.Region)
 	bslName := storageDomainBSLName(repo, body.ClusterID)
-	objectPrefix := storageDomainPrefix(body.ClusterID)
+	objectPrefix := storageDomainPrefix(repo.TenantID, body.ClusterID)
 	config := storageConfigWithPrefix(repo, objectPrefix)
 	binding, err := r.store.UpsertClusterStorageBinding(store.ClusterStorageBindingInput{
 		ClusterID:       body.ClusterID,
@@ -4449,12 +4526,21 @@ func (r *Router) dispatchStorageSyncTaskForPlan(clusterID string, repositoryID s
 const storageSyncMaxAttempts = 3
 const protectionPlanActivationTaskTimeout = 90 * time.Second
 
-func storageDomainPrefix(sourceClusterID string) string {
+func storageDomainPrefix(tenantID string, sourceClusterID string) string {
+	tenantID = strings.TrimSpace(tenantID)
 	sourceClusterID = strings.TrimSpace(sourceClusterID)
-	if sourceClusterID == "" {
-		return "hypercdr/clusters/unknown"
+	if tenantID == "" {
+		tenantID = "unknown"
 	}
-	return "hypercdr/clusters/" + sourceClusterID
+	if sourceClusterID == "" {
+		sourceClusterID = "unknown"
+	}
+	return "hypercdr/v1/tenants/" + tenantID + "/clusters/" + sourceClusterID
+}
+
+func validStorageDomainPrefix(prefix string) bool {
+	parts := strings.Split(strings.Trim(strings.TrimSpace(prefix), "/"), "/")
+	return len(parts) >= 6 && parts[0] == "hypercdr" && parts[1] == "v1" && parts[2] == "tenants" && parts[3] != "" && parts[3] != "unknown" && parts[4] == "clusters" && parts[5] != "" && parts[5] != "unknown"
 }
 
 func storageDomainBSLName(repo store.StorageRepository, sourceClusterID string) string {
@@ -4542,7 +4628,7 @@ func (r *Router) dispatchStorageSyncTaskForPlanActivationAttempt(clusterID strin
 		sourceClusterID = clusterID
 	}
 	bslName := storageDomainBSLName(repo, sourceClusterID)
-	objectPrefix := storageDomainPrefix(sourceClusterID)
+	objectPrefix := storageDomainPrefix(repo.TenantID, sourceClusterID)
 	config := storageConfigWithPrefix(repo, objectPrefix)
 	binding, err := r.store.UpsertClusterStorageBinding(store.ClusterStorageBindingInput{
 		ClusterID:       clusterID,
@@ -5848,7 +5934,7 @@ func (r *Router) storageBindingActivationAction(clusterID string, storageRepoID 
 		return "dispatch", "", nil
 	}
 	expectedBSLName := storageDomainBSLName(repo, sourceClusterID)
-	expectedPrefix := storageDomainPrefix(sourceClusterID)
+	expectedPrefix := storageDomainPrefix(repo.TenantID, sourceClusterID)
 	if binding.BSLName != expectedBSLName || binding.ObjectPrefix != expectedPrefix {
 		return "dispatch", "", nil
 	}
@@ -6000,7 +6086,7 @@ func (r *Router) dispatchScheduleSyncTask(plan store.ProtectionPlan) (store.Task
 		"storageRepo":             storageName,
 		"storageRepoDisplayName":  repo.Name,
 		"sourceClusterId":         plan.SourceClusterID,
-		"objectPrefix":            storageDomainPrefix(plan.SourceClusterID),
+		"objectPrefix":            storageDomainPrefix(plan.TenantID, plan.SourceClusterID),
 		"includeClusterResources": plan.IncludeClusterScoped,
 		"excludedResources":       plan.ExcludedResources,
 		"retentionCount":          policy.RetentionCount,
@@ -7870,6 +7956,10 @@ func (r *Router) agentWebSocket(w http.ResponseWriter, req *http.Request) {
 			VeleroVersion:  register.Payload.Velero.Version,
 			VeleroStatus:   register.Payload.Velero.Status,
 			NodeCount:      register.Payload.Cluster.NodeCount,
+			ClusterType:    register.Payload.Cluster.ClusterType,
+			CloudProvider:  register.Payload.Cluster.CloudProvider,
+			CloudRegion:    register.Payload.Cluster.CloudRegion,
+			CloudClusterID: register.Payload.Cluster.CloudClusterID,
 		})
 		if err != nil {
 			reason := "TOKEN_INVALID"
@@ -8755,7 +8845,7 @@ func (r *Router) clusterStorageBindingReady(clusterID string, storageRepoID stri
 		return false, "storage binding has not been configured", nil
 	}
 	expectedBSLName := storageDomainBSLName(repo, sourceClusterID)
-	expectedPrefix := storageDomainPrefix(sourceClusterID)
+	expectedPrefix := storageDomainPrefix(repo.TenantID, sourceClusterID)
 	if binding.BSLName != expectedBSLName || binding.ObjectPrefix != expectedPrefix {
 		return false, "storage binding uses an outdated backup storage location", nil
 	}
@@ -10625,7 +10715,7 @@ func (r *Router) createProtectionCleanupTask(plan store.ProtectionPlan) (store.T
 		"storageRepo":            storageName,
 		"storageRepoDisplayName": repo.Name,
 		"sourceClusterId":        plan.SourceClusterID,
-		"objectPrefix":           storageDomainPrefix(plan.SourceClusterID),
+		"objectPrefix":           storageDomainPrefix(plan.TenantID, plan.SourceClusterID),
 		"cleanupObjectStorage":   true,
 		"restorePoints":          restorePoints,
 		"restoreNames":           restoreNames,
@@ -10649,7 +10739,7 @@ func (r *Router) createProtectionCleanupTask(plan store.ProtectionPlan) (store.T
 			"storageRepo":            storageName,
 			"storageRepoDisplayName": repo.Name,
 			"sourceClusterId":        plan.SourceClusterID,
-			"objectPrefix":           storageDomainPrefix(plan.SourceClusterID),
+			"objectPrefix":           storageDomainPrefix(plan.TenantID, plan.SourceClusterID),
 			"cleanupObjectStorage":   false,
 			"restorePoints":          restorePoints,
 			"restoreNames":           restoreNames,
@@ -11652,6 +11742,7 @@ set -euo pipefail
 
 REGISTRY_HOST="{{REGISTRY_HOST}}"
 REGISTRY_CA_URL="{{REGISTRY_CA_URL}}"
+PLATFORM_CA_URL="{{PLATFORM_CA_URL}}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -11803,6 +11894,11 @@ set -euo pipefail
 
 TOKEN=""
 ENDPOINT="{{AGENT_WS_ENDPOINT}}"
+ENDPOINT_PRIVATE=""
+ENDPOINT_PUBLIC=""
+CLUSTER_TYPE="native-kubernetes"
+KUBECONFIG_PATH=""
+KUBECTL_CONTEXT=""
 TOKEN_VALIDATE_URL="{{TOKEN_VALIDATE_URL}}"
 AGENT_UNINSTALL_URL="{{AGENT_UNINSTALL_URL}}"
 NAMESPACE="{{AGENT_NAMESPACE}}"
@@ -11814,6 +11910,7 @@ VELERO_GCP_PLUGIN_IMAGE="{{VELERO_GCP_PLUGIN_IMAGE}}"
 EXECUTOR_MODE="kubernetes"
 VELERO_CRDS_URL="{{VELERO_CRDS_URL}}"
 REGISTRY_CA_URL="{{REGISTRY_CA_URL}}"
+PLATFORM_CA_URL="{{PLATFORM_CA_URL}}"
 INSTALL_VELERO="true"
 ALLOW_EXISTING_VELERO="false"
 REGISTRY_SERVER=""
@@ -11833,6 +11930,9 @@ NODE_SSH_KEY=""
 NODE_SSH_PORT="22"
 INTERACTIVE="true"
 STORAGE_CLASS=""
+DETECTED_CLUSTER_NAME=""
+DETECTED_CLOUD_REGION=""
+DETECTED_CLOUD_CLUSTER_ID=""
 
 log_time() {
   date '+%H:%M:%S'
@@ -11871,6 +11971,7 @@ print_install_summary() {
   log_info "Target namespace: ${NAMESPACE}"
   log_info "Platform endpoint: ${ENDPOINT}"
   log_info "Executor mode: ${EXECUTOR_MODE}"
+  log_info "Cluster type: ${CLUSTER_TYPE}"
   log_info "Agent image: ${AGENT_IMAGE}"
   if [[ "$INSTALL_VELERO" == "true" ]]; then
     log_info "Velero image: ${VELERO_IMAGE}"
@@ -11887,6 +11988,26 @@ while [[ $# -gt 0 ]]; do
       ;;
     --endpoint)
       ENDPOINT="${2:-}"
+      shift 2
+      ;;
+    --endpoint-private)
+      ENDPOINT_PRIVATE="${2:-}"
+      shift 2
+      ;;
+    --endpoint-public)
+      ENDPOINT_PUBLIC="${2:-}"
+      shift 2
+      ;;
+    --cluster-type)
+      CLUSTER_TYPE="${2:-}"
+      shift 2
+      ;;
+    --kubeconfig)
+      KUBECONFIG_PATH="${2:-}"
+      shift 2
+      ;;
+    --context)
+      KUBECTL_CONTEXT="${2:-}"
       shift 2
       ;;
     --namespace)
@@ -12006,8 +12127,11 @@ done
 if [[ -z "$TOKEN" ]]; then
   fail "Missing required argument: --token" 2
 fi
-if [[ -z "$ENDPOINT" ]]; then
+if [[ -z "$ENDPOINT" && -z "$ENDPOINT_PRIVATE" && -z "$ENDPOINT_PUBLIC" ]]; then
   fail "Missing required argument: --endpoint" 2
+fi
+if [[ "$CLUSTER_TYPE" != "native-kubernetes" && "$CLUSTER_TYPE" != "huaweicloud-cce" ]]; then
+  fail "Unsupported --cluster-type '${CLUSTER_TYPE}'. Use native-kubernetes or huaweicloud-cce." 2
 fi
 if [[ "$NAMESPACE" != "hypercdr-agent" ]]; then
   fail "HyperCDR uses the single canonical namespace 'hypercdr-agent'. Community and Enterprise Agent installations are identical; use the control-plane handover workflow to change editions." 2
@@ -12018,6 +12142,57 @@ fi
 if ! command -v kubectl >/dev/null 2>&1; then
   fail "kubectl is required but was not found in PATH"
 fi
+
+select_cce_kubeconfig() {
+  [[ "$CLUSTER_TYPE" == "huaweicloud-cce" ]] || return 0
+  local candidate selection
+  local -a candidates=()
+  for candidate in "${KUBECONFIG:-}" "$HOME/.kube/hypercdr-cce.yaml" "$HOME/.kube/config"; do
+    [[ -n "$candidate" && -f "$candidate" ]] && candidates+=("$candidate")
+  done
+  shopt -s nullglob
+  for candidate in "$PWD"/*kubeconfig* "$HOME/Downloads"/*kubeconfig* "$HOME/Downloads"/*config*.yaml; do
+    [[ -f "$candidate" ]] && candidates+=("$candidate")
+  done
+  shopt -u nullglob
+  if [[ -z "$KUBECONFIG_PATH" && ${#candidates[@]} -eq 1 ]]; then
+    KUBECONFIG_PATH="${candidates[0]}"
+  elif [[ -z "$KUBECONFIG_PATH" && ${#candidates[@]} -gt 1 && "$INTERACTIVE" == "true" ]] && { exec 3<>/dev/tty; } 2>/dev/null; then
+    echo "Detected Kubernetes configuration files:" >&3
+    for selection in "${!candidates[@]}"; do printf '%d) %s\n' "$((selection+1))" "${candidates[$selection]}" >&3; done
+    printf 'Select a CCE kubeconfig [1-%d], or 0 to enter another path: ' "${#candidates[@]}" >&3
+    IFS= read -r selection <&3 || true
+    if [[ "$selection" =~ ^[0-9]+$ ]] && ((selection >= 1 && selection <= ${#candidates[@]})); then
+      KUBECONFIG_PATH="${candidates[$((selection-1))]}"
+    fi
+    exec 3>&-
+  fi
+  if [[ -z "$KUBECONFIG_PATH" && "$INTERACTIVE" == "true" ]] && { exec 3<>/dev/tty; } 2>/dev/null; then
+    printf 'Enter the CCE kubeconfig file path: ' >&3
+    IFS= read -r KUBECONFIG_PATH <&3 || true
+    exec 3>&-
+  fi
+  [[ -n "$KUBECONFIG_PATH" ]] || fail "CCE registration requires a kubeconfig. Rerun with --kubeconfig <path>."
+  KUBECONFIG_PATH="${KUBECONFIG_PATH/#\~/$HOME}"
+  [[ -r "$KUBECONFIG_PATH" ]] || fail "CCE kubeconfig is not readable: ${KUBECONFIG_PATH}"
+  export KUBECONFIG="$KUBECONFIG_PATH"
+  if [[ -z "$KUBECTL_CONTEXT" ]]; then
+    mapfile -t contexts < <(command kubectl config get-contexts -o name)
+    if [[ ${#contexts[@]} -eq 1 ]]; then
+      KUBECTL_CONTEXT="${contexts[0]}"
+    elif [[ ${#contexts[@]} -gt 1 ]]; then
+      fail "The CCE kubeconfig contains multiple contexts. Rerun with --context <name>."
+    fi
+  fi
+}
+
+select_cce_kubeconfig
+
+kubectl() {
+  if [[ -n "$KUBECTL_CONTEXT" ]]; then command kubectl --context "$KUBECTL_CONTEXT" "$@"; else command kubectl "$@"; fi
+}
+
+if [[ -n "$ENDPOINT_PRIVATE" ]]; then ENDPOINT="$ENDPOINT_PRIVATE"; elif [[ -n "$ENDPOINT_PUBLIC" ]]; then ENDPOINT="$ENDPOINT_PUBLIC"; fi
 AGENT_RBAC_NAME="hypercdr-agent"
 VELERO_RBAC_NAME="hypercdr-velero"
 print_install_summary
@@ -12051,6 +12226,27 @@ if ! kubectl cluster-info >/dev/null 2>&1; then
   exit 1
 fi
 log_ok "Kubernetes API is reachable"
+
+if [[ "$CLUSTER_TYPE" == "huaweicloud-cce" ]]; then
+  log_info "Verifying Huawei Cloud CCE compatibility"
+  provider_ids="$(kubectl get nodes -o jsonpath='{range .items[*]}{.spec.providerID}{"\n"}{end}' 2>/dev/null || true)"
+  cce_markers="$(kubectl get nodes --show-labels 2>/dev/null || true) $(kubectl -n kube-system get deployments,daemonsets 2>/dev/null || true)"
+  if ! grep -Eqi 'huaweicloud|cce' <<<"${provider_ids} ${cce_markers}"; then
+    fail "The selected cluster could not be verified as Huawei Cloud CCE. Check the kubeconfig and target context."
+  fi
+  unsupported_nodes="$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.nodeInfo.operatingSystem}{" "}{.status.nodeInfo.architecture}{"\n"}{end}' | awk '$2 != "linux" || ($3 != "amd64" && $3 != "x86_64")')"
+  [[ -z "$unsupported_nodes" ]] || fail "CCE phase one supports Linux amd64 workers only. Unsupported nodes: ${unsupported_nodes//$'\n'/, }"
+  for permission in 'create namespaces' 'create clusterroles.rbac.authorization.k8s.io' 'create clusterrolebindings.rbac.authorization.k8s.io' 'create deployments.apps' 'create daemonsets.apps' 'create secrets' 'create persistentvolumeclaims'; do
+    verb="${permission%% *}"; resource="${permission#* }"
+    if ! kubectl auth can-i "$verb" "$resource" --all-namespaces | grep -qx yes; then
+      fail "CCE kubeconfig lacks required permission: ${verb} ${resource}"
+    fi
+  done
+  DETECTED_CLUSTER_NAME="${KUBECTL_CONTEXT:-$(kubectl config current-context 2>/dev/null || true)}"
+	DETECTED_CLOUD_REGION="$(kubectl get nodes -o jsonpath='{.items[0].metadata.labels.topology\.kubernetes\.io/region}' 2>/dev/null || true)"
+	DETECTED_CLOUD_CLUSTER_ID="${DETECTED_CLUSTER_NAME}"
+  log_ok "Huawei Cloud CCE cluster verified: ${DETECTED_CLUSTER_NAME:-unknown}"
+fi
 
 log_info "Checking whether this cluster is already managed by HyperCDR"
 existing_agents="$(kubectl get deployments -A -o jsonpath='{range .items[?(@.metadata.name=="hypercdr-comm-agent")]}{.metadata.namespace}{"\n"}{end}' 2>/dev/null | sed '/^[[:space:]]*$/d' | sort -u || true)"
@@ -12573,14 +12769,15 @@ preflight_image_pull() {
   local name="$1"
   local image="$2"
   local command_yaml="$3"
+  local target_namespace="${PREFLIGHT_NAMESPACE:-$NAMESPACE}"
   log_info "Checking whether cluster nodes can pull image ${image}"
-  kubectl -n "$NAMESPACE" delete pod "$name" --ignore-not-found --wait=true >/dev/null 2>&1 || true
+  kubectl -n "$target_namespace" delete pod "$name" --ignore-not-found --wait=true >/dev/null 2>&1 || true
   cat <<YAML | kubectl_apply_retry >/dev/null
 apiVersion: v1
 kind: Pod
 metadata:
   name: ${name}
-  namespace: ${NAMESPACE}
+  namespace: ${target_namespace}
   labels:
     app.kubernetes.io/name: hypercdr-image-preflight
 spec:
@@ -12597,21 +12794,21 @@ YAML
   local deadline=$((SECONDS + 90))
   while [[ $SECONDS -lt $deadline ]]; do
     local phase waiting terminated
-    phase="$(kubectl -n "$NAMESPACE" get pod "$name" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
-    waiting="$(kubectl -n "$NAMESPACE" get pod "$name" -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}' 2>/dev/null || true)"
-    terminated="$(kubectl -n "$NAMESPACE" get pod "$name" -o jsonpath='{.status.containerStatuses[0].state.terminated.reason}' 2>/dev/null || true)"
+    phase="$(kubectl -n "$target_namespace" get pod "$name" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+    waiting="$(kubectl -n "$target_namespace" get pod "$name" -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}' 2>/dev/null || true)"
+    terminated="$(kubectl -n "$target_namespace" get pod "$name" -o jsonpath='{.status.containerStatuses[0].state.terminated.reason}' 2>/dev/null || true)"
     case "$waiting" in
       ErrImagePull|ImagePullBackOff|InvalidImageName)
         log_error "Image pull preflight failed for ${image}: ${waiting}"
         log_error "Check image name, registry reachability, registry certificate trust, and image pull credentials."
-        kubectl -n "$NAMESPACE" describe pod "$name" >&2 || true
-        kubectl -n "$NAMESPACE" get events --sort-by=.lastTimestamp | tail -n 20 >&2 || true
-        kubectl -n "$NAMESPACE" delete pod "$name" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+        kubectl -n "$target_namespace" describe pod "$name" >&2 || true
+        kubectl -n "$target_namespace" get events --sort-by=.lastTimestamp | tail -n 20 >&2 || true
+        kubectl -n "$target_namespace" delete pod "$name" --ignore-not-found --wait=false >/dev/null 2>&1 || true
         exit 1
         ;;
     esac
     if [[ "$phase" == "Running" || "$phase" == "Succeeded" || "$terminated" != "" ]]; then
-      kubectl -n "$NAMESPACE" delete pod "$name" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+      kubectl -n "$target_namespace" delete pod "$name" --ignore-not-found --wait=false >/dev/null 2>&1 || true
       log_ok "Image pull preflight passed for ${image}"
       return 0
     fi
@@ -12619,10 +12816,64 @@ YAML
   done
   log_error "Image pull preflight timed out for ${image}"
   log_error "The cluster did not start the preflight pod within 90s. Check node scheduling, image pull, and registry connectivity."
-  kubectl -n "$NAMESPACE" describe pod "$name" >&2 || true
-  kubectl -n "$NAMESPACE" get events --sort-by=.lastTimestamp | tail -n 20 >&2 || true
-  kubectl -n "$NAMESPACE" delete pod "$name" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  kubectl -n "$target_namespace" describe pod "$name" >&2 || true
+  kubectl -n "$target_namespace" get events --sort-by=.lastTimestamp | tail -n 20 >&2 || true
+  kubectl -n "$target_namespace" delete pod "$name" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   exit 1
+}
+
+preflight_dynamic_pvc() {
+  [[ "$CLUSTER_TYPE" == "huaweicloud-cce" ]] || return 0
+  log_info "Checking dynamic PVC provisioning with StorageClass ${STORAGE_CLASS}"
+  cat <<YAML | kubectl_apply_retry >/dev/null
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hypercdr-storage-preflight
+  namespace: ${PREFLIGHT_NAMESPACE}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: ${STORAGE_CLASS}
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hypercdr-storage-preflight
+  namespace: ${PREFLIGHT_NAMESPACE}
+spec:
+  serviceAccountName: default
+  automountServiceAccountToken: false
+  restartPolicy: Never
+${IMAGE_PULL_SECRETS_BLOCK}
+  containers:
+    - name: storage-check
+      image: ${VELERO_IMAGE}
+      imagePullPolicy: IfNotPresent
+      command: ["/velero", "version", "--client-only"]
+      volumeMounts:
+        - name: data
+          mountPath: /preflight
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: hypercdr-storage-preflight
+YAML
+  local deadline=$((SECONDS + 120)) phase
+  while [[ $SECONDS -lt $deadline ]]; do
+    phase="$(kubectl -n "$PREFLIGHT_NAMESPACE" get pvc hypercdr-storage-preflight -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+    if [[ "$phase" == "Bound" ]]; then
+      log_ok "Dynamic PVC provisioning passed with StorageClass ${STORAGE_CLASS}"
+      return 0
+    fi
+    sleep 3
+  done
+  log_error "Dynamic PVC provisioning did not bind within 120s for StorageClass ${STORAGE_CLASS}"
+  kubectl -n "$PREFLIGHT_NAMESPACE" describe pvc hypercdr-storage-preflight >&2 || true
+  kubectl -n "$PREFLIGHT_NAMESPACE" get events --sort-by=.lastTimestamp | tail -n 30 >&2 || true
+  return 1
 }
 
 check_existing_velero_installation() {
@@ -12695,7 +12946,11 @@ fi
 check_existing_velero_installation
 
 rollback_failed_registration() {
+	trap - ERR
   log_warn "Rolling back changes because comm-agent registration did not complete"
+  if [[ -n "${PREFLIGHT_NAMESPACE:-}" ]]; then
+    kubectl delete namespace "$PREFLIGHT_NAMESPACE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  fi
   if [[ "$NAMESPACE_EXISTS" == "false" && "$AGENT_DEPLOYMENT_EXISTS" == "false" ]]; then
     kubectl delete namespace "$NAMESPACE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
     kubectl delete clusterrolebinding "$AGENT_RBAC_NAME" "$VELERO_RBAC_NAME" --ignore-not-found >/dev/null 2>&1 || true
@@ -12710,6 +12965,9 @@ rollback_failed_registration() {
   fi
 }
 
+ROLLBACK_ACTIVE="true"
+trap 'status=$?; if [[ "$ROLLBACK_ACTIVE" == "true" ]]; then rollback_failed_registration; fi; exit $status' ERR
+
 log_section "Registry trust"
 REGISTRY_HOST="$(image_registry_host "$AGENT_IMAGE")"
 AGENT_VERSION="${AGENT_IMAGE##*:}"
@@ -12720,10 +12978,49 @@ if [[ -z "$REGISTRY_HOST" || "$INSTALL_REGISTRY_CA" != "true" ]]; then
   log_info "Registry CA installation skipped"
 fi
 
+log_section "Isolated installation preflight"
+PREFLIGHT_NAMESPACE="${NAMESPACE}-preflight-$(date +%s)-${RANDOM}"
+kubectl create namespace "$PREFLIGHT_NAMESPACE" --dry-run=client -o yaml | kubectl_apply_retry
+kubectl -n "$PREFLIGHT_NAMESPACE" create serviceaccount default --dry-run=client -o yaml | kubectl_apply_retry
+if [[ -n "$REGISTRY_SERVER" || -n "$REGISTRY_USERNAME" || -n "$REGISTRY_PASSWORD" ]]; then
+  if [[ -z "$REGISTRY_SERVER" || -z "$REGISTRY_USERNAME" || -z "$REGISTRY_PASSWORD" ]]; then
+    fail "--registry-server, --registry-username, and --registry-password must be provided together" 2
+  fi
+  kubectl -n "$PREFLIGHT_NAMESPACE" create secret docker-registry "$IMAGE_PULL_SECRET" \
+    --docker-server="$REGISTRY_SERVER" --docker-username="$REGISTRY_USERNAME" \
+    --docker-password="$REGISTRY_PASSWORD" --docker-email="$REGISTRY_EMAIL" \
+    --dry-run=client -o yaml | kubectl_apply_retry
+  IMAGE_PULL_SECRETS_BLOCK=$'  imagePullSecrets:\n    - name: '"$IMAGE_PULL_SECRET"
+fi
+if [[ "$IMAGE_PULL_PREFLIGHT" == "true" ]]; then
+  preflight_image_pull "hypercdr-image-check-agent" "$AGENT_IMAGE" '      command: ["/comm-agent"]'
+  if [[ "$INSTALL_VELERO" == "true" ]]; then
+    preflight_image_pull "hypercdr-image-check-velero" "$VELERO_IMAGE" '      command: ["/velero", "version", "--client-only"]'
+    preflight_image_pull "hypercdr-image-check-velero-aws-plugin" "$VELERO_AWS_PLUGIN_IMAGE" '      command: ["/plugins/velero-plugin-for-aws"]'
+    preflight_image_pull "hypercdr-image-check-velero-azure-plugin" "$VELERO_AZURE_PLUGIN_IMAGE" '      command: ["/plugins/velero-plugin-for-microsoft-azure"]'
+    preflight_image_pull "hypercdr-image-check-velero-gcp-plugin" "$VELERO_GCP_PLUGIN_IMAGE" '      command: ["/plugins/velero-plugin-for-gcp"]'
+  fi
+fi
+preflight_dynamic_pvc
+kubectl delete namespace "$PREFLIGHT_NAMESPACE" --ignore-not-found --wait=true --timeout=60s >/dev/null
+PREFLIGHT_NAMESPACE=""
+IMAGE_PULL_SECRETS_BLOCK=""
+log_ok "Isolated image and storage preflight completed"
+
 log_section "Namespace and credentials"
 log_info "Creating or updating namespace ${NAMESPACE}"
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl_apply_retry
 log_ok "Namespace ${NAMESPACE} is ready"
+platform_ca_file="$(mktemp)"
+if curl -k -fsSL "$PLATFORM_CA_URL" -o "$platform_ca_file" && grep -q 'BEGIN CERTIFICATE' "$platform_ca_file"; then
+  kubectl -n "$NAMESPACE" create configmap hypercdr-platform-ca --from-file=ca.crt="$platform_ca_file" --dry-run=client -o yaml | kubectl_apply_retry
+  PLATFORM_TLS_SKIP_VERIFY="false"
+  log_ok "Platform TLS certificate is pinned for Agent connections"
+else
+  rm -f "$platform_ca_file"
+  fail "Platform TLS certificate could not be downloaded or is invalid. No Agent resources were installed with insecure TLS."
+fi
+rm -f "$platform_ca_file"
 log_info "Installing the offline Agent uninstaller in the cluster"
 uninstaller_file="$(mktemp)"
 if curl -k -fsSL "$AGENT_UNINSTALL_URL" -o "$uninstaller_file" && head -n 1 "$uninstaller_file" | grep -qx '#!/usr/bin/env bash' && kubectl -n "$NAMESPACE" create configmap hypercdr-agent-uninstaller --from-file=uninstall-agent.sh="$uninstaller_file" --dry-run=client -o yaml | kubectl_apply_retry; then
@@ -12751,16 +13048,6 @@ if [[ -n "$REGISTRY_SERVER" || -n "$REGISTRY_USERNAME" || -n "$REGISTRY_PASSWORD
   IMAGE_PULL_SECRETS_BLOCK=$'      imagePullSecrets:\n        - name: '"$IMAGE_PULL_SECRET"
   log_ok "Image pull secret ${IMAGE_PULL_SECRET} is ready"
 fi
-if [[ "$IMAGE_PULL_PREFLIGHT" == "true" ]]; then
-  log_section "Image pull preflight"
-  preflight_image_pull "hypercdr-image-check-agent" "$AGENT_IMAGE" '      command: ["/comm-agent"]'
-  if [[ "$INSTALL_VELERO" == "true" ]]; then
-    preflight_image_pull "hypercdr-image-check-velero" "$VELERO_IMAGE" '      command: ["/velero", "version", "--client-only"]'
-    preflight_image_pull "hypercdr-image-check-velero-aws-plugin" "$VELERO_AWS_PLUGIN_IMAGE" '      command: ["/plugins/velero-plugin-for-aws"]'
-    preflight_image_pull "hypercdr-image-check-velero-azure-plugin" "$VELERO_AZURE_PLUGIN_IMAGE" '      command: ["/plugins/velero-plugin-for-microsoft-azure"]'
-    preflight_image_pull "hypercdr-image-check-velero-gcp-plugin" "$VELERO_GCP_PLUGIN_IMAGE" '      command: ["/plugins/velero-plugin-for-gcp"]'
-  fi
-fi
 if [[ -n "$VELERO_CRDS_URL" ]]; then
   log_section "Velero CRDs"
   log_info "Installing Velero CRDs from ${VELERO_CRDS_URL}"
@@ -12772,7 +13059,7 @@ if [[ -n "$VELERO_CRDS_URL" ]]; then
   kubectl_retry kubectl apply -f "$crds_file" || {
     rm -f "$crds_file"
     log_error "Failed to apply Velero CRDs"
-        return 1
+        exit 1
   }
   rm -f "$crds_file"
   log_ok "Velero CRDs are ready"
@@ -12981,6 +13268,13 @@ log_info "Creating or updating agent bootstrap secret"
 kubectl -n "$NAMESPACE" create secret generic hypercdr-agent-bootstrap \
   --from-literal=HCDR_INSTALL_TOKEN="$TOKEN" \
   --from-literal=HCDR_PLATFORM_ENDPOINT="$ENDPOINT" \
+  --from-literal=HCDR_PLATFORM_PRIVATE_ENDPOINT="$ENDPOINT_PRIVATE" \
+  --from-literal=HCDR_PLATFORM_PUBLIC_ENDPOINT="$ENDPOINT_PUBLIC" \
+  --from-literal=HCDR_CLUSTER_TYPE="$CLUSTER_TYPE" \
+  --from-literal=HCDR_CLOUD_PROVIDER="$(if [[ "$CLUSTER_TYPE" == "huaweicloud-cce" ]]; then echo huaweicloud; fi)" \
+  --from-literal=HCDR_CLOUD_REGION="$DETECTED_CLOUD_REGION" \
+  --from-literal=HCDR_CLOUD_CLUSTER_ID="$DETECTED_CLOUD_CLUSTER_ID" \
+  --from-literal=HCDR_CLUSTER_NAME="$DETECTED_CLUSTER_NAME" \
   --dry-run=client -o yaml | kubectl_apply_retry
 log_ok "Agent bootstrap secret is ready"
 if [[ "$RESET_AGENT_CREDENTIAL" == "true" ]]; then
@@ -13159,14 +13453,23 @@ ${IMAGE_PULL_SECRETS_BLOCK}
             - name: HCDR_AGENT_STATE_DIR
               value: "/var/lib/hypercdr-agent"
             - name: HCDR_PLATFORM_TLS_INSECURE_SKIP_VERIFY
-              value: "true"
+              value: "${PLATFORM_TLS_SKIP_VERIFY}"
+            - name: HCDR_PLATFORM_CA_FILE
+              value: "/etc/hypercdr/platform-ca/ca.crt"
           volumeMounts:
             - name: agent-state
               mountPath: /var/lib/hypercdr-agent
+            - name: platform-ca
+              mountPath: /etc/hypercdr/platform-ca
+              readOnly: true
       volumes:
         - name: agent-state
           persistentVolumeClaim:
             claimName: hypercdr-agent-state
+        - name: platform-ca
+          configMap:
+            name: hypercdr-platform-ca
+            optional: true
 YAML
 
 if [[ "$AGENT_DEPLOYMENT_EXISTS" == "true" && "$RESET_AGENT_CREDENTIAL" == "true" ]]; then
@@ -13194,6 +13497,8 @@ if [[ "$WAIT_READY" == "true" ]]; then
     rollback_failed_registration
     exit 1
   fi
+  ROLLBACK_ACTIVE="false"
+  trap - ERR
   log_section "Completed"
   log_ok "HyperCDR agent installation is ready"
 fi

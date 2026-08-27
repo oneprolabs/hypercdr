@@ -122,6 +122,10 @@ export type DRSupportCheck = {
 export interface Cluster {
   id: string;
   name: string;
+  clusterType?: string;
+  cloudProvider?: string;
+  cloudRegion?: string;
+  cloudClusterId?: string;
   region: string;
   version: string;
   status: ClusterStatus;

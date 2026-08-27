@@ -9,12 +9,19 @@ import (
 
 type Config struct {
 	PlatformEndpoint        string
+	PlatformPrivateEndpoint string
+	PlatformPublicEndpoint  string
 	PlatformTLSSkipVerify   bool
+	PlatformCAFile          string
 	StateDir                string
 	InstallToken            string
 	AgentCredential         string
 	ClusterID               string
 	ClusterName             string
+	ClusterType             string
+	CloudProvider           string
+	CloudRegion             string
+	CloudClusterID          string
 	ControlPlaneIP          string
 	AgentID                 string
 	AgentVersion            string
@@ -34,12 +41,19 @@ type Config struct {
 func Load() Config {
 	return Config{
 		PlatformEndpoint:        getEnv("HCDR_PLATFORM_ENDPOINT", "ws://127.0.0.1:8080/ws/agent"),
+		PlatformPrivateEndpoint: os.Getenv("HCDR_PLATFORM_PRIVATE_ENDPOINT"),
+		PlatformPublicEndpoint:  os.Getenv("HCDR_PLATFORM_PUBLIC_ENDPOINT"),
 		PlatformTLSSkipVerify:   parseBool("HCDR_PLATFORM_TLS_INSECURE_SKIP_VERIFY", false),
+		PlatformCAFile:          os.Getenv("HCDR_PLATFORM_CA_FILE"),
 		StateDir:                getEnv("HCDR_AGENT_STATE_DIR", "/var/lib/hypercdr-agent"),
 		InstallToken:            os.Getenv("HCDR_INSTALL_TOKEN"),
 		AgentCredential:         os.Getenv("HCDR_AGENT_CREDENTIAL"),
 		ClusterID:               os.Getenv("HCDR_CLUSTER_ID"),
 		ClusterName:             getEnv("HCDR_CLUSTER_NAME", "unknown-cluster"),
+		ClusterType:             getEnv("HCDR_CLUSTER_TYPE", "native-kubernetes"),
+		CloudProvider:           os.Getenv("HCDR_CLOUD_PROVIDER"),
+		CloudRegion:             os.Getenv("HCDR_CLOUD_REGION"),
+		CloudClusterID:          os.Getenv("HCDR_CLOUD_CLUSTER_ID"),
 		AgentID:                 getEnv("HCDR_AGENT_ID", getEnv("HOSTNAME", "comm-agent-local")),
 		AgentVersion:            getEnv("HCDR_AGENT_VERSION", "v0.1.0-dev"),
 		AgentImage:              getEnv("HCDR_AGENT_IMAGE", ""),

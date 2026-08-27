@@ -620,6 +620,10 @@ function mapCluster(cluster: ApiCluster, apps: AppItem[] = []): Cluster {
   return {
     id: cluster.id,
     name: cluster.name || 'unknown-cluster',
+    clusterType: cluster.clusterType,
+    cloudProvider: cluster.cloudProvider,
+    cloudRegion: cluster.cloudRegion,
+    cloudClusterId: cluster.cloudClusterId,
     region: cluster.connectionStatus === 'online' ? 'connected' : 'disconnected',
     version: cluster.kubeVersion || 'unknown',
     status: mapClusterStatus(cluster.status, cluster.connectionStatus),
@@ -1252,9 +1256,10 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     }
   }, [selectedCluster?.id]);
 
-  const requestAgentToken = useCallback(async () => apiPost<ApiAgentToken>('/api/v1/agent-tokens', {
+  const requestAgentToken = useCallback(async (clusterType: 'native-kubernetes' | 'huaweicloud-cce' = 'native-kubernetes') => apiPost<ApiAgentToken>('/api/v1/agent-tokens', {
     description: 'cluster registration from console',
     ttlSeconds: 1800,
+    clusterType,
   }), []);
 
   const prefetchAgentToken = useCallback(() => {
@@ -1267,7 +1272,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     if (!owner) return null;
     if (isAgentTokenUsable(prefetchedAgentTokenRef.current) || prefetchingAgentTokenRef.current) return prefetchingAgentTokenRef.current;
     prefetchedAgentTokenRef.current = null;
-    const request = requestAgentToken()
+    const request = requestAgentToken('native-kubernetes')
       .then(token => {
         if (agentTokenOwnerRef.current === owner) prefetchedAgentTokenRef.current = token;
         return token;
@@ -1293,13 +1298,18 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     return isAgentTokenUsable(token) ? token : null;
   }, [authSession?.session.token]);
 
-  const getAgentTokenForRegistration = useCallback(async () => {
+  const getAgentTokenForRegistration = useCallback(async (clusterType: 'native-kubernetes' | 'huaweicloud-cce' = 'native-kubernetes') => {
+    if (clusterType === 'huaweicloud-cce') {
+      const token = await requestAgentToken(clusterType);
+      if (!isAgentTokenUsable(token)) throw new Error('agent token is unavailable');
+      return token;
+    }
     const prefetched = takePrefetchedAgentToken();
     if (prefetched) {
       void prefetchAgentToken();
       return prefetched;
     }
-    const token = await (prefetchingAgentTokenRef.current || requestAgentToken());
+    const token = await (prefetchingAgentTokenRef.current || requestAgentToken('native-kubernetes'));
     if (!isAgentTokenUsable(token)) throw new Error('agent token is unavailable');
     void prefetchAgentToken();
     return token;

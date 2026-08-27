@@ -77,6 +77,10 @@ type ClusterSummary struct {
 	KubeVersion    string `json:"kubeVersion"`
 	NodeCount      int    `json:"nodeCount"`
 	NamespaceCount int    `json:"namespaceCount"`
+	ClusterType    string `json:"clusterType,omitempty"`
+	CloudProvider  string `json:"cloudProvider,omitempty"`
+	CloudRegion    string `json:"cloudRegion,omitempty"`
+	CloudClusterID string `json:"cloudClusterId,omitempty"`
 }
 
 type AgentSummary struct {

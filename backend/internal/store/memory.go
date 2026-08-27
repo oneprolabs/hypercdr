@@ -809,7 +809,7 @@ func (s *MemoryStore) FindOrCreateGoogleUser(email string) (User, error) {
 	return u, nil
 }
 
-func (s *MemoryStore) CreateAgentToken(tenantID, createdBy, description string, ttl time.Duration) (AgentToken, error) {
+func (s *MemoryStore) CreateAgentToken(tenantID, createdBy, description string, ttl time.Duration, requestedType ...string) (AgentToken, error) {
 	now := time.Now().UTC()
 	token := AgentToken{
 		ID:          newID(),
@@ -818,6 +818,7 @@ func (s *MemoryStore) CreateAgentToken(tenantID, createdBy, description string, 
 		Token:       "hcdr_" + newID() + newID(),
 		Description: description,
 		ExpiresAt:   now.Add(ttl),
+		ClusterType: normalizedClusterType(firstRequestedString(requestedType)),
 	}
 
 	s.mu.Lock()
@@ -977,6 +978,9 @@ func (s *MemoryStore) RegisterCluster(input RegisterClusterInput) (Cluster, stri
 	if now.After(token.ExpiresAt) {
 		return Cluster{}, "", ErrTokenExpired
 	}
+	if input.ClusterType != "" && normalizedClusterType(input.ClusterType) != normalizedClusterType(token.ClusterType) {
+		return Cluster{}, "", errors.New("registration cluster type does not match install token")
+	}
 
 	clusterName := input.ClusterName
 	if strings.TrimSpace(clusterName) == "" || clusterName == "unknown-cluster" || clusterName == "unnamed cluster" {
@@ -1015,6 +1019,10 @@ func (s *MemoryStore) RegisterCluster(input RegisterClusterInput) (Cluster, stri
 		ID:               clusterID,
 		TenantID:         token.TenantID,
 		Name:             clusterName,
+		ClusterType:      normalizedClusterType(token.ClusterType),
+		CloudProvider:    input.CloudProvider,
+		CloudRegion:      input.CloudRegion,
+		CloudClusterID:   input.CloudClusterID,
 		KubeVersion:      input.KubeVersion,
 		Status:           "healthy",
 		ConnectionStatus: "online",

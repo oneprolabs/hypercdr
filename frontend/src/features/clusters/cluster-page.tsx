@@ -12,7 +12,8 @@ import { buildDRTopology, type DRRelationship } from './dr-topology';
 import DRTopologyView from './dr-topology-view';
 
 type ApiList<T>={items:T[]};
-type ApiAgentToken={installCommand:string;prepareNodeCommand?:string};
+type ClusterRegistrationType='native-kubernetes'|'huaweicloud-cce';
+type ApiAgentToken={installCommand:string;prepareNodeCommand?:string;clusterType?:ClusterRegistrationType};
 type ApiCluster={id:string;name:string};
 type ApiTask={id:string;clusterId:string;type:string;status:string;progress:number;errorCode?:string;errorMessage?:string;payload?:Record<string,any>;createdAt?:string;completedAt?:string};
 type ApiTaskEvent={id:string;taskId:string;level:string;reason:string;message:string;payload?:Record<string,any>;createdAt?:string};
@@ -63,13 +64,14 @@ export default function ClusterPage(props: {
   onRegisterCluster: (cluster: Cluster) => void;
   onRefreshRegistration: () => Promise<Cluster[]>;
   clusterTaskLogs: Record<string, ClusterTaskLog[]>;
-  getAgentTokenForRegistration: () => Promise<ApiAgentToken>;
+  getAgentTokenForRegistration: (clusterType?: ClusterRegistrationType) => Promise<ApiAgentToken>;
   prefetchAgentToken: () => Promise<ApiAgentToken | null> | null;
   openDashboard: () => void;
   toast: (msg: string) => void;
 }) {
   const { clusters, loading, protectionPlans, onLoadTopology, canUpgrade, defaultClusterId, clusterMenuId, setClusterMenuId, setSelectedCluster, setDefaultCluster, clearDefaultCluster, unregisterCluster, onRenameCluster, onUpgradeCluster, onUpgradeVelero, onRegisterCluster, onRefreshRegistration, clusterTaskLogs, getAgentTokenForRegistration, prefetchAgentToken, openDashboard, toast } = props;
   const [registerOpen, setRegisterOpen] = useState(false);
+  const [registrationType, setRegistrationType] = useState<ClusterRegistrationType>('native-kubernetes');
   const [registerStep, setRegisterStep] = useState<1 | 2 | 3>(1);
   const [copied, setCopied] = useState(false);
   const [caCopied, setCaCopied] = useState(false);
@@ -299,28 +301,31 @@ export default function ClusterPage(props: {
     return () => window.removeEventListener('click', closeMenu, true);
   }, [clusterMenuId, setClusterMenuId]);
 
+  const loadRegistrationCommand = async (clusterType: ClusterRegistrationType) => {
+    setRegistrationType(clusterType);
+    setInstallLoading(true);
+    setInstallError(null);
+    setPrepareNodeCommand('');
+    try {
+      const token = await getAgentTokenForRegistration(clusterType);
+      setPrepareNodeCommand(token.prepareNodeCommand || '');
+      setInstallCommand(token.installCommand);
+      setRegisterStep(3);
+      if (clusterType === 'native-kubernetes') void prefetchAgentToken();
+    } catch {
+      setInstallError('Install token generation failed. Check whether the platform API is running.');
+      toast('Failed to generate install token');
+    } finally { setInstallLoading(false); }
+  };
+
   const openRegister = async () => {
     setRegisterStep(1);
     setCopied(false);
     setInstallError(null);
     setRegistrationBaseline(clusters.map(cluster => cluster.id));
     setRegistrationWaiting(false);
-    setInstallLoading(true);
-    setPrepareNodeCommand('');
-    try {
-      const token = await getAgentTokenForRegistration();
-      setPrepareNodeCommand(token.prepareNodeCommand || '');
-      setInstallCommand(token.installCommand);
-      setRegisterStep(3);
-      setRegisterOpen(true);
-      void prefetchAgentToken();
-    } catch {
-      setInstallError('Install token generation failed. Check whether the platform API is running.');
-      setRegisterOpen(true);
-      toast('Failed to generate install token');
-    } finally {
-      setInstallLoading(false);
-    }
+    setRegisterOpen(true);
+    await loadRegistrationCommand('native-kubernetes');
   };
 
   const closeRegister = () => {
@@ -881,6 +886,8 @@ export default function ClusterPage(props: {
                       <h4>Overview</h4>
                     </div>
                     <div className="hbdr-cluster-overview-grid">
+                      <div><span>Cluster Type</span><strong>{cluster.clusterType === 'huaweicloud-cce' ? 'Huawei Cloud CCE' : 'Native Kubernetes'}</strong></div>
+                      <div><span>Cloud Region</span><strong>{cluster.cloudRegion || 'N/A'}</strong></div>
                       <div><span>Nodes</span><strong>{cluster.nodes}</strong></div>
                       <div><span>Namespaces</span><strong>{cluster.namespaces}</strong></div>
                       <div><span>Storage Classes</span><strong>{(cluster.storageClasses || []).length}</strong></div>
@@ -993,6 +1000,19 @@ export default function ClusterPage(props: {
                 </div>
 
                 <div className="space-y-4">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <label htmlFor="cluster-registration-type" className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Cluster type</label>
+                    <select id="cluster-registration-type" value={registrationType} disabled={installLoading} onChange={event => void loadRegistrationCommand(event.target.value as ClusterRegistrationType)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                      <option value="native-kubernetes">Native Kubernetes</option>
+                      <option value="huaweicloud-cce">Huawei Cloud CCE</option>
+                    </select>
+                  </div>
+                  {registrationType === 'huaweicloud-cce' && <div className="rounded-xl border border-sky-100 bg-sky-50 p-4 text-sm text-sky-900">
+                    <p className="font-bold">1. Prepare CCE access</p>
+                    <p className="mt-1 text-xs leading-5 text-sky-700">Install kubectl, download the CCE kubeconfig from Huawei Cloud, and save it on this Linux operations host. Recommended path: ~/.kube/hypercdr-cce.yaml.</p>
+                    <p className="mt-3 font-bold">2. Run the command below</p>
+                    <p className="mt-1 text-xs leading-5 text-sky-700">The installer discovers the kubeconfig, confirms the target CCE cluster, runs compatibility checks, and installs the agent stack.</p>
+                  </div>}
                   {prepareNodeCommand && <><div className="flex gap-3 rounded-xl border border-blue-100 bg-blue-50 p-3">
                     <div className="mt-1"><ShieldCheck size={20} className="text-blue-600" /></div>
                     <div className="text-sm">

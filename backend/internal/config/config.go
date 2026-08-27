@@ -14,6 +14,8 @@ type Config struct {
 	DatabaseURL              string
 	PublicBaseURL            string
 	AgentWSEndpoint          string
+	AgentPrivateWSEndpoint   string
+	AgentPublicWSEndpoint    string
 	AgentImage               string
 	ImageRegistry            string
 	AgentNamespace           string
@@ -50,6 +52,8 @@ func Load() Config {
 		DatabaseURL:              os.Getenv("HCDR_DATABASE_URL"),
 		PublicBaseURL:            strings.TrimRight(getEnv("HCDR_PUBLIC_BASE_URL", ""), "/"),
 		AgentWSEndpoint:          getEnv("HCDR_AGENT_WS_ENDPOINT", ""),
+		AgentPrivateWSEndpoint:   getEnv("HCDR_AGENT_PRIVATE_WS_ENDPOINT", ""),
+		AgentPublicWSEndpoint:    getEnv("HCDR_AGENT_PUBLIC_WS_ENDPOINT", ""),
 		AgentImage:               getEnv("HCDR_AGENT_IMAGE", defaultImage(imageRegistry, "comm-agent:dev")),
 		ImageRegistry:            imageRegistry,
 		AgentNamespace:           getEnv("HCDR_AGENT_NAMESPACE", "hypercdr-agent"),

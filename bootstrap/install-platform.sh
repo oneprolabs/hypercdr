@@ -70,6 +70,8 @@ Kubernetes options:
   --kubeconfig PATH            Optional kubeconfig path for kubectl and helm
   --namespace NAME             Namespace for the control plane, default: hypercdr-system
   --public-base-url URL        Container DR control plane URL used by users and agents
+  --agent-private-endpoint URL Private WebSocket endpoint preferred by agents
+  --agent-public-endpoint URL  Optional public WebSocket fallback endpoint
   --registry REGISTRY          Optional OCI Registry prefix override.
   --registry-profile NAME      Registry profile; defaults to HCDR_ACTIVE_REGISTRY.
   --registry-config PATH       Registry profiles file.
@@ -85,6 +87,8 @@ Kubernetes options:
 
 Docker options:
   --public-base-url URL        Container DR control plane URL used by users and agents
+  --agent-private-endpoint URL Private WebSocket endpoint preferred by agents
+  --agent-public-endpoint URL  Optional public WebSocket fallback endpoint
   --data-dir PATH              Persistent data directory, default: /var/lib/hypercdr
   --registry REGISTRY          Optional OCI Registry prefix override.
   --registry-profile NAME      Registry profile; defaults to HCDR_ACTIVE_REGISTRY.
@@ -118,6 +122,8 @@ shift
 namespace="hypercdr-system"
 kubeconfig=""
 public_base_url=""
+agent_private_endpoint=""
+agent_public_endpoint=""
 registry=""
 registry_profile=""
 registry_config="${HCDR_REGISTRY_CONFIG:-${DEFAULT_REGISTRY_CONFIG}}"
@@ -143,6 +149,8 @@ while [[ $# -gt 0 ]]; do
     --kubeconfig) kubeconfig="${2:?missing value for --kubeconfig}"; shift 2 ;;
     --namespace) namespace="${2:?missing value for --namespace}"; shift 2 ;;
     --public-base-url) public_base_url="${2:?missing value for --public-base-url}"; shift 2 ;;
+    --agent-private-endpoint) agent_private_endpoint="${2:?missing value for --agent-private-endpoint}"; shift 2 ;;
+    --agent-public-endpoint) agent_public_endpoint="${2:?missing value for --agent-public-endpoint}"; shift 2 ;;
     --registry) registry="${2:?missing value for --registry}"; shift 2 ;;
     --registry-profile) registry_profile="${2:?missing value for --registry-profile}"; shift 2 ;;
     --registry-config) registry_config="${2:?missing value for --registry-config}"; shift 2 ;;
@@ -197,6 +205,7 @@ esac
 
 agent_ws_endpoint="${public_base_url/https:/wss:}"
 agent_ws_endpoint="${agent_ws_endpoint/http:/ws:}/ws/agent"
+[[ -n "${agent_public_endpoint}" ]] || agent_public_endpoint="${agent_ws_endpoint}"
 
 extract_port_from_url() {
   local url="$1"
@@ -577,9 +586,15 @@ EOF
         if [[ "${public_host}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
           san_entry="IP:${public_host}"
         fi
+        local private_host=""
+        if [[ -n "${agent_private_endpoint}" ]]; then private_host="$(extract_host_from_url "${agent_private_endpoint}")"; fi
+        local private_san=""
+        if [[ -n "${private_host}" ]]; then
+          if [[ "${private_host}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then private_san=",IP:${private_host}"; else private_san=",DNS:${private_host}"; fi
+        fi
         openssl req -x509 -nodes -newkey rsa:4096 -sha256 -days 7300 \
           -subj "/CN=${public_host}" \
-          -addext "subjectAltName=${san_entry},DNS:localhost,IP:127.0.0.1" \
+          -addext "subjectAltName=${san_entry}${private_san},DNS:localhost,IP:127.0.0.1" \
           -keyout "${tls_key_file}" \
           -out "${tls_cert_file}" >/dev/null 2>&1
       fi
@@ -592,6 +607,8 @@ EOF
     cat > "${data_dir}/.env" <<EOF
 HCDR_PUBLIC_BASE_URL=${public_base_url}
 HCDR_AGENT_WS_ENDPOINT=${agent_ws_endpoint}
+HCDR_AGENT_PRIVATE_WS_ENDPOINT=${agent_private_endpoint}
+HCDR_AGENT_PUBLIC_WS_ENDPOINT=${agent_public_endpoint}
 HCDR_IMAGE_REGISTRY=${registry}
 HCDR_REGISTRY_PROFILE=${HCDR_SELECTED_REGISTRY:-custom}
 HCDR_IMAGE_TAG=${image_tag}

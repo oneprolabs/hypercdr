@@ -319,7 +319,7 @@ func TestSchedulerCreatesSingleBackupTaskPerPlan(t *testing.T) {
 	}
 	_, err = repo.UpsertClusterStorageBinding(store.ClusterStorageBindingInput{
 		ClusterID: clusterID, StorageRepoID: storage.ID, SourceClusterID: clusterID,
-		BSLName: storageDomainBSLName(storage, clusterID), ObjectPrefix: storageDomainPrefix(clusterID), Status: "active",
+		BSLName: storageDomainBSLName(storage, clusterID), ObjectPrefix: storageDomainPrefix(storage.TenantID, clusterID), Status: "active",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -974,6 +974,10 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 		"TENANT_LICENSE_[A-Z_]+",
 		"rollback_failed_registration",
 		"Failed first-time installation was rolled back",
+		"Isolated installation preflight",
+		"preflight_dynamic_pvc",
+		"Dynamic PVC provisioning passed",
+		`target_namespace="${PREFLIGHT_NAMESPACE:-$NAMESPACE}"`,
 		"configmap hypercdr-agent-uninstaller",
 		"/uninstall-agent.sh",
 	} {
@@ -986,6 +990,15 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 	}
 	if strings.Contains(text, "kubectl delete crd") {
 		t.Fatal("registration rollback must not delete cluster-scoped Velero CRDs shared by another HyperCDR edition")
+	}
+	if strings.Contains(text, "{{PLATFORM_CA_URL}}") {
+		t.Fatal("generated install script must contain the resolved platform CA URL")
+	}
+	if !strings.Contains(text, "/assets/platform/ca.crt") {
+		t.Fatal("generated install script must download the platform CA from this control plane")
+	}
+	if strings.Contains(text, "Platform TLS certificate is unavailable; Agent TLS verification fallback is enabled") {
+		t.Fatal("agent installation must never silently fall back to insecure platform TLS")
 	}
 	if strings.Contains(text, "supports isolated Community and Enterprise Velero instances") {
 		t.Fatal("installer must not advertise dual-edition Agent coexistence")
@@ -1131,6 +1144,46 @@ func TestAgentTokenInstallCommandUsesKubernetesMode(t *testing.T) {
 	}
 	if !strings.Contains(body.InstallCommand, "--install-registry-ca false") {
 		t.Fatalf("expected install command to skip registry CA after prepare-node step, got %q", body.InstallCommand)
+	}
+}
+
+func TestCCEAgentTokenInstallCommandUsesDualEndpoints(t *testing.T) {
+	repo := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	cfg := config.Config{AgentNamespace: "hypercdr-agent", AgentPrivateWSEndpoint: "wss://10.0.0.10:3102/ws/agent", AgentPublicWSEndpoint: "wss://203.0.113.10:3102/ws/agent"}
+	server := httptest.NewServer(NewRouter(cfg, logger, repo))
+	defer server.Close()
+	resp, err := http.Post(server.URL+"/api/v1/agent-tokens", "application/json", bytes.NewReader([]byte(`{"clusterType":"huaweicloud-cce"}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body struct{ ClusterType, InstallCommand string }
+	if err = json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"--cluster-type huaweicloud-cce", "--endpoint-private wss://10.0.0.10:3102/ws/agent", "--endpoint-public wss://203.0.113.10:3102/ws/agent"} {
+		if !strings.Contains(body.InstallCommand, expected) {
+			t.Fatalf("CCE install command %q does not contain %q", body.InstallCommand, expected)
+		}
+	}
+	if body.ClusterType != "huaweicloud-cce" {
+		t.Fatalf("cluster type = %q", body.ClusterType)
+	}
+}
+
+func TestStorageDomainPrefixIncludesTenantAndCluster(t *testing.T) {
+	prefix := storageDomainPrefix("tenant-a", "cluster-b")
+	if prefix != "hypercdr/v1/tenants/tenant-a/clusters/cluster-b" {
+		t.Fatalf("prefix = %q", prefix)
+	}
+	if !validStorageDomainPrefix(prefix + "/") {
+		t.Fatal("expected complete tenant cluster prefix to be valid")
+	}
+	for _, unsafe := range []string{"", "hypercdr/", "hypercdr/v1/", "hypercdr/v1/tenants/tenant-a/", "hypercdr/clusters/cluster-b/"} {
+		if validStorageDomainPrefix(unsafe) {
+			t.Fatalf("unsafe prefix accepted: %q", unsafe)
+		}
 	}
 }
 
@@ -1293,7 +1346,7 @@ func TestFinishUnregisterDoesNotAccessObjectStorage(t *testing.T) {
 		if repo.ID != storageRepo.ID {
 			t.Fatalf("unexpected repository %s", repo.ID)
 		}
-		expectedPrefix := storageDomainPrefix(clusterID) + "/"
+		expectedPrefix := storageDomainPrefix(store.DefaultTenantID, clusterID) + "/"
 		if prefix != expectedPrefix {
 			t.Fatalf("expected cleanup prefix %q, got %q", expectedPrefix, prefix)
 		}
@@ -1398,7 +1451,7 @@ func TestForceCleanupRemovesPlatformRecordsWithoutObjectStorage(t *testing.T) {
 		if repo.ID != storageRepo.ID {
 			t.Fatalf("unexpected repository %s", repo.ID)
 		}
-		expectedPrefix := storageDomainPrefix(clusterID) + "/"
+		expectedPrefix := storageDomainPrefix(store.DefaultTenantID, clusterID) + "/"
 		if prefix != expectedPrefix {
 			t.Fatalf("expected cleanup prefix %q, got %q", expectedPrefix, prefix)
 		}
@@ -1524,6 +1577,14 @@ func TestForceCleanupBlocksTargetReferencedCluster(t *testing.T) {
 func TestCleanupClusterObjectStorageUsesOnlyAssociatedRepositories(t *testing.T) {
 	repo := store.NewMemoryStore()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	token, err := repo.CreateAgentToken(store.DefaultTenantID, "", "cleanup-test", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cluster, _, err := repo.RegisterCluster(store.RegisterClusterInput{Token: token.Token, ClusterName: "cleanup-cluster"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	associated, err := repo.CreateStorageRepository(store.StorageRepositoryInput{Name: "associated", Type: "S3", Endpoint: "http://minio", Bucket: "bucket-a"})
 	if err != nil {
 		t.Fatal(err)
@@ -1540,7 +1601,7 @@ func TestCleanupClusterObjectStorageUsesOnlyAssociatedRepositories(t *testing.T)
 		return objectStorageCleanupResult{RepositoryID: repository.ID, Prefix: prefix}, nil
 	}
 	router := &Router{store: repo, logger: logger, hub: newSessionHub()}
-	results, err := router.cleanupClusterObjectStorageRepositories(context.Background(), "cluster-a", []string{associated.ID})
+	results, err := router.cleanupClusterObjectStorageRepositories(context.Background(), cluster.ID, []string{associated.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1558,7 +1619,7 @@ func TestUnregisterAuditUsesHistoricalStorageBinding(t *testing.T) {
 	}
 	if _, err := repo.UpsertClusterStorageBinding(store.ClusterStorageBindingInput{
 		ClusterID: clusterID, StorageRepoID: storage.ID, SourceClusterID: clusterID,
-		BSLName: storageDomainBSLName(storage, clusterID), ObjectPrefix: storageDomainPrefix(clusterID), Status: "active",
+		BSLName: storageDomainBSLName(storage, clusterID), ObjectPrefix: storageDomainPrefix(storage.TenantID, clusterID), Status: "active",
 	}); err != nil {
 		t.Fatal(err)
 	}

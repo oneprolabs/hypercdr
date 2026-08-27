@@ -65,7 +65,7 @@ type Store interface {
 	CreatePasswordResetToken(email string, ttl time.Duration) (string, bool, error)
 	ResetPassword(token string, password string) (User, error)
 	FindOrCreateGoogleUser(email string) (User, error)
-	CreateAgentToken(tenantID, createdBy, description string, ttl time.Duration) (AgentToken, error)
+	CreateAgentToken(tenantID, createdBy, description string, ttl time.Duration, clusterType ...string) (AgentToken, error)
 	ValidateAgentToken(token string) error
 	ValidateDisasterHandoverToken(token string) error
 	RegisterCluster(input RegisterClusterInput) (Cluster, string, error)
@@ -366,6 +366,7 @@ type AgentToken struct {
 	CreatedBy   string    `json:"createdBy,omitempty"`
 	Token       string    `json:"token"`
 	Description string    `json:"description,omitempty"`
+	ClusterType string    `json:"clusterType,omitempty"`
 	ExpiresAt   time.Time `json:"expiresAt"`
 	UsedAt      time.Time `json:"usedAt,omitempty"`
 	ClusterID   string    `json:"clusterId,omitempty"`
@@ -388,6 +389,10 @@ type Cluster struct {
 	ID                         string                `json:"id"`
 	TenantID                   string                `json:"tenantId"`
 	Name                       string                `json:"name"`
+	ClusterType                string                `json:"clusterType,omitempty"`
+	CloudProvider              string                `json:"cloudProvider,omitempty"`
+	CloudRegion                string                `json:"cloudRegion,omitempty"`
+	CloudClusterID             string                `json:"cloudClusterId,omitempty"`
 	KubeVersion                string                `json:"kubeVersion"`
 	Status                     string                `json:"status"`
 	ConnectionStatus           string                `json:"connectionStatus"`
@@ -547,6 +552,10 @@ type ApplicationUpdateInput struct {
 type RegisterClusterInput struct {
 	Token          string
 	ClusterName    string
+	ClusterType    string
+	CloudProvider  string
+	CloudRegion    string
+	CloudClusterID string
 	ControlPlaneIP string
 	KubeVersion    string
 	AgentVersion   string
@@ -558,6 +567,20 @@ type RegisterClusterInput struct {
 type AgentCredentialInput struct {
 	ClusterID  string
 	Credential string
+}
+
+func firstRequestedString(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
+}
+
+func normalizedClusterType(value string) string {
+	if value == "huaweicloud-cce" {
+		return value
+	}
+	return "native-kubernetes"
 }
 
 type HeartbeatInput struct {

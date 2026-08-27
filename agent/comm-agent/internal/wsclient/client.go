@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -187,7 +188,7 @@ func (c *Client) Register() (protocol.RegisterAcceptedPayload, error) {
 	if c.cfg.AgentCredential != "" && c.cfg.ClusterID == "" {
 		return protocol.RegisterAcceptedPayload{}, errors.New("HCDR_CLUSTER_ID is required when HCDR_AGENT_CREDENTIAL is set")
 	}
-	clusterSummary := protocol.ClusterSummary{Name: c.cfg.ClusterName, ControlPlaneIP: c.cfg.ControlPlaneIP, KubeVersion: "unknown"}
+	clusterSummary := protocol.ClusterSummary{Name: c.cfg.ClusterName, ControlPlaneIP: c.cfg.ControlPlaneIP, KubeVersion: "unknown", ClusterType: c.cfg.ClusterType, CloudProvider: c.cfg.CloudProvider, CloudRegion: c.cfg.CloudRegion, CloudClusterID: c.cfg.CloudClusterID}
 	// A fresh Enterprise registration needs an authoritative Worker Node count
 	// before the platform can accept and persist its license consumption.
 	if c.cfg.AgentCredential == "" && c.collector != nil {
@@ -204,16 +205,33 @@ func (c *Client) Register() (protocol.RegisterAcceptedPayload, error) {
 			if clusterSummary.ControlPlaneIP == "" {
 				clusterSummary.ControlPlaneIP = c.cfg.ControlPlaneIP
 			}
+			clusterSummary.ClusterType = c.cfg.ClusterType
+			clusterSummary.CloudProvider = c.cfg.CloudProvider
+			clusterSummary.CloudRegion = c.cfg.CloudRegion
+			clusterSummary.CloudClusterID = c.cfg.CloudClusterID
 		}
 	}
 
-	dialer := websocket.DefaultDialer
-	if c.cfg.PlatformTLSSkipVerify {
-		copyDialer := *websocket.DefaultDialer
-		copyDialer.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-		dialer = &copyDialer
+	dialer, err := platformDialer(c.cfg)
+	if err != nil {
+		return protocol.RegisterAcceptedPayload{}, err
 	}
-	conn, resp, err := dialer.Dial(c.cfg.PlatformEndpoint, http.Header{})
+	endpoints := orderedPlatformEndpoints(c.cfg)
+	seenEndpoints := map[string]bool{}
+	var conn *websocket.Conn
+	var resp *http.Response
+	for _, endpoint := range endpoints {
+		endpoint = strings.TrimSpace(endpoint)
+		if endpoint == "" || seenEndpoints[endpoint] {
+			continue
+		}
+		seenEndpoints[endpoint] = true
+		conn, resp, err = dialer.Dial(endpoint, http.Header{})
+		if err == nil {
+			c.cfg.PlatformEndpoint = endpoint
+			break
+		}
+	}
 	if err != nil {
 		status := ""
 		if resp != nil {
@@ -283,6 +301,42 @@ func (c *Client) Register() (protocol.RegisterAcceptedPayload, error) {
 	}
 }
 
+func platformDialer(cfg config.Config) (*websocket.Dialer, error) {
+	dialer := *websocket.DefaultDialer
+	if cfg.PlatformTLSSkipVerify {
+		dialer.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	} else if strings.TrimSpace(cfg.PlatformCAFile) != "" {
+		pemData, readErr := os.ReadFile(cfg.PlatformCAFile)
+		if readErr != nil {
+			return nil, fmt.Errorf("read platform CA: %w", readErr)
+		}
+		roots, rootErr := x509.SystemCertPool()
+		if rootErr != nil || roots == nil {
+			roots = x509.NewCertPool()
+		}
+		if !roots.AppendCertsFromPEM(pemData) {
+			return nil, errors.New("platform CA file does not contain a valid certificate")
+		}
+		dialer.TLSClientConfig = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
+	}
+	return &dialer, nil
+}
+
+func orderedPlatformEndpoints(cfg config.Config) []string {
+	values := []string{cfg.PlatformPrivateEndpoint, cfg.PlatformPublicEndpoint, cfg.PlatformEndpoint}
+	seen := map[string]bool{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
+}
+
 func (c *Client) RunHeartbeat() error {
 	if c.conn == nil {
 		return errors.New("websocket is not connected")
@@ -302,6 +356,8 @@ func (c *Client) RunHeartbeat() error {
 	defer veleroTicker.Stop()
 	outboxTicker := time.NewTicker(30 * time.Second)
 	defer outboxTicker.Stop()
+	privateEndpointTicker := time.NewTicker(60 * time.Second)
+	defer privateEndpointTicker.Stop()
 
 	if err := c.sendInventory(true); err != nil {
 		c.logger.Warn("initial inventory collection failed; heartbeat will continue until inventory recovers", "error", err)
@@ -341,6 +397,10 @@ func (c *Client) RunHeartbeat() error {
 			}
 		case <-outboxTicker.C:
 			c.resendPendingEvents()
+		case <-privateEndpointTicker.C:
+			if c.usingPublicFallback() && c.privateEndpointReachable() {
+				return errors.New("private platform endpoint is reachable; reconnecting with private endpoint priority")
+			}
 		case sig := <-stopCh:
 			c.logger.Info("stop signal received", "signal", sig.String())
 			return nil
@@ -348,6 +408,25 @@ func (c *Client) RunHeartbeat() error {
 			return err
 		}
 	}
+}
+
+func (c *Client) usingPublicFallback() bool {
+	privateEndpoint := strings.TrimSpace(c.cfg.PlatformPrivateEndpoint)
+	return privateEndpoint != "" && strings.TrimSpace(c.cfg.PlatformEndpoint) != privateEndpoint
+}
+
+func (c *Client) privateEndpointReachable() bool {
+	dialer, err := platformDialer(c.cfg)
+	if err != nil {
+		return false
+	}
+	dialer.HandshakeTimeout = 5 * time.Second
+	conn, _, err := dialer.Dial(strings.TrimSpace(c.cfg.PlatformPrivateEndpoint), http.Header{})
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 func (c *Client) readMessages() error {

@@ -2,6 +2,10 @@ import type { ClusterNode, ClusterStorageClass } from '../clusters/types';
 
 export type ApiCluster = {
   id: string;
+  clusterType?: string;
+  cloudProvider?: string;
+  cloudRegion?: string;
+  cloudClusterId?: string;
   tenantId: string;
   name: string;
   kubeVersion: string;

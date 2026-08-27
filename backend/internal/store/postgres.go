@@ -778,7 +778,7 @@ func (s *PostgresStore) GetUserValue(id string) (User, error) {
 	return u, nil
 }
 
-func (s *PostgresStore) CreateAgentToken(tenantID, createdBy, description string, ttl time.Duration) (AgentToken, error) {
+func (s *PostgresStore) CreateAgentToken(tenantID, createdBy, description string, ttl time.Duration, requestedType ...string) (AgentToken, error) {
 	now := time.Now().UTC()
 	token := AgentToken{
 		ID:          newID(),
@@ -787,12 +787,13 @@ func (s *PostgresStore) CreateAgentToken(tenantID, createdBy, description string
 		Token:       "hcdr_" + newID() + newID(),
 		Description: description,
 		ExpiresAt:   now.Add(ttl),
+		ClusterType: normalizedClusterType(firstRequestedString(requestedType)),
 	}
 
 	_, err := s.db.Exec(`
-		insert into agent_tokens (id, tenant_id, token_hash, description, expires_at, created_by, created_at)
-		values ($1, $2, $3, $4, $5, nullif($6,'')::uuid, $7)
-	`, token.ID, token.TenantID, token.Token, token.Description, token.ExpiresAt, token.CreatedBy, now)
+		insert into agent_tokens (id, tenant_id, token_hash, description, expires_at, created_by, created_at, cluster_type)
+		values ($1, $2, $3, $4, $5, nullif($6,'')::uuid, $7, $8)
+	`, token.ID, token.TenantID, token.Token, token.Description, token.ExpiresAt, token.CreatedBy, now, token.ClusterType)
 	return token, err
 }
 
@@ -956,11 +957,11 @@ func (s *PostgresStore) RegisterCluster(input RegisterClusterInput) (Cluster, st
 	var token AgentToken
 	var usedAt sql.NullTime
 	err = tx.QueryRow(`
-		select id, tenant_id, token_hash, coalesce(description, ''), expires_at, used_at, coalesce(cluster_id::text,'')
+		select id, tenant_id, token_hash, coalesce(description, ''), expires_at, used_at, coalesce(cluster_id::text,''), cluster_type
 		from agent_tokens
 		where token_hash = $1 and revoked_at is null
 		for update
-	`, input.Token).Scan(&token.ID, &token.TenantID, &token.Token, &token.Description, &token.ExpiresAt, &usedAt, &token.ClusterID)
+	`, input.Token).Scan(&token.ID, &token.TenantID, &token.Token, &token.Description, &token.ExpiresAt, &usedAt, &token.ClusterID, &token.ClusterType)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Cluster{}, "", ErrTokenInvalid
 	}
@@ -972,6 +973,9 @@ func (s *PostgresStore) RegisterCluster(input RegisterClusterInput) (Cluster, st
 	}
 	if now.After(token.ExpiresAt) {
 		return Cluster{}, "", ErrTokenExpired
+	}
+	if input.ClusterType != "" && normalizedClusterType(input.ClusterType) != normalizedClusterType(token.ClusterType) {
+		return Cluster{}, "", errors.New("registration cluster type does not match install token")
 	}
 	if token.ClusterID != "" {
 		if !strings.HasPrefix(token.Description, "community-migration-handover:") {
@@ -1033,6 +1037,10 @@ func (s *PostgresStore) RegisterCluster(input RegisterClusterInput) (Cluster, st
 		ID:               clusterID,
 		TenantID:         token.TenantID,
 		Name:             clusterName,
+		ClusterType:      normalizedClusterType(token.ClusterType),
+		CloudProvider:    input.CloudProvider,
+		CloudRegion:      input.CloudRegion,
+		CloudClusterID:   input.CloudClusterID,
 		KubeVersion:      input.KubeVersion,
 		Status:           "healthy",
 		ConnectionStatus: "online",
@@ -1050,12 +1058,13 @@ func (s *PostgresStore) RegisterCluster(input RegisterClusterInput) (Cluster, st
 		insert into clusters (
 			id, tenant_id, name, kube_version, status, connection_status,
 			agent_version, velero_version, velero_status, registered_at, last_seen_at,
-			role, is_default, node_count, created_at, updated_at
+			role, is_default, node_count, created_at, updated_at, cluster_type, cloud_provider, cloud_region, cloud_cluster_id
 		)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $15)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $15, $16, nullif($17,''), nullif($18,''), nullif($19,''))
 	`, cluster.ID, cluster.TenantID, cluster.Name, cluster.KubeVersion, cluster.Status,
 		cluster.ConnectionStatus, cluster.AgentVersion, cluster.VeleroVersion, cluster.VeleroStatus,
-		cluster.RegisteredAt, cluster.LastSeenAt, cluster.Role, cluster.IsDefault, cluster.NodeCount, now)
+		cluster.RegisteredAt, cluster.LastSeenAt, cluster.Role, cluster.IsDefault, cluster.NodeCount, now,
+		cluster.ClusterType, cluster.CloudProvider, cluster.CloudRegion, cluster.CloudClusterID)
 	if err != nil {
 		return Cluster{}, "", err
 	}
@@ -1116,7 +1125,8 @@ func (s *PostgresStore) ListClusters() ([]Cluster, error) {
 		       node_count, namespace_count, application_count, 0 as active_tasks,
 		       coalesce(agent_version, ''), coalesce(velero_version, ''), coalesce(velero_status, ''),
 		       coalesce(metadata->>'inventoryHash', ''), role, is_default,
-		       coalesce(registered_at, created_at), coalesce(last_seen_at, created_at), metadata
+		       coalesce(registered_at, created_at), coalesce(last_seen_at, created_at), metadata,
+		       cluster_type, coalesce(cloud_provider,''), coalesce(cloud_region,''), coalesce(cloud_cluster_id,'')
 		from clusters
 		order by created_at desc
 	`)
@@ -1134,6 +1144,7 @@ func (s *PostgresStore) ListClusters() ([]Cluster, error) {
 			&cluster.ConnectionStatus, &cluster.NodeCount, &cluster.NamespaceCount, &cluster.ApplicationCount,
 			&cluster.ActiveTasks, &cluster.AgentVersion, &cluster.VeleroVersion, &cluster.VeleroStatus,
 			&cluster.InventoryHash, &cluster.Role, &cluster.IsDefault, &cluster.RegisteredAt, &cluster.LastSeenAt, &metadataRaw,
+			&cluster.ClusterType, &cluster.CloudProvider, &cluster.CloudRegion, &cluster.CloudClusterID,
 		); err != nil {
 			return nil, err
 		}
@@ -1783,7 +1794,8 @@ func (s *PostgresStore) getCluster(clusterID string) (Cluster, bool, error) {
 		       node_count, namespace_count, application_count, 0 as active_tasks,
 		       coalesce(agent_version, ''), coalesce(velero_version, ''), coalesce(velero_status, ''),
 		       coalesce(metadata->>'inventoryHash', ''), role, is_default,
-		       coalesce(registered_at, created_at), coalesce(last_seen_at, created_at), metadata
+		       coalesce(registered_at, created_at), coalesce(last_seen_at, created_at), metadata,
+		       cluster_type, coalesce(cloud_provider,''), coalesce(cloud_region,''), coalesce(cloud_cluster_id,'')
 		from clusters
 		where id = $1
 	`, clusterID).Scan(
@@ -1791,6 +1803,7 @@ func (s *PostgresStore) getCluster(clusterID string) (Cluster, bool, error) {
 		&cluster.ConnectionStatus, &cluster.NodeCount, &cluster.NamespaceCount, &cluster.ApplicationCount,
 		&cluster.ActiveTasks, &cluster.AgentVersion, &cluster.VeleroVersion, &cluster.VeleroStatus,
 		&cluster.InventoryHash, &cluster.Role, &cluster.IsDefault, &cluster.RegisteredAt, &cluster.LastSeenAt, &metadataRaw,
+		&cluster.ClusterType, &cluster.CloudProvider, &cluster.CloudRegion, &cluster.CloudClusterID,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Cluster{}, false, nil
