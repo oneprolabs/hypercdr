@@ -30,6 +30,29 @@ func TestPreflightRestoreCache(t *testing.T) {
 	}
 }
 
+func TestParseRestoreDataPathFailurePreservesReadOnlyRootCause(t *testing.T) {
+	logText := `time="2026-08-27T05:00:14Z" level=error msg="Async fs restore data path failed" error="Failed to run kopia restore: error creating file: open /restore/#innodb_redo/#ib_redo32_tmp: read-only file system"`
+	failure, ok := parseRestoreDataPathFailure(logText)
+	if !ok {
+		t.Fatal("expected restore failure")
+	}
+	if failure.Code != "RESTORE_VOLUME_FILESYSTEM_READ_ONLY" {
+		t.Fatalf("code = %q", failure.Code)
+	}
+	for _, expected := range []string{"kopia restore", "#ib_redo32_tmp", "read-only file system"} {
+		if !strings.Contains(failure.Message, expected) {
+			t.Fatalf("message %q does not contain %q", failure.Message, expected)
+		}
+	}
+}
+
+func TestParseRestoreDataPathFailureUsesGenericDataPathCode(t *testing.T) {
+	failure, ok := parseRestoreDataPathFailure(`level=error msg="Async fs restore was not completed" error="repository connection reset"`)
+	if !ok || failure.Code != "RESTORE_VOLUME_DATA_PATH_FAILED" || !strings.Contains(failure.Message, "connection reset") {
+		t.Fatalf("unexpected failure: ok=%v failure=%+v", ok, failure)
+	}
+}
+
 func TestPreflightRestoreCacheRejectsRetainStorageClass(t *testing.T) {
 	retainPolicy := corev1.PersistentVolumeReclaimRetain
 	client := fake.NewSimpleClientset(

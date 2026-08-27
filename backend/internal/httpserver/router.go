@@ -9760,6 +9760,9 @@ func taskFailurePayloadPatch(details map[string]any) map[string]any {
 		if sizeWarnings := sliceFromAny(velero["sizeWarnings"]); len(sizeWarnings) > 0 {
 			patch["sizeWarnings"] = sizeWarnings
 		}
+		if dataPathFailure := mapFromAny(velero["dataPathFailure"]); len(dataPathFailure) > 0 {
+			patch["dataPathFailure"] = dataPathFailure
+		}
 	}
 	if messages := taskFailureMessagesFromDetails(details); len(messages) > 0 {
 		patch["failureDetails"] = messages
@@ -9797,6 +9800,16 @@ func taskFailureMessagesFromDetails(details map[string]any) []string {
 	status := mapFromAny(velero["status"])
 	if statusMessage := strings.TrimSpace(fmt.Sprint(status["message"])); statusMessage != "" && statusMessage != "<nil>" {
 		messages = append(messages, humanizeBackupFailureMessage(statusMessage))
+	}
+	dataPathFailure := mapFromAny(velero["dataPathFailure"])
+	if pod := strings.TrimSpace(fmt.Sprint(dataPathFailure["pod"])); pod != "" && pod != "<nil>" {
+		messages = append(messages, "Restore data-path Pod: "+pod)
+	}
+	if node := strings.TrimSpace(fmt.Sprint(dataPathFailure["node"])); node != "" && node != "<nil>" {
+		messages = append(messages, "Target node: "+node)
+	}
+	if logDetail := strings.TrimSpace(fmt.Sprint(dataPathFailure["logDetail"])); logDetail != "" && logDetail != "<nil>" {
+		messages = append(messages, "Original Kopia/Velero log: "+logDetail)
 	}
 	return dedupeStrings(messages)
 }

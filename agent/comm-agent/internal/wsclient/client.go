@@ -126,6 +126,7 @@ func NewWithRuntimeDependencies(cfg config.Config, logger *slog.Logger, applier 
 		kube.AgentUpgrader
 		kube.VeleroRuntimeManager
 		kube.ComponentLogCollector
+		kube.RestoreDataPathFailureReader
 	}
 	if runtime, err := kube.NewKubernetesAgentRuntime(cfg.KubeconfigPath); err == nil {
 		agentRuntime = runtime
@@ -1861,7 +1862,8 @@ func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, 
 	progress := 0
 	samples := make([]volumeProgressSample, 0, 12)
 	var statusReadErrorSince time.Time
-	var volumeReadySince time.Time
+	lastVolumeProgressAt := started
+	var lastVolumeBytes int64
 	for {
 		status, err := c.statusReader.GetManifestStatus(context.Background(), object)
 		if err != nil {
@@ -1904,12 +1906,9 @@ func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, 
 				return
 			}
 			volumeReady = ready
-			if ready {
-				if volumeReadySince.IsZero() {
-					volumeReadySince = time.Now().UTC()
-				}
-			} else {
-				volumeReadySince = time.Time{}
+			if bytesDone := int64FromAny(volumePayload["bytesDone"]); bytesDone > lastVolumeBytes {
+				lastVolumeBytes = bytesDone
+				lastVolumeProgressAt = time.Now().UTC()
 			}
 			if ready && volumeProgress > progress {
 				progress = volumeProgress
@@ -1931,9 +1930,16 @@ func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, 
 			_ = c.sendTaskFailedWithDetails(task, code, message, map[string]any{"velero": payload})
 			return
 		}
-		if object.Kind == "Restore" && status.Phase == "InProgress" && volumeReady && !volumeReadySince.IsZero() && time.Since(volumeReadySince) >= veleroStalledAfter {
-			message := "Velero restore remains InProgress after volume restoration completed"
-			_ = c.sendTaskFailedWithDetails(task, "RESTORE_VELERO_STALLED", message, map[string]any{"velero": payload})
+		if object.Kind == "Restore" && status.Phase == "InProgress" && volumeReady && time.Since(lastVolumeProgressAt) >= veleroStalledAfter {
+			if failure, ok := c.restoreDataPathFailure(task, object, started); ok {
+				payload["dataPathFailure"] = map[string]any{
+					"pod": failure.Pod, "node": failure.Node, "logDetail": failure.LogDetail,
+				}
+				_ = c.sendTaskFailedWithDetails(task, failure.Code, failure.Message, map[string]any{"velero": payload})
+				return
+			}
+			message := fmt.Sprintf("persistent volume restoration made no progress for %s while Velero Restore remained InProgress", veleroStalledAfter)
+			_ = c.sendTaskFailedWithDetails(task, "RESTORE_VOLUME_PROGRESS_STALLED", message, map[string]any{"velero": payload})
 			return
 		}
 		if time.Now().UTC().After(deadline) {
@@ -1950,6 +1956,23 @@ func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, 
 		}
 		time.Sleep(interval)
 	}
+}
+
+func (c *Client) restoreDataPathFailure(task protocol.TaskDispatchPayload, object kube.AppliedObject, since time.Time) (kube.RestoreDataPathFailure, bool) {
+	reader, ok := c.agentRuntime.(kube.RestoreDataPathFailureReader)
+	if !ok || reader == nil {
+		return kube.RestoreDataPathFailure{}, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	failure, found, err := reader.FindRestoreDataPathFailure(ctx, object.Namespace, object.Name, since)
+	if err != nil {
+		if c.logger != nil {
+			c.logger.Warn("failed to inspect restore data path logs", "task_id", task.TaskID, "restore", object.Name, "error", err)
+		}
+		return kube.RestoreDataPathFailure{}, false
+	}
+	return failure, found
 }
 
 func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, basePayload map[string]any, namespace string, restoreMessage string) {
@@ -3523,7 +3546,7 @@ func recoveryFailureStageStatus(stageID string, errorCode string) string {
 	switch {
 	case strings.Contains(errorCode, "WORKLOAD") || strings.Contains(errorCode, "READINESS"):
 		failureStage = "waiting_for_workloads"
-	case strings.Contains(errorCode, "VOLUME") || strings.Contains(errorCode, "PVC"):
+	case strings.Contains(errorCode, "VOLUME") || strings.Contains(errorCode, "PVC") || strings.Contains(errorCode, "DATA_PATH") || errorCode == "RESTORE_VELERO_STALLED":
 		failureStage = "restoring_data"
 	case errorCode == "RESTORE_FAILED" || strings.Contains(errorCode, "STATUS"):
 		failureStage = "restoring_resources"

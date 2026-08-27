@@ -38,6 +38,22 @@ type ComponentLogCollector interface {
 	CollectComponentLogs(ctx context.Context, namespace, component string, since time.Time, tailLines int64) ([]ComponentLogEntry, bool, error)
 }
 
+type RestoreDataPathFailure struct {
+	Code      string
+	Message   string
+	Pod       string
+	Node      string
+	LogDetail string
+}
+
+// RestoreDataPathFailureReader provides a fallback source of truth when a
+// Kubernetes API/etcd outage prevents Velero from persisting a failed
+// PodVolumeRestore status. The restore hosting pod has already written the
+// authoritative Kopia error to its log in that situation.
+type RestoreDataPathFailureReader interface {
+	FindRestoreDataPathFailure(ctx context.Context, namespace, restoreName string, since time.Time) (RestoreDataPathFailure, bool, error)
+}
+
 type VeleroRuntimeStatus struct {
 	Version              string
 	Image                string
@@ -230,6 +246,85 @@ func (r *KubernetesAgentRuntime) CollectComponentLogs(ctx context.Context, names
 		}
 	}
 	return result, truncated, nil
+}
+
+func (r *KubernetesAgentRuntime) FindRestoreDataPathFailure(ctx context.Context, namespace, restoreName string, since time.Time) (RestoreDataPathFailure, bool, error) {
+	pods, err := r.client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return RestoreDataPathFailure{}, false, err
+	}
+	for _, pod := range pods.Items {
+		if !strings.HasPrefix(pod.Name, restoreName+"-") {
+			continue
+		}
+		for _, container := range pod.Spec.Containers {
+			tailLines := int64(300)
+			options := &corev1.PodLogOptions{Container: container.Name, Timestamps: true, TailLines: &tailLines}
+			if !since.IsZero() {
+				value := metav1.NewTime(since)
+				options.SinceTime = &value
+			}
+			stream, err := r.client.CoreV1().Pods(namespace).GetLogs(pod.Name, options).Stream(ctx)
+			if err != nil {
+				continue
+			}
+			raw, readErr := io.ReadAll(io.LimitReader(stream, 2<<20))
+			_ = stream.Close()
+			if readErr != nil {
+				continue
+			}
+			if failure, ok := parseRestoreDataPathFailure(string(raw)); ok {
+				failure.Pod = pod.Name
+				failure.Node = pod.Spec.NodeName
+				return failure, true, nil
+			}
+		}
+	}
+	return RestoreDataPathFailure{}, false, nil
+}
+
+func parseRestoreDataPathFailure(logText string) (RestoreDataPathFailure, bool) {
+	var detail string
+	for _, line := range strings.Split(logText, "\n") {
+		lower := strings.ToLower(line)
+		if !strings.Contains(lower, "restore data path failed") && !strings.Contains(lower, "async fs restore was not completed") {
+			continue
+		}
+		detail = strings.TrimSpace(line)
+		if strings.Contains(lower, "read-only file system") {
+			return RestoreDataPathFailure{
+				Code:      "RESTORE_VOLUME_FILESYSTEM_READ_ONLY",
+				Message:   extractRestoreLogError(detail, "Persistent volume restoration failed because the target filesystem became read-only."),
+				LogDetail: detail,
+			}, true
+		}
+	}
+	if detail != "" {
+		return RestoreDataPathFailure{
+			Code:      "RESTORE_VOLUME_DATA_PATH_FAILED",
+			Message:   extractRestoreLogError(detail, "Persistent volume data restoration failed."),
+			LogDetail: detail,
+		}, true
+	}
+	return RestoreDataPathFailure{}, false
+}
+
+func extractRestoreLogError(line, fallback string) string {
+	for _, marker := range []string{`error="`, `error=`} {
+		if index := strings.Index(line, marker); index >= 0 {
+			value := line[index+len(marker):]
+			if marker == `error="` {
+				if end := strings.Index(value, `"`); end >= 0 {
+					value = value[:end]
+				}
+			}
+			value = strings.TrimSpace(value)
+			if value != "" {
+				return value
+			}
+		}
+	}
+	return fallback
 }
 
 func splitKubernetesLogLine(line string) (time.Time, string) {

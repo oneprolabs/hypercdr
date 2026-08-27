@@ -81,7 +81,7 @@ function taskEventStageId(event: ApiTaskEvent, recovery: boolean): string {
   if (reason === 'application_ready' || reason.includes('validation')) return 'application_validation';
   if (reason === 'application_readiness_check_started' || reason.includes('readiness') || reason.includes('workload') || code.includes('WORKLOAD')) return 'waiting_for_workloads';
   if (['finalizing', 'completed'].includes(reason)) return 'finalizing_drill';
-  if (['restore_progress', 'progress'].includes(reason) || reason.includes('volume') || reason.includes('data_transfer') || code.includes('VOLUME')) return 'restoring_data';
+  if (['restore_progress', 'progress'].includes(reason) || reason.includes('volume') || reason.includes('data_transfer') || reason.includes('data_path') || reason === 'restore_velero_stalled' || code.includes('VOLUME') || code.includes('DATA_PATH')) return 'restoring_data';
   if (reason === 'restore_completed' || reason.includes('restore_resource') || reason.includes('restore_submit') || code.includes('RESTORE_SUBMIT')) return 'restoring_resources';
   return 'preparing_restore';
 }

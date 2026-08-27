@@ -261,9 +261,16 @@ export function eventRestoreResultErrors(event?: ApiTaskEvent | null): string[] 
 export function taskFailureDetails(task: ApiTask, events?: ApiTaskEvent[]): string[] {
   const details: string[] = [];
   if (task.errorMessage) details.push(task.errorMessage);
+  dataPathFailureDetails(task.payload).forEach(detail => details.push(detail));
   volumeFailureDetails(task.payload).forEach(detail => details.push(detail));
   const seen = new Set(details);
   (events || []).forEach(event => {
+    dataPathFailureDetails(event.payload).forEach(detail => {
+      if (!seen.has(detail)) {
+        details.push(detail);
+        seen.add(detail);
+      }
+    });
     volumeFailureDetails(event.payload).forEach(detail => {
       if (!seen.has(detail)) {
         details.push(detail);
@@ -279,6 +286,16 @@ export function taskFailureDetails(task: ApiTask, events?: ApiTaskEvent[]): stri
   });
   if (details.length === 0 && task.errorCode) details.push(task.errorCode);
   return details;
+}
+
+function dataPathFailureDetails(payload: any): string[] {
+  const velero = recordFromUnknown(payload?.velero) || {};
+  const failure = recordFromUnknown(payload?.dataPathFailure) || recordFromUnknown(velero.dataPathFailure) || {};
+  return [
+    failure.pod ? `Restore data-path Pod: ${failure.pod}` : '',
+    failure.node ? `Target node: ${failure.node}` : '',
+    failure.logDetail ? `Original Kopia/Velero log: ${failure.logDetail}` : '',
+  ].filter(Boolean);
 }
 
 export type ErrorMessageDefinition = {
@@ -457,6 +474,35 @@ export const ERROR_MESSAGE_CATALOG: ErrorMessageDefinition[] = [
     title: 'Volume restoration did not start',
     description: 'Persistent volume data restoration did not start within the allowed observation window.',
     detail: 'Check the PodVolumeRestore name and elapsed time in task details. Verify that the restored PVC exists and is Bound, the target StorageClass and Longhorn replicas are healthy, and the workload volume can be mounted on a target node.',
+  },
+  {
+    code: '140010',
+    aliases: ['RESTORE_VOLUME_DATA_PATH_FAILED'],
+    title: 'Persistent volume restoration failed',
+    description: 'Kopia could not finish restoring data to the target persistent volume.',
+    detail: 'Inspect the original Kopia/Velero error, the target PVC and Longhorn volume, object-storage connectivity, and the target node before retrying.',
+  },
+  {
+    code: '140011',
+    aliases: ['RESTORE_VOLUME_FILESYSTEM_READ_ONLY'],
+    title: 'Target volume filesystem is read-only',
+    description: 'Persistent volume restoration stopped because the target filesystem became read-only.',
+    detail: 'Inspect and repair the target Longhorn volume and filesystem, or remove the failed Drill target and allow HyperCDR to create a clean writable volume before retrying.',
+    match: message => message.toLowerCase().includes('read-only file system'),
+  },
+  {
+    code: '140012',
+    aliases: ['RESTORE_VOLUME_PROGRESS_STALLED', 'RESTORE_VELERO_STALLED'],
+    title: 'Persistent volume restoration stalled',
+    description: 'Persistent volume restoration stopped making progress while Velero still reported the Restore as running.',
+    detail: 'Check the PodVolumeRestore and its hosting Pod, target storage health, Kubernetes API and etcd availability, and Kopia/Velero logs before retrying.',
+  },
+  {
+    code: '140013',
+    aliases: ['RESTORE_WORKLOAD_VOLUME_MOUNT_FAILED'],
+    title: 'Restored volume could not be mounted',
+    description: 'The restored workload could not mount its persistent volume during readiness validation.',
+    detail: 'Inspect the target PVC, Longhorn volume attachment and filesystem error. Repair or recreate the target volume, then retry the Drill.',
   },
 ];
 
@@ -646,6 +692,15 @@ function taskFailureSolution(code: string, details: string[], fallback: string):
     if (/not found|manifest unknown/.test(evidence)) {
       return 'Confirm that the exact repository and tag or digest exists. Map it to an available target-registry image in Advanced options, then retry.';
     }
+  }
+  if (code === '140011') {
+    return 'Inspect the target Longhorn volume and run an appropriate filesystem repair while it is safely detached, or remove the failed Drill target so HyperCDR can create a clean writable volume. Confirm the volume is writable before retrying.';
+  }
+  if (code === '140010' || code === '140012') {
+    return 'Inspect the PodVolumeRestore hosting Pod and its Kopia/Velero logs, then verify target Longhorn health and Kubernetes API/etcd stability. Resolve the reported root cause and retry the Drill.';
+  }
+  if (code === '140013') {
+    return 'Inspect the PVC and Longhorn attachment on the target node. Repair the filesystem or recreate the failed Drill volume, confirm it mounts read-write, and retry.';
   }
   return productTaskMessage(fallback);
 }

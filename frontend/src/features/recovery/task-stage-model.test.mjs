@@ -58,6 +58,20 @@ test('opens the stage containing a failed event and leaves later stages not star
   assert.equal(groups[4].status, 'not_started');
 });
 
+test('classifies volume and Velero stall failures in persistent data restoration', () => {
+  for (const reason of ['RESTORE_VOLUME_FILESYSTEM_READ_ONLY', 'RESTORE_VOLUME_DATA_PATH_FAILED', 'RESTORE_VOLUME_PROGRESS_STALLED', 'RESTORE_VELERO_STALLED']) {
+    const failedStages = recoveryStages.map(([id, name], index) => ({ id, name, status: index < 2 ? 'succeeded' : index === 2 ? 'failed' : 'pending' }));
+    const groups = groupTaskEventsByStage(task('failed', { payload: { recoveryStages: failedStages } }), [
+      event('1', 'accepted', '2026-08-26T01:00:00Z'),
+      event('2', reason, '2026-08-26T01:00:01Z', { level: 'error' }),
+    ]);
+    assert.equal(groups[0].status, 'completed', reason);
+    assert.equal(groups[2].status, 'failed', reason);
+    assert.equal(groups[2].currentEventId, '2', reason);
+    assert.equal(groups[3].status, 'not_started', reason);
+  }
+});
+
 test('collapses progress updates to the newest payload while preserving stable order', () => {
   const events = keyTaskEvents([
     event('2', 'restore_progress', '2026-08-26T01:00:02Z', { payload: { percent: 20 } }),

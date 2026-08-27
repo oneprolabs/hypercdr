@@ -51,6 +51,20 @@ func TestWithRecoveryStagesClassifiesWorkloadVolumeMountFailureAsReadiness(t *te
 	}
 }
 
+func TestWithRecoveryStagesClassifiesVolumeDataPathFailures(t *testing.T) {
+	for _, code := range []string{"RESTORE_VOLUME_FILESYSTEM_READ_ONLY", "RESTORE_VOLUME_DATA_PATH_FAILED", "RESTORE_VOLUME_PROGRESS_STALLED", "RESTORE_VELERO_STALLED"} {
+		payload := withRecoveryStages(protocol.TaskDispatchPayload{Type: "drill"}, nil, 74, "failed", code, "restore failed")
+		stages := payload["recoveryStages"].([]map[string]any)
+		want := map[string]string{"preparing_restore": "succeeded", "restoring_resources": "succeeded", "restoring_data": "failed"}
+		for _, stage := range stages {
+			id := stage["id"].(string)
+			if expected, ok := want[id]; ok && stage["status"] != expected {
+				t.Errorf("code %s stage %s = %v, want %s", code, id, stage["status"], expected)
+			}
+		}
+	}
+}
+
 func TestWithRecoveryStagesMarksSuccessfulRecovery(t *testing.T) {
 	task := protocol.TaskDispatchPayload{Type: "restore"}
 	payload := withRecoveryStages(task, nil, 100, "succeeded", "", "complete")
