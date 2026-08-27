@@ -76,7 +76,7 @@ export default function ClusterPage(props: {
   const [copied, setCopied] = useState(false);
   const [caCopied, setCaCopied] = useState(false);
   const [prepareNodeCommand, setPrepareNodeCommand] = useState('');
-  const [installCommand, setInstallCommand] = useState(`curl -sSL ${window.location.origin}/install.sh | bash -s -- --token pending --endpoint ${window.location.origin.replace(/^http/, 'ws')}/ws/agent --executor-mode kubernetes`);
+  const [installCommand, setInstallCommand] = useState('');
   const [installLoading, setInstallLoading] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
   const [registrationBaseline, setRegistrationBaseline] = useState<string[]>([]);
@@ -313,6 +313,8 @@ export default function ClusterPage(props: {
       setRegisterStep(3);
       if (clusterType === 'native-kubernetes') void prefetchAgentToken();
     } catch {
+      setInstallCommand('');
+      setPrepareNodeCommand('');
       setInstallError('Install token generation failed. Check whether the platform API is running.');
       toast('Failed to generate install token');
     } finally { setInstallLoading(false); }
@@ -1008,11 +1010,14 @@ export default function ClusterPage(props: {
                     </select>
                   </div>
                   {registrationType === 'huaweicloud-cce' && <div className="rounded-xl border border-sky-100 bg-sky-50 p-4 text-sm text-sky-900">
-                    <p className="font-bold">1. Prepare CCE access</p>
-                    <p className="mt-1 text-xs leading-5 text-sky-700">Install kubectl, download the CCE kubeconfig from Huawei Cloud, and save it on this Linux operations host. Recommended path: ~/.kube/hypercdr-cce.yaml.</p>
-                    <p className="mt-3 font-bold">2. Run the command below</p>
-                    <p className="mt-1 text-xs leading-5 text-sky-700">The installer discovers the kubeconfig, confirms the target CCE cluster, runs compatibility checks, and installs the agent stack.</p>
+                    <p className="font-bold">Before you begin</p>
+                    <ul className="mt-2 list-disc space-y-1 pl-4 text-xs leading-5 text-sky-700">
+                      <li>Install kubectl on this Linux operations host.</li>
+                      <li>Download the CCE kubeconfig from Huawei Cloud and save it as <code className="rounded bg-white/70 px-1">~/.kube/hypercdr-cce.yaml</code>.</li>
+                      <li>The installer will discover the file and run compatibility checks before installation.</li>
+                    </ul>
                   </div>}
+                  <div className="pt-1 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Installation steps</div>
                   {prepareNodeCommand && <><div className="flex gap-3 rounded-xl border border-blue-100 bg-blue-50 p-3">
                     <div className="mt-1"><ShieldCheck size={20} className="text-blue-600" /></div>
                     <div className="text-sm">
@@ -1075,7 +1080,7 @@ export default function ClusterPage(props: {
                         />
                       </div>
                     </div>
-                    <button disabled={installLoading} onClick={copyInstallCommand} className="absolute right-3 top-3 flex items-center gap-2 rounded-lg bg-white/20 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white backdrop-blur transition-all hover:bg-white/30 active:scale-95 disabled:cursor-wait disabled:opacity-60">
+                    <button disabled={installLoading || !installCommand} onClick={copyInstallCommand} className="absolute right-3 top-3 flex items-center gap-2 rounded-lg bg-white/20 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white backdrop-blur transition-all hover:bg-white/30 active:scale-95 disabled:cursor-wait disabled:opacity-60">
                       {copied ? <CheckCircle2 size={12} /> : <Check size={12} />}
                       {copied ? 'Copied' : 'Copy'}
                     </button>
