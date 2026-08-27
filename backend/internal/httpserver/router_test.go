@@ -1575,12 +1575,20 @@ func TestUnregisterAuditUsesHistoricalStorageBinding(t *testing.T) {
 
 func TestProtectionPlanRestoreNamesComeFromDatabaseTasks(t *testing.T) {
 	repo := store.NewMemoryStore()
-	planID := store.NewPublicID()
+	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{TenantID: store.DefaultTenantID, SourceClusterID: "cluster-a", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherPlan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{TenantID: store.DefaultTenantID, SourceClusterID: "cluster-b", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	planID := plan.ID
 	for _, input := range []store.TaskInput{
 		{ProtectionPlanID: planID, Type: "drill", Status: "succeeded", Payload: map[string]any{"veleroBackupName": "hcdr-restore-drill-a"}},
 		{ProtectionPlanID: planID, Type: "restore", Status: "failed", Payload: map[string]any{"veleroBackupName": "hcdr-restore-manual-b"}},
 		{ProtectionPlanID: planID, Type: "backup", Status: "succeeded", Payload: map[string]any{"veleroBackupName": "hcdr-backup-c"}},
-		{ProtectionPlanID: store.NewPublicID(), Type: "drill", Status: "succeeded", Payload: map[string]any{"veleroBackupName": "other-plan"}},
+		{ProtectionPlanID: otherPlan.ID, Type: "drill", Status: "succeeded", Payload: map[string]any{"veleroBackupName": "other-plan"}},
 	} {
 		if _, err := repo.CreateTask(input); err != nil {
 			t.Fatal(err)
@@ -1607,7 +1615,15 @@ func TestUnregisterRequiresExplicitBackupDeletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.CreateRestorePoint(store.RestorePointInput{SourceClusterID: clusterID, StorageRepoID: storage.ID, VeleroBackupName: "backup-1", Status: "available"}); err != nil {
+	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: clusterID, StorageRepoID: storage.ID, Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backupTask, err := repo.CreateTask(store.TaskInput{ProtectionPlanID: plan.ID, ClusterID: clusterID, Type: "backup", Status: "succeeded"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.CreateRestorePoint(store.RestorePointInput{ProtectionPlanID: plan.ID, BackupTaskID: backupTask.ID, SourceClusterID: clusterID, StorageRepoID: storage.ID, VeleroBackupName: "backup-1", Status: "available"}); err != nil {
 		t.Fatal(err)
 	}
 	router.hub.set(clusterID, nil)
@@ -1636,7 +1652,15 @@ func TestObjectStorageCleanupFailurePreventsAgentDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.CreateRestorePoint(store.RestorePointInput{SourceClusterID: clusterID, StorageRepoID: storage.ID, VeleroBackupName: "backup-1", Status: "available"}); err != nil {
+	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: clusterID, StorageRepoID: storage.ID, Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backupTask, err := repo.CreateTask(store.TaskInput{ProtectionPlanID: plan.ID, ClusterID: clusterID, Type: "backup", Status: "succeeded"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.CreateRestorePoint(store.RestorePointInput{ProtectionPlanID: plan.ID, BackupTaskID: backupTask.ID, SourceClusterID: clusterID, StorageRepoID: storage.ID, VeleroBackupName: "backup-1", Status: "available"}); err != nil {
 		t.Fatal(err)
 	}
 	router.hub.set(clusterID, nil)

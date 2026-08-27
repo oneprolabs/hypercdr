@@ -108,6 +108,7 @@ import {
   type VolumeProgressInfo,
 } from './features/recovery/types';
 import { isActiveTaskStatus, isCompletedTaskStatus, isFailedStatus, isSucceededStatus, taskHasWarning } from './features/recovery/task-status';
+import { selectPointedPlanTask } from './features/recovery/plan-task-selection';
 import type { ApiCluster, ApiStorageRepo } from './features/recovery/platform-types';
 import {
   TaskErrorDetailBlock, TaskErrorStatus, TaskFinalResult, TaskOriginLabel, TaskProcessTimeline,
@@ -524,7 +525,9 @@ function buildAppTaskMap(tasks: ApiTask[], apps: ApiApplication[], taskTypes?: s
   for (const app of apps) {
     const appPlan = plans.find(item => planIncludesApp(item, app.id));
     if (!appPlan?.id) continue;
-    const match = sorted.find(t => {
+    const recovery = Boolean(taskTypes?.some(type => ['restore', 'drill', 'takeover'].includes(type)));
+    const pointedTaskID = recovery ? appPlan.latestRecoveryTaskId : appPlan.latestSyncTaskId;
+    const eligible = (t: ApiTask) => {
       if (allowedTypes && !allowedTypes.has(t.type)) return false;
       if (t.payload?.archivedClusterId || t.payload?.archivedAppId || t.payload?.archivedProtectionPlanId) return false;
       if (['restore', 'drill', 'takeover'].includes(t.type)) return recoveryTaskMatchesApp(t, app, plans, restorePoints);
@@ -532,10 +535,21 @@ function buildAppTaskMap(tasks: ApiTask[], apps: ApiApplication[], taskTypes?: s
       if (!t.clusterId || t.clusterId !== app.clusterId) return false;
       const taskNamespaces = namespacesFromPayload(t.payload);
       return taskNamespaces.length === 0 || taskNamespaces.includes(app.namespace);
-    });
+    };
+    // A persisted plan pointer is authoritative. Time ordering is retained
+    // only for plans created before the pointer migration.
+    const match = selectPointedPlanTask((pointedTaskID ? tasks : sorted).filter(eligible), pointedTaskID);
     if (match) byNamespace[app.namespace] = match;
   }
   return byNamespace;
+}
+
+async function includePointedTasks(tasks: ApiTask[], plans: ApiProtectionPlan[]): Promise<ApiTask[]> {
+  const present = new Set(tasks.map(task => task.id));
+  const missing = Array.from(new Set(plans.flatMap(plan => [plan.latestSyncTaskId, plan.latestRecoveryTaskId]).filter((id): id is string => Boolean(id) && !present.has(id))));
+  if (!missing.length) return tasks;
+  const fetched = await Promise.all(missing.map(id => apiGet<ApiTask>(`/api/v1/tasks/${encodeURIComponent(id)}`).catch(() => null)));
+  return [...tasks, ...fetched.filter((task): task is ApiTask => Boolean(task) && !present.has(task.id))];
 }
 
 // Task summaries can briefly lag immediately after submission. Do not replace
@@ -1692,7 +1706,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       const apiPolicies = listItems(policyRes);
       const apiPlans = listItems(planRes);
       const apiRestorePoints = listItems(restorePointRes).map(mapRestorePoint);
-      const apiTasks = listItems(taskRes);
+      const apiTasks = await includePointedTasks(listItems(taskRes), apiPlans);
       setTags(listItems(tagRes));
       const nextAppTasks = buildAppTaskMap(apiTasks, apiApps, ['backup'], apiRestorePoints, apiPlans);
       const nextRecoveryTasks = buildAppTaskMap(apiTasks, apiApps, ['restore', 'drill', 'takeover'], apiRestorePoints, apiPlans);
@@ -1807,7 +1821,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
           apiGet<ApiList<ApiRestorePoint>>('/api/v1/restore-points?view=summary&pageSize=500'),
         ]);
         if (cancelled) return;
-        const apiTasks = listItems(taskRes);
+        const apiTasks = await includePointedTasks(listItems(taskRes), liveApiPlansRef.current);
         const apiRestorePoints = listItems(restorePointRes);
         const apiRestorePointViews = apiRestorePoints.map(mapRestorePoint);
         setLiveApiTasks(apiTasks);

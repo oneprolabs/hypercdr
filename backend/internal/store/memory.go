@@ -2066,6 +2066,11 @@ func (s *MemoryStore) CreateRestorePoint(input RestorePointInput) (RestorePoint,
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	backupTask, taskFound := s.tasks[point.BackupTaskID]
+	if point.BackupTaskID == "" || !taskFound || backupTask.Type != "backup" || backupTask.ProtectionPlanID != point.ProtectionPlanID {
+		return RestorePoint{}, fmt.Errorf("restore point backup task must be a backup task owned by the same protection plan")
+	}
+	point.TaskCreatedAt = backupTask.CreatedAt
 	for id, existing := range s.restorePoints {
 		if existing.SourceClusterID == point.SourceClusterID && existing.VeleroBackupName == point.VeleroBackupName {
 			existing.DisplayName = ""
@@ -2200,6 +2205,13 @@ func (s *MemoryStore) CreateTask(input TaskInput) (Task, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if task.ProtectionPlanID != "" {
+		if plan, ok := s.plans[task.ProtectionPlanID]; !ok {
+			return Task{}, fmt.Errorf("protection plan %s not found while creating %s task", task.ProtectionPlanID, task.Type)
+		} else {
+			task.TenantID = plan.TenantID
+		}
+	}
 	s.tasks[task.ID] = task
 	if plan, ok := s.plans[task.ProtectionPlanID]; ok {
 		switch task.Type {

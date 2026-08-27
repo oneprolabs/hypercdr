@@ -10,7 +10,7 @@
     "dev": "vite --host 0.0.0.0 --port 3002",
     "test:extensions": "node --experimental-strip-types --test src/app/extensions.test.mjs",
     "test:topology": "node --experimental-strip-types --test src/features/clusters/dr-topology.test.mjs",
-    "test:task-ui": "node --experimental-strip-types --test src/features/recovery/task-stage-model.test.mjs",
+    "test:task-ui": "node --experimental-strip-types --test src/features/recovery/task-stage-model.test.mjs src/features/recovery/plan-task-selection.test.mjs src/lib/date-time.test.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 3002",
     "visual:compare": "env -u DISPLAY -u WAYLAND_DISPLAY -u XAUTHORITY PLAYWRIGHT_BROWSERS_PATH=/data/software/ms-playwright node scripts/visual-compare.mjs"

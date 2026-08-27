@@ -77,14 +77,11 @@ func TestCreateRestorePointFromBackupPersistsTypedSizeMetricsV2(t *testing.T) {
 		MeasuredAt:        time.Date(2026, 8, 12, 1, 2, 3, 0, time.UTC),
 	}
 	patch := taskCompletedPayloadPatch(protocol.TaskCompletedPayload{SizeMetricsV2: metrics})
-	point, err := router.createRestorePointFromBackup(store.Task{
-		ID:               "task-1",
-		ClusterID:        "cluster-1",
-		AppID:            "app-1",
-		ProtectionPlanID: plan.ID,
-		Payload:          patch,
-		CreatedAt:        time.Now().UTC(),
-	}, map[string]any{"kind": "Backup", "name": "backup-1"})
+	backupTask, err := repo.CreateTask(store.TaskInput{ProtectionPlanID: plan.ID, ClusterID: "cluster-1", AppID: "app-1", Type: "backup", Status: "succeeded", Payload: patch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	point, err := router.createRestorePointFromBackup(backupTask, map[string]any{"kind": "Backup", "name": "backup-1"})
 	if err != nil {
 		t.Fatal(err)
 	}

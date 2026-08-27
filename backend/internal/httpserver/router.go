@@ -6400,17 +6400,25 @@ func (r *Router) latestPlanTask(taskType string) http.HandlerFunc {
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "protection_plan_not_found"})
 			return
 		}
-		filter := store.TaskFilter{TenantID: plan.TenantID, ProtectionPlanID: planID, Types: []string{taskType}, Limit: 1, Summary: true}
-		items, err := r.store.ListTasksFiltered(filter)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_plan_tasks_failed"})
-			return
+		taskID := ""
+		if taskType == "backup" {
+			taskID = plan.LatestSyncTaskID
 		}
-		if len(items) == 0 {
+		if taskID == "" {
 			writeJSON(w, http.StatusOK, map[string]any{"task": nil})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"task": items[0]})
+		task, found, taskErr := r.store.GetTask(taskID)
+		if taskErr != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "get_plan_task_failed"})
+			return
+		}
+		if !found || task.ProtectionPlanID != plan.ID || task.Type != taskType {
+			r.logger.Warn("protection plan latest task pointer is invalid", "plan_id", plan.ID, "task_id", taskID, "expected_type", taskType)
+			writeJSON(w, http.StatusOK, map[string]any{"task": nil})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"task": task})
 	}
 }
 
@@ -6425,16 +6433,21 @@ func (r *Router) latestPlanRecoveryTask(w http.ResponseWriter, req *http.Request
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "protection_plan_not_found"})
 		return
 	}
-	items, err := r.store.ListTasksFiltered(store.TaskFilter{TenantID: plan.TenantID, ProtectionPlanID: planID, Types: []string{"drill", "restore", "takeover"}, Limit: 1, Summary: true})
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_plan_tasks_failed"})
-		return
-	}
-	if len(items) == 0 {
+	if plan.LatestRecoveryTaskID == "" {
 		writeJSON(w, http.StatusOK, map[string]any{"task": nil})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"task": items[0]})
+	task, found, taskErr := r.store.GetTask(plan.LatestRecoveryTaskID)
+	if taskErr != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "get_plan_task_failed"})
+		return
+	}
+	if !found || task.ProtectionPlanID != plan.ID || !slices.Contains([]string{"drill", "restore", "takeover"}, task.Type) {
+		r.logger.Warn("protection plan latest recovery task pointer is invalid", "plan_id", plan.ID, "task_id", plan.LatestRecoveryTaskID)
+		writeJSON(w, http.StatusOK, map[string]any{"task": nil})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"task": task})
 }
 
 func (r *Router) getTask(w http.ResponseWriter, req *http.Request) {

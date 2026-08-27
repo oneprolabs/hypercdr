@@ -4,8 +4,10 @@ import "testing"
 
 func TestRestorePointSizeMetricsV2RoundTripAndUpsert(t *testing.T) {
 	repo := NewMemoryStore()
+	plan, task := seedRestorePointBackupTask(t, repo, "cluster-size")
 	point, err := repo.CreateRestorePoint(RestorePointInput{
 		SourceClusterID: "cluster-size", VeleroBackupName: "backup-size",
+		ProtectionPlanID: plan.ID, BackupTaskID: task.ID,
 		SizeMetricsV2: map[string]any{
 			"schemaVersion": float64(2),
 			"newData":       map[string]any{"totalBytes": float64(0), "known": true},
@@ -20,6 +22,7 @@ func TestRestorePointSizeMetricsV2RoundTripAndUpsert(t *testing.T) {
 	}
 	updated, err := repo.CreateRestorePoint(RestorePointInput{
 		SourceClusterID: "cluster-size", VeleroBackupName: "backup-size",
+		ProtectionPlanID: plan.ID, BackupTaskID: task.ID,
 		SizeMetricsV2: map[string]any{"measurementStatus": "partial"},
 	})
 	if err != nil {

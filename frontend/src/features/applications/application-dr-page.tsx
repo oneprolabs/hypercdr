@@ -22,6 +22,7 @@ import {
   type PolicyItem, type StorageRepo, type TagItem,
 } from '../recovery/types';
 import { isActiveTaskStatus, isCompletedTaskStatus, isFailedStatus, isSucceededStatus, taskHasWarning } from '../recovery/task-status';
+import { selectPointedPlanTask } from '../recovery/plan-task-selection';
 import {
   TaskErrorDetailBlock, TaskErrorStatus, TaskFinalResult, TaskOriginLabel, TaskProcessTimeline,
   canRetryDrActivation, drStatusForPlan, formatAge, formatBytes, formatBytesPerSecond,
@@ -649,15 +650,7 @@ export default function ApplicationDrPage(props: {
       : allowedTypes.some(type => ['drill', 'restore', 'takeover'].includes(type))
         ? plan?.latestRecoveryTaskId
         : '';
-    const latest = latestTaskId ? matching.find(task => task.id === latestTaskId) : undefined;
-    if (latest) return latest;
-    return matching
-      .sort((left, right) => {
-        const activeOrder = Number(isActiveTaskStatus(right.status)) - Number(isActiveTaskStatus(left.status));
-        if (activeOrder) return activeOrder;
-        const timeOrder = String(right.createdAt || '').localeCompare(String(left.createdAt || ''));
-        return timeOrder || String(right.id || '').localeCompare(String(left.id || ''));
-      })[0];
+    return selectPointedPlanTask(matching, latestTaskId);
   };
   const recoveryTaskForUnit = (app: AppItem) => taskForUnit(recoveryTasks, app, ['restore', 'drill', 'takeover']);
   useEffect(() => {

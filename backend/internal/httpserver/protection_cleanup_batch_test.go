@@ -9,7 +9,10 @@ import (
 func TestProtectionCleanupTasksCompleteIgnoresHistoricalFailedRun(t *testing.T) {
 	repo := store.NewMemoryStore()
 	router := &Router{store: repo}
-	plan := store.ProtectionPlan{ID: "plan-1", SourceClusterID: "source", TargetClusterID: "target"}
+	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: "source", TargetClusterID: "target", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	inputs := []store.TaskInput{
 		{ProtectionPlanID: plan.ID, Type: "protection-cleanup", Status: "failed", Payload: map[string]any{"cleanupMode": "source", "cleanupRunId": "old"}},
 		{ProtectionPlanID: plan.ID, Type: "protection-cleanup", Status: "succeeded", Payload: map[string]any{"cleanupMode": "target", "cleanupRunId": "old"}},
@@ -30,7 +33,10 @@ func TestProtectionCleanupTasksCompleteIgnoresHistoricalFailedRun(t *testing.T) 
 func TestProtectionCleanupTasksCompleteLegacyTasksUseLatestAttempt(t *testing.T) {
 	repo := store.NewMemoryStore()
 	router := &Router{store: repo}
-	plan := store.ProtectionPlan{ID: "plan-legacy", SourceClusterID: "source", TargetClusterID: "target"}
+	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: "source", TargetClusterID: "target", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, input := range []store.TaskInput{
 		{ProtectionPlanID: plan.ID, Type: "protection-cleanup", Status: "failed", Payload: map[string]any{"cleanupMode": "source"}},
 		{ProtectionPlanID: plan.ID, Type: "protection-cleanup", Status: "succeeded", Payload: map[string]any{"cleanupMode": "target"}},
