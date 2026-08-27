@@ -1808,8 +1808,11 @@ func (c *Client) pollRestoreStatus(task protocol.TaskDispatchPayload, object kub
 		if task.Restore != nil && len(task.Restore.ImageMappings) > 0 {
 			payload["imageMappingStage"] = "running"
 			if err := c.sendTaskProgress(task, payload, 92, "Persistent data restoration completed; applying durable workload image mappings."); err != nil {
-				c.logger.Error("failed to send post-restore image mapping progress", "task_id", task.TaskID, "error", err)
-				return
+				// Progress delivery is advisory. A temporary control-plane or
+				// WebSocket outage must not stop the durable restore workflow.
+				// The next progress snapshot or the reliable terminal event will
+				// reconcile the persisted task after the connection recovers.
+				c.logger.Warn("failed to send post-restore image mapping progress; continuing restore", "task_id", task.TaskID, "error", err)
 			}
 			if c.imageMapper == nil {
 				_ = c.sendTaskFailedWithDetails(task, "RESTORE_IMAGE_MAPPING_UNAVAILABLE", "workload image mapping is not supported by this agent", map[string]any{"velero": payload})
@@ -1957,8 +1960,7 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, b
 	startPayload := cloneVeleroPayload(basePayload)
 	startPayload["readinessStage"] = "started"
 	if err := c.sendTaskProgress(task, startPayload, 95, "Resource and volume data restoration completed; restored application readiness validation started."); err != nil {
-		c.logger.Error("failed to send restore readiness start event", "task_id", task.TaskID, "error", err)
-		return
+		c.logger.Warn("failed to send restore readiness start event; continuing readiness checks", "task_id", task.TaskID, "error", err)
 	}
 	for {
 		readiness, err := c.readiness.GetNamespaceReadiness(context.Background(), namespace)
@@ -1978,8 +1980,7 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, b
 					payload["applicationValidationStage"] = "skipped"
 				}
 				if err := c.sendTaskProgress(task, payload, 99, "Restored application readiness validation completed successfully."); err != nil {
-					c.logger.Error("failed to send restore readiness success event", "task_id", task.TaskID, "error", err)
-					return
+					c.logger.Warn("failed to send restore readiness success event; sending reliable completion", "task_id", task.TaskID, "error", err)
 				}
 				if err := c.sendTaskCompleted(task, payload, restoreMessage+"; restored application is ready"); err != nil {
 					c.logger.Error("failed to send task completed", "task_id", task.TaskID, "error", err)
@@ -1991,8 +1992,7 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, b
 				return
 			}
 			if err := c.sendTaskProgress(task, payload, 95, restoreReadinessProgressMessage(readiness)); err != nil {
-				c.logger.Error("failed to send restore readiness progress", "task_id", task.TaskID, "error", err)
-				return
+				c.logger.Warn("failed to send restore readiness progress; continuing readiness checks", "task_id", task.TaskID, "error", err)
 			}
 		} else {
 			if time.Now().UTC().After(deadline) {
@@ -2000,8 +2000,7 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, b
 				return
 			}
 			if err := c.sendTaskProgress(task, payload, 90, "waiting for restored namespace to be created"); err != nil {
-				c.logger.Error("failed to send restore readiness progress", "task_id", task.TaskID, "error", err)
-				return
+				c.logger.Warn("failed to send restore readiness progress; continuing readiness checks", "task_id", task.TaskID, "error", err)
 			}
 		}
 		time.Sleep(5 * time.Second)
@@ -3481,40 +3480,51 @@ func recoveryStageEvidence(stageID string, payload map[string]any) []string {
 	switch stageID {
 	case "restoring_resources":
 		status := wsMapFromAny(payload["status"])
-		if phase := strings.TrimSpace(fmt.Sprint(status["phase"])); phase != "" {
+		if phase := displayEvidenceValue(status["phase"]); phase != "" {
 			evidence = append(evidence, "Velero Restore phase: "+phase)
 		}
 		if raw := wsMapFromAny(status["raw"]); len(raw) > 0 {
-			if restored := strings.TrimSpace(fmt.Sprint(raw["itemsRestored"])); restored != "" {
+			if restored := displayEvidenceValue(raw["itemsRestored"]); restored != "" {
 				evidence = append(evidence, "Resources restored: "+restored)
 			}
 		}
 	case "restoring_data":
 		volume := wsMapFromAny(payload["volumeProgress"])
-		if total := strings.TrimSpace(fmt.Sprint(volume["totalBytes"])); total != "" && total != "<nil>" {
+		if total := displayEvidenceValue(volume["totalBytes"]); total != "" {
 			evidence = append(evidence, "Persistent bytes: "+total)
 		}
 	case "waiting_for_workloads":
 		readiness := wsMapFromAny(payload["readiness"])
-		if namespace := strings.TrimSpace(fmt.Sprint(readiness["namespace"])); namespace != "" {
+		if namespace := displayEvidenceValue(readiness["namespace"]); namespace != "" {
 			evidence = append(evidence, "Target namespace: "+namespace)
 		}
 	case "application_validation":
 		validation := wsMapFromAny(payload["applicationValidation"])
-		if message := strings.TrimSpace(fmt.Sprint(validation["message"])); message != "" {
+		if message := displayEvidenceValue(validation["message"]); message != "" {
 			evidence = append(evidence, message)
 		}
 	}
 	return evidence
 }
 
+func displayEvidenceValue(value any) string {
+	if value == nil {
+		return ""
+	}
+	result := strings.TrimSpace(fmt.Sprint(value))
+	if result == "<nil>" {
+		return ""
+	}
+	return result
+}
+
 func recoveryFailureStageStatus(stageID string, errorCode string) string {
 	failureStage := "preparing_restore"
 	switch {
-	case strings.Contains(errorCode, "VOLUME") || strings.Contains(errorCode, "PVC"):
-		failureStage = "restoring_data"
 	case strings.Contains(errorCode, "WORKLOAD") || strings.Contains(errorCode, "READINESS"):
 		failureStage = "waiting_for_workloads"
+	case strings.Contains(errorCode, "VOLUME") || strings.Contains(errorCode, "PVC"):
+		failureStage = "restoring_data"
 	case errorCode == "RESTORE_FAILED" || strings.Contains(errorCode, "STATUS"):
 		failureStage = "restoring_resources"
 	}

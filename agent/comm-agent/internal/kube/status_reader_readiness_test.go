@@ -70,6 +70,32 @@ func TestImagePullFailureEventMessageReturnsDetailedKubeletCause(t *testing.T) {
 	}
 }
 
+func TestPersistentStorageFailureEventMessageReportsUncorrectableFilesystem(t *testing.T) {
+	events := []unstructured.Unstructured{{Object: map[string]any{
+		"reason":  "FailedMount",
+		"message": "MountVolume.MountDevice failed: 'fsck' found errors on device /dev/longhorn/pvc-1 but could not correct them",
+	}}}
+	code, message := persistentStorageFailureEventMessage(events, "demo-mysql-abc")
+	if code != "RESTORE_WORKLOAD_VOLUME_MOUNT_FAILED" {
+		t.Fatalf("unexpected code %q", code)
+	}
+	for _, expected := range []string{"demo-mysql-abc", "fsck", "could not correct"} {
+		if !strings.Contains(message, expected) {
+			t.Fatalf("expected %q in %q", expected, message)
+		}
+	}
+}
+
+func TestPersistentStorageFailureEventMessageIgnoresTransientAttach(t *testing.T) {
+	events := []unstructured.Unstructured{{Object: map[string]any{
+		"reason":  "FailedAttachVolume",
+		"message": "AttachVolume.Attach failed: volume is not ready for workloads",
+	}}}
+	if code, message := persistentStorageFailureEventMessage(events, "demo-mysql-abc"); code != "" || message != "" {
+		t.Fatalf("transient attach must remain retryable, got %q %q", code, message)
+	}
+}
+
 func TestPodTerminalReadinessFailureAllowsOrdinaryStartup(t *testing.T) {
 	object := map[string]any{
 		"metadata": map[string]any{"name": "demo-web-abc"},

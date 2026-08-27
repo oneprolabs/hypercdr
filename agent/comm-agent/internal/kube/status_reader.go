@@ -499,6 +499,12 @@ func (a *DynamicManifestApplier) readPodReadiness(ctx context.Context, namespace
 			result.UnreadyPods = append(result.UnreadyPods, name)
 			continue
 		}
+		if code, message := a.podPersistentStorageFailureEvent(ctx, namespace, name); code != "" {
+			result.FailureCode = code
+			result.FailureMessage = message
+			result.UnreadyPods = append(result.UnreadyPods, name)
+			continue
+		}
 		if isPodReady(pod.Object) {
 			result.ReadyPodCount++
 			continue
@@ -506,6 +512,32 @@ func (a *DynamicManifestApplier) readPodReadiness(ctx context.Context, namespace
 		result.UnreadyPods = append(result.UnreadyPods, name)
 	}
 	return nil
+}
+
+func (a *DynamicManifestApplier) podPersistentStorageFailureEvent(ctx context.Context, namespace string, podName string) (string, string) {
+	events, err := a.client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "events"}).Namespace(namespace).List(ctx, metav1.ListOptions{
+		FieldSelector: "involvedObject.kind=Pod,involvedObject.name=" + podName,
+	})
+	if err != nil {
+		return "", ""
+	}
+	return persistentStorageFailureEventMessage(events.Items, podName)
+}
+
+func persistentStorageFailureEventMessage(events []unstructured.Unstructured, podName string) (string, string) {
+	for _, event := range events {
+		reason, _, _ := unstructured.NestedString(event.Object, "reason")
+		message, _, _ := unstructured.NestedString(event.Object, "message")
+		lower := strings.ToLower(message)
+		// These messages describe a deterministic storage/filesystem failure,
+		// not a normal transient attach delay. Surface them immediately instead
+		// of leaving the Drill running until its broad task deadline.
+		fatal := strings.Contains(lower, "fsck") && (strings.Contains(lower, "could not correct") || strings.Contains(lower, "uncorrectable"))
+		if (reason == "FailedMount" || reason == "FailedAttachVolume") && fatal {
+			return "RESTORE_WORKLOAD_VOLUME_MOUNT_FAILED", fmt.Sprintf("restored pod %s cannot mount its persistent volume: %s", podName, message)
+		}
+	}
+	return "", ""
 }
 
 func (a *DynamicManifestApplier) podImagePullFailureEvent(ctx context.Context, namespace string, podName string) string {

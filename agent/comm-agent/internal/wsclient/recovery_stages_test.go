@@ -37,6 +37,20 @@ func TestWithRecoveryStagesMarksReadinessFailureWithoutRegressingRestore(t *test
 	}
 }
 
+func TestWithRecoveryStagesClassifiesWorkloadVolumeMountFailureAsReadiness(t *testing.T) {
+	task := protocol.TaskDispatchPayload{Type: "drill"}
+	payload := withRecoveryStages(task, map[string]any{}, 0, "failed", "RESTORE_WORKLOAD_VOLUME_MOUNT_FAILED", "mount failed")
+	stages := payload["recoveryStages"].([]map[string]any)
+	for _, stage := range stages {
+		if stage["id"] == "restoring_data" && stage["status"] != "succeeded" {
+			t.Fatalf("restoring_data status = %v, want succeeded", stage["status"])
+		}
+		if stage["id"] == "waiting_for_workloads" && stage["status"] != "failed" {
+			t.Fatalf("waiting_for_workloads status = %v, want failed", stage["status"])
+		}
+	}
+}
+
 func TestWithRecoveryStagesMarksSuccessfulRecovery(t *testing.T) {
 	task := protocol.TaskDispatchPayload{Type: "restore"}
 	payload := withRecoveryStages(task, nil, 100, "succeeded", "", "complete")
