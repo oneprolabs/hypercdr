@@ -77,6 +77,39 @@ func TestAgentCredentialReconnect(t *testing.T) {
 	}
 }
 
+func TestFrontendCacheAndMissingAssetBehavior(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>shell</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "assets", "app-hash.js"), []byte("export {}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	router := &Router{cfg: config.Config{FrontendDir: dir}}
+
+	for _, tc := range []struct {
+		path, cache string
+		status      int
+	}{
+		{path: "/", status: http.StatusOK, cache: "no-store"},
+		{path: "/applications/detail", status: http.StatusOK, cache: "no-store"},
+		{path: "/assets/app-hash.js", status: http.StatusOK, cache: "public, max-age=31536000, immutable"},
+		{path: "/assets/old-hash.js", status: http.StatusNotFound},
+	} {
+		recorder := httptest.NewRecorder()
+		router.frontend(recorder, httptest.NewRequest(http.MethodGet, tc.path, nil))
+		if recorder.Code != tc.status {
+			t.Fatalf("%s: expected status %d, got %d", tc.path, tc.status, recorder.Code)
+		}
+		if got := recorder.Header().Get("Cache-Control"); got != tc.cache {
+			t.Fatalf("%s: expected Cache-Control %q, got %q", tc.path, tc.cache, got)
+		}
+	}
+}
+
 func TestRegistryTagsTreatsMissingRepositoryAsEmpty(t *testing.T) {
 	registry := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.URL.Path != "/v2/hypercdr/platform-api/tags/list" {

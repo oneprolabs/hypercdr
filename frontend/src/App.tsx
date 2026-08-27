@@ -495,13 +495,19 @@ function recoveryTaskMatchesApp(task: ApiTask, app: ApiApplication, plans: ApiPr
   const planID = taskPlanId(task);
   const restorePointID = taskRestorePointId(task);
   const namespace = app.namespace || app.name;
-  if (!appPlan?.id || !planID || !restorePointID || !namespace) return false;
+  if (!appPlan?.id || !planID) return false;
   if (planID !== appPlan.id) return false;
   const taskNamespaces = namespacesFromPayload(task.payload);
-  if (!taskNamespaces.includes(namespace)) return false;
+  // Plan ID is the authoritative ownership key. Namespace/restore-point data
+  // may be omitted by the summary endpoint, so use those fields only when
+  // they are present to disambiguate multi-namespace plans.
+  if (taskNamespaces.length > 0 && namespace && !taskNamespaces.includes(namespace)) return false;
+  if (!restorePointID) return true;
   const point = restorePoints.find(item => item.id === restorePointID);
   if (point) {
-    return point.protectionPlanId === appPlan.id && restorePointNamespaces(point).includes(namespace);
+    if (point.protectionPlanId && point.protectionPlanId !== appPlan.id) return false;
+    const pointNamespaces = restorePointNamespaces(point);
+    return pointNamespaces.length === 0 || !namespace || pointNamespaces.includes(namespace);
   }
   return true;
 }
@@ -509,9 +515,10 @@ function recoveryTaskMatchesApp(task: ApiTask, app: ApiApplication, plans: ApiPr
 function buildAppTaskMap(tasks: ApiTask[], apps: ApiApplication[], taskTypes?: string[], restorePoints: ApiRestorePointView[] = [], plans: ApiProtectionPlan[] = []): Record<string, ApiTask> {
   const byNamespace: Record<string, ApiTask> = {};
   const sorted = [...tasks].sort((a, b) => {
-    const activeDelta = Number(isActiveTaskStatus(b.status)) - Number(isActiveTaskStatus(a.status));
-    if (activeDelta !== 0) return activeDelta;
-    return (b.createdAt || '').localeCompare(a.createdAt || '');
+    // The newest task is authoritative. Preferring active status first made an
+    // older task replace a newer terminal task during refresh, causing status
+    // text and details to jump between operations.
+    return (b.createdAt || '').localeCompare(a.createdAt || '') || String(b.id || '').localeCompare(String(a.id || ''));
   });
   const allowedTypes = taskTypes ? new Set(taskTypes) : null;
   for (const app of apps) {
@@ -529,6 +536,27 @@ function buildAppTaskMap(tasks: ApiTask[], apps: ApiApplication[], taskTypes?: s
     if (match) byNamespace[app.namespace] = match;
   }
   return byNamespace;
+}
+
+// Task summaries can briefly lag immediately after submission. Do not replace
+// an already rendered active task with an empty/older snapshot during that
+// consistency window; otherwise the row falls back to Last snapshot and then
+// jumps back to the progress state on the next poll.
+function mergeTaskMapKeepingActive(previous: Record<string, ApiTask>, next: Record<string, ApiTask>): Record<string, ApiTask> {
+  const merged = { ...next };
+  Object.entries(previous).forEach(([key, previousTask]) => {
+    const nextTask = merged[key];
+    if (!nextTask && isActiveTaskStatus(previousTask.status)) {
+      merged[key] = previousTask;
+      return;
+    }
+    if (nextTask && isActiveTaskStatus(previousTask.status)) {
+      const previousCreated = String(previousTask.createdAt || '');
+      const nextCreated = String(nextTask.createdAt || '');
+      if (nextCreated < previousCreated) merged[key] = previousTask;
+    }
+  });
+  return merged;
 }
 
 function planIncludesApp(plan: ApiProtectionPlan, appId: string): boolean {
@@ -1696,8 +1724,8 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
         setLiveApiPolicies(apiPolicies);
         setLiveApiPlans(apiPlans);
         setLiveApiApps(apiApps);
-        setLiveAppTasks(nextAppTasks);
-        setLiveRecoveryTasks(nextRecoveryTasks);
+        setLiveAppTasks(previous => mergeTaskMapKeepingActive(previous, nextAppTasks));
+        setLiveRecoveryTasks(previous => mergeTaskMapKeepingActive(previous, nextRecoveryTasks));
         setSelectedCluster(prev => {
           if (prev && nextClusters.some(cluster => cluster.id === prev.id)) {
             return nextClusters.find(cluster => cluster.id === prev.id) || nextClusters[0] || null;
@@ -1774,8 +1802,10 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
         const apiRestorePoints = listItems(restorePointRes);
         const apiRestorePointViews = apiRestorePoints.map(mapRestorePoint);
         setLiveApiTasks(apiTasks);
-        setLiveAppTasks(buildAppTaskMap(apiTasks, liveApiApps, ['backup'], apiRestorePointViews, liveApiPlans));
-        setLiveRecoveryTasks(buildAppTaskMap(apiTasks, liveApiApps, ['restore', 'drill', 'takeover'], apiRestorePointViews, liveApiPlans));
+        const nextAppTasks = buildAppTaskMap(apiTasks, liveApiApps, ['backup'], apiRestorePointViews, liveApiPlans);
+        const nextRecoveryTasks = buildAppTaskMap(apiTasks, liveApiApps, ['restore', 'drill', 'takeover'], apiRestorePointViews, liveApiPlans);
+        setLiveAppTasks(previous => mergeTaskMapKeepingActive(previous, nextAppTasks));
+        setLiveRecoveryTasks(previous => mergeTaskMapKeepingActive(previous, nextRecoveryTasks));
         setRestorePointCount(apiRestorePointViews.length);
         setLiveRestorePoints(apiRestorePointViews);
         setLiveApiRestorePointViews(apiRestorePointViews);
@@ -1793,7 +1823,10 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       cancelled = true;
       if (timer) window.clearInterval(timer);
     };
-  }, [authSession, refreshPlatformData, view]);
+  // The application activity poll joins tasks to the current application and
+  // plan records. Recreate the poll when either collection changes so the
+  // timer never keeps an initialization-time (often empty) closure.
+  }, [authSession, liveApiApps, liveApiPlans, refreshPlatformData, view]);
 
   const visibleExtensionModules = useMemo(() => extensionModules.filter(module => authSession && (!module.isVisible || module.isVisible({ currentUser: authSession.user, capabilities: productCapabilities }))), [authSession, extensionModules, productCapabilities]);
   const activeExtension = visibleExtensionModules.find(module => module.view === view);

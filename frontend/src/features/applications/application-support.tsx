@@ -164,6 +164,7 @@ export function namespacesFromPayload(payload: any): string[] {
     ...stringArrayFromAny(payload?.velero?.manifest?.spec?.includedNamespaces),
   ];
   if (payload?.sourceNamespace) values.push(String(payload.sourceNamespace));
+  if (payload?.namespace) values.push(String(payload.namespace));
   return Array.from(new Set(values.filter(Boolean)));
 }
 

@@ -604,12 +604,29 @@ export function RecoveryWizardModal(props: Props) {
                     <input
                       type="checkbox"
                       checked={advancedOpen}
-                      onChange={event => setAdvancedOpen(event.target.checked)}
+                      onChange={event => {
+                        const nextOpen = event.target.checked;
+                        setAdvancedOpen(nextOpen);
+                        // Advanced mappings depend on the restore-point catalog, but
+                        // keep that inspection lazy so opening the wizard stays fast.
+                        if (nextOpen && !config.contentCatalogLoaded && !contentsLoading) {
+                          void loadCustomResources();
+                        }
+                      }}
                       aria-label="Show advanced options"
                     />
                   </label>
                   {advancedOpen && (
                     <div className="hbdr-recovery-advanced-content">
+                      {contentsLoading && (
+                        <div className="hbdr-recovery-advanced-loading" role="status" aria-live="polite">
+                          <RefreshCw size={15} className="animate-spin" />
+                          <span>
+                            <strong>Loading advanced options…</strong>
+                            <em>Inspecting the selected restore point for mappings and service ports.</em>
+                          </span>
+                        </div>
+                      )}
                       <section>
                         <header><strong>Environment mappings</strong><span>Leave blank to preserve the value stored in the backup.</span></header>
                         {backupStorageClasses.map(source => <label className="hbdr-recovery-mapping" key={`sc-${source}`}><span>StorageClass <b>{source}</b></span><select value={config.storageClassMappings?.[source] || ''} onChange={event => updateMapping('storageClassMappings', source, event.target.value)}><option value="">Keep original</option>{(targetClusterOption?.storageClasses || []).map(item => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label>)}

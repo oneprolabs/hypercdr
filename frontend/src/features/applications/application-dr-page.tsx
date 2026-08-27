@@ -29,8 +29,8 @@ import {
   mapApplicationStatus, normalizeErrorCode, numberFromUnknown, recordFromUnknown,
   recoveryActionText, recoveryPreparingMessage, resourceCategoryIconMap, resourceCategoryMeta,
   resourceInventoryDetailText, resourceInventoryTitle, shortResourceKind, storageFailurePresentation,
-  syncPreparingMessage, taskDetailFullLabel, taskDetailLabel, taskFailureDetails,
-  taskFailureSummary, taskProgressInfo, type ApplicationStage,
+  latestVisibleTaskEventMessage, syncPreparingMessage, taskDetailFullLabel, taskDetailLabel, taskFailureDetails,
+  taskFailureSummary, taskProgressInfo, taskStatusDisplay, type ApplicationStage,
 } from '../recovery/task-ui';
 import {
   ErrorDetailModalFrame, appOverrideKey, buildLabelSelectorOptions, formatNextSyncTime,
@@ -70,6 +70,7 @@ export default function ApplicationDrPage(props: {
   const [selectedConfigApps, setSelectedConfigApps] = useState<string[]>([]);
   const [selectedRunApps, setSelectedRunApps] = useState<string[]>([]);
   const [submittingSyncTasks, setSubmittingSyncTasks] = useState<Record<string, ApiTask>>({});
+  const [preferredSyncTaskIds, setPreferredSyncTaskIds] = useState<Record<string, string>>({});
   const [submittingRecoveryTasks, setSubmittingRecoveryTasks] = useState<Record<string, ApiTask>>({});
   const [syncSubmitting, setSyncSubmitting] = useState(false);
   const [recoverySubmitting, setRecoverySubmitting] = useState(false);
@@ -165,6 +166,7 @@ export default function ApplicationDrPage(props: {
   const [newExcludeRule, setNewExcludeRule] = useState({ group: '', resource: '', name: '', version: '', labels: '' });
   const [editingRuleIndex, setEditingRuleIndex] = useState<number | null>(null);
   const syncTasks: Record<string, ApiTask> = { ...liveAppTasks, ...submittingSyncTasks };
+  const recoveryTasks: Record<string, ApiTask> = { ...liveRecoveryTasks, ...submittingRecoveryTasks };
   const setSyncTasks = (updater: any) => {
     if (typeof updater === 'function') {
       setLiveAppTasks(prev => updater(prev));
@@ -174,6 +176,7 @@ export default function ApplicationDrPage(props: {
   };
   const [syncTaskDetail, setSyncTaskDetail] = useState<{ app: AppItem; task: ApiTask; failure?: ReturnType<typeof taskFailureSummary> } | null>(null);
   const [drTaskEvents, setDrTaskEvents] = useState<Record<string, ApiTaskEvent[]>>({});
+  const refreshedTerminalEventIdsRef = useRef(new Set<string>());
   const [resourceDetail, setResourceDetail] = useState<{ app: AppItem } | null>(null);
   const [resourceRefreshKey, setResourceRefreshKey] = useState('');
   const [resourceRefreshStatus, setResourceRefreshStatus] = useState<{ key: string; status: string; message?: string } | null>(null);
@@ -398,11 +401,12 @@ export default function ApplicationDrPage(props: {
   const namespaceRows = stage === 'select' ? selectRows : pendingRows;
   const protectedCount = protectedRows.length;
   const pendingCount = pendingRows.length;
-  const activeDrTaskIds = [
+  const displayedDrTasks = [
     ...Object.values(syncTasks),
-    ...Object.values(liveRecoveryTasks),
-  ].filter(task => task?.id && isActiveTaskStatus(task.status)).map(task => task.id);
-  const activeDrTaskKey = Array.from(new Set(activeDrTaskIds)).sort().join('|');
+    ...Object.values(recoveryTasks),
+  ].filter(task => task?.id);
+  const displayedDrTaskKey = Array.from(new Set(displayedDrTasks.map(task => task.id))).sort().join('|');
+  const hasActiveDisplayedTask = displayedDrTasks.some(task => isActiveTaskStatus(task.status));
   const protectionPlanForApp = (app: AppItem) => {
     if (!app.protectionPlanId) return undefined;
 	const plan = protectionPlans.find(plan => plan.id === app.protectionPlanId);
@@ -522,7 +526,7 @@ export default function ApplicationDrPage(props: {
     }
   };
   useEffect(() => {
-    const ids = activeDrTaskKey ? activeDrTaskKey.split('|').filter(Boolean) : [];
+    const ids = displayedDrTaskKey ? displayedDrTaskKey.split('|').filter(Boolean) : [];
     if (ids.length === 0) return;
     let cancelled = false;
     const loadEvents = async () => {
@@ -537,36 +541,65 @@ export default function ApplicationDrPage(props: {
       if (cancelled) return;
       setDrTaskEvents(prev => {
         const next = { ...prev };
+        let changed = false;
         for (const [taskId, events] of entries) {
-          if (events) next[taskId] = events;
+          if (!events) continue;
+          const current = prev[taskId] || [];
+          const unchanged = current.length === events.length && current.every((event, index) => (
+            event.id === events[index]?.id
+            && event.level === events[index]?.level
+            && event.message === events[index]?.message
+          ));
+          if (!unchanged) {
+            next[taskId] = events;
+            changed = true;
+          }
         }
-        return next;
+        return changed ? next : prev;
       });
-      if (entries.some(([, events]) => events?.some(event => ['completed', 'backup_completed', 'velero-schedule'].includes(event.reason)))) {
+      let observedNewTerminalEvent = false;
+      for (const [, events] of entries) {
+        for (const event of events || []) {
+          if (!['completed', 'backup_completed', 'velero-schedule'].includes(event.reason)) continue;
+          if (refreshedTerminalEventIdsRef.current.has(event.id)) continue;
+          refreshedTerminalEventIdsRef.current.add(event.id);
+          observedNewTerminalEvent = true;
+        }
+      }
+      if (observedNewTerminalEvent) {
         void refreshPlatformData();
       }
     };
     loadEvents();
-    const timer = window.setInterval(loadEvents, 2000);
+    const timer = hasActiveDisplayedTask ? window.setInterval(loadEvents, 2000) : undefined;
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      if (timer) window.clearInterval(timer);
     };
-  }, [activeDrTaskKey, refreshPlatformData]);
+  }, [displayedDrTaskKey, hasActiveDisplayedTask, refreshPlatformData]);
   useEffect(() => {
     const taskId = syncTaskDetail?.task.id;
     if (!taskId) return;
     let cancelled = false;
     const refreshOpenTask = async () => {
       try {
-        const [eventResult, taskResult] = await Promise.all([
+        const [eventResult, latest] = await Promise.all([
           apiGet<ApiList<ApiTaskEvent>>(`/api/v1/tasks/${taskId}/events`),
-          apiGet<ApiList<ApiTask>>('/api/v1/tasks'),
+          apiGet<ApiTask>(`/api/v1/tasks/${taskId}`),
         ]);
         if (cancelled) return;
-        setDrTaskEvents(prev => ({ ...prev, [taskId]: listItems(eventResult) }));
-        const latest = listItems(taskResult).find(task => task.id === taskId);
-        if (latest) setSyncTaskDetail(prev => prev?.task.id === taskId ? { ...prev, task: latest } : prev);
+        const nextEvents = listItems(eventResult);
+        setDrTaskEvents(prev => {
+          const current = prev[taskId] || [];
+          const unchanged = current.length === nextEvents.length && current.every((event, index) => event.id === nextEvents[index]?.id);
+          return unchanged ? prev : { ...prev, [taskId]: nextEvents };
+        });
+        if (latest) setSyncTaskDetail(prev => {
+          if (prev?.task.id !== taskId) return prev;
+          const currentSignature = JSON.stringify([prev.task.status, prev.task.progress, prev.task.errorCode, prev.task.errorMessage, prev.task.payload]);
+          const nextSignature = JSON.stringify([latest.status, latest.progress, latest.errorCode, latest.errorMessage, latest.payload]);
+          return currentSignature === nextSignature ? prev : { ...prev, task: latest, failure: undefined };
+        });
       } catch {
         // Keep the last successful snapshot visible while the next live refresh retries.
       }
@@ -594,14 +627,31 @@ export default function ApplicationDrPage(props: {
   }, [namespaceDetailTaskId, drTaskEvents]);
   const unitMembers = (app: AppItem) => app.memberApps?.length ? app.memberApps : [app];
   const unitNamespaces = (app: AppItem) => unitMembers(app).map(item => item.namespace || item.name);
-  const taskForUnit = (tasks: Record<string, ApiTask>, app: AppItem) => {
-    if (!app.protectionPlanId) return undefined;
-    const direct = tasks[app.name];
-    if (direct?.protectionPlanId === app.protectionPlanId) return direct;
-    return Object.values(tasks).find(task => task?.protectionPlanId === app.protectionPlanId);
+  const taskForUnit = (tasks: Record<string, ApiTask>, app: AppItem, allowedTypes: string[] = ['backup']) => {
+    const planId = String(app.protectionPlanId || '').trim();
+    if (!planId) return undefined;
+    const localTasks = Object.values(tasks);
+    const platformPlanTasks = platformTasks.filter(task => allowedTypes.includes(task.type) && String(task.protectionPlanId || task.payload?.protectionPlanId || '').trim() === planId);
+    const candidates = [...platformPlanTasks, ...localTasks.filter(local => !platformPlanTasks.some(remote => remote.id === local.id))];
+    const matching = candidates
+      .filter(task => {
+        const taskPlanId = String(task?.protectionPlanId || task?.payload?.protectionPlanId || '').trim();
+        return taskPlanId === planId && allowedTypes.includes(task.type);
+      });
+    const preferredTaskId = allowedTypes.length === 1 && allowedTypes[0] === 'backup'
+      ? preferredSyncTaskIds[app.name]
+      : '';
+    const preferred = preferredTaskId ? matching.find(task => task.id === preferredTaskId) : undefined;
+    if (preferred) return preferred;
+    return matching
+      .sort((left, right) => {
+        const activeOrder = Number(isActiveTaskStatus(right.status)) - Number(isActiveTaskStatus(left.status));
+        if (activeOrder) return activeOrder;
+        const timeOrder = String(right.createdAt || '').localeCompare(String(left.createdAt || ''));
+        return timeOrder || String(right.id || '').localeCompare(String(left.id || ''));
+      })[0];
   };
-  const recoveryTaskForUnit = (app: AppItem) =>
-    taskForUnit(submittingRecoveryTasks, app) || taskForUnit(liveRecoveryTasks, app);
+  const recoveryTaskForUnit = (app: AppItem) => taskForUnit(recoveryTasks, app, ['restore', 'drill', 'takeover']);
   useEffect(() => {
     const confirmedTaskIds = new Set(platformTasks.map(task => task.id));
     setSubmittingSyncTasks(prev => {
@@ -640,7 +690,9 @@ export default function ApplicationDrPage(props: {
   };
   const appMatchesFilter = (app: AppItem, filter: string) => {
     const profile = profileOf(app);
-    const task = taskForUnit(syncTasks, app);
+    // Keep the optimistic submit state visible while the refreshed row is
+    // temporarily missing its protectionPlanId.
+    const task = taskForUnit(syncTasks, app) || submittingSyncTasks[app.name];
     const recoveryTask = recoveryTaskForUnit(app);
     if (filter === 'active') return unitMembers(app).some(member => member.status === 'Active' || member.status === 'Running');
     if (filter === 'protected') return stageOf(app) === 'run';
@@ -1579,7 +1631,7 @@ export default function ApplicationDrPage(props: {
         size: 300,
         minSize: 280,
         maxSize: 520,
-        cell: info => <span>{renderSyncTaskStatus(info.row.original)}</span>,
+        cell: info => <div className="hbdr-task-status-cell">{renderSyncTaskStatus(info.row.original)}</div>,
       });
     }
     if (visibleRunColumns.includes('recoveryTask')) {
@@ -1590,7 +1642,7 @@ export default function ApplicationDrPage(props: {
         size: 340,
         minSize: 300,
         maxSize: 580,
-        cell: info => <span>{renderRecoveryTaskStatus(info.row.original)}</span>,
+        cell: info => <div className="hbdr-task-status-cell">{renderRecoveryTaskStatus(info.row.original)}</div>,
       });
     }
     if (visibleRunColumns.includes('resource')) {
@@ -1815,11 +1867,26 @@ export default function ApplicationDrPage(props: {
           contentCatalogLoaded: action.config.contentCatalogLoaded,
           persistentDataExpected: action.config.persistentDataExpected,
       });
-      setLiveRecoveryTasks(prev => ({ ...prev, [action.app.name]: createdTask }));
-      setSubmittingRecoveryTasks(prev => ({ ...prev, [action.app.name]: createdTask }));
+      // Keep the just-created task visible before the next platform refresh.
+      // Store it under every member namespace; selection later still filters by
+      // the exact protection plan id and stable creation time.
+      const immediateTask = {
+        ...createdTask,
+        protectionPlanId: createdTask.protectionPlanId || livePoint.protectionPlanId || action.app.protectionPlanId,
+      };
+      setLiveRecoveryTasks(prev => {
+        const next = { ...prev };
+        unitMembers(action.app).forEach(member => { next[member.name] = immediateTask; });
+        return next;
+      });
+      setSubmittingRecoveryTasks(prev => {
+        const next = { ...prev };
+        unitMembers(action.app).forEach(member => { next[member.name] = immediateTask; });
+        return next;
+      });
       setDrTaskEvents(prev => ({
         ...prev,
-        [createdTask.id]: prev[createdTask.id] || [],
+        [immediateTask.id]: prev[immediateTask.id] || [],
       }));
       setRestoreAction(null);
       toast(submittedMessage);
@@ -1830,8 +1897,31 @@ export default function ApplicationDrPage(props: {
       setRecoverySubmitting(false);
     }
   };
+  const renderTaskStatusCell = ({
+    stage,
+    detail,
+    progress,
+    onDetails,
+  }: {
+    stage: string;
+    detail: string;
+    progress?: number;
+    onDetails: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  }) => (
+    <button type="button" className="hbdr-task-status-summary is-progress hbdr-task-status-clickable" aria-label={`View task details: ${stage}`} onClick={onDetails}>
+      <strong className="hbdr-task-status-stage" title={stage}><i className="hbdr-task-status-running" aria-hidden="true" />{stage}</strong>
+      <span className="hbdr-task-status-detail" title={detail}>
+        {progress !== undefined && <i className="hbdr-task-status-inline-track"><b style={{ width: `${progress}%` }} /></i>}
+        <em>{progress !== undefined ? `${formatPercent(progress)}% · ${detail}` : detail}</em>
+      </span>
+    </button>
+  );
   const renderSyncTaskStatus = (app: AppItem) => {
-    const task = taskForUnit(syncTasks, app);
+    // Keep the optimistic submission state visible while the applications
+    // snapshot is being refreshed.  During that short window the refreshed
+    // row can temporarily omit protectionPlanId, so taskForUnit cannot match
+    // it even though the sync request has already been accepted by the API.
+    const task = submittingSyncTasks[app.name] || taskForUnit(syncTasks, app);
     const sourceClusterId = unitMembers(app).map(member => member.clusterId).find(Boolean) || app.clusterId || currentClusterId;
     const sourceCluster = clusters.find(cluster => cluster.id === sourceClusterId) || currentCluster || clusters[0] || null;
     const sourceClusterOffline = Boolean(sourceCluster && sourceCluster.connectionStatus !== 'online');
@@ -1866,15 +1956,8 @@ export default function ApplicationDrPage(props: {
 
     if (isActiveTaskStatus(task.status)) {
       const events = drTaskEvents[task.id] || [];
-      const finalizing = (task.status || '').toLowerCase() === 'finalizing';
-      const canceling = (task.status || '').toLowerCase() === 'canceling';
       const waitingForAgent = sourceClusterOffline || (task.errorCode || '').toUpperCase() === 'AGENT_OFFLINE';
-      const volume = taskProgressInfo(task, events);
-      const hasVolumeBytes = Boolean(volume && volume.knownTotal && volume.totalBytes > 0);
-      const configuringStorage = hasTaskEventReason(events, ['storage_preflight_started'])
-        && !hasTaskEventReason(events, ['storage_preflight_skipped', 'storage_preflight_succeeded', 'dispatched', 'accepted', 'dispatch_waiting_agent', 'dispatch_failed']);
-      const progress = volume ? Math.max(0, Math.min(100, volume.percent)) : 0;
-      const showProgressBar = !configuringStorage && !canceling && !finalizing && !waitingForAgent;
+      const display = taskStatusDisplay(task, events);
       if (waitingForAgent) {
         const failure = {
           code: normalizeErrorCode('AGENT_OFFLINE'),
@@ -1883,84 +1966,37 @@ export default function ApplicationDrPage(props: {
           fullText: `Source cluster ${sourceCluster?.name || sourceClusterId || ''} agent is offline. The task will resume after the WebSocket connection is restored.`,
         };
         return (
-          <TaskErrorStatus
-            code={failure.code}
-            title={failure.title}
-            description={failure.description}
-            detail={failure.fullText}
-            onClick={event => {
-              event.stopPropagation();
-              setSyncTaskDetail({ app, task, failure });
-            }}
-          />
+          <TaskErrorStatus code={failure.code} title={failure.title} description={failure.description} detail={failure.fullText}
+            onClick={event => { event.stopPropagation(); setSyncTaskDetail({ app, task, failure }); }} />
         );
       }
-      const preparingMessage = syncPreparingMessage(events);
-      const primary = canceling
-        ? 'Canceling sync...'
-        : finalizing
-            ? 'Finalizing restore point...'
-            : configuringStorage
-              ? preparingMessage
-              : volume
-                ? `Syncing... ${formatPercent(progress)}%`
-                : 'Syncing...';
-      const details = !finalizing && hasVolumeBytes && volume
-          ? [
-              `${formatBytes(volume.bytesDone)} / ${formatBytes(volume.totalBytes)}`,
-              formatBytesPerSecond(volume.speedBytesPerSecond),
-              formatEta(volume.etaSeconds),
-            ].filter(Boolean).join(' · ')
-          : '';
-      return (
-        <button type="button" className={`hbdr-dr-progress-cell hbdr-task-status-clickable ${canceling ? 'is-stopped' : 'is-syncing'}`} aria-label="View sync process" onPointerDown={event => { event.stopPropagation(); setSyncTaskDetail({ app, task }); }} onMouseDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}>
-          {!showProgressBar && <em className="hbdr-sync-label">{primary}</em>}
-          {showProgressBar && <i className="hbdr-progress-track"><b style={{ width: `${progress}%` }} /><span>{formatPercent(progress)}%</span></i>}
-          {details && <small>{details}</small>}
-        </button>
-      );
+      return renderTaskStatusCell({
+        stage: display.stage,
+        detail: display.detail,
+        progress: display.progress,
+        onDetails: event => { event.stopPropagation(); setSyncTaskDetail({ app, task }); },
+      });
     }
 
     if (isCompletedTaskStatus(task.status)) {
       if (taskHasWarning(task)) {
         const warning = taskFailureSummary(task, drTaskEvents[task.id] || []);
-        return (
-          <TaskErrorStatus
-            code={warning.code}
-            title={warning.title}
-            description={warning.description}
-            detail={warning.fullText}
-            onClick={event => {
-              event.stopPropagation();
-              setSyncTaskDetail({ app, task, failure: warning });
-            }}
-          />
-        );
+        return <TaskErrorStatus code={warning.code} title={warning.title} description={warning.description} detail={warning.fullText}
+          onClick={event => { event.stopPropagation(); setSyncTaskDetail({ app, task, failure: warning }); }} />;
       }
       const completedPoint = taskVisibleRestorePoint;
       const completedPointLabel = restorePointDisplayLabel(completedPoint) || 'Restore point creating...';
       return (
-        <button type="button" className="hbdr-dr-last-snapshot hbdr-task-status-clickable" aria-label="View sync process" onPointerDown={event => { event.stopPropagation(); setSyncTaskDetail({ app, task }); }} onMouseDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}>
-          <strong>Sync complete</strong>
-          <em title={completedPoint?.veleroBackupName || completedPoint?.title || completedPointLabel}>{completedPointLabel}</em>
+        <button type="button" className="hbdr-dr-last-snapshot is-inline hbdr-task-status-clickable" aria-label="View sync process" onPointerDown={event => { event.stopPropagation(); setSyncTaskDetail({ app, task }); }} onMouseDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}>
+          <strong title={completedPoint?.veleroBackupName || completedPoint?.title || completedPointLabel}>Last snapshot [{completedPointLabel}]</strong>
           {nextSyncHint}
         </button>
       );
     }
 
     const failure = taskFailureSummary(task, drTaskEvents[task.id] || []);
-    return (
-      <TaskErrorStatus
-        code={failure.code}
-        title={failure.title}
-        description={failure.description}
-        detail={failure.fullText}
-        onClick={event => {
-          event.stopPropagation();
-          setSyncTaskDetail({ app, task, failure });
-        }}
-      />
-    );
+    return <TaskErrorStatus code={failure.code} title={failure.title} description={failure.description} detail={failure.fullText}
+      onClick={event => { event.stopPropagation(); setSyncTaskDetail({ app, task, failure }); }} />;
   };
   const renderRecoveryTaskStatus = (app: AppItem) => {
     const task = recoveryTaskForUnit(app);
@@ -1973,28 +2009,13 @@ export default function ApplicationDrPage(props: {
       || String(task.payload?.targetCluster || app.targetCluster || '');
     if (isActiveTaskStatus(task.status)) {
       const events = drTaskEvents[task.id] || [];
-      const volume = taskProgressInfo(task, events);
-      const hasVolumeBytes = Boolean(volume && volume.knownTotal && volume.totalBytes > 0);
-      const configuringStorage = hasTaskEventReason(events, ['storage_preflight_started'])
-        && !hasTaskEventReason(events, ['storage_preflight_skipped', 'storage_preflight_succeeded', 'dispatched', 'accepted', 'dispatch_waiting_agent', 'dispatch_failed']);
-      const progress = volume ? Math.max(0, Math.min(100, volume.percent)) : Math.max(0, Math.min(100, task.progress || 0));
-      const showProgressBar = !configuringStorage;
-      const details = hasVolumeBytes && volume
-        ? [
-            `${formatBytes(volume.bytesDone)} / ${formatBytes(volume.totalBytes)}`,
-            formatBytesPerSecond(volume.speedBytesPerSecond),
-            formatEta(volume.etaSeconds),
-          ].filter(Boolean).join(' · ')
-        : '';
-      const preparingMessage = recoveryPreparingMessage(events, task.type);
-      const primary = configuringStorage ? preparingMessage : `${actionText.running} ${formatPercent(progress)}%`;
-      return (
-        <button type="button" className="hbdr-dr-progress-cell hbdr-recovery-task-progress hbdr-task-status-clickable is-syncing" aria-label="View recovery process" onPointerDown={event => { event.stopPropagation(); setSyncTaskDetail({ app, task }); }} onMouseDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}>
-          {!showProgressBar && <em className="hbdr-sync-label">{primary}</em>}
-          {showProgressBar && <i className="hbdr-progress-track"><b style={{ width: `${progress}%` }} /><span>{formatPercent(progress)}%</span></i>}
-          {details && <small>{details}</small>}
-        </button>
-      );
+      const display = taskStatusDisplay(task, events);
+      return renderTaskStatusCell({
+        stage: display.stage,
+        detail: display.detail,
+        progress: display.progress,
+        onDetails: event => { event.stopPropagation(); setSyncTaskDetail({ app, task }); },
+      });
     }
 
     if (isCompletedTaskStatus(task.status)) {
@@ -2005,25 +2026,15 @@ export default function ApplicationDrPage(props: {
       const targetLabel = recoveryCompletedTargetLabel(targetClusterName, targetNamespace);
       return (
         <button type="button" className="hbdr-recovery-task-complete hbdr-task-status-clickable" aria-label="View recovery process" onPointerDown={event => { event.stopPropagation(); setSyncTaskDetail({ app, task }); }} onMouseDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}>
-          <strong title={completedTitle}>[{restorePointLabel}] {actionText.complete.toLowerCase()}</strong>
+          <strong title={completedTitle}>[{restorePointLabel}] {task.type === 'drill' ? 'drilled' : actionText.complete.toLowerCase()}</strong>
           <em title={completedTitle}>{targetLabel}</em>
         </button>
       );
     }
 
     const failure = taskFailureSummary(task, drTaskEvents[task.id] || []);
-    return (
-      <TaskErrorStatus
-        code={failure.code}
-        title={failure.title}
-        description={failure.description}
-        detail={failure.fullText}
-        onClick={event => {
-          event.stopPropagation();
-          setSyncTaskDetail({ app, task, failure });
-        }}
-      />
-    );
+    return <TaskErrorStatus code={failure.code} title={failure.title} description={failure.description} detail={failure.fullText}
+      onClick={event => { event.stopPropagation(); setSyncTaskDetail({ app, task, failure }); }} />;
   };
   const moveAppsToStage = async (names: string[], target: ApplicationStage) => {
     if (names.length === 0) return;
@@ -2172,6 +2183,28 @@ export default function ApplicationDrPage(props: {
       return;
     }
     let syncWarning = '';
+    const submissionStartedAt = new Date().toISOString();
+    setSubmittingSyncTasks(prev => {
+      const next = { ...prev };
+      selectedRunRows.forEach(app => {
+        const plan = protectionPlanForApp(app);
+        const placeholder: ApiTask = {
+          id: `submitting-sync:${app.protectionPlanId || app.name}`,
+          clusterId: plan?.sourceClusterId || app.clusterId || currentClusterId,
+          appId: app.isMergedPlan ? '' : app.apiId || '',
+          protectionPlanId: app.protectionPlanId || '',
+          type: 'backup',
+          status: 'queued',
+          progress: 0,
+          createdAt: submissionStartedAt,
+          payload: { submissionPending: true },
+        };
+        [app.name, ...unitMembers(app).map(member => member.name)].forEach(key => {
+          next[key] = placeholder;
+        });
+      });
+      return next;
+    });
     setSyncSubmitting(true);
     try {
       const responses = await Promise.all(selectedRunRows.map(app => {
@@ -2212,7 +2245,28 @@ export default function ApplicationDrPage(props: {
         });
         return next;
       });
+      setPreferredSyncTaskIds(prev => {
+        const next = { ...prev };
+        selectedRunRows.forEach((app, index) => {
+          const response = responses[index];
+          const task = 'task' in response ? response.task : response;
+          if (!task?.id) return;
+          [app.name, ...unitMembers(app).map(member => member.name)].forEach(key => {
+            next[key] = task.id;
+          });
+        });
+        return next;
+      });
     } catch (error) {
+      setSubmittingSyncTasks(prev => {
+        const next = { ...prev };
+        selectedRunRows.forEach(app => {
+          [app.name, ...unitMembers(app).map(member => member.name)].forEach(key => {
+            if (next[key]?.payload?.submissionPending) delete next[key];
+          });
+        });
+        return next;
+      });
       toast('Failed to submit sync job: ' + (error instanceof Error ? error.message : 'unknown error'));
       return;
     } finally {
@@ -2694,55 +2748,6 @@ export default function ApplicationDrPage(props: {
     });
   };
 
-  useEffect(() => {
-    const activeIds = [...Object.values(liveAppTasks), ...Object.values(liveRecoveryTasks)]
-      .filter(t => isActiveTaskStatus(t.status))
-      .map(t => t.id);
-    if (activeIds.length === 0) return;
-    let cancelled = false;
-    const activeIdSet = new Set(activeIds);
-    const pollTaskStatus = async () => {
-      try {
-        const taskRes = await apiGet<ApiList<ApiTask>>('/api/v1/tasks');
-        if (cancelled) return;
-        const latestTasks = new Map(listItems(taskRes).filter(task => activeIdSet.has(task.id)).map(task => [task.id, task]));
-        if (latestTasks.size === 0) return;
-        const hasSettledTask = Array.from(latestTasks.values()).some(task => !isActiveTaskStatus(task.status));
-        setLiveAppTasks(prev => {
-          let changed = false;
-          const next = Object.fromEntries(Object.entries(prev).map(([key, task]) => {
-            const latest = latestTasks.get(task.id);
-            if (!latest) return [key, task];
-            changed = true;
-            return [key, { ...task, ...latest }];
-          }));
-          return changed ? next : prev;
-        });
-        setLiveRecoveryTasks(prev => {
-          let changed = false;
-          const next = Object.fromEntries(Object.entries(prev).map(([key, task]) => {
-            const latest = latestTasks.get(task.id);
-            if (!latest) return [key, task];
-            changed = true;
-            return [key, { ...task, ...latest }];
-          }));
-          return changed ? next : prev;
-        });
-        if (hasSettledTask) {
-          void refreshPlatformData();
-        }
-      } catch {
-        // Keep the current list stable if status polling fails.
-      }
-    };
-    pollTaskStatus();
-    const timer = window.setInterval(pollTaskStatus, 3000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [liveAppTasks, liveRecoveryTasks, setLiveAppTasks, setLiveRecoveryTasks, refreshPlatformData]);
-
   return (
     <>
       <div className="hbdr-stage-panel">
@@ -3223,7 +3228,7 @@ export default function ApplicationDrPage(props: {
           <ErrorDetailModalFrame title={`${taskDetailLabel(syncTaskDetail.task.type)} Task Details`} onClose={() => setSyncTaskDetail(null)}>
             {(() => {
               const events = drTaskEvents[syncTaskDetail.task.id] || [];
-              const failure = syncTaskDetail.failure || taskFailureSummary(syncTaskDetail.task, events);
+              const failure = taskFailureSummary(syncTaskDetail.task, events);
               const details = taskFailureDetails(syncTaskDetail.task, events);
               const showError = isFailedStatus(syncTaskDetail.task.status) || taskHasWarning(syncTaskDetail.task);
               return (

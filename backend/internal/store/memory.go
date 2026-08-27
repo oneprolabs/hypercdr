@@ -2224,6 +2224,7 @@ func (s *MemoryStore) ListTasksFiltered(filter TaskFilter) ([]Task, error) {
 	for _, item := range s.tasks {
 		if (filter.TenantID == "" || item.TenantID == filter.TenantID) &&
 			(filter.ClusterID == "" || item.ClusterID == filter.ClusterID) &&
+			(filter.ProtectionPlanID == "" || item.ProtectionPlanID == filter.ProtectionPlanID) &&
 			(len(filter.Types) == 0 || containsString(filter.Types, item.Type)) &&
 			(len(filter.Statuses) == 0 || containsString(filter.Statuses, item.Status)) {
 			if filter.Summary {

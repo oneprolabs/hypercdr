@@ -3207,6 +3207,10 @@ func (s *PostgresStore) listTasks(filter TaskFilter) ([]Task, error) {
 		args = append(args, filter.ClusterID)
 		conditions = append(conditions, fmt.Sprintf("cluster_id = $%d", len(args)))
 	}
+	if filter.ProtectionPlanID != "" {
+		args = append(args, filter.ProtectionPlanID)
+		conditions = append(conditions, fmt.Sprintf("protection_plan_id = $%d", len(args)))
+	}
 	if len(filter.Types) > 0 {
 		placeholders := make([]string, 0, len(filter.Types))
 		for _, value := range filter.Types {

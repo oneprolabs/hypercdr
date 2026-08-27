@@ -1,9 +1,11 @@
 import React from 'react';
-import { Boxes, Calendar, ClipboardList, Clock, FileCog, Gauge, HardDrive, KeyRound, MoreVertical, Network, RefreshCw, Settings2, User } from 'lucide-react';
-import { formatLocalDateTime } from '../../lib/date-time';
+import { AlertTriangle, Boxes, Calendar, Check, ClipboardList, Clock, FileCog, Gauge, HardDrive, KeyRound, LoaderCircle, MoreVertical, Network, RefreshCw, Settings2, User, X } from 'lucide-react';
+import { formatLocalDateTime, parseUTCInstant } from '../../lib/date-time';
 import type { AppItem, ResourceCategoryKey, ResourceKindSummary, ResourceRef } from '../clusters/types';
 import type { ApiRestorePoint, ApiTask, ApiTaskEvent, VolumeProgressInfo } from './types';
 import { isActiveTaskStatus, isFailedStatus, taskHasWarning } from './task-status';
+import { groupTaskEventsByStage, keyTaskEvents, latestVisibleTaskEvent, reachedTaskStages } from './task-stage-model';
+export { groupTaskEventsByStage, keyTaskEvents, latestVisibleTaskEvent, reachedTaskStages } from './task-stage-model';
 
 export function formatBytes(bytes: number): string {
   if (!bytes) return '0 B';
@@ -172,6 +174,82 @@ export function hasTaskEventReason(events: ApiTaskEvent[] | undefined, reasons: 
 
 export function latestTaskMessage(events: ApiTaskEvent[] | undefined, fallback: string): string {
   return events?.at(-1)?.message || fallback;
+}
+
+export type TaskActivity = {
+  label: string;
+  transferring: boolean;
+};
+
+export function taskWorkflowProgress(task: ApiTask, events: ApiTaskEvent[] | undefined): number {
+  const type = String(task.type || '').toLowerCase();
+  const status = String(task.status || '').toLowerCase();
+  if (['succeeded', 'completed', 'success'].includes(status)) return 100;
+  const recovery = ['drill', 'restore', 'takeover'].includes(type);
+  const reasons = new Set((events || []).map(event => String(event.reason || '').toLowerCase()));
+  const volume = taskProgressInfo(task, events);
+  const volumePercent = volume?.knownTotal ? Math.max(0, Math.min(100, volume.percent)) : 0;
+  const candidates = [2];
+
+  if (reasons.has('storage_preflight_started')) candidates.push(5);
+  if (reasons.has('storage_preflight_succeeded') || reasons.has('storage_preflight_skipped')) candidates.push(7);
+  if (reasons.has('dispatched')) candidates.push(8);
+  if (reasons.has('accepted')) candidates.push(10);
+
+  if (recovery) {
+    if (volumePercent > 0) candidates.push(10 + volumePercent * 0.6);
+    if (reasons.has('restore_completed')) candidates.push(78);
+    if (reasons.has('application_readiness_check_started')) candidates.push(88);
+    if (reasons.has('application_ready')) candidates.push(95);
+    const stages = Array.isArray(task.payload?.recoveryStages) ? task.payload.recoveryStages : [];
+    if (stages.some((stage: any) => stage?.id === 'restoring_resources' && stage?.status === 'succeeded')) candidates.push(78);
+    if (stages.some((stage: any) => stage?.id === 'waiting_for_workloads' && stage?.status !== 'pending')) candidates.push(88);
+    if (stages.some((stage: any) => stage?.id === 'application_validation' && stage?.status !== 'pending')) candidates.push(95);
+    if (status === 'finalizing' || reasons.has('finalizing')) candidates.push(98);
+  } else {
+    if (volumePercent > 0) candidates.push(10 + volumePercent * 0.75);
+    if (reasons.has('backup_completed')) candidates.push(90);
+    if (status === 'finalizing' || reasons.has('finalizing')) candidates.push(95);
+  }
+  return Math.min(99, Math.max(...candidates));
+}
+
+export function taskCurrentActivity(task: ApiTask, events: ApiTaskEvent[] | undefined): TaskActivity {
+  const type = String(task.type || '').toLowerCase();
+  const status = String(task.status || '').toLowerCase();
+  const recovery = type === 'drill' || type === 'restore' || type === 'takeover';
+  const orderedEvents = [...(events || [])].sort((left, right) => {
+    const timeOrder = (parseUTCInstant(left.createdAt)?.getTime() || 0) - (parseUTCInstant(right.createdAt)?.getTime() || 0);
+    return timeOrder || String(left.id || '').localeCompare(String(right.id || ''));
+  });
+  const latest = orderedEvents.at(-1);
+  const reason = String(latest?.reason || '').toLowerCase();
+  const reasons = new Set(orderedEvents.map(event => String(event.reason || '').toLowerCase()));
+  const volume = taskProgressInfo(task, orderedEvents);
+  const laterWorkflowStage = [...orderedEvents].reverse().find(event =>
+    ['finalizing', 'backup_completed', 'restore_completed', 'application_readiness_check_started', 'application_ready', 'completed'].includes(String(event.reason || '').toLowerCase()),
+  );
+  const transferring = Boolean(
+    volume && !laterWorkflowStage && !['finalizing', 'canceling'].includes(status)
+      && ['progress', 'backup_progress', 'restore_progress'].includes(reason),
+  );
+
+  if (status === 'canceling') return { label: recovery ? 'Canceling recovery' : 'Canceling sync', transferring: false };
+  if (status === 'finalizing' || reasons.has('finalizing')) return { label: recovery ? 'Finalizing recovery' : 'Creating restore point', transferring: false };
+  // Resolve the furthest confirmed phase, rather than trusting whichever
+  // event happened to arrive last. This keeps the label monotonic while live
+  // progress events are appended.
+  if (reasons.has('application_ready')) return { label: 'Validating recovered application', transferring: false };
+  if (reasons.has('application_readiness_check_started')) return { label: 'Waiting for workload readiness', transferring: false };
+  if (reasons.has('restore_completed')) return { label: 'Restoring Kubernetes resources', transferring: false };
+  if (reasons.has('backup_completed')) return { label: 'Creating restore point', transferring: false };
+  if (transferring) return { label: recovery ? 'Restoring persistent volume data' : 'Backing up persistent volume data', transferring: true };
+  if (reasons.has('accepted')) return { label: recovery ? 'Preparing target environment' : 'Preparing backup', transferring: false };
+  if (reasons.has('dispatched')) return { label: 'Waiting for cluster agent', transferring: false };
+  if (reasons.has('storage_preflight_succeeded') || reasons.has('storage_preflight_skipped')) return { label: 'Preparing task dispatch', transferring: false };
+  if (reasons.has('storage_preflight_started')) return { label: 'Checking storage readiness', transferring: false };
+  if (recovery) return { label: recoveryPreparingMessage(orderedEvents, type).replace(/\.\.\.$/, ''), transferring: false };
+  return { label: syncPreparingMessage(orderedEvents).replace(/\.\.\.$/, ''), transferring: false };
 }
 
 export function eventRestoreResultErrors(event?: ApiTaskEvent | null): string[] {
@@ -574,76 +652,130 @@ function taskFailureSolution(code: string, details: string[], fallback: string):
 
 export function TaskProcessTimeline({ task, events }: { task: ApiTask; events: ApiTaskEvent[] }) {
   const terminal = !isActiveTaskStatus(task.status);
-  const recoveryStages = taskRecoveryStages(task, events);
+  const visibleEvents = keyTaskEvents(events.filter(event => !event.taskId || event.taskId === task.id));
+  const stageGroups = groupTaskEventsByStage(task, visibleEvents);
+  const reachedStages = reachedTaskStages(stageGroups);
   return (
     <div className="hbdr-task-detail-section">
-      <div className="hbdr-task-detail-section-title">
-        <strong>Execution process</strong>
-        <span>{terminal ? `${events.length} records` : `Live · ${events.length} records`}</span>
-      </div>
-      {recoveryStages.length > 0 && (
-        <div className="hbdr-recovery-stage-list" aria-label="Recovery stages">
-          {recoveryStages.map(stage => (
-            <section key={stage.id} className={`is-${stage.status}`}>
-              <i aria-hidden="true" />
-              <div>
-                <strong>{stage.name}</strong>
-                {stage.message && <span>{productTaskMessage(stage.message)}</span>}
-                {stage.evidence.length > 0 && <ul>{stage.evidence.map((item, index) => <li key={`${stage.id}-${index}`}>{item}</li>)}</ul>}
+      <div className="hbdr-task-stage-groups" aria-label="Task stages" aria-live="polite">
+        {reachedStages.map(stage => (
+          <TimelineItem
+            key={stage.id}
+            status={stage.status}
+            title={stage.name}
+            className="hbdr-task-stage-group"
+          >
+            {stage.events.length > 0 && (
+              <div className="hbdr-task-detail-events" aria-label={`${stage.name} events`}>
+                {stage.events.map(event => (
+                  <TaskStageEvent key={event.id} event={event} current={!terminal && event.id === stage.currentEventId} />
+                ))}
               </div>
-              <em>{stage.status.replace(/_/g, ' ')}</em>
-            </section>
-          ))}
-        </div>
-      )}
-      <div className="hbdr-task-detail-events" aria-live="polite">
-        {events.length > 0 ? events.map(event => {
-          const errors = eventRestoreResultErrors(event);
-          const eventMessage = taskProcessEventMessage(event);
-          return (
-            <section key={event.id} className="hbdr-task-log-entry">
-              <div className="hbdr-task-log-line" title={`${formatLocalDateTime(event.createdAt) || '-'} · ${eventMessage}`}>
-                <time>{formatLocalDateTime(event.createdAt) || '-'}</time>
-                <p className={event.level === 'error' ? 'is-error' : ''}>{eventMessage}</p>
-              </div>
-              {errors.length > 0 && <ul>{errors.map((error, index) => <li key={`${index}-${error}`}>{error}</li>)}</ul>}
-            </section>
-          );
-        }) : <p className="hbdr-task-detail-empty">Waiting for task events...</p>}
+            )}
+          </TimelineItem>
+        ))}
+        {reachedStages.length === 0 && <p className="hbdr-task-detail-empty">Waiting for task events...</p>}
       </div>
     </div>
   );
 }
 
-type TaskRecoveryStage = {
-  id: string;
-  name: string;
-  status: string;
-  message: string;
-  evidence: string[];
+type TimelineStatus = 'completed' | 'in_progress' | 'failed' | 'warning' | 'not_started';
+
+function TimelineMarker({ status }: { status: TimelineStatus }) {
+  const label = status === 'in_progress' ? 'In progress' : status.replace('_', ' ');
+  return (
+    <span className={`hbdr-timeline-marker is-${status}`} role="img" aria-label={label}>
+      {status === 'completed' && <Check size={11} strokeWidth={3} />}
+      {status === 'in_progress' && <LoaderCircle size={12} strokeWidth={2.5} />}
+      {status === 'failed' && <X size={11} strokeWidth={3} />}
+      {status === 'warning' && <AlertTriangle size={10} strokeWidth={2.7} />}
+    </span>
+  );
+}
+
+function TimelineItem({ status, title, className = '', children }: {
+  status: TimelineStatus;
+  title: React.ReactNode;
+  className?: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <section className={`hbdr-timeline-item is-${status} ${className}`.trim()}>
+      <span className="hbdr-timeline-rail" aria-hidden="true" />
+      <TimelineMarker status={status} />
+      <div className="hbdr-timeline-content">
+        <strong className="hbdr-timeline-title">{title}</strong>
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function TaskStageEvent({ event, current }: { event: ApiTaskEvent; current: boolean }) {
+  const errors = eventRestoreResultErrors(event);
+  const presentation = taskEventPresentation(event);
+  const level = String(event.level || '').toLowerCase();
+  const pointState = level === 'error' || errors.length > 0
+    ? 'failed'
+    : level === 'warning' || level === 'warn'
+      ? 'warning'
+      : current
+        ? 'in_progress'
+        : 'completed';
+  return (
+    <TimelineItem
+      status={pointState}
+      title={<><time>[{formatLocalDateTime(event.createdAt) || '-'}]</time><span>{presentation.summary}</span></>}
+      className="hbdr-task-log-entry"
+    >
+      {presentation.detail && <p className="hbdr-task-log-detail">{presentation.detail}</p>}
+      {errors.length > 0 && <ul>{errors.map((error, index) => <li key={`${index}-${error}`}>{error}</li>)}</ul>}
+    </TimelineItem>
+  );
+}
+
+export function latestVisibleTaskEventMessage(events: ApiTaskEvent[] | undefined): string {
+  const event = latestVisibleTaskEvent(events);
+  return event ? taskProcessEventMessage(event) : 'Waiting for task events...';
+}
+
+export type TaskStatusDisplay = {
+  stage: string;
+  detail: string;
+  progress?: number;
+  dataTransfer: boolean;
 };
 
-function taskRecoveryStages(task: ApiTask, events: ApiTaskEvent[]): TaskRecoveryStage[] {
-  const candidates: unknown[] = [task.payload?.recoveryStages, task.payload?.velero?.recoveryStages];
-  [...events].reverse().forEach(event => {
-    candidates.push(event.payload?.recoveryStages, event.payload?.velero?.recoveryStages);
-  });
-  const raw = candidates.find(value => Array.isArray(value)) as Array<Record<string, unknown>> | undefined;
-  if (!raw) return [];
-  return raw.map((stage, index) => {
-    const status = String(stage.status || 'pending').trim().toLowerCase().replace(/\s+/g, '_');
-    const evidenceValue = stage.evidence;
-    const evidence = Array.isArray(evidenceValue)
-      ? evidenceValue.map(item => typeof item === 'string' ? item : JSON.stringify(item)).filter(Boolean)
-      : evidenceValue ? [typeof evidenceValue === 'string' ? evidenceValue : JSON.stringify(evidenceValue)] : [];
-    return {
-      id: String(stage.id || `stage-${index}`),
-      name: String(stage.name || stage.id || `Stage ${index + 1}`),
-      status,
-      message: String(stage.message || ''),
-      evidence,
-    };
-  });
+/** Stable two-line status model: stage title on line one, event/data on line two. */
+export function taskStatusDisplay(task: ApiTask, events: ApiTaskEvent[]): TaskStatusDisplay {
+  if (task.payload?.submissionPending) {
+    return { stage: 'Preparing Backup', detail: 'Submitting sync request…', dataTransfer: false };
+  }
+  const visible = keyTaskEvents(events.filter(event => !event.taskId || event.taskId === task.id));
+  const groups = groupTaskEventsByStage(task, visible);
+  const current = groups.find(group => group.currentEventId) || groups.find(group => group.status === 'in_progress') || groups.find(group => group.status === 'failed');
+  const latest = latestVisibleTaskEvent(visible);
+  const fallback = latest ? taskEventPresentation(latest).summary : 'Waiting for task events...';
+  const recovery = ['drill', 'restore', 'takeover'].includes(String(task.type || '').toLowerCase());
+  const dataStage = recovery ? 'restoring_data' : 'backing_up_data';
+  const dataTransfer = current?.id === dataStage;
+  const progress = dataTransfer ? taskProgressInfo(task, visible) : null;
+  const taskPercent = Number(task.progress);
+  const fallbackPercent = dataTransfer && Number.isFinite(taskPercent)
+    ? Math.max(0, Math.min(100, taskPercent))
+    : undefined;
+  const detail = dataTransfer && progress?.knownTotal && progress.totalBytes > 0
+    ? `${formatBytes(progress.bytesDone)} / ${formatBytes(progress.totalBytes)}${progress.speedBytesPerSecond > 0 ? ` · ${formatBytesPerSecond(progress.speedBytesPerSecond)}` : ''}`
+    : fallback;
+  return {
+    stage: current?.name || (recovery ? 'Preparing Restore' : 'Preparing Backup'),
+    detail,
+    progress: dataTransfer
+      ? (progress?.knownTotal ? Math.max(0, Math.min(100, progress.percent)) : fallbackPercent)
+      : undefined,
+    dataTransfer,
+  };
 }
 
 export function taskProcessEventMessage(event: ApiTaskEvent): string {
@@ -654,13 +786,35 @@ export function taskProcessEventMessage(event: ApiTaskEvent): string {
     storage_preflight_skipped: message || 'Storage is already configured; readiness check skipped.',
     dispatched: 'Task was dispatched to the cluster agent.',
     accepted: 'Cluster agent accepted the task and started processing.',
+    progress: 'Persistent volume data transfer is in progress.',
+    backup_progress: 'Persistent volume data backup is in progress.',
+    restore_progress: 'Persistent volume data restoration is in progress.',
+    finalizing: 'Data transfer completed; final task records are being prepared.',
     backup_completed: 'Backup and restore point creation completed successfully.',
     restore_completed: 'Resource and volume data restoration completed successfully.',
     application_readiness_check_started: 'Restored application readiness validation started.',
     application_ready: 'Restored application readiness validation completed successfully.',
     completed: message || 'Task completed successfully.',
   };
-  return productTaskMessage(messages[event.reason] || message || `${String(event.reason || 'Task event').replace(/_/g, ' ')}.`);
+  const fallback = /[\u3400-\u9fff]/.test(message)
+    ? `${String(event.reason || 'Task event').replace(/[._]/g, ' ')}.`
+    : message;
+  return productTaskMessage(messages[event.reason] || fallback || `${String(event.reason || 'Task event').replace(/[._]/g, ' ')}.`);
+}
+
+export function taskEventPresentation(event: ApiTaskEvent): { summary: string; detail: string } {
+  const payload = recordFromUnknown(event.payload);
+  const summary = productTaskMessage(String(payload.summary || '').trim()) || taskProcessEventMessage(event);
+  const rawDetail = payload.detail;
+  if (typeof rawDetail === 'string' && rawDetail.trim()) return { summary, detail: rawDetail.trim() };
+  if (rawDetail && typeof rawDetail === 'object') {
+    const detail = Object.entries(rawDetail as Record<string, unknown>)
+      .map(([key, value]) => `${key.replace(/([A-Z])/g, ' $1').replace(/^./, char => char.toUpperCase())}: ${typeof value === 'string' ? value : JSON.stringify(value)}`)
+      .filter(Boolean).join('\n');
+    if (detail) return { summary, detail };
+  }
+  const errors = eventRestoreResultErrors(event);
+  return { summary, detail: errors.join('\n') };
 }
 
 export function productTaskMessage(message: string): string {
@@ -672,19 +826,26 @@ export function productTaskMessage(message: string): string {
 }
 
 export function TaskFinalResult({ task, events }: { task: ApiTask; events: ApiTaskEvent[] }) {
-  if (isActiveTaskStatus(task.status)) return null;
+  if (isActiveTaskStatus(task.status)) return (
+    <div className="hbdr-task-final-result is-running">
+      <small>Final result</small>
+      <strong>Task is still running</strong>
+      <span>The final result will be available when all required stages finish.</span>
+    </div>
+  );
   const failed = isFailedStatus(task.status);
   const warning = taskHasWarning(task);
-  const lastEvent = events.at(-1);
+  const lastEvent = latestVisibleTaskEvent(events);
   const failure = failed || warning ? taskFailureSummary(task, events) : null;
   const title = failed
     ? `[${failure?.code || normalizeErrorCode(task.errorCode)}] ${failure?.title || 'Task failed'}`
     : warning
       ? `Completed with warning · ${failure?.title || 'Review task details'}`
       : `${taskDetailLabel(task.type)} completed successfully`;
-  const message = productTaskMessage(failed || warning
-    ? failure?.description || task.errorMessage || lastEvent?.message || 'The task did not complete successfully.'
-    : lastEvent?.message || 'All task stages completed successfully.');
+  const lastPresentation = lastEvent ? taskEventPresentation(lastEvent) : null;
+  const message = failed || warning
+    ? failure?.description || task.errorMessage || lastPresentation?.summary || 'The task did not complete successfully.'
+    : lastPresentation?.summary || 'All task stages completed successfully.';
   return (
     <div className={`hbdr-task-final-result ${failed ? 'is-failed' : warning ? 'is-warning' : 'is-succeeded'}`}>
       <small>Final result</small>

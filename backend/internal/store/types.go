@@ -150,12 +150,13 @@ type Store interface {
 // TaskFilter keeps list endpoints from loading and decoding the complete task
 // history when a page only needs a small, recent operational view.
 type TaskFilter struct {
-	TenantID  string
-	ClusterID string
-	Types     []string
-	Statuses  []string
-	Limit     int
-	Summary   bool
+	TenantID         string
+	ClusterID        string
+	ProtectionPlanID string
+	Types            []string
+	Statuses         []string
+	Limit            int
+	Summary          bool
 }
 
 type PlatformSettings struct {

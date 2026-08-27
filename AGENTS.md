@@ -23,7 +23,11 @@ updated documentation.
 
 ## Design rules
 
-- Persist timestamps in UTC and convert only at display boundaries.
+- Persist timestamps in UTC and convert only at display boundaries. Every
+  user-visible timestamp must use the product's selected user timezone through
+  the shared date-time helpers, including task timelines and the timestamp in
+  `RP-YYYY-MM-DD HH:mm:ss` restore-point labels. Never format visible dates
+  directly with the browser timezone or reuse a display string for ordering.
 - Derive UI state from persisted task and resource data.
 - Enforce tenant scope in storage and API paths, not only in the UI.
 - Keep user-facing pages consistent with shared components and design tokens.

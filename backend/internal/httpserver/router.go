@@ -633,6 +633,8 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("GET /api/v1/restore-points/{id}/contents", r.getRestorePointContents)
 	r.mux.HandleFunc("POST /api/v1/restore-points/delete", r.deleteRestorePoints)
 	r.mux.HandleFunc("GET /api/v1/tasks", r.listTasks)
+	r.mux.HandleFunc("GET /api/v1/protection-plans/{id}/latest-sync", r.latestPlanTask("backup"))
+	r.mux.HandleFunc("GET /api/v1/protection-plans/{id}/latest-recovery", r.latestPlanRecoveryTask)
 	r.mux.HandleFunc("GET /api/v1/tasks/{id}", r.getTask)
 	r.mux.HandleFunc("GET /api/v1/tasks/{id}/events", r.tenantGuard("task", r.listTaskEvents))
 	r.mux.HandleFunc("POST /api/v1/tasks/{id}/cancel", r.tenantGuard("task", r.cancelTask))
@@ -1196,7 +1198,22 @@ func (r *Router) frontend(w http.ResponseWriter, req *http.Request) {
 
 	info, err := os.Stat(fullPath)
 	if err != nil || info.IsDir() {
+		// Asset URLs are content-addressed by the frontend build. Returning the
+		// SPA shell for a missing JavaScript file produces a misleading 200 with
+		// text/html and leaves an already-open browser on stale code.
+		if strings.HasPrefix(cleanPath, "assets/") {
+			http.NotFound(w, req)
+			return
+		}
 		fullPath = filepath.Join(frontendDir, "index.html")
+		cleanPath = "index.html"
+	}
+	if cleanPath == "index.html" {
+		w.Header().Set("Cache-Control", "no-store")
+	} else if strings.HasPrefix(cleanPath, "assets/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "no-cache")
 	}
 	http.ServeFile(w, req, fullPath)
 }
@@ -6371,6 +6388,55 @@ func (r *Router) listTasks(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": nonNilSlice(items)})
 }
 
+func (r *Router) latestPlanTask(taskType string) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		planID := req.PathValue("id")
+		plan, ok, err := r.store.GetProtectionPlan(planID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "get_protection_plan_failed"})
+			return
+		}
+		if !ok || !tenantVisible(req, plan.TenantID) {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "protection_plan_not_found"})
+			return
+		}
+		filter := store.TaskFilter{TenantID: plan.TenantID, ProtectionPlanID: planID, Types: []string{taskType}, Limit: 1, Summary: true}
+		items, err := r.store.ListTasksFiltered(filter)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_plan_tasks_failed"})
+			return
+		}
+		if len(items) == 0 {
+			writeJSON(w, http.StatusOK, map[string]any{"task": nil})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"task": items[0]})
+	}
+}
+
+func (r *Router) latestPlanRecoveryTask(w http.ResponseWriter, req *http.Request) {
+	planID := req.PathValue("id")
+	plan, ok, err := r.store.GetProtectionPlan(planID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "get_protection_plan_failed"})
+		return
+	}
+	if !ok || !tenantVisible(req, plan.TenantID) {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "protection_plan_not_found"})
+		return
+	}
+	items, err := r.store.ListTasksFiltered(store.TaskFilter{TenantID: plan.TenantID, ProtectionPlanID: planID, Types: []string{"drill", "restore", "takeover"}, Limit: 1, Summary: true})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_plan_tasks_failed"})
+		return
+	}
+	if len(items) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"task": nil})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"task": items[0]})
+}
+
 func (r *Router) getTask(w http.ResponseWriter, req *http.Request) {
 	id := req.PathValue("id")
 	item, ok, err := r.store.GetTask(id)
@@ -7018,6 +7084,22 @@ func (r *Router) createPendingBackupTask(body backupTaskRequest, appID string) (
 	if body.ProtectionPlanID == "" {
 		return store.Task{}, errors.New("backup task requires protection plan id")
 	}
+	if appID == "" {
+		plan, ok, err := r.store.GetProtectionPlan(body.ProtectionPlanID)
+		if err != nil {
+			return store.Task{}, err
+		}
+		if !ok {
+			return store.Task{}, errors.New("protection plan not found")
+		}
+		appID = plan.AppID
+		if appID == "" && len(plan.AppIDs) == 1 {
+			appID = plan.AppIDs[0]
+		}
+	}
+	if appID == "" {
+		return store.Task{}, errors.New("backup task requires application id")
+	}
 	commandID := store.NewPublicID()
 	veleroBackupName := ""
 	if body.ProtectionPlanID != "" {
@@ -7213,6 +7295,8 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 	storageRepoID := ""
 	storageSourceClusterID := ""
 	protectionPlanID := body.ProtectionPlanID
+	var recoveryPlan store.ProtectionPlan
+	var recoveryAppID string
 	if protectionPlanID != "" {
 		plan, found, err := r.store.GetProtectionPlan(protectionPlanID)
 		if err != nil {
@@ -7224,6 +7308,8 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "protection_plan_not_found"})
 			return
 		}
+		recoveryPlan = plan
+		recoveryAppID = plan.AppID
 	}
 	if body.RestorePointID != "" {
 		point, ok, err := r.store.GetRestorePoint(body.RestorePointID)
@@ -7248,7 +7334,26 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 			})
 			return
 		}
+		if protectionPlanID != "" && point.ProtectionPlanID != "" && protectionPlanID != point.ProtectionPlanID {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "restore_point_plan_mismatch", "message": "The selected restore point does not belong to the selected protection plan."})
+			return
+		}
 		protectionPlanID = point.ProtectionPlanID
+		if recoveryPlan.ID == "" && protectionPlanID != "" {
+			plan, found, err := r.store.GetProtectionPlan(protectionPlanID)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "get_protection_plan_failed"})
+				return
+			}
+			if !found || !tenantVisible(req, plan.TenantID) {
+				writeJSON(w, http.StatusNotFound, map[string]any{"error": "protection_plan_not_found"})
+				return
+			}
+			recoveryPlan, recoveryAppID = plan, plan.AppID
+		}
+		if point.AppID != "" {
+			recoveryAppID = point.AppID
+		}
 		if body.VeleroBackupName == "" {
 			body.VeleroBackupName = point.VeleroBackupName
 		}
@@ -7329,9 +7434,18 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 			return
 		}
 	}
+	if protectionPlanID == "" || body.RestorePointID == "" || recoveryAppID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "recovery_relationship_incomplete", "message": "A recovery task requires a protection plan, application, and restore point."})
+		return
+	}
+	if recoveryPlan.ID != "" && recoveryPlan.AppID != "" && recoveryAppID != recoveryPlan.AppID && !slices.Contains(recoveryPlan.AppIDs, recoveryAppID) {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "restore_point_application_mismatch", "message": "The selected restore point does not belong to the selected protection plan application."})
+		return
+	}
 	commandID := store.NewPublicID()
 	task, err := r.store.CreateTask(store.TaskInput{
 		ClusterID:        body.ClusterID,
+		AppID:            recoveryAppID,
 		ProtectionPlanID: protectionPlanID,
 		RestorePointID:   body.RestorePointID,
 		Type:             taskType,
