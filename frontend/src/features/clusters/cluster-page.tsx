@@ -1000,18 +1000,17 @@ export default function ClusterPage(props: {
 
             <AnimatePresence>
         {registerOpen && (
-          <div className="fixed inset-0 z-[230] flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[230]">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={closeRegister} className="absolute inset-0 bg-slate-900/15" />
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="relative max-h-[82vh] w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl">
-              <div className="max-h-[82vh] overflow-y-auto p-4">
-                <div className="mb-4 flex items-start justify-between">
-                  <div>
-                    <h2 className="flex items-center gap-2 text-xl font-bold tracking-tight text-slate-900"><PlusCircle className="text-blue-600" />Register New Cluster</h2>
-                    <p className="mt-1 text-xs text-slate-500">Follow the steps below to connect a Kubernetes cluster to HyperCDR.</p>
-                  </div>
-                  <button onClick={closeRegister} className="rounded-full p-2 transition-colors hover:bg-slate-100"><X size={20} className="text-slate-400" /></button>
+            <motion.aside initial={{ opacity: 0, x: 34 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 34 }} transition={{ duration: 0.18, ease: 'easeOut' }} className="hbdr-filter-drawer hbdr-cluster-register-drawer" role="dialog" aria-modal="true" aria-label="Register New Cluster">
+              <div className="hbdr-filter-drawer-head">
+                <div>
+                    <strong className="flex items-center gap-2 text-xl tracking-tight"><PlusCircle className="text-blue-600" />Register New Cluster</strong>
+                    <span>Follow the steps below to connect a Kubernetes cluster to HyperCDR.</span>
                 </div>
-
+                <button onClick={closeRegister} aria-label="Close registration"><X size={18} /></button>
+              </div>
+              <div className="hbdr-filter-drawer-body hbdr-cluster-register-drawer-body">
                 <div className="space-y-4">
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <label htmlFor="cluster-registration-type" className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Cluster type</label>
@@ -1103,7 +1102,7 @@ export default function ClusterPage(props: {
                   </div>
                 </div>
               </div>
-            </motion.div>
+            </motion.aside>
           </div>
         )}
       </AnimatePresence>
