@@ -753,6 +753,8 @@ type ProtectionPlan struct {
 	PlanStorageSize      map[string]any    `json:"planStorageSize,omitempty"`
 	NextFireAt           time.Time         `json:"nextFireAt,omitempty"`
 	ScheduleEnabled      bool              `json:"scheduleEnabled,omitempty"`
+	LatestSyncTaskID     string            `json:"latestSyncTaskId,omitempty"`
+	LatestRecoveryTaskID string            `json:"latestRecoveryTaskId,omitempty"`
 	Status               string            `json:"status"`
 	CreatedAt            time.Time         `json:"createdAt"`
 	UpdatedAt            time.Time         `json:"updatedAt"`

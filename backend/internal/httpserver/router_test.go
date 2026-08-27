@@ -373,6 +373,13 @@ func TestSchedulerCreatesSingleBackupTaskPerPlan(t *testing.T) {
 	if backupCount != 1 {
 		t.Fatalf("backup task count = %d, want 1", backupCount)
 	}
+	updatedPlan, ok, err := repo.GetProtectionPlan(plan.ID)
+	if err != nil || !ok {
+		t.Fatalf("get scheduled plan: ok=%v err=%v", ok, err)
+	}
+	if updatedPlan.LatestSyncTaskID == "" {
+		t.Fatal("scheduled backup did not update latest sync task pointer")
+	}
 
 	router.runSchedulerTick(now.Add(time.Second))
 	tasks, err = repo.ListTasks(clusterID)
@@ -575,6 +582,13 @@ func TestCreateBackupTaskResolvesProtectionPlanForApp(t *testing.T) {
 	}
 	if body.Task.ProtectionPlanID != plan.ID {
 		t.Fatalf("expected task protection plan %q, got %q", plan.ID, body.Task.ProtectionPlanID)
+	}
+	updatedPlan, ok, err := repo.GetProtectionPlan(plan.ID)
+	if err != nil || !ok {
+		t.Fatalf("get plan after manual backup: ok=%v err=%v", ok, err)
+	}
+	if updatedPlan.LatestSyncTaskID != body.Task.ID {
+		t.Fatalf("latest sync task id = %q, want %q", updatedPlan.LatestSyncTaskID, body.Task.ID)
 	}
 }
 

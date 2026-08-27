@@ -630,6 +630,7 @@ export default function ApplicationDrPage(props: {
   const taskForUnit = (tasks: Record<string, ApiTask>, app: AppItem, allowedTypes: string[] = ['backup']) => {
     const planId = String(app.protectionPlanId || '').trim();
     if (!planId) return undefined;
+    const plan = protectionPlanForApp(app);
     const localTasks = Object.values(tasks);
     const platformPlanTasks = platformTasks.filter(task => allowedTypes.includes(task.type) && String(task.protectionPlanId || task.payload?.protectionPlanId || '').trim() === planId);
     const candidates = [...platformPlanTasks, ...localTasks.filter(local => !platformPlanTasks.some(remote => remote.id === local.id))];
@@ -643,6 +644,13 @@ export default function ApplicationDrPage(props: {
       : '';
     const preferred = preferredTaskId ? matching.find(task => task.id === preferredTaskId) : undefined;
     if (preferred) return preferred;
+    const latestTaskId = allowedTypes.length === 1 && allowedTypes[0] === 'backup'
+      ? plan?.latestSyncTaskId
+      : allowedTypes.some(type => ['drill', 'restore', 'takeover'].includes(type))
+        ? plan?.latestRecoveryTaskId
+        : '';
+    const latest = latestTaskId ? matching.find(task => task.id === latestTaskId) : undefined;
+    if (latest) return latest;
     return matching
       .sort((left, right) => {
         const activeOrder = Number(isActiveTaskStatus(right.status)) - Number(isActiveTaskStatus(left.status));

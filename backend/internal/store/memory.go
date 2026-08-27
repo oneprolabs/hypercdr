@@ -2201,6 +2201,15 @@ func (s *MemoryStore) CreateTask(input TaskInput) (Task, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.tasks[task.ID] = task
+	if plan, ok := s.plans[task.ProtectionPlanID]; ok {
+		switch task.Type {
+		case "backup":
+			plan.LatestSyncTaskID = task.ID
+		case "drill", "restore", "takeover":
+			plan.LatestRecoveryTaskID = task.ID
+		}
+		s.plans[plan.ID] = plan
+	}
 	return task, nil
 }
 

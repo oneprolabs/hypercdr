@@ -1118,6 +1118,8 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   const [liveApiPolicies, setLiveApiPolicies] = useState<ApiPolicy[]>([]);
   const [liveApiPlans, setLiveApiPlans] = useState<ApiProtectionPlan[]>([]);
   const [liveApiApps, setLiveApiApps] = useState<ApiApplication[]>([]);
+  const liveApiPlansRef = useRef<ApiProtectionPlan[]>([]);
+  const liveApiAppsRef = useRef<ApiApplication[]>([]);
   const [liveAppTasks, setLiveAppTasks] = useState<Record<string, ApiTask>>({});
   const [liveRecoveryTasks, setLiveRecoveryTasks] = useState<Record<string, ApiTask>>({});
   const [restorePointNamespaceFilter, setRestorePointNamespaceFilter] = useState<string[]>([]);
@@ -1777,6 +1779,13 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   }, []);
 
   useEffect(() => {
+    liveApiAppsRef.current = liveApiApps;
+  }, [liveApiApps]);
+  useEffect(() => {
+    liveApiPlansRef.current = liveApiPlans;
+  }, [liveApiPlans]);
+
+  useEffect(() => {
     if (!authSession || !PLATFORM_DATA_VIEWS.has(view)) return;
     let cancelled = false;
     const realtimeViews = new Set<View>(['dashboard', 'applications', 'clusters']);
@@ -1802,8 +1811,8 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
         const apiRestorePoints = listItems(restorePointRes);
         const apiRestorePointViews = apiRestorePoints.map(mapRestorePoint);
         setLiveApiTasks(apiTasks);
-        const nextAppTasks = buildAppTaskMap(apiTasks, liveApiApps, ['backup'], apiRestorePointViews, liveApiPlans);
-        const nextRecoveryTasks = buildAppTaskMap(apiTasks, liveApiApps, ['restore', 'drill', 'takeover'], apiRestorePointViews, liveApiPlans);
+        const nextAppTasks = buildAppTaskMap(apiTasks, liveApiAppsRef.current, ['backup'], apiRestorePointViews, liveApiPlansRef.current);
+        const nextRecoveryTasks = buildAppTaskMap(apiTasks, liveApiAppsRef.current, ['restore', 'drill', 'takeover'], apiRestorePointViews, liveApiPlansRef.current);
         setLiveAppTasks(previous => mergeTaskMapKeepingActive(previous, nextAppTasks));
         setLiveRecoveryTasks(previous => mergeTaskMapKeepingActive(previous, nextRecoveryTasks));
         setRestorePointCount(apiRestorePointViews.length);
@@ -1823,10 +1832,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       cancelled = true;
       if (timer) window.clearInterval(timer);
     };
-  // The application activity poll joins tasks to the current application and
-  // plan records. Recreate the poll when either collection changes so the
-  // timer never keeps an initialization-time (often empty) closure.
-  }, [authSession, liveApiApps, liveApiPlans, refreshPlatformData, view]);
+  }, [authSession, refreshPlatformData, view]);
 
   const visibleExtensionModules = useMemo(() => extensionModules.filter(module => authSession && (!module.isVisible || module.isVisible({ currentUser: authSession.user, capabilities: productCapabilities }))), [authSession, extensionModules, productCapabilities]);
   const activeExtension = visibleExtensionModules.find(module => module.view === view);

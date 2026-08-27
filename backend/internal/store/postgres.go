@@ -2552,6 +2552,7 @@ func (s *PostgresStore) ListProtectionPlans(clusterID string) ([]ProtectionPlan,
 		       pp.include_cluster_scoped, coalesce(pp.storage_repo_id::text, ''), coalesce(pp.policy_id::text, ''),
 		       coalesce(pp.target_cluster_id::text, ''), pp.excluded_resources, pp.pre_hooks, pp.post_hooks,
 		       pp.plan_storage_size, coalesce(pps.next_fire_at, '0001-01-01'::timestamptz), coalesce(pps.enabled, false),
+		       coalesce(pp.latest_sync_task_id::text, ''), coalesce(pp.latest_recovery_task_id::text, ''),
 		       pp.status, pp.created_at, pp.updated_at
 		from protection_plans pp
 		left join protection_plan_schedules pps on pps.protection_plan_id = pp.id
@@ -2577,7 +2578,7 @@ func (s *PostgresStore) ListProtectionPlans(clusterID string) ([]ProtectionPlan,
 		if err := rows.Scan(&item.ID, &item.TenantID, &item.SourceClusterID, &item.AppID, &item.ScopeType,
 			&includedResources, &resourceSelection, &labelSelector, &item.IncludeClusterScoped, &item.StorageRepoID, &item.PolicyID,
 			&item.TargetClusterID, &excludedResources, &preHooks, &postHooks, &planStorageSize,
-			&item.NextFireAt, &item.ScheduleEnabled, &item.Status,
+			&item.NextFireAt, &item.ScheduleEnabled, &item.LatestSyncTaskID, &item.LatestRecoveryTaskID, &item.Status,
 			&item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -3150,7 +3151,12 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 	if task.Payload == nil {
 		task.Payload = map[string]any{}
 	}
-	_, err = s.db.Exec(`
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Task{}, err
+	}
+	defer tx.Rollback()
+	_, err = tx.Exec(`
 		insert into tasks (
 			id, tenant_id, cluster_id, app_id, protection_plan_id, restore_point_id, type, status,
 			progress, command_id, payload, created_at
@@ -3159,7 +3165,33 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 			$7, $8, 0, nullif($9, '')::uuid, $10, $11)
 	`, task.ID, task.TenantID, task.ClusterID, task.AppID, task.ProtectionPlanID, task.RestorePointID,
 		task.Type, task.Status, task.CommandID, payloadRaw, now)
-	return task, err
+	if err != nil {
+		return Task{}, err
+	}
+	if task.ProtectionPlanID != "" {
+		column := ""
+		switch task.Type {
+		case "backup":
+			column = "latest_sync_task_id"
+		case "drill", "restore", "takeover":
+			column = "latest_recovery_task_id"
+		}
+		if column != "" {
+			result, updateErr := tx.Exec(`update protection_plans set `+column+`=$2 where id=$1`, task.ProtectionPlanID, task.ID)
+			if updateErr != nil {
+				return Task{}, updateErr
+			}
+			if affected, affectedErr := result.RowsAffected(); affectedErr != nil {
+				return Task{}, affectedErr
+			} else if affected != 1 {
+				return Task{}, fmt.Errorf("protection plan %s not found while creating %s task", task.ProtectionPlanID, task.Type)
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return Task{}, err
+	}
+	return task, nil
 }
 
 func (s *PostgresStore) ListTasks(clusterID string) ([]Task, error) {
@@ -3506,6 +3538,7 @@ func (s *PostgresStore) GetProtectionPlan(id string) (ProtectionPlan, bool, erro
 		       pp.include_cluster_scoped, coalesce(pp.storage_repo_id::text, ''), coalesce(pp.policy_id::text, ''),
 		       coalesce(pp.target_cluster_id::text, ''), pp.excluded_resources, pp.pre_hooks, pp.post_hooks,
 		       pp.plan_storage_size, coalesce(pps.next_fire_at, '0001-01-01'::timestamptz), coalesce(pps.enabled, false),
+		       coalesce(pp.latest_sync_task_id::text, ''), coalesce(pp.latest_recovery_task_id::text, ''),
 		       pp.status, pp.created_at, pp.updated_at
 		from protection_plans pp
 		left join protection_plan_schedules pps on pps.protection_plan_id = pp.id
@@ -3516,7 +3549,7 @@ func (s *PostgresStore) GetProtectionPlan(id string) (ProtectionPlan, bool, erro
 	if err := row.Scan(&item.ID, &item.TenantID, &item.SourceClusterID, &item.AppID, &item.ScopeType,
 		&includedResources, &resourceSelection, &labelSelector, &item.IncludeClusterScoped, &item.StorageRepoID, &item.PolicyID,
 		&item.TargetClusterID, &excludedResources, &preHooks, &postHooks, &planStorageSize,
-		&item.NextFireAt, &item.ScheduleEnabled, &item.Status,
+		&item.NextFireAt, &item.ScheduleEnabled, &item.LatestSyncTaskID, &item.LatestRecoveryTaskID, &item.Status,
 		&item.CreatedAt, &item.UpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ProtectionPlan{}, false, nil

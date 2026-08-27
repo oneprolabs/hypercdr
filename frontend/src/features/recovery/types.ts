@@ -105,6 +105,8 @@ export type ApiProtectionPlan = {
   planStorageSize?: Record<string, any>;
   nextFireAt?: string;
   scheduleEnabled?: boolean;
+  latestSyncTaskId?: string;
+  latestRecoveryTaskId?: string;
   createdAt?: string;
   updatedAt?: string;
 };
