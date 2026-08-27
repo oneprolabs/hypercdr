@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, CheckCircle2, ChevronRight, Edit2, Eye, GitBranch, MoreVertical, Plus, PlusCircle, RefreshCw, Server, ShieldCheck, Star, Terminal, Trash2, Upload, X } from 'lucide-react';
+import { AlertTriangle, Check, CheckCircle2, ChevronRight, Edit2, Eye, GitBranch, MoreVertical, Plus, PlusCircle, RefreshCw, Server, Star, Trash2, Upload, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { ApiRequestError, apiGet, apiPatch, apiPost } from '../../api/client';
 import { SearchBar } from '../../components/search-bar';
@@ -44,6 +44,17 @@ const unregisterFailure=(task:ApiTask|null,events:ApiTaskEvent[])=>{
 };
 const agentReadiness=(cluster:Cluster)=>cluster.connectionStatus!=='online'?{label:'Offline',className:'text-slate-500'}:cluster.status==='healthy'?{label:'Ready',className:'text-emerald-600'}:cluster.status==='syncing'?{label:'Syncing',className:'text-blue-600'}:{label:'Degraded',className:'text-amber-600'};
 const copyTextToClipboard=async(text:string,textarea?:HTMLTextAreaElement|null)=>{try{await navigator.clipboard.writeText(text);return true}catch{if(!textarea)return false;textarea.focus();textarea.select();return document.execCommand('copy')}};
+
+function RegistrationStep({number,title,description,children}:{number:number;title:string;description:string;children?:React.ReactNode}) {
+  return <section className="flex gap-3.5">
+    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white shadow-sm shadow-blue-200">{number}</div>
+    <div className="min-w-0 flex-1 pb-1">
+      <h3 className="text-sm font-bold leading-7 text-slate-900">{title}</h3>
+      <p className="mt-0.5 text-xs leading-5 text-slate-500">{description}</p>
+      {children && <div className="mt-3">{children}</div>}
+    </div>
+  </section>;
+}
 
 export default function ClusterPage(props: {
   clusters: Cluster[];
@@ -996,7 +1007,7 @@ export default function ClusterPage(props: {
                 <div className="mb-4 flex items-start justify-between">
                   <div>
                     <h2 className="flex items-center gap-2 text-xl font-bold tracking-tight text-slate-900"><PlusCircle className="text-blue-600" />Register New Cluster</h2>
-                    <p className="mt-1 text-xs text-slate-500">{prepareNodeCommand ? 'Install private registry trust, then install the agent stack.' : 'Install the agent stack with cluster-admin access.'}</p>
+                    <p className="mt-1 text-xs text-slate-500">Follow the steps below to connect a Kubernetes cluster to HyperCDR.</p>
                   </div>
                   <button onClick={closeRegister} className="rounded-full p-2 transition-colors hover:bg-slate-100"><X size={20} className="text-slate-400" /></button>
                 </div>
@@ -1009,23 +1020,16 @@ export default function ClusterPage(props: {
                       <option value="huaweicloud-cce">Huawei Cloud CCE</option>
                     </select>
                   </div>
-                  {registrationType === 'huaweicloud-cce' && <div className="rounded-xl border border-sky-100 bg-sky-50 p-4 text-sm text-sky-900">
-                    <p className="font-bold">Before you begin</p>
-                    <ul className="mt-2 list-disc space-y-1 pl-4 text-xs leading-5 text-sky-700">
-                      <li>Install kubectl on this Linux operations host.</li>
-                      <li>Download the CCE kubeconfig from Huawei Cloud and save it as <code className="rounded bg-white/70 px-1">~/.kube/hypercdr-cce.yaml</code>.</li>
-                      <li>The installer will discover the file and run compatibility checks before installation.</li>
-                    </ul>
-                  </div>}
-                  <div className="pt-1 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Installation steps</div>
-                  {prepareNodeCommand && <><div className="flex gap-3 rounded-xl border border-blue-100 bg-blue-50 p-3">
-                    <div className="mt-1"><ShieldCheck size={20} className="text-blue-600" /></div>
-                    <div className="text-sm">
-                      <p className="mb-1 font-bold text-blue-900">1. Install the registry CA on every node</p>
-                      <p className="leading-relaxed text-blue-700">Run on every Kubernetes node to trust the internal registry.</p>
-                    </div>
-                  </div>
-
+                  <div className="space-y-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  {(() => {
+                    let step = 0;
+                    const nextStep = () => ++step;
+                    return <>
+                  {registrationType === 'huaweicloud-cce' && <>
+                    <RegistrationStep number={nextStep()} title="Install kubectl" description="Install kubectl on the Linux or macOS host that will run the registration command." />
+                    <RegistrationStep number={nextStep()} title="Download the CCE kubeconfig" description="Download the cluster credential from Huawei Cloud CCE and save it as ~/.kube/hypercdr-cce.yaml. The installer will detect it automatically." />
+                  </>}
+                  {prepareNodeCommand && <RegistrationStep number={nextStep()} title="Install the registry CA" description="Run this command on every Kubernetes node to trust the private image registry.">
                   <div className="relative">
                     <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900 p-4 font-mono text-[11px] leading-5 text-blue-300 shadow-inner">
                       <div className="mb-2 flex items-center gap-2 border-b border-white/10 pb-2 opacity-50">
@@ -1050,16 +1054,14 @@ export default function ClusterPage(props: {
                       {caCopied ? <CheckCircle2 size={12} /> : <Check size={12} />}
                       {caCopied ? 'Copied' : 'Copy'}
                     </button>
-                  </div></>}
-
-                  <div className="flex gap-3 rounded-xl border border-blue-100 bg-blue-50 p-3">
-                    <div className="mt-1"><Terminal size={18} className="text-blue-600" /></div>
-                    <div className="text-sm">
-                      <p className="mb-1 font-bold text-blue-900">{prepareNodeCommand ? '2' : '1'}. Install agent stack</p>
-                      <p className="leading-relaxed text-blue-700">Run once with cluster-admin kubectl access to install Velero and comm-agent.</p>
-                    </div>
                   </div>
+                  </RegistrationStep>}
 
+                  <RegistrationStep
+                    number={nextStep()}
+                    title="Install HyperCDR agent"
+                    description={registrationType === 'huaweicloud-cce' ? 'Run this command on the host with access to the CCE cluster. The installer will verify the kubeconfig before making changes.' : 'Log in to the Kubernetes control-plane node and run this command.'}
+                  >
                   <div className="relative">
                     <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900 p-4 font-mono text-[11px] leading-5 text-blue-300 shadow-inner">
                       <div className="mb-2 flex items-center gap-2 border-b border-white/10 pb-2 opacity-50">
@@ -1086,15 +1088,13 @@ export default function ClusterPage(props: {
                     </button>
                   </div>
                   {installError && <p className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-xs font-medium text-rose-700">{installError}</p>}
+                  </RegistrationStep>
 
-                  <div className="flex gap-3 rounded-xl border border-emerald-100 bg-emerald-50 p-3">
-                    <div className="mt-1">
-                      {registrationWaiting ? <RefreshCw size={20} className="animate-spin text-emerald-600" /> : <CheckCircle2 size={20} className="text-emerald-600" />}
-                    </div>
-                    <div className="text-sm">
-                      <p className="mb-1 font-bold text-emerald-900">{prepareNodeCommand ? '3' : '2'}. Wait for connection</p>
-                      <p className="leading-relaxed text-emerald-700">Connection detection starts automatically. The cluster appears as soon as the agent registers.</p>
-                    </div>
+                  <RegistrationStep number={nextStep()} title="Wait for connection" description={registrationWaiting ? 'Detecting the cluster connection. It will appear in the cluster list as soon as the agent registers.' : 'Connection detection starts automatically after the agent is installed.'}>
+                    {registrationWaiting && <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700"><RefreshCw size={14} className="animate-spin" />Waiting for cluster connection...</div>}
+                  </RegistrationStep>
+                  </>;
+                  })()}
                   </div>
 
                   <div className="flex justify-end gap-3 pt-1">
