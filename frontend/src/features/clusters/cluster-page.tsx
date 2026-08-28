@@ -1039,14 +1039,8 @@ export default function ClusterPage(props: {
                       </div>
                       <div className="flex items-start gap-2">
                         <span className="text-white/30">$</span>
-                        <textarea
-                          ref={registryCACommandRef}
-                          readOnly
-                          value={prepareNodeCommand}
-                          className="hbdr-cluster-register-command h-[34px] flex-1 resize-none overflow-auto border-0 bg-transparent p-0 font-mono text-[11px] leading-5 text-blue-300 outline-none"
-                          aria-label="Registry CA command"
-                          onFocus={event => event.currentTarget.select()}
-                        />
+                        <pre className="min-w-0 flex-1 whitespace-pre-wrap break-all font-mono text-[11px] leading-5 text-blue-300" aria-label="Registry CA command">{prepareNodeCommand}</pre>
+                        <textarea ref={registryCACommandRef} readOnly value={prepareNodeCommand} className="sr-only" tabIndex={-1} aria-hidden="true" />
                       </div>
                     </div>
                     <button onClick={copyRegistryCACommand} className="absolute right-3 top-3 flex items-center gap-2 rounded-lg bg-white/20 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white backdrop-blur transition-all hover:bg-white/30 active:scale-95">
@@ -1071,14 +1065,8 @@ export default function ClusterPage(props: {
                       </div>
                       <div className="flex items-start gap-2">
                         <span className="text-white/30">$</span>
-                        <textarea
-                          ref={installCommandRef}
-                          readOnly
-                          value={installLoading ? 'Generating install command...' : installCommand}
-                          className="hbdr-cluster-register-command h-[48px] flex-1 resize-none overflow-auto border-0 bg-transparent p-0 font-mono text-[11px] leading-5 text-blue-300 outline-none"
-                          aria-label="Install command"
-                          onFocus={event => event.currentTarget.select()}
-                        />
+                        <pre className="min-w-0 flex-1 whitespace-pre-wrap break-all font-mono text-[11px] leading-5 text-blue-300" aria-label="Install command">{installLoading ? 'Generating install command...' : installCommand}</pre>
+                        <textarea ref={installCommandRef} readOnly value={installCommand} className="sr-only" tabIndex={-1} aria-hidden="true" />
                       </div>
                     </div>
                     <button disabled={installLoading || !installCommand} onClick={copyInstallCommand} className="absolute right-3 top-3 flex items-center gap-2 rounded-lg bg-white/20 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white backdrop-blur transition-all hover:bg-white/30 active:scale-95 disabled:cursor-wait disabled:opacity-60">
