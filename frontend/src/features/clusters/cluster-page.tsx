@@ -44,6 +44,7 @@ const unregisterFailure=(task:ApiTask|null,events:ApiTaskEvent[])=>{
 };
 const agentReadiness=(cluster:Cluster)=>cluster.connectionStatus!=='online'?{label:'Offline',className:'text-slate-500'}:cluster.status==='healthy'?{label:'Ready',className:'text-emerald-600'}:cluster.status==='syncing'?{label:'Syncing',className:'text-blue-600'}:{label:'Degraded',className:'text-amber-600'};
 const copyTextToClipboard=async(text:string,textarea?:HTMLTextAreaElement|null)=>{try{await navigator.clipboard.writeText(text);return true}catch{if(!textarea)return false;textarea.focus();textarea.select();return document.execCommand('copy')}};
+const selectCommandText=(element:HTMLElement)=>{const selection=window.getSelection();if(!selection)return;const range=document.createRange();range.selectNodeContents(element);selection.removeAllRanges();selection.addRange(range)};
 
 function RegistrationStep({number,title,description,children}:{number:number;title:string;description:string;children?:React.ReactNode}) {
   return <section className="flex gap-3.5">
@@ -1039,7 +1040,7 @@ export default function ClusterPage(props: {
                       </div>
                       <div className="flex items-start gap-2">
                         <span className="text-white/30">$</span>
-                        <pre className="min-w-0 flex-1 whitespace-pre-wrap break-all font-mono text-[11px] leading-5 text-blue-300" aria-label="Registry CA command">{prepareNodeCommand}</pre>
+                        <pre className="hbdr-cluster-register-command min-w-0 flex-1 cursor-text whitespace-pre-wrap break-all font-mono text-[11px] leading-5 text-blue-300" aria-label="Registry CA command" onClick={event=>selectCommandText(event.currentTarget)}>{prepareNodeCommand}</pre>
                         <textarea ref={registryCACommandRef} readOnly value={prepareNodeCommand} className="sr-only" tabIndex={-1} aria-hidden="true" />
                       </div>
                     </div>
@@ -1065,7 +1066,7 @@ export default function ClusterPage(props: {
                       </div>
                       <div className="flex items-start gap-2">
                         <span className="text-white/30">$</span>
-                        <pre className="min-w-0 flex-1 whitespace-pre-wrap break-all font-mono text-[11px] leading-5 text-blue-300" aria-label="Install command">{installLoading ? 'Generating install command...' : installCommand}</pre>
+                        <pre className="hbdr-cluster-register-command min-w-0 flex-1 cursor-text whitespace-pre-wrap break-all font-mono text-[11px] leading-5 text-blue-300" aria-label="Install command" onClick={event=>selectCommandText(event.currentTarget)}>{installLoading ? 'Generating install command...' : installCommand}</pre>
                         <textarea ref={installCommandRef} readOnly value={installCommand} className="sr-only" tabIndex={-1} aria-hidden="true" />
                       </div>
                     </div>

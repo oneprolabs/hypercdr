@@ -4247,6 +4247,17 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   padding: 10px 24px 24px;
 }
 
+.hbdr-cluster-register-command {
+  user-select: text;
+}
+
+.hbdr-cluster-register-command::selection,
+.hbdr-cluster-register-command *::selection {
+  background: #2563eb;
+  color: #ffffff;
+  -webkit-text-fill-color: #ffffff;
+}
+
 .hbdr-advanced-filter-section {
   display: grid;
   gap: 12px;
