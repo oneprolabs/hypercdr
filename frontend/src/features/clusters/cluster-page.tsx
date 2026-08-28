@@ -327,7 +327,9 @@ export default function ClusterPage(props: {
     } catch (error) {
       setInstallCommand('');
       setPrepareNodeCommand('');
-      const message=error instanceof Error?error.message:'Install command generation failed.';
+      const message = error instanceof ApiRequestError && error.code === 'LICENSE_NOT_ACTIVE'
+        ? 'License required: start a trial or import a formal license in Settings > License Management before registering a cluster.'
+        : error instanceof Error ? error.message : 'Install command generation failed.';
       setInstallError(message);
       toast(message);
     } finally { setInstallLoading(false); }
