@@ -324,11 +324,12 @@ export default function ClusterPage(props: {
       setInstallCommand(token.installCommand);
       setRegisterStep(3);
       if (clusterType === 'native-kubernetes') void prefetchAgentToken();
-    } catch {
+    } catch (error) {
       setInstallCommand('');
       setPrepareNodeCommand('');
-      setInstallError('Install token generation failed. Check whether the platform API is running.');
-      toast('Failed to generate install token');
+      const message=error instanceof Error?error.message:'Install command generation failed.';
+      setInstallError(message);
+      toast(message);
     } finally { setInstallLoading(false); }
   };
 
@@ -1056,7 +1057,7 @@ export default function ClusterPage(props: {
                     title="Install HyperCDR agent"
                     description={registrationType === 'huaweicloud-cce' ? 'Run this command on the host with access to the CCE cluster. The installer will verify the kubeconfig before making changes.' : 'Log in to the Kubernetes control-plane node and run this command.'}
                   >
-                  <div className="relative">
+                  {!installError && <div className="relative">
                     <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900 p-4 font-mono text-[11px] leading-5 text-blue-300 shadow-inner">
                       <div className="mb-2 flex items-center gap-2 border-b border-white/10 pb-2 opacity-50">
                         <span className="h-2 w-2 rounded-full bg-red-500" />
@@ -1074,7 +1075,7 @@ export default function ClusterPage(props: {
                       {copied ? <CheckCircle2 size={12} /> : <Check size={12} />}
                       {copied ? 'Copied' : 'Copy'}
                     </button>
-                  </div>
+                  </div>}
                   {installError && <p className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-xs font-medium text-rose-700">{installError}</p>}
                   </RegistrationStep>
 
