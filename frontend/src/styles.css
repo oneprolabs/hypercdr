@@ -4247,6 +4247,31 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   padding: 10px 24px 24px;
 }
 
+/* Read-only terminal content must not inherit the drawer form-control skin. */
+.premium-app .hbdr-cluster-register-command,
+.hbdr-cluster-register-command {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: #93c5fd !important;
+  box-shadow: none !important;
+  -webkit-text-fill-color: #93c5fd;
+}
+
+.premium-app.hbdr-workspace .premium-content .hbdr-cluster-register-drawer .hbdr-cluster-register-command {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: #93c5fd !important;
+  box-shadow: none !important;
+}
+
+.premium-app .hbdr-cluster-register-command:focus,
+.hbdr-cluster-register-command:focus {
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
 .hbdr-advanced-filter-section {
   display: grid;
   gap: 12px;

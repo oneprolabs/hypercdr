@@ -1043,7 +1043,7 @@ export default function ClusterPage(props: {
                           ref={registryCACommandRef}
                           readOnly
                           value={prepareNodeCommand}
-                          className="h-[34px] flex-1 resize-none overflow-auto border-0 bg-transparent p-0 font-mono text-[11px] leading-5 text-blue-300 outline-none"
+                          className="hbdr-cluster-register-command h-[34px] flex-1 resize-none overflow-auto border-0 bg-transparent p-0 font-mono text-[11px] leading-5 text-blue-300 outline-none"
                           aria-label="Registry CA command"
                           onFocus={event => event.currentTarget.select()}
                         />
@@ -1075,7 +1075,7 @@ export default function ClusterPage(props: {
                           ref={installCommandRef}
                           readOnly
                           value={installLoading ? 'Generating install command...' : installCommand}
-                          className="h-[48px] flex-1 resize-none overflow-auto border-0 bg-transparent p-0 font-mono text-[11px] leading-5 text-blue-300 outline-none"
+                          className="hbdr-cluster-register-command h-[48px] flex-1 resize-none overflow-auto border-0 bg-transparent p-0 font-mono text-[11px] leading-5 text-blue-300 outline-none"
                           aria-label="Install command"
                           onFocus={event => event.currentTarget.select()}
                         />
