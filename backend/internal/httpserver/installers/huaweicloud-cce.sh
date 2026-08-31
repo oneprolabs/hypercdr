@@ -130,8 +130,8 @@ provider_huaweicloud_cce_verify() {
   provider_ids="$(kubectl get nodes -o jsonpath='{range .items[*]}{.spec.providerID}{"\n"}{end}' 2>/dev/null || true)"
   cce_markers="$(kubectl get nodes --show-labels 2>/dev/null || true) $(kubectl -n kube-system get deployments,daemonsets 2>/dev/null || true)"
   grep -Eqi 'huaweicloud|cce' <<<"${provider_ids} ${cce_markers}" || fail "The selected cluster could not be verified as Huawei Cloud CCE. Check the kubeconfig and target context."
-  unsupported_nodes="$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.nodeInfo.operatingSystem}{" "}{.status.nodeInfo.architecture}{"\n"}{end}' | awk '$2 != "linux" || ($3 != "amd64" && $3 != "x86_64")')"
-  [[ -z "$unsupported_nodes" ]] || fail "CCE phase one supports Linux amd64 workers only. Unsupported nodes: ${unsupported_nodes//$'\n'/, }"
+  unsupported_nodes="$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.nodeInfo.operatingSystem}{" "}{.status.nodeInfo.architecture}{"\n"}{end}' | awk '$2 != "linux" || ($3 != "amd64" && $3 != "x86_64" && $3 != "arm64" && $3 != "aarch64")')"
+  [[ -z "$unsupported_nodes" ]] || fail "CCE registration supports Linux amd64 or arm64 workers. Unsupported nodes: ${unsupported_nodes//$'\n'/, }"
   for permission in 'create namespaces' 'create clusterroles.rbac.authorization.k8s.io' 'create clusterrolebindings.rbac.authorization.k8s.io' 'create deployments.apps' 'create daemonsets.apps' 'create secrets' 'create persistentvolumeclaims'; do
     verb="${permission%% *}"; resource="${permission#* }"
     kubectl auth can-i "$verb" "$resource" --all-namespaces | grep -qx yes || fail "CCE kubeconfig lacks required permission: ${verb} ${resource}"
