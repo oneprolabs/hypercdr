@@ -1,5 +1,7 @@
 # Huawei Cloud CCE provider. No function in this module is called by the Native
 # provider; cloud-specific validation remains behind the provider contract.
+IMAGE_PULL_PREFLIGHT_STRATEGY="sequential"
+
 provider_huaweicloud_cce_select_context() {
   local candidate resolved selection
   local -a candidates=()

@@ -992,6 +992,7 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 		"Isolated installation preflight",
 		"provider_huaweicloud_cce_dynamic_pvc_preflight",
 		`"$HOME/.kube"/*kubeconfig*`,
+		`IMAGE_PULL_PREFLIGHT_STRATEGY="sequential"`,
 		"Dynamic PVC provisioning passed",
 		`target_namespace="${PREFLIGHT_NAMESPACE:-$NAMESPACE}"`,
 		"configmap hypercdr-agent-uninstaller",
