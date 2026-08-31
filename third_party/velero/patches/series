@@ -1,0 +1,2 @@
+velero/0001-forward-s3-bucket-lookup-to-kopia.patch
+kopia/0001-support-s3-bucket-lookup.patch

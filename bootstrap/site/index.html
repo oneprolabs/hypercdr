@@ -46,11 +46,14 @@
           <button class="mode-tab" type="button" data-mode="k8s" role="tab" aria-selected="false">Kubernetes</button>
         </div>
         <div id="community-docker" class="mode-panel">
-          <label>Public URL<input id="host-public-url" placeholder="https://192.168.8.149:3002" /><small>Use an address reachable from protected clusters.</small></label>
+          <div class="form-grid">
+            <label>Control plane address<input id="host-public-url" placeholder="https://192.168.8.149:3002" /><small>Primary address used by users and clusters, usually the private address.</small></label>
+            <label>Public fallback address <span class="optional">Optional</span><input id="host-agent-public-url" placeholder="https://hypercdr.example.com:3002" /><small>Only required when clusters may connect through the public network.</small></label>
+          </div>
           <div class="command-window"><div class="command-title"><span></span><span></span><span></span><strong>install-community.sh</strong></div><pre id="community-docker-command" class="command" tabindex="0"></pre><button type="button" class="command-copy" data-copy-target="community-docker-command">Copy</button></div>
         </div>
         <div id="community-k8s" class="mode-panel hidden">
-          <div class="form-grid"><label>Cluster node IP<input id="k8s-node-ip" placeholder="192.168.8.158" /></label><label>NodePort<input id="k8s-node-port" value="30080" /></label><label>StorageClass<input id="k8s-storage-class" value="longhorn" /></label></div>
+          <div class="form-grid"><label>Cluster node IP<input id="k8s-node-ip" placeholder="192.168.8.158" /><small>Primary address used by users and clusters.</small></label><label>NodePort<input id="k8s-node-port" value="30080" /></label><label>StorageClass<input id="k8s-storage-class" value="longhorn" /></label><label>Public fallback address <span class="optional">Optional</span><input id="k8s-agent-public-url" placeholder="https://hypercdr.example.com:30080" /></label></div>
           <div class="command-window"><div class="command-title"><span></span><span></span><span></span><strong>install-community-k8s.sh</strong></div><pre id="community-k8s-command" class="command" tabindex="0"></pre><button type="button" class="command-copy" data-copy-target="community-k8s-command">Copy</button></div>
         </div>
       </section>
@@ -65,7 +68,8 @@
           <button class="mode-tab" type="button" data-enterprise-mode="k8s" role="tab" aria-selected="false">Kubernetes</button>
         </div>
         <div class="form-grid">
-          <label>Public URL<input id="enterprise-public-url" placeholder="https://192.168.8.149:3102" /><small>Reachable by users and protected clusters.</small></label>
+          <label>Control plane address<input id="enterprise-public-url" placeholder="https://192.168.8.149:3102" /><small>Primary address used by users and clusters, usually the private address.</small></label>
+          <label>Public fallback address <span class="optional">Optional</span><input id="enterprise-agent-public-url" placeholder="https://hypercdr.example.com:3102" /><small>Only required when clusters may connect through the public network.</small></label>
           <label>License file<input id="enterprise-license-file" value="./license.json" /></label>
           <label>Public keys file<input id="enterprise-public-keys-file" value="./public-keys.json" /></label>
           <label id="enterprise-namespace-field" class="hidden">Namespace<input id="enterprise-namespace" value="hypercdr-enterprise" /></label>

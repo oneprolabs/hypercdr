@@ -80,6 +80,19 @@ func TestWithRecoveryStagesMarksSuccessfulRecovery(t *testing.T) {
 	}
 }
 
+func TestWithRecoveryStagesKeepsReadinessRunningAfterDataCompletes(t *testing.T) {
+	task := protocol.TaskDispatchPayload{Type: "drill", Restore: &protocol.RestoreCommand{WaitForWorkloads: true, RunValidation: true}}
+	payload := withRecoveryStages(task, map[string]any{"readinessStage": "started"}, 95, "running", "", "waiting for workloads")
+	stages := payload["recoveryStages"].([]map[string]any)
+	statuses := map[string]string{}
+	for _, stage := range stages {
+		statuses[stage["id"].(string)] = stage["status"].(string)
+	}
+	if statuses["restoring_data"] != "succeeded" || statuses["waiting_for_workloads"] != "running" {
+		t.Fatalf("unexpected recovery stages: %#v", statuses)
+	}
+}
+
 func TestWithRecoveryStagesMarksPersistentDataNotApplicableFromCatalog(t *testing.T) {
 	task := protocol.TaskDispatchPayload{Type: "drill", Restore: &protocol.RestoreCommand{ContentCatalogLoaded: true, PersistentDataExpected: false, WaitForWorkloads: true}}
 	payload := withRecoveryStages(task, nil, 100, "succeeded", "", "complete")

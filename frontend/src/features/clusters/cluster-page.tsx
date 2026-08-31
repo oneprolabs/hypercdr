@@ -79,10 +79,13 @@ export default function ClusterPage(props: {
   getAgentTokenForRegistration: (clusterType?: ClusterRegistrationType) => Promise<ApiAgentToken>;
   prefetchAgentToken: () => Promise<ApiAgentToken | null> | null;
   openDashboard: () => void;
+  registrationAllowed?: boolean;
+  openLicenseManagement?: () => void;
   toast: (msg: string) => void;
 }) {
-  const { clusters, loading, protectionPlans, onLoadTopology, canUpgrade, defaultClusterId, clusterMenuId, setClusterMenuId, setSelectedCluster, setDefaultCluster, clearDefaultCluster, unregisterCluster, onRenameCluster, onUpgradeCluster, onUpgradeVelero, onRegisterCluster, onRefreshRegistration, clusterTaskLogs, getAgentTokenForRegistration, prefetchAgentToken, openDashboard, toast } = props;
+  const { clusters, loading, protectionPlans, onLoadTopology, canUpgrade, defaultClusterId, clusterMenuId, setClusterMenuId, setSelectedCluster, setDefaultCluster, clearDefaultCluster, unregisterCluster, onRenameCluster, onUpgradeCluster, onUpgradeVelero, onRegisterCluster, onRefreshRegistration, clusterTaskLogs, getAgentTokenForRegistration, prefetchAgentToken, openDashboard, registrationAllowed = true, openLicenseManagement, toast } = props;
   const [registerOpen, setRegisterOpen] = useState(false);
+  const [licenseGuideOpen, setLicenseGuideOpen] = useState(false);
   const [registrationType, setRegistrationType] = useState<ClusterRegistrationType>('native-kubernetes');
   const [registerStep, setRegisterStep] = useState<1 | 2 | 3>(1);
   const [copied, setCopied] = useState(false);
@@ -322,7 +325,6 @@ export default function ClusterPage(props: {
       const token = await getAgentTokenForRegistration(clusterType);
       setPrepareNodeCommand(token.prepareNodeCommand || '');
       setInstallCommand(token.installCommand);
-      setRegisterStep(3);
       if (clusterType === 'native-kubernetes') void prefetchAgentToken();
     } catch (error) {
       setInstallCommand('');
@@ -336,6 +338,10 @@ export default function ClusterPage(props: {
   };
 
   const openRegister = async () => {
+    if (!registrationAllowed) {
+      setLicenseGuideOpen(true);
+      return;
+    }
     setRegisterStep(1);
     setCopied(false);
     setInstallError(null);
@@ -421,6 +427,7 @@ export default function ClusterPage(props: {
   const copyInstallCommand = async () => {
     if (await copyTextToClipboard(installCommand, installCommandRef.current)) {
       setCopied(true);
+      setRegisterStep(3);
       toast('Install command copied');
       window.setTimeout(() => setCopied(false), 1800);
     } else {
@@ -1002,7 +1009,20 @@ export default function ClusterPage(props: {
         })()}
       </AnimatePresence>
 
-            <AnimatePresence>
+      <AnimatePresence>
+        {licenseGuideOpen && (
+          <div className="fixed inset-0 z-[240]">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setLicenseGuideOpen(false)} className="absolute inset-0 bg-slate-900/15" />
+            <motion.aside initial={{ opacity: 0, x: 34 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 34 }} className="hbdr-filter-drawer" role="dialog" aria-modal="true" aria-labelledby="cluster-license-guide-title">
+              <div className="hbdr-filter-drawer-head"><div><strong id="cluster-license-guide-title">License required</strong><span>Activate HyperCDR Enterprise before registering a cluster.</span></div><button aria-label="Close license guide" onClick={() => setLicenseGuideOpen(false)}><X size={18} /></button></div>
+              <div className="hbdr-filter-drawer-body"><div className="rounded-xl border border-amber-100 bg-amber-50 p-4 text-sm leading-6 text-amber-900">Start the included trial or import a signed formal license. Query, recovery, unregister and cleanup operations remain available without an active license.</div></div>
+              <div className="hbdr-filter-drawer-actions"><button onClick={() => { setLicenseGuideOpen(false); openLicenseManagement?.(); }}>Start Trial</button><button onClick={() => { setLicenseGuideOpen(false); openLicenseManagement?.(); }}>Import License</button><button onClick={() => setLicenseGuideOpen(false)}>Cancel</button></div>
+            </motion.aside>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {registerOpen && (
           <div className="fixed inset-0 z-[230]">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={closeRegister} className="absolute inset-0 bg-slate-900/15" />
@@ -1081,7 +1101,7 @@ export default function ClusterPage(props: {
                   {installError && <p className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-xs font-medium text-rose-700">{installError}</p>}
                   </RegistrationStep>
 
-                  <RegistrationStep number={nextStep()} title="Wait for connection" description={registrationWaiting ? 'Detecting the cluster connection. It will appear in the cluster list as soon as the agent registers.' : 'Connection detection starts automatically after the agent is installed.'}>
+                  <RegistrationStep number={nextStep()} title="Wait for connection" description={registrationWaiting ? 'Detecting the cluster connection. It will appear in the cluster list as soon as the agent registers.' : 'Connection monitoring starts after you copy the install command.'}>
                     {registrationWaiting && <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700"><RefreshCw size={14} className="animate-spin" />Waiting for cluster connection...</div>}
                   </RegistrationStep>
                   </>;

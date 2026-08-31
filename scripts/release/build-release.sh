@@ -178,6 +178,7 @@ log "Building comm-agent binary"
 
 log "Preparing Docker contexts"
 cp /etc/ssl/certs/ca-certificates.crt "${WORK_DIR}/platform-api/ca-certificates.crt"
+cp /etc/ssl/certs/ca-certificates.crt "${WORK_DIR}/comm-agent/ca-certificates.crt"
 cp "${ROOT_DIR}/docker/platform-api.runtime.Dockerfile" "${WORK_DIR}/platform-api/Dockerfile"
 sed -i "s#^FROM debian:bookworm-slim#FROM ${DEBIAN_IMAGE}#" "${WORK_DIR}/platform-api/Dockerfile"
 

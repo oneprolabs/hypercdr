@@ -1,0 +1,35 @@
+diff --git a/repo/blob/s3/s3_options.go b/repo/blob/s3/s3_options.go
+--- a/repo/blob/s3/s3_options.go
++++ b/repo/blob/s3/s3_options.go
+@@ -17,6 +17,10 @@ type Options struct {
+ 	DoNotVerifyTLS bool   `json:"doNotVerifyTLS,omitempty"`
+ 	RootCA         []byte `json:"rootCA,omitempty"`
+ 
++	// BucketLookup controls S3 bucket addressing: auto, path, or dns.
++	// Empty preserves MinIO's automatic lookup behavior.
++	BucketLookup string `json:"bucketLookup,omitempty"`
++
+ 	AccessKeyID     string `json:"accessKeyID"`
+ 	SecretAccessKey string `json:"secretAccessKey" kopia:"sensitive"`
+ 	SessionToken    string `json:"sessionToken" kopia:"sensitive"`
+diff --git a/repo/blob/s3/s3_storage.go b/repo/blob/s3/s3_storage.go
+--- a/repo/blob/s3/s3_storage.go
++++ b/repo/blob/s3/s3_storage.go
+@@ -394,6 +394,17 @@ func newStorageWithCredentials(ctx context.Context, creds *credentials.Credentia
+ 		Secure: !opt.DoNotUseTLS,
+ 		Region: opt.Region,
+ 	}
++
++	switch strings.ToLower(opt.BucketLookup) {
++	case "", "auto":
++		minioOpts.BucketLookup = minio.BucketLookupAuto
++	case "path":
++		minioOpts.BucketLookup = minio.BucketLookupPath
++	case "dns":
++		minioOpts.BucketLookup = minio.BucketLookupDNS
++	default:
++		return nil, errors.Errorf("invalid S3 bucket lookup style %q", opt.BucketLookup)
++	}
+ 
+ 	var err error
+ 

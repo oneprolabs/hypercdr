@@ -21,13 +21,42 @@ import (
 )
 
 type backupStorageLocationInfo struct {
-	Bucket     string
-	Prefix     string
-	Endpoint   string
-	Region     string
-	Secure     bool
-	Credential credentialRef
-	Provider   string
+	Bucket       string
+	Prefix       string
+	Endpoint     string
+	Region       string
+	Secure       bool
+	Credential   credentialRef
+	Provider     string
+	BucketLookup minio.BucketLookupType
+}
+
+func newObjectStoreClient(bsl backupStorageLocationInfo, creds s3Credentials) (*minio.Client, error) {
+	endpoint, secure, err := normalizeObjectStoreEndpoint(bsl.Endpoint, bsl.Secure)
+	if err != nil {
+		return nil, err
+	}
+	return minio.New(endpoint, &minio.Options{
+		Creds:        credentials.NewStaticV4(creds.AccessKey, creds.SecretKey, ""),
+		Secure:       secure,
+		Region:       bsl.Region,
+		BucketLookup: bsl.BucketLookup,
+	})
+}
+
+func bucketLookupFromConfig(config map[string]string) minio.BucketLookupType {
+	raw, exists := config["s3ForcePathStyle"]
+	if !exists {
+		return minio.BucketLookupAuto
+	}
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "true":
+		return minio.BucketLookupPath
+	case "false":
+		return minio.BucketLookupDNS
+	default:
+		return minio.BucketLookupAuto
+	}
 }
 
 type credentialRef struct {
@@ -55,15 +84,7 @@ func (a *DynamicManifestApplier) GetBackupObjectStats(ctx context.Context, names
 	if err != nil {
 		return BackupObjectStats{}, err
 	}
-	endpoint, secure, err := normalizeObjectStoreEndpoint(bsl.Endpoint, bsl.Secure)
-	if err != nil {
-		return BackupObjectStats{}, err
-	}
-	client, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(creds.AccessKey, creds.SecretKey, ""),
-		Secure: secure,
-		Region: bsl.Region,
-	})
+	client, err := newObjectStoreClient(bsl, creds)
 	if err != nil {
 		return BackupObjectStats{}, err
 	}
@@ -94,15 +115,7 @@ func (a *DynamicManifestApplier) GetBackupVolumeInfoStats(ctx context.Context, n
 	if err != nil {
 		return BackupVolumeInfoStats{}, err
 	}
-	endpoint, secure, err := normalizeObjectStoreEndpoint(bsl.Endpoint, bsl.Secure)
-	if err != nil {
-		return BackupVolumeInfoStats{}, err
-	}
-	client, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(creds.AccessKey, creds.SecretKey, ""),
-		Secure: secure,
-		Region: bsl.Region,
-	})
+	client, err := newObjectStoreClient(bsl, creds)
 	if err != nil {
 		return BackupVolumeInfoStats{}, err
 	}
@@ -154,15 +167,7 @@ func (a *DynamicManifestApplier) GetPlanObjectStorageStats(ctx context.Context, 
 	if err != nil {
 		return PlanObjectStorageStats{}, err
 	}
-	endpoint, secure, err := normalizeObjectStoreEndpoint(bsl.Endpoint, bsl.Secure)
-	if err != nil {
-		return PlanObjectStorageStats{}, err
-	}
-	client, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(creds.AccessKey, creds.SecretKey, ""),
-		Secure: secure,
-		Region: bsl.Region,
-	})
+	client, err := newObjectStoreClient(bsl, creds)
 	if err != nil {
 		return PlanObjectStorageStats{}, err
 	}
@@ -211,15 +216,7 @@ func (a *DynamicManifestApplier) GetRestoreResultSummary(ctx context.Context, na
 	if err != nil {
 		return RestoreResultSummary{}, err
 	}
-	endpoint, secure, err := normalizeObjectStoreEndpoint(bsl.Endpoint, bsl.Secure)
-	if err != nil {
-		return RestoreResultSummary{}, err
-	}
-	client, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(creds.AccessKey, creds.SecretKey, ""),
-		Secure: secure,
-		Region: bsl.Region,
-	})
+	client, err := newObjectStoreClient(bsl, creds)
 	if err != nil {
 		return RestoreResultSummary{}, err
 	}
@@ -268,15 +265,7 @@ func (a *DynamicManifestApplier) DeleteKopiaRepositories(ctx context.Context, na
 	if err != nil {
 		return nil, err
 	}
-	endpoint, secure, err := normalizeObjectStoreEndpoint(bsl.Endpoint, bsl.Secure)
-	if err != nil {
-		return nil, err
-	}
-	client, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(creds.AccessKey, creds.SecretKey, ""),
-		Secure: secure,
-		Region: bsl.Region,
-	})
+	client, err := newObjectStoreClient(bsl, creds)
 	if err != nil {
 		return nil, err
 	}
@@ -314,15 +303,7 @@ func (a *DynamicManifestApplier) DeleteBackupObjectsByNamePrefix(ctx context.Con
 	if err != nil {
 		return nil, err
 	}
-	endpoint, secure, err := normalizeObjectStoreEndpoint(bsl.Endpoint, bsl.Secure)
-	if err != nil {
-		return nil, err
-	}
-	client, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(creds.AccessKey, creds.SecretKey, ""),
-		Secure: secure,
-		Region: bsl.Region,
-	})
+	client, err := newObjectStoreClient(bsl, creds)
 	if err != nil {
 		return nil, err
 	}
@@ -360,15 +341,7 @@ func (a *DynamicManifestApplier) DeleteRestoreObjects(ctx context.Context, names
 	if err != nil {
 		return nil, err
 	}
-	endpoint, secure, err := normalizeObjectStoreEndpoint(bsl.Endpoint, bsl.Secure)
-	if err != nil {
-		return nil, err
-	}
-	client, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(creds.AccessKey, creds.SecretKey, ""),
-		Secure: secure,
-		Region: bsl.Region,
-	})
+	client, err := newObjectStoreClient(bsl, creds)
 	if err != nil {
 		return nil, err
 	}
@@ -413,14 +386,16 @@ func (a *DynamicManifestApplier) readBackupStorageLocation(ctx context.Context, 
 		endpoint = "https://s3.amazonaws.com"
 	}
 	secure := !strings.EqualFold(config["insecureSkipTLSVerify"], "true")
+	bucketLookup := bucketLookupFromConfig(config)
 	return backupStorageLocationInfo{
-		Bucket:     bucket,
-		Prefix:     prefix,
-		Endpoint:   endpoint,
-		Region:     config["region"],
-		Secure:     secure,
-		Provider:   provider,
-		Credential: credentialRef{Name: credentialName, Key: credentialKey},
+		Bucket:       bucket,
+		Prefix:       prefix,
+		Endpoint:     endpoint,
+		Region:       config["region"],
+		Secure:       secure,
+		Provider:     provider,
+		BucketLookup: bucketLookup,
+		Credential:   credentialRef{Name: credentialName, Key: credentialKey},
 	}, nil
 }
 

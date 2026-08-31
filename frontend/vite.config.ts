@@ -66,8 +66,10 @@ export default defineConfig({
     proxy: {
       "/api": proxyTarget,
       "/install.sh": proxyTarget,
+      "/uninstall-agent.sh": proxyTarget,
       "/prepare-node.sh": proxyTarget,
       "/assets/registry": proxyTarget,
+      "/assets/platform": proxyTarget,
       "/assets/velero": proxyTarget,
       "/healthz": proxyTarget,
       "/readyz": proxyTarget,
@@ -82,8 +84,10 @@ export default defineConfig({
     proxy: {
       "/api": proxyTarget,
       "/install.sh": proxyTarget,
+      "/uninstall-agent.sh": proxyTarget,
       "/prepare-node.sh": proxyTarget,
       "/assets/registry": proxyTarget,
+      "/assets/platform": proxyTarget,
       "/assets/velero": proxyTarget,
       "/healthz": proxyTarget,
       "/readyz": proxyTarget,

@@ -228,7 +228,7 @@ func (c *Client) Register() (protocol.RegisterAcceptedPayload, error) {
 		seenEndpoints[endpoint] = true
 		conn, resp, err = dialer.Dial(endpoint, http.Header{})
 		if err == nil {
-			c.cfg.PlatformEndpoint = endpoint
+			pinPlatformEndpoint(&c.cfg, endpoint)
 			break
 		}
 	}
@@ -301,6 +301,19 @@ func (c *Client) Register() (protocol.RegisterAcceptedPayload, error) {
 	}
 }
 
+func pinPlatformEndpoint(cfg *config.Config, endpoint string) {
+	if cfg == nil {
+		return
+	}
+	// Endpoint selection happens once per process. Keep the selected address as
+	// the only reconnect candidate. The Kubernetes Secret and process
+	// environment retain the full startup configuration, so a Pod restart runs
+	// primary/fallback selection again.
+	cfg.PlatformEndpoint = strings.TrimSpace(endpoint)
+	cfg.PlatformPublicEndpoint = ""
+	cfg.PlatformPrivateEndpoint = ""
+}
+
 func platformDialer(cfg config.Config) (*websocket.Dialer, error) {
 	dialer := *websocket.DefaultDialer
 	if cfg.PlatformTLSSkipVerify {
@@ -323,7 +336,10 @@ func platformDialer(cfg config.Config) (*websocket.Dialer, error) {
 }
 
 func orderedPlatformEndpoints(cfg config.Config) []string {
-	values := []string{cfg.PlatformPrivateEndpoint, cfg.PlatformPublicEndpoint, cfg.PlatformEndpoint}
+	// PlatformEndpoint is the user-facing primary address. The public endpoint
+	// is an optional fallback shared by every cluster provider. The legacy
+	// private field remains last so existing installations continue to connect.
+	values := []string{cfg.PlatformEndpoint, cfg.PlatformPublicEndpoint, cfg.PlatformPrivateEndpoint}
 	seen := map[string]bool{}
 	result := make([]string, 0, len(values))
 	for _, value := range values {
@@ -335,6 +351,34 @@ func orderedPlatformEndpoints(cfg config.Config) []string {
 		result = append(result, value)
 	}
 	return result
+}
+
+// CheckPlatformConnectivity verifies the complete WebSocket and TLS handshake
+// without registering or consuming an install token. Installers use it from a
+// short-lived in-cluster Pod before creating formal Agent resources.
+func CheckPlatformConnectivity(cfg config.Config) (string, error) {
+	dialer, err := platformDialer(cfg)
+	if err != nil {
+		return "", err
+	}
+	dialer.HandshakeTimeout = 10 * time.Second
+	var failures []string
+	for _, endpoint := range orderedPlatformEndpoints(cfg) {
+		conn, response, dialErr := dialer.Dial(endpoint, http.Header{})
+		if dialErr == nil {
+			_ = conn.Close()
+			return endpoint, nil
+		}
+		status := ""
+		if response != nil {
+			status = response.Status
+		}
+		failures = append(failures, strings.TrimSpace(endpoint+" "+status+": "+dialErr.Error()))
+	}
+	if len(failures) == 0 {
+		return "", errors.New("no platform endpoint is configured")
+	}
+	return "", fmt.Errorf("platform endpoints are unreachable: %s", strings.Join(failures, "; "))
 }
 
 func (c *Client) RunHeartbeat() error {
@@ -356,8 +400,6 @@ func (c *Client) RunHeartbeat() error {
 	defer veleroTicker.Stop()
 	outboxTicker := time.NewTicker(30 * time.Second)
 	defer outboxTicker.Stop()
-	privateEndpointTicker := time.NewTicker(60 * time.Second)
-	defer privateEndpointTicker.Stop()
 
 	if err := c.sendInventory(true); err != nil {
 		c.logger.Warn("initial inventory collection failed; heartbeat will continue until inventory recovers", "error", err)
@@ -397,10 +439,6 @@ func (c *Client) RunHeartbeat() error {
 			}
 		case <-outboxTicker.C:
 			c.resendPendingEvents()
-		case <-privateEndpointTicker.C:
-			if c.usingPublicFallback() && c.privateEndpointReachable() {
-				return errors.New("private platform endpoint is reachable; reconnecting with private endpoint priority")
-			}
 		case sig := <-stopCh:
 			c.logger.Info("stop signal received", "signal", sig.String())
 			return nil
@@ -408,25 +446,6 @@ func (c *Client) RunHeartbeat() error {
 			return err
 		}
 	}
-}
-
-func (c *Client) usingPublicFallback() bool {
-	privateEndpoint := strings.TrimSpace(c.cfg.PlatformPrivateEndpoint)
-	return privateEndpoint != "" && strings.TrimSpace(c.cfg.PlatformEndpoint) != privateEndpoint
-}
-
-func (c *Client) privateEndpointReachable() bool {
-	dialer, err := platformDialer(c.cfg)
-	if err != nil {
-		return false
-	}
-	dialer.HandshakeTimeout = 5 * time.Second
-	conn, _, err := dialer.Dial(strings.TrimSpace(c.cfg.PlatformPrivateEndpoint), http.Header{})
-	if err != nil {
-		return false
-	}
-	_ = conn.Close()
-	return true
 }
 
 func (c *Client) readMessages() error {
@@ -2067,6 +2086,10 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, b
 	for {
 		readiness, err := c.readiness.GetNamespaceReadiness(context.Background(), namespace)
 		payload := cloneVeleroPayload(basePayload)
+		// Keep the phase monotonic on every readiness poll. Without this marker,
+		// subsequent samples rebuild recoveryStages from the pre-readiness base
+		// payload and regress Waiting for Workloads from running to pending.
+		payload["readinessStage"] = "started"
 		if err == nil {
 			payload["readiness"] = readiness
 			if readiness.FailureCode != "" {

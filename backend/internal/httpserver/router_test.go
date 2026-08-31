@@ -23,7 +23,22 @@ import (
 	"hypercdr-platform/platform/backend/internal/store"
 
 	"github.com/gorilla/websocket"
+	"github.com/minio/minio-go/v7"
 )
+
+func TestTaskProgressPayloadPatchClearsTransferProgressDuringReadiness(t *testing.T) {
+	patch := taskProgressPayloadPatch(protocol.TaskProgressPayload{
+		Velero: map[string]any{
+			"readinessStage": "started",
+			"volumeProgress": map[string]any{"bytesDone": int64(100), "totalBytes": int64(100)},
+		},
+		SizeProgressV2: &protocol.SizeProgressV2{Operation: "restore", ProcessedBytes: 100, TotalBytes: 100},
+	})
+	value, exists := patch["sizeProgressV2"]
+	if !exists || value != nil {
+		t.Fatalf("sizeProgressV2 = %#v (exists=%v), want explicit nil", value, exists)
+	}
+}
 
 func TestAgentCredentialReconnect(t *testing.T) {
 	repo := store.NewMemoryStore()
@@ -975,7 +990,7 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 		"rollback_failed_registration",
 		"Failed first-time installation was rolled back",
 		"Isolated installation preflight",
-		"preflight_dynamic_pvc",
+		"provider_huaweicloud_cce_dynamic_pvc_preflight",
 		"Dynamic PVC provisioning passed",
 		`target_namespace="${PREFLIGHT_NAMESPACE:-$NAMESPACE}"`,
 		"configmap hypercdr-agent-uninstaller",
@@ -1162,13 +1177,51 @@ func TestCCEAgentTokenInstallCommandUsesDualEndpoints(t *testing.T) {
 	if err = json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"--cluster-type huaweicloud-cce", "--endpoint-private wss://10.0.0.10:3102/ws/agent", "--endpoint-public wss://203.0.113.10:3102/ws/agent"} {
+	for _, expected := range []string{"--cluster-type huaweicloud-cce", "--endpoint wss://10.0.0.10:3102/ws/agent", "--endpoint-public wss://203.0.113.10:3102/ws/agent"} {
 		if !strings.Contains(body.InstallCommand, expected) {
 			t.Fatalf("CCE install command %q does not contain %q", body.InstallCommand, expected)
 		}
 	}
+	if strings.Contains(body.InstallCommand, "--endpoint-private") {
+		t.Fatalf("CCE install command must expose the primary address as --endpoint: %q", body.InstallCommand)
+	}
 	if body.ClusterType != "huaweicloud-cce" {
 		t.Fatalf("cluster type = %q", body.ClusterType)
+	}
+}
+
+func TestNativeAgentTokenInstallCommandUsesDualEndpoints(t *testing.T) {
+	repo := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	cfg := config.Config{AgentNamespace: "hypercdr-agent", AgentPrivateWSEndpoint: "wss://10.0.0.10:3002/ws/agent", AgentPublicWSEndpoint: "wss://203.0.113.10:3002/ws/agent"}
+	server := httptest.NewServer(NewRouter(cfg, logger, repo))
+	defer server.Close()
+	resp, err := http.Post(server.URL+"/api/v1/agent-tokens", "application/json", bytes.NewReader([]byte(`{"clusterType":"native-kubernetes"}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body struct{ ClusterType, InstallCommand string }
+	if err = json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"--endpoint wss://10.0.0.10:3002/ws/agent", "--endpoint-public wss://203.0.113.10:3002/ws/agent"} {
+		if !strings.Contains(body.InstallCommand, expected) {
+			t.Fatalf("native install command %q does not contain %q", body.InstallCommand, expected)
+		}
+	}
+	if strings.Contains(body.InstallCommand, "--cluster-type") || strings.Contains(body.InstallCommand, "--endpoint-private") {
+		t.Fatalf("native install command contains provider-specific or legacy arguments: %q", body.InstallCommand)
+	}
+}
+
+func TestInstallScriptDoesNotReplacePrimaryEndpointWithPublicFallback(t *testing.T) {
+	if strings.Contains(installScriptTemplate, `elif [[ -n "$ENDPOINT_PUBLIC" ]]; then ENDPOINT="$ENDPOINT_PUBLIC"`) {
+		t.Fatal("install script overwrites an explicit primary endpoint with the public fallback")
+	}
+	want := `if [[ -z "$ENDPOINT" ]]; then`
+	if !strings.Contains(installScriptTemplate, want) {
+		t.Fatalf("install script is missing the guarded legacy endpoint fallback %q", want)
 	}
 }
 
@@ -1236,6 +1289,27 @@ func TestStorageCredentialsBuildAgentPayload(t *testing.T) {
 	}
 	if credentials.AccessKey != "minio-access" || credentials.SecretKey != "minio-secret" {
 		t.Fatalf("unexpected credentials: %#v", credentials)
+	}
+}
+
+func TestStorageBucketLookupHonorsRepositoryURLStyle(t *testing.T) {
+	tests := []struct {
+		name  string
+		style string
+		want  minio.BucketLookupType
+	}{
+		{name: "OBS virtual host", style: "virtual", want: minio.BucketLookupDNS},
+		{name: "virtual host label", style: "Virtual-host", want: minio.BucketLookupDNS},
+		{name: "MinIO path", style: "path", want: minio.BucketLookupPath},
+		{name: "unspecified", style: "", want: minio.BucketLookupAuto},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := store.StorageRepository{Config: map[string]any{"urlStyle": tt.style}}
+			if got := storageBucketLookup(repo); got != tt.want {
+				t.Fatalf("lookup = %v, want %v for style %q", got, tt.want, tt.style)
+			}
+		})
 	}
 }
 

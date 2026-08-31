@@ -13,6 +13,7 @@ type Config struct {
 	PlatformPublicEndpoint  string
 	PlatformTLSSkipVerify   bool
 	PlatformCAFile          string
+	PlatformPreflightOnly   bool
 	StateDir                string
 	InstallToken            string
 	AgentCredential         string
@@ -45,6 +46,7 @@ func Load() Config {
 		PlatformPublicEndpoint:  os.Getenv("HCDR_PLATFORM_PUBLIC_ENDPOINT"),
 		PlatformTLSSkipVerify:   parseBool("HCDR_PLATFORM_TLS_INSECURE_SKIP_VERIFY", false),
 		PlatformCAFile:          os.Getenv("HCDR_PLATFORM_CA_FILE"),
+		PlatformPreflightOnly:   parseBool("HCDR_PLATFORM_PREFLIGHT_ONLY", false),
 		StateDir:                getEnv("HCDR_AGENT_STATE_DIR", "/var/lib/hypercdr-agent"),
 		InstallToken:            os.Getenv("HCDR_INSTALL_TOKEN"),
 		AgentCredential:         os.Getenv("HCDR_AGENT_CREDENTIAL"),

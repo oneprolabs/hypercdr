@@ -69,7 +69,8 @@ Usage:
 Kubernetes options:
   --kubeconfig PATH            Optional kubeconfig path for kubectl and helm
   --namespace NAME             Namespace for the control plane, default: hypercdr-system
-  --public-base-url URL        Container DR control plane URL used by users and agents
+  --public-base-url URL        Primary control plane URL used by users and agents
+  --agent-public-url URL       Optional public control plane URL used as Agent fallback
   --agent-private-endpoint URL Private WebSocket endpoint preferred by agents
   --agent-public-endpoint URL  Optional public WebSocket fallback endpoint
   --registry REGISTRY          Optional OCI Registry prefix override.
@@ -86,7 +87,8 @@ Kubernetes options:
   --execute                    Run helm commands. Without this flag, prints and validates the plan only.
 
 Docker options:
-  --public-base-url URL        Container DR control plane URL used by users and agents
+  --public-base-url URL        Primary control plane URL used by users and agents
+  --agent-public-url URL       Optional public control plane URL used as Agent fallback
   --agent-private-endpoint URL Private WebSocket endpoint preferred by agents
   --agent-public-endpoint URL  Optional public WebSocket fallback endpoint
   --data-dir PATH              Persistent data directory, default: /var/lib/hypercdr
@@ -124,6 +126,7 @@ kubeconfig=""
 public_base_url=""
 agent_private_endpoint=""
 agent_public_endpoint=""
+agent_public_url=""
 registry=""
 registry_profile=""
 registry_config="${HCDR_REGISTRY_CONFIG:-${DEFAULT_REGISTRY_CONFIG}}"
@@ -151,6 +154,7 @@ while [[ $# -gt 0 ]]; do
     --public-base-url) public_base_url="${2:?missing value for --public-base-url}"; shift 2 ;;
     --agent-private-endpoint) agent_private_endpoint="${2:?missing value for --agent-private-endpoint}"; shift 2 ;;
     --agent-public-endpoint) agent_public_endpoint="${2:?missing value for --agent-public-endpoint}"; shift 2 ;;
+    --agent-public-url) agent_public_url="${2:?missing value for --agent-public-url}"; shift 2 ;;
     --registry) registry="${2:?missing value for --registry}"; shift 2 ;;
     --registry-profile) registry_profile="${2:?missing value for --registry-profile}"; shift 2 ;;
     --registry-config) registry_config="${2:?missing value for --registry-config}"; shift 2 ;;
@@ -205,7 +209,12 @@ esac
 
 agent_ws_endpoint="${public_base_url/https:/wss:}"
 agent_ws_endpoint="${agent_ws_endpoint/http:/ws:}/ws/agent"
-[[ -n "${agent_public_endpoint}" ]] || agent_public_endpoint="${agent_ws_endpoint}"
+if [[ -n "${agent_public_url}" ]]; then
+  [[ "${agent_public_url}" =~ ^https?://[^/]+/?$ ]] || { echo "--agent-public-url must be an http(s) origin without a path" >&2; exit 2; }
+  agent_public_url="${agent_public_url%/}"
+  agent_public_endpoint="${agent_public_url/https:/wss:}"
+  agent_public_endpoint="${agent_public_endpoint/http:/ws:}/ws/agent"
+fi
 
 extract_port_from_url() {
   local url="$1"
@@ -363,6 +372,8 @@ helm ${helm_args[*]} upgrade --install ${RELEASE_NAME} ${CHART_DIR} \\
   --wait --timeout ${timeout} \\
   --set-string global.publicBaseURL=${public_base_url} \\
   --set-string global.agentWebSocketURL=${agent_ws_endpoint} \\
+  --set-string global.agentPrivateWebSocketURL=${agent_private_endpoint} \\
+  --set-string global.agentPublicWebSocketURL=${agent_public_endpoint} \\
   --set-string global.imageRegistry=${registry} \\
   --set-string platform.image.tag=${image_tag} \\
   --set platform.registryCA.enabled=$([[ "${registry_trust}" == "private-ca" ]] && echo true || echo false) \\
@@ -419,6 +430,8 @@ EOF
     --wait --timeout "${timeout}" \
     --set-string "global.publicBaseURL=${public_base_url}" \
     --set-string "global.agentWebSocketURL=${agent_ws_endpoint}" \
+    --set-string "global.agentPrivateWebSocketURL=${agent_private_endpoint}" \
+    --set-string "global.agentPublicWebSocketURL=${agent_public_endpoint}" \
     --set-string "global.imageRegistry=${registry}" \
     --set-string "platform.image.tag=${image_tag}" \
     "${registry_ca_helm_args[@]}" \

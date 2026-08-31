@@ -2,6 +2,9 @@
 
 HyperCDR supports Huawei Cloud CCE as an additional managed Kubernetes type.
 The existing Native Kubernetes registration path remains backward compatible.
+The CCE implementation is isolated behind the installer Provider contract; its
+kubeconfig, identity, dynamic storage, certificate and Worker connectivity
+checks are not executed by the Native Kubernetes provider.
 
 ## Phase-one scope
 
@@ -35,10 +38,12 @@ then installs the shared HyperCDR Agent stack.
 
 Automation may specify `--kubeconfig`, `--context`, and `--interactive false`.
 The registration command can contain private and public WebSocket endpoints.
-The Agent tries the private endpoint first and uses the public endpoint only as
-a fallback. While connected through the public endpoint it periodically probes
-the private WebSocket endpoint and reconnects through it after service returns.
-A deployment without a public Agent endpoint is supported.
+The Agent tries the primary endpoint first and uses the public endpoint only as
+a startup fallback. After one endpoint connects, that address is fixed for the
+lifetime of the Agent process: reconnects use the same address and no runtime
+network probing or automatic endpoint switching occurs. Restart the Agent to
+run endpoint selection again. A deployment without a public Agent endpoint is
+supported.
 
 The installer downloads and validates the control-plane certificate before it
 creates Agent workloads. It never silently falls back to insecure Agent TLS.

@@ -1,6 +1,8 @@
 global:
   publicBaseURL: https://127.0.0.1:30080
   agentWebSocketURL: wss://127.0.0.1:30080/ws/agent
+  agentPrivateWebSocketURL: ""
+  agentPublicWebSocketURL: ""
   imageRegistry: ""
 
 platform:

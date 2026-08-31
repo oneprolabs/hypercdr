@@ -78,6 +78,13 @@ function taskEventStageId(event: ApiTaskEvent, recovery: boolean): string {
     if (['progress', 'backup_progress'].includes(reason) || reason.includes('volume') || reason.includes('backup')) return 'backing_up_data';
     return 'preparing_backup';
   }
+  // Recovery progress events all share a generic `progress` reason. Prefer
+  // the authoritative stage snapshot carried by that exact event, otherwise
+  // readiness polls are incorrectly grouped back under persistent data.
+  const eventStages = [event.payload?.recoveryStages, event.payload?.velero?.recoveryStages]
+    .find(value => Array.isArray(value)) as Array<Record<string, unknown>> | undefined;
+  const snapshotStage = eventStages?.find(stage => ['running', 'in_progress', 'failed'].includes(String(stage.status || '').toLowerCase()));
+  if (snapshotStage?.id) return String(snapshotStage.id);
   if (reason === 'application_ready' || reason.includes('validation')) return 'application_validation';
   if (reason === 'application_readiness_check_started' || reason.includes('readiness') || reason.includes('workload') || code.includes('WORKLOAD')) return 'waiting_for_workloads';
   if (['finalizing', 'completed'].includes(reason)) return 'finalizing_drill';
@@ -118,7 +125,10 @@ export function groupTaskEventsByStage(task: ApiTask, events: ApiTaskEvent[]): T
     const stageID = taskEventStageId(event, recovery);
     (eventMap.get(stageID) || eventMap.get(definitions[0].id))?.push(event);
   });
-  const currentStageID = currentEvent ? taskEventStageId(currentEvent, recovery) : '';
+  const snapshotCurrentStageID = recovery
+    ? snapshots.find(stage => ['running', 'in_progress', 'failed'].includes(stage.status))?.id || ''
+    : '';
+  const currentStageID = snapshotCurrentStageID || (currentEvent ? taskEventStageId(currentEvent, recovery) : '');
   const taskFailed = isFailedStatus(task.status);
   const taskActive = isActiveTaskStatus(task.status);
   const taskSucceeded = !taskActive && !taskFailed && ['succeeded', 'completed', 'success'].includes(String(task.status || '').toLowerCase());

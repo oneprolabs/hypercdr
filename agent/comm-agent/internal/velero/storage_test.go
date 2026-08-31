@@ -47,6 +47,43 @@ func TestBuildBackupStorageLocationManifestMapsPathStyleConfig(t *testing.T) {
 	}
 }
 
+func TestBuildBackupStorageLocationManifestMapsVirtualHostStyleConfig(t *testing.T) {
+	manifest, err := BuildBackupStorageLocationManifest(StorageBuildInput{Command: protocol.StorageSyncCommand{
+		Name: "my-obs", Type: "S3-Compatible", Endpoint: "obs.cn-north-9.myhuaweicloud.com", Bucket: "backups", Region: "cn-north-9", TLSEnabled: true,
+		Config: map[string]any{"urlStyle": "virtual"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := manifest.Spec.Config["s3ForcePathStyle"]; got != "false" {
+		t.Fatalf("unexpected s3ForcePathStyle for virtual host: %q", got)
+	}
+	if got, ok := manifest.Spec.Config["checksumAlgorithm"]; !ok || got != "" {
+		t.Fatalf("Huawei OBS must disable payload checksum, config=%#v", manifest.Spec.Config)
+	}
+}
+
+func TestS3VendorCompatibilityDoesNotAffectOtherProviders(t *testing.T) {
+	tests := []struct{ name, endpoint string }{
+		{name: "minio", endpoint: "minio.example.internal:9000"},
+		{name: "aws", endpoint: "s3.cn-north-1.amazonaws.com.cn"},
+		{name: "generic-s3", endpoint: "objects.example.com"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manifest, err := BuildBackupStorageLocationManifest(StorageBuildInput{Command: protocol.StorageSyncCommand{
+				Name: tt.name, Type: "S3-Compatible", Endpoint: tt.endpoint, Bucket: "backups", TLSEnabled: true,
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := manifest.Spec.Config["checksumAlgorithm"]; ok {
+				t.Fatalf("vendor-specific OBS config leaked into %s: %#v", tt.name, manifest.Spec.Config)
+			}
+		})
+	}
+}
+
 func TestBuildBackupStorageLocationManifestRejectsDisplayRegionPlaceholder(t *testing.T) {
 	manifest, err := BuildBackupStorageLocationManifest(StorageBuildInput{
 		Command: protocol.StorageSyncCommand{

@@ -27,6 +27,15 @@ func main() {
 		"endpoint", cfg.PlatformEndpoint,
 		"namespace", cfg.Namespace,
 	)
+	if cfg.PlatformPreflightOnly {
+		endpoint, err := wsclient.CheckPlatformConnectivity(cfg)
+		if err != nil {
+			logger.Error("platform connectivity preflight failed", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("platform connectivity preflight passed", "endpoint", endpoint)
+		return
+	}
 
 	var applier kube.ManifestApplier
 	var uninstaller kube.Uninstaller

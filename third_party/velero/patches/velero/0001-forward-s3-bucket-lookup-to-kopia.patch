@@ -1,0 +1,46 @@
+diff --git a/pkg/repository/provider/unified_repo.go b/pkg/repository/provider/unified_repo.go
+index 2af59f1..76160ad 100644
+--- a/pkg/repository/provider/unified_repo.go
++++ b/pkg/repository/provider/unified_repo.go
+@@ -597,6 +597,17 @@ func getStorageVariables(backupLocation *velerov1api.BackupStorageLocation, repo
+ 		result[udmrepo.StoreOptionS3Endpoint] = strings.Trim(s3URL, "/")
+ 		result[udmrepo.StoreOptionS3DisableTLSVerify] = config["insecureSkipTLSVerify"]
+ 		result[udmrepo.StoreOptionS3DisableTLS] = strconv.FormatBool(disableTLS)
++		if forcePathStyle, ok := config["s3ForcePathStyle"]; ok {
++			value, err := strconv.ParseBool(forcePathStyle)
++			if err != nil {
++				return map[string]string{}, errors.Wrap(err, "invalid s3ForcePathStyle")
++			}
++			if value {
++				result[udmrepo.StoreOptionS3BucketLookup] = "path"
++			} else {
++				result[udmrepo.StoreOptionS3BucketLookup] = "dns"
++			}
++		}
+ 	} else if backendType == repoconfig.AzureBackend {
+ 		for k, v := range config {
+ 			result[k] = v
+diff --git a/pkg/repository/udmrepo/kopialib/backend/s3.go b/pkg/repository/udmrepo/kopialib/backend/s3.go
+index 202c3c4..22bff30 100644
+--- a/pkg/repository/udmrepo/kopialib/backend/s3.go
++++ b/pkg/repository/udmrepo/kopialib/backend/s3.go
+@@ -47,6 +47,7 @@ func (c *S3Backend) Setup(ctx context.Context, flags map[string]string, logger l
+ 	c.options.DoNotUseTLS = optionalHaveBool(ctx, udmrepo.StoreOptionS3DisableTLS, flags)
+ 	c.options.DoNotVerifyTLS = optionalHaveBool(ctx, udmrepo.StoreOptionS3DisableTLSVerify, flags)
+ 	c.options.SessionToken = optionalHaveString(udmrepo.StoreOptionS3Token, flags)
++	c.options.BucketLookup = optionalHaveString(udmrepo.StoreOptionS3BucketLookup, flags)
+ 	c.options.RootCA = optionalHaveBase64(ctx, udmrepo.StoreOptionCACert, flags)
+ 
+ 	ctx = logging.WithLogger(ctx, logger)
+diff --git a/pkg/repository/udmrepo/repo_options.go b/pkg/repository/udmrepo/repo_options.go
+index a8371b7..643aa7a 100644
+--- a/pkg/repository/udmrepo/repo_options.go
++++ b/pkg/repository/udmrepo/repo_options.go
+@@ -44,6 +44,7 @@ const (
+ 	StoreOptionS3Endpoint         = "endpoint"
+ 	StoreOptionS3DisableTLS       = "doNotUseTLS"
+ 	StoreOptionS3DisableTLSVerify = "skipTLSVerify"
++	StoreOptionS3BucketLookup     = "bucketLookup"
+ 
+ 	StoreOptionFsPath = "fspath"
+ 

@@ -35,6 +35,7 @@ func TestMemoryStoreTaskSummaryKeepsListFieldsAndGetTaskKeepsFullPayload(t *test
 		Payload: map[string]any{
 			"namespace":        "demo",
 			"stage":            "restoring",
+			"recoveryStages":   []any{map[string]any{"id": "waiting_for_workloads", "status": "running"}},
 			"technicalDetails": map[string]any{"large": true},
 		},
 	}
@@ -46,6 +47,9 @@ func TestMemoryStoreTaskSummaryKeepsListFieldsAndGetTaskKeepsFullPayload(t *test
 	}
 	if len(items) != 1 || items[0].Payload["namespace"] != "demo" || items[0].Payload["stage"] != "restoring" {
 		t.Fatalf("summary payload=%v, want list fields", items)
+	}
+	if _, ok := items[0].Payload["recoveryStages"]; !ok {
+		t.Fatalf("summary payload=%v, authoritative recovery stage snapshot must be retained", items[0].Payload)
 	}
 	if _, ok := items[0].Payload["technicalDetails"]; ok {
 		t.Fatalf("summary payload=%v, technical details must be omitted", items[0].Payload)

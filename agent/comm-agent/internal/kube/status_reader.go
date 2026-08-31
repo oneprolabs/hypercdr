@@ -16,6 +16,8 @@ import (
 const (
 	restoreVolumeStartGrace     = 10 * time.Minute
 	restoreWorkloadStartupGrace = 5 * time.Minute
+	restoreImagePullRetryWindow = 90 * time.Second
+	restoreImagePullConfirmAge  = 15 * time.Second
 )
 
 type ManifestStatusReader interface {
@@ -488,16 +490,38 @@ func (a *DynamicManifestApplier) readPodReadiness(ctx context.Context, namespace
 		}
 		name := pod.GetName()
 		result.PodCount++
+		imageDetail := a.podImagePullFailureEvent(ctx, namespace, name)
 		if code, message := podTerminalReadinessFailure(pod.Object); code != "" {
 			if code == "RESTORE_WORKLOAD_IMAGE_PULL_FAILED" {
-				if detail := a.podImagePullFailureEvent(ctx, namespace, name); detail != "" && !strings.Contains(message, detail) {
-					message += ". Underlying kubelet error: " + detail
+				if imageDetail != "" && !strings.Contains(message, imageDetail) {
+					message += ". Underlying kubelet error: " + imageDetail
+				}
+				// Deterministic registry failures should not consume the broad
+				// five-minute workload startup grace. Confirm them briefly to
+				// tolerate a single stale Kubernetes event, then fail fast.
+				if imagePullFailureIsDeterministic(message) && podAge(pod.Object) >= restoreImagePullConfirmAge {
+					result.FailureCode = code
+					result.FailureMessage = message
+					result.UnreadyPods = append(result.UnreadyPods, name)
+					continue
 				}
 			}
 			result.FailureCode = code
 			result.FailureMessage = message
 			result.UnreadyPods = append(result.UnreadyPods, name)
 			continue
+		}
+		// Kubernetes may expose the detailed pull failure only as an Event
+		// before containerStatuses transitions to a terminal backoff state.
+		// Treat that event as the same signal so deterministic errors fail fast.
+		if imageDetail != "" {
+			message := fmt.Sprintf("restored pod %s cannot pull its image: %s", name, imageDetail)
+			if podAge(pod.Object) >= restoreImagePullRetryWindow || imagePullFailureIsDeterministic(message) && podAge(pod.Object) >= restoreImagePullConfirmAge {
+				result.FailureCode = "RESTORE_WORKLOAD_IMAGE_PULL_FAILED"
+				result.FailureMessage = message
+				result.UnreadyPods = append(result.UnreadyPods, name)
+				continue
+			}
 		}
 		if code, message := a.podPersistentStorageFailureEvent(ctx, namespace, name); code != "" {
 			result.FailureCode = code
@@ -512,6 +536,29 @@ func (a *DynamicManifestApplier) readPodReadiness(ctx context.Context, namespace
 		result.UnreadyPods = append(result.UnreadyPods, name)
 	}
 	return nil
+}
+
+func podAge(object map[string]any) time.Duration {
+	createdAt, ok := nestedTime(object, "metadata", "creationTimestamp")
+	if !ok {
+		return 0
+	}
+	return time.Since(createdAt)
+}
+
+func imagePullFailureIsDeterministic(message string) bool {
+	lower := strings.ToLower(message)
+	for _, marker := range []string{
+		"invalidimagename", "manifest unknown", "not found", "repository does not exist",
+		"unauthorized", "authentication required", "pull access denied", "denied",
+		"connection refused", "no such host", "network is unreachable", "certificate",
+		"tls handshake", "unsupported platform", "no matching manifest",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *DynamicManifestApplier) podPersistentStorageFailureEvent(ctx context.Context, namespace string, podName string) (string, string) {
@@ -568,9 +615,6 @@ func imagePullFailureEventMessage(events []unstructured.Unstructured) string {
 }
 
 func podTerminalReadinessFailure(object map[string]any) (string, string) {
-	if createdAt, ok := nestedTime(object, "metadata", "creationTimestamp"); ok && time.Since(createdAt) < restoreWorkloadStartupGrace {
-		return "", ""
-	}
 	podName, _, _ := unstructured.NestedString(object, "metadata", "name")
 	for _, statusPath := range [][]string{{"status", "initContainerStatuses"}, {"status", "containerStatuses"}} {
 		statuses, _, _ := unstructured.NestedSlice(object, statusPath...)
@@ -589,6 +633,15 @@ func podTerminalReadinessFailure(object map[string]any) (string, string) {
 				}
 				if detail != "" {
 					message += ": " + detail
+				}
+				if podAge(object) < restoreImagePullConfirmAge && !imagePullFailureIsDeterministic(message) {
+					return "", ""
+				}
+				if podAge(object) < restoreImagePullRetryWindow && !imagePullFailureIsDeterministic(message) {
+					return "", ""
+				}
+				if (reason == "InvalidImageName" || reason == "CreateContainerConfigError") && podAge(object) >= restoreImagePullConfirmAge {
+					return "RESTORE_WORKLOAD_IMAGE_PULL_FAILED", message
 				}
 				return "RESTORE_WORKLOAD_IMAGE_PULL_FAILED", message
 			case "CrashLoopBackOff":

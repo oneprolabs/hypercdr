@@ -809,9 +809,14 @@ export function taskStatusDisplay(task: ApiTask, events: ApiTaskEvent[]): TaskSt
   }
   const visible = keyTaskEvents(events.filter(event => !event.taskId || event.taskId === task.id));
   const groups = groupTaskEventsByStage(task, visible);
-  const current = groups.find(group => group.currentEventId) || groups.find(group => group.status === 'in_progress') || groups.find(group => group.status === 'failed');
+  // Persisted recoveryStages are authoritative. Event reasons such as
+  // `progress` are intentionally generic and can otherwise keep selecting the
+  // completed data-transfer stage after readiness validation has started.
+  const current = groups.find(group => group.status === 'in_progress') || groups.find(group => group.status === 'failed') || groups.find(group => group.currentEventId);
   const latest = latestVisibleTaskEvent(visible);
-  const fallback = latest ? taskEventPresentation(latest).summary : 'Waiting for task events...';
+  const fallback = current?.id === 'waiting_for_workloads'
+    ? 'Waiting for restored workloads and pods to become ready.'
+    : latest ? taskEventPresentation(latest).summary : 'Waiting for task events...';
   const recovery = ['drill', 'restore', 'takeover'].includes(String(task.type || '').toLowerCase());
   const dataStage = recovery ? 'restoring_data' : 'backing_up_data';
   const dataTransfer = current?.id === dataStage;

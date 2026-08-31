@@ -40,6 +40,10 @@ spec:
               value: {{ .Values.global.publicBaseURL | quote }}
             - name: HCDR_AGENT_WS_ENDPOINT
               value: {{ .Values.global.agentWebSocketURL | quote }}
+            - name: HCDR_AGENT_PRIVATE_WS_ENDPOINT
+              value: {{ .Values.global.agentPrivateWebSocketURL | quote }}
+            - name: HCDR_AGENT_PUBLIC_WS_ENDPOINT
+              value: {{ .Values.global.agentPublicWebSocketURL | quote }}
             - name: HCDR_IMAGE_REGISTRY
               value: {{ .Values.global.imageRegistry | quote }}
             - name: HCDR_AGENT_NAMESPACE

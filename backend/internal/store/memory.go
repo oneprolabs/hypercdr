@@ -2258,7 +2258,7 @@ func (s *MemoryStore) ListTasksFiltered(filter TaskFilter) ([]Task, error) {
 			(len(filter.Statuses) == 0 || containsString(filter.Statuses, item.Status)) {
 			if filter.Summary {
 				summary := map[string]any{}
-				for _, key := range []string{"namespace", "sourceNamespace", "applicationName", "stage", "archivedClusterId", "archivedClusterName", "restorePointId", "archivedRestorePointId", "pointId", "veleroBackupName", "backupName", "storageRepoId", "repositoryId", "storageRepo", "backupStorageName", "storageLocation", "repository", "name"} {
+				for _, key := range []string{"namespace", "sourceNamespace", "applicationName", "stage", "recoveryStages", "archivedClusterId", "archivedClusterName", "restorePointId", "archivedRestorePointId", "pointId", "veleroBackupName", "backupName", "storageRepoId", "repositoryId", "storageRepo", "backupStorageName", "storageLocation", "repository", "name"} {
 					if value, ok := item.Payload[key]; ok {
 						summary[key] = value
 					}

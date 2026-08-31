@@ -21,5 +21,6 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o
 FROM ${DISTROLESS_IMAGE}
 
 COPY --from=builder /out/comm-agent /comm-agent
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 USER nonroot:nonroot
 ENTRYPOINT ["/comm-agent"]

@@ -3660,25 +3660,20 @@ func (r *Router) createAgentToken(w http.ResponseWriter, req *http.Request) {
 		curlCommand = "curl -k -sSL "
 	}
 
-	installCommand := curlCommand + baseURL + "/install.sh | bash -s -- --token " +
-		token.Token + " --endpoint " + r.agentWSEndpoint(req) +
-		" --namespace " + r.cfg.AgentNamespace +
-		" --executor-mode kubernetes --install-registry-ca false"
-	if clusterType == "huaweicloud-cce" {
-		installCommand = curlCommand + baseURL + "/install.sh | bash -s -- --token " + token.Token +
-			" --cluster-type huaweicloud-cce --namespace " + r.cfg.AgentNamespace + " --executor-mode kubernetes --install-registry-ca false"
-		if endpoint := strings.TrimSpace(r.cfg.AgentPrivateWSEndpoint); endpoint != "" {
-			installCommand += " --endpoint-private " + endpoint
-		}
-		if endpoint := strings.TrimSpace(r.cfg.AgentPublicWSEndpoint); endpoint != "" {
-			installCommand += " --endpoint-public " + endpoint
-		} else if endpoint := strings.TrimSpace(r.cfg.AgentWSEndpoint); endpoint != "" {
-			installCommand += " --endpoint-public " + endpoint
-		}
-		if !strings.Contains(installCommand, "--endpoint-private") && !strings.Contains(installCommand, "--endpoint-public") {
-			installCommand += " --endpoint-public " + r.agentWSEndpoint(req)
-		}
+	primaryEndpoint := strings.TrimSpace(r.cfg.AgentPrivateWSEndpoint)
+	if primaryEndpoint == "" {
+		primaryEndpoint = r.agentWSEndpoint(req)
 	}
+	installCommand := curlCommand + baseURL + "/install.sh | bash -s -- --token " +
+		token.Token + " --endpoint " + primaryEndpoint
+	if publicEndpoint := strings.TrimSpace(r.cfg.AgentPublicWSEndpoint); publicEndpoint != "" && publicEndpoint != primaryEndpoint {
+		installCommand += " --endpoint-public " + publicEndpoint
+	}
+	if clusterType == "huaweicloud-cce" {
+		installCommand += " --cluster-type huaweicloud-cce"
+	}
+	installCommand += " --namespace " + r.cfg.AgentNamespace +
+		" --executor-mode kubernetes --install-registry-ca false"
 	response := map[string]any{
 		"id":             token.ID,
 		"token":          token.Token,
@@ -3746,9 +3741,14 @@ func (r *Router) installScript(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "component_target_unavailable", "message": "Active cluster component versions are not available."})
 		return
 	}
-	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
+	modules, moduleErr := assembledInstallerModules()
+	if moduleErr != nil {
+		r.logger.Error("failed to assemble installer provider modules", "error", moduleErr)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "installer_modules_unavailable"})
+		return
+	}
 	script := strings.ReplaceAll(installScriptTemplate, "{{AGENT_IMAGE}}", agentTarget.Image)
+	script = strings.ReplaceAll(script, "{{INSTALLER_PROVIDER_MODULES}}", modules)
 	script = strings.ReplaceAll(script, "{{AGENT_NAMESPACE}}", r.cfg.AgentNamespace)
 	script = strings.ReplaceAll(script, "{{AGENT_WS_ENDPOINT}}", r.agentWSEndpoint(req))
 	script = strings.ReplaceAll(script, "{{TOKEN_VALIDATE_URL}}", r.publicBaseURL(req)+"/api/v1/agent-tokens/validate")
@@ -3760,6 +3760,8 @@ func (r *Router) installScript(w http.ResponseWriter, req *http.Request) {
 	script = strings.ReplaceAll(script, "{{VELERO_AWS_PLUGIN_IMAGE}}", r.cfg.VeleroAWSPlugin)
 	script = strings.ReplaceAll(script, "{{VELERO_AZURE_PLUGIN_IMAGE}}", r.cfg.VeleroAzurePlugin)
 	script = strings.ReplaceAll(script, "{{VELERO_GCP_PLUGIN_IMAGE}}", r.cfg.VeleroGCPPlugin)
+	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(script))
 }
 
@@ -4150,9 +4152,10 @@ func probeStorageRepository(repo store.StorageRepository, timeout time.Duration)
 		}
 		endpoint, secure := minioEndpoint(repo)
 		client, err := minio.New(endpoint, &minio.Options{
-			Creds:  credentials.NewStaticV4(creds.AccessKey, creds.SecretKey, ""),
-			Secure: secure,
-			Region: normalizedStorageRegion(repo.Type, repo.Region),
+			Creds:        credentials.NewStaticV4(creds.AccessKey, creds.SecretKey, ""),
+			Secure:       secure,
+			Region:       normalizedStorageRegion(repo.Type, repo.Region),
+			BucketLookup: storageBucketLookup(repo),
 		})
 		if err != nil {
 			return map[string]any{"endpoint": endpoint, "bucket": repo.Bucket}, err
@@ -4326,9 +4329,10 @@ func deleteObjectStoragePrefix(ctx context.Context, repo store.StorageRepository
 	}
 	endpoint, secure := minioEndpoint(repo)
 	client, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(creds.AccessKey, creds.SecretKey, ""),
-		Secure: secure,
-		Region: repo.Region,
+		Creds:        credentials.NewStaticV4(creds.AccessKey, creds.SecretKey, ""),
+		Secure:       secure,
+		Region:       normalizedStorageRegion(repo.Type, repo.Region),
+		BucketLookup: storageBucketLookup(repo),
 	})
 	if err != nil {
 		return result, err
@@ -4357,6 +4361,18 @@ func minioEndpoint(repo store.StorageRepository) (string, bool) {
 		endpoint = strings.TrimPrefix(endpoint, "https://")
 	}
 	return endpoint, secure
+}
+
+func storageBucketLookup(repo store.StorageRepository) minio.BucketLookupType {
+	style, _ := repo.Config["urlStyle"].(string)
+	switch strings.ToLower(strings.TrimSpace(style)) {
+	case "virtual", "virtual-host", "virtual_host", "dns":
+		return minio.BucketLookupDNS
+	case "path", "path-style", "path_style":
+		return minio.BucketLookupPath
+	default:
+		return minio.BucketLookupAuto
+	}
 }
 
 func (r *Router) syncStorageRepository(w http.ResponseWriter, req *http.Request) {
@@ -9990,6 +10006,12 @@ func taskProgressPayloadPatch(payload protocol.TaskProgressPayload) map[string]a
 	if payload.SizeProgressV2 != nil {
 		patch["sizeProgressV2"] = payload.SizeProgressV2
 	}
+	// Persistent-data progress ends when readiness validation begins. Payload
+	// patches are merged, so explicitly clear the previous 100% transfer sample
+	// instead of leaving the UI apparently stuck in Restoring Persistent Data.
+	if readinessStage := strings.TrimSpace(fmt.Sprint(payload.Velero["readinessStage"])); readinessStage != "" && readinessStage != "<nil>" {
+		patch["sizeProgressV2"] = nil
+	}
 	volumeProgress := mapFromAny(payload.Velero["volumeProgress"])
 	if len(volumeProgress) > 0 {
 		patch["volumeProgress"] = volumeProgress
@@ -11929,6 +11951,7 @@ NODE_SSH_USER=""
 NODE_SSH_KEY=""
 NODE_SSH_PORT="22"
 INTERACTIVE="true"
+SCENARIO="fresh-install"
 STORAGE_CLASS=""
 DETECTED_CLUSTER_NAME=""
 DETECTED_CLOUD_REGION=""
@@ -11963,8 +11986,17 @@ fail() {
   local message="$1"
   local code="${2:-1}"
   log_error "$message"
+  # Explicit exit does not trigger Bash's ERR trap. Once installation has
+  # entered its mutating phase, invoke the same rollback path directly so a
+  # provider or core validation cannot leave a partial namespace behind.
+  if [[ "${ROLLBACK_ACTIVE:-false}" == "true" ]] && declare -F rollback_failed_registration >/dev/null; then
+    ROLLBACK_ACTIVE="false"
+    rollback_failed_registration
+  fi
   exit "$code"
 }
+
+{{INSTALLER_PROVIDER_MODULES}}
 
 print_install_summary() {
   log_section "HyperCDR agent installer"
@@ -12114,6 +12146,10 @@ while [[ $# -gt 0 ]]; do
       INTERACTIVE="${2:-}"
       shift 2
       ;;
+    --scenario)
+      SCENARIO="${2:-}"
+      shift 2
+      ;;
     --storage-class)
       STORAGE_CLASS="${2:-}"
       shift 2
@@ -12133,6 +12169,7 @@ fi
 if [[ "$CLUSTER_TYPE" != "native-kubernetes" && "$CLUSTER_TYPE" != "huaweicloud-cce" ]]; then
   fail "Unsupported --cluster-type '${CLUSTER_TYPE}'. Use native-kubernetes or huaweicloud-cce." 2
 fi
+validate_registration_scenario
 if [[ "$NAMESPACE" != "hypercdr-agent" ]]; then
   fail "HyperCDR uses the single canonical namespace 'hypercdr-agent'. Community and Enterprise Agent installations are identical; use the control-plane handover workflow to change editions." 2
 fi
@@ -12143,56 +12180,19 @@ if ! command -v kubectl >/dev/null 2>&1; then
   fail "kubectl is required but was not found in PATH"
 fi
 
-select_cce_kubeconfig() {
-  [[ "$CLUSTER_TYPE" == "huaweicloud-cce" ]] || return 0
-  local candidate selection
-  local -a candidates=()
-  for candidate in "${KUBECONFIG:-}" "$HOME/.kube/hypercdr-cce.yaml" "$HOME/.kube/config"; do
-    [[ -n "$candidate" && -f "$candidate" ]] && candidates+=("$candidate")
-  done
-  shopt -s nullglob
-  for candidate in "$PWD"/*kubeconfig* "$HOME/Downloads"/*kubeconfig* "$HOME/Downloads"/*config*.yaml; do
-    [[ -f "$candidate" ]] && candidates+=("$candidate")
-  done
-  shopt -u nullglob
-  if [[ -z "$KUBECONFIG_PATH" && ${#candidates[@]} -eq 1 ]]; then
-    KUBECONFIG_PATH="${candidates[0]}"
-  elif [[ -z "$KUBECONFIG_PATH" && ${#candidates[@]} -gt 1 && "$INTERACTIVE" == "true" ]] && { exec 3<>/dev/tty; } 2>/dev/null; then
-    echo "Detected Kubernetes configuration files:" >&3
-    for selection in "${!candidates[@]}"; do printf '%d) %s\n' "$((selection+1))" "${candidates[$selection]}" >&3; done
-    printf 'Select a CCE kubeconfig [1-%d], or 0 to enter another path: ' "${#candidates[@]}" >&3
-    IFS= read -r selection <&3 || true
-    if [[ "$selection" =~ ^[0-9]+$ ]] && ((selection >= 1 && selection <= ${#candidates[@]})); then
-      KUBECONFIG_PATH="${candidates[$((selection-1))]}"
-    fi
-    exec 3>&-
-  fi
-  if [[ -z "$KUBECONFIG_PATH" && "$INTERACTIVE" == "true" ]] && { exec 3<>/dev/tty; } 2>/dev/null; then
-    printf 'Enter the CCE kubeconfig file path: ' >&3
-    IFS= read -r KUBECONFIG_PATH <&3 || true
-    exec 3>&-
-  fi
-  [[ -n "$KUBECONFIG_PATH" ]] || fail "CCE registration requires a kubeconfig. Rerun with --kubeconfig <path>."
-  KUBECONFIG_PATH="${KUBECONFIG_PATH/#\~/$HOME}"
-  [[ -r "$KUBECONFIG_PATH" ]] || fail "CCE kubeconfig is not readable: ${KUBECONFIG_PATH}"
-  export KUBECONFIG="$KUBECONFIG_PATH"
-  if [[ -z "$KUBECTL_CONTEXT" ]]; then
-    mapfile -t contexts < <(command kubectl config get-contexts -o name)
-    if [[ ${#contexts[@]} -eq 1 ]]; then
-      KUBECTL_CONTEXT="${contexts[0]}"
-    elif [[ ${#contexts[@]} -gt 1 ]]; then
-      fail "The CCE kubeconfig contains multiple contexts. Rerun with --context <name>."
-    fi
-  fi
-}
-
-select_cce_kubeconfig
+provider_select_context
 
 kubectl() {
   if [[ -n "$KUBECTL_CONTEXT" ]]; then command kubectl --context "$KUBECTL_CONTEXT" "$@"; else command kubectl "$@"; fi
 }
 
-if [[ -n "$ENDPOINT_PRIVATE" ]]; then ENDPOINT="$ENDPOINT_PRIVATE"; elif [[ -n "$ENDPOINT_PUBLIC" ]]; then ENDPOINT="$ENDPOINT_PUBLIC"; fi
+if [[ -z "$ENDPOINT" ]]; then
+  if [[ -n "$ENDPOINT_PRIVATE" ]]; then
+    ENDPOINT="$ENDPOINT_PRIVATE"
+  elif [[ -n "$ENDPOINT_PUBLIC" ]]; then
+    ENDPOINT="$ENDPOINT_PUBLIC"
+  fi
+fi
 AGENT_RBAC_NAME="hypercdr-agent"
 VELERO_RBAC_NAME="hypercdr-velero"
 print_install_summary
@@ -12227,26 +12227,7 @@ if ! kubectl cluster-info >/dev/null 2>&1; then
 fi
 log_ok "Kubernetes API is reachable"
 
-if [[ "$CLUSTER_TYPE" == "huaweicloud-cce" ]]; then
-  log_info "Verifying Huawei Cloud CCE compatibility"
-  provider_ids="$(kubectl get nodes -o jsonpath='{range .items[*]}{.spec.providerID}{"\n"}{end}' 2>/dev/null || true)"
-  cce_markers="$(kubectl get nodes --show-labels 2>/dev/null || true) $(kubectl -n kube-system get deployments,daemonsets 2>/dev/null || true)"
-  if ! grep -Eqi 'huaweicloud|cce' <<<"${provider_ids} ${cce_markers}"; then
-    fail "The selected cluster could not be verified as Huawei Cloud CCE. Check the kubeconfig and target context."
-  fi
-  unsupported_nodes="$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.nodeInfo.operatingSystem}{" "}{.status.nodeInfo.architecture}{"\n"}{end}' | awk '$2 != "linux" || ($3 != "amd64" && $3 != "x86_64")')"
-  [[ -z "$unsupported_nodes" ]] || fail "CCE phase one supports Linux amd64 workers only. Unsupported nodes: ${unsupported_nodes//$'\n'/, }"
-  for permission in 'create namespaces' 'create clusterroles.rbac.authorization.k8s.io' 'create clusterrolebindings.rbac.authorization.k8s.io' 'create deployments.apps' 'create daemonsets.apps' 'create secrets' 'create persistentvolumeclaims'; do
-    verb="${permission%% *}"; resource="${permission#* }"
-    if ! kubectl auth can-i "$verb" "$resource" --all-namespaces | grep -qx yes; then
-      fail "CCE kubeconfig lacks required permission: ${verb} ${resource}"
-    fi
-  done
-  DETECTED_CLUSTER_NAME="${KUBECTL_CONTEXT:-$(kubectl config current-context 2>/dev/null || true)}"
-	DETECTED_CLOUD_REGION="$(kubectl get nodes -o jsonpath='{.items[0].metadata.labels.topology\.kubernetes\.io/region}' 2>/dev/null || true)"
-	DETECTED_CLOUD_CLUSTER_ID="${DETECTED_CLUSTER_NAME}"
-  log_ok "Huawei Cloud CCE cluster verified: ${DETECTED_CLUSTER_NAME:-unknown}"
-fi
+provider_verify
 
 log_info "Checking whether this cluster is already managed by HyperCDR"
 existing_agents="$(kubectl get deployments -A -o jsonpath='{range .items[?(@.metadata.name=="hypercdr-comm-agent")]}{.metadata.namespace}{"\n"}{end}' 2>/dev/null | sed '/^[[:space:]]*$/d' | sort -u || true)"
@@ -12822,60 +12803,6 @@ YAML
   exit 1
 }
 
-preflight_dynamic_pvc() {
-  [[ "$CLUSTER_TYPE" == "huaweicloud-cce" ]] || return 0
-  log_info "Checking dynamic PVC provisioning with StorageClass ${STORAGE_CLASS}"
-  cat <<YAML | kubectl_apply_retry >/dev/null
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: hypercdr-storage-preflight
-  namespace: ${PREFLIGHT_NAMESPACE}
-spec:
-  accessModes: ["ReadWriteOnce"]
-  storageClassName: ${STORAGE_CLASS}
-  resources:
-    requests:
-      storage: 1Gi
----
-apiVersion: v1
-kind: Pod
-metadata:
-  name: hypercdr-storage-preflight
-  namespace: ${PREFLIGHT_NAMESPACE}
-spec:
-  serviceAccountName: default
-  automountServiceAccountToken: false
-  restartPolicy: Never
-${IMAGE_PULL_SECRETS_BLOCK}
-  containers:
-    - name: storage-check
-      image: ${VELERO_IMAGE}
-      imagePullPolicy: IfNotPresent
-      command: ["/velero", "version", "--client-only"]
-      volumeMounts:
-        - name: data
-          mountPath: /preflight
-  volumes:
-    - name: data
-      persistentVolumeClaim:
-        claimName: hypercdr-storage-preflight
-YAML
-  local deadline=$((SECONDS + 120)) phase
-  while [[ $SECONDS -lt $deadline ]]; do
-    phase="$(kubectl -n "$PREFLIGHT_NAMESPACE" get pvc hypercdr-storage-preflight -o jsonpath='{.status.phase}' 2>/dev/null || true)"
-    if [[ "$phase" == "Bound" ]]; then
-      log_ok "Dynamic PVC provisioning passed with StorageClass ${STORAGE_CLASS}"
-      return 0
-    fi
-    sleep 3
-  done
-  log_error "Dynamic PVC provisioning did not bind within 120s for StorageClass ${STORAGE_CLASS}"
-  kubectl -n "$PREFLIGHT_NAMESPACE" describe pvc hypercdr-storage-preflight >&2 || true
-  kubectl -n "$PREFLIGHT_NAMESPACE" get events --sort-by=.lastTimestamp | tail -n 30 >&2 || true
-  return 1
-}
-
 check_existing_velero_installation() {
   if [[ "$INSTALL_VELERO" != "true" || "$ALLOW_EXISTING_VELERO" == "true" ]]; then
     return 0
@@ -12947,6 +12874,7 @@ check_existing_velero_installation
 
 rollback_failed_registration() {
 	trap - ERR
+  [[ -z "${platform_ca_file:-}" ]] || rm -f "$platform_ca_file"
   log_warn "Rolling back changes because comm-agent registration did not complete"
   if [[ -n "${PREFLIGHT_NAMESPACE:-}" ]]; then
     kubectl delete namespace "$PREFLIGHT_NAMESPACE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
@@ -12978,10 +12906,13 @@ if [[ -z "$REGISTRY_HOST" || "$INSTALL_REGISTRY_CA" != "true" ]]; then
   log_info "Registry CA installation skipped"
 fi
 
+provider_prepare_platform_trust
+
 log_section "Isolated installation preflight"
 PREFLIGHT_NAMESPACE="${NAMESPACE}-preflight-$(date +%s)-${RANDOM}"
 kubectl create namespace "$PREFLIGHT_NAMESPACE" --dry-run=client -o yaml | kubectl_apply_retry
 kubectl -n "$PREFLIGHT_NAMESPACE" create serviceaccount default --dry-run=client -o yaml | kubectl_apply_retry
+provider_prepare_preflight
 if [[ -n "$REGISTRY_SERVER" || -n "$REGISTRY_USERNAME" || -n "$REGISTRY_PASSWORD" ]]; then
   if [[ -z "$REGISTRY_SERVER" || -z "$REGISTRY_USERNAME" || -z "$REGISTRY_PASSWORD" ]]; then
     fail "--registry-server, --registry-username, and --registry-password must be provided together" 2
@@ -12992,16 +12923,8 @@ if [[ -n "$REGISTRY_SERVER" || -n "$REGISTRY_USERNAME" || -n "$REGISTRY_PASSWORD
     --dry-run=client -o yaml | kubectl_apply_retry
   IMAGE_PULL_SECRETS_BLOCK=$'  imagePullSecrets:\n    - name: '"$IMAGE_PULL_SECRET"
 fi
-if [[ "$IMAGE_PULL_PREFLIGHT" == "true" ]]; then
-  preflight_image_pull "hypercdr-image-check-agent" "$AGENT_IMAGE" '      command: ["/comm-agent"]'
-  if [[ "$INSTALL_VELERO" == "true" ]]; then
-    preflight_image_pull "hypercdr-image-check-velero" "$VELERO_IMAGE" '      command: ["/velero", "version", "--client-only"]'
-    preflight_image_pull "hypercdr-image-check-velero-aws-plugin" "$VELERO_AWS_PLUGIN_IMAGE" '      command: ["/plugins/velero-plugin-for-aws"]'
-    preflight_image_pull "hypercdr-image-check-velero-azure-plugin" "$VELERO_AZURE_PLUGIN_IMAGE" '      command: ["/plugins/velero-plugin-for-microsoft-azure"]'
-    preflight_image_pull "hypercdr-image-check-velero-gcp-plugin" "$VELERO_GCP_PLUGIN_IMAGE" '      command: ["/plugins/velero-plugin-for-gcp"]'
-  fi
-fi
-preflight_dynamic_pvc
+run_image_pull_preflights
+provider_run_preflight
 kubectl delete namespace "$PREFLIGHT_NAMESPACE" --ignore-not-found --wait=true --timeout=60s >/dev/null
 PREFLIGHT_NAMESPACE=""
 IMAGE_PULL_SECRETS_BLOCK=""
@@ -13011,16 +12934,7 @@ log_section "Namespace and credentials"
 log_info "Creating or updating namespace ${NAMESPACE}"
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl_apply_retry
 log_ok "Namespace ${NAMESPACE} is ready"
-platform_ca_file="$(mktemp)"
-if curl -k -fsSL "$PLATFORM_CA_URL" -o "$platform_ca_file" && grep -q 'BEGIN CERTIFICATE' "$platform_ca_file"; then
-  kubectl -n "$NAMESPACE" create configmap hypercdr-platform-ca --from-file=ca.crt="$platform_ca_file" --dry-run=client -o yaml | kubectl_apply_retry
-  PLATFORM_TLS_SKIP_VERIFY="false"
-  log_ok "Platform TLS certificate is pinned for Agent connections"
-else
-  rm -f "$platform_ca_file"
-  fail "Platform TLS certificate could not be downloaded or is invalid. No Agent resources were installed with insecure TLS."
-fi
-rm -f "$platform_ca_file"
+provider_install_platform_trust
 log_info "Installing the offline Agent uninstaller in the cluster"
 uninstaller_file="$(mktemp)"
 if curl -k -fsSL "$AGENT_UNINSTALL_URL" -o "$uninstaller_file" && head -n 1 "$uninstaller_file" | grep -qx '#!/usr/bin/env bash' && kubectl -n "$NAMESPACE" create configmap hypercdr-agent-uninstaller --from-file=uninstall-agent.sh="$uninstaller_file" --dry-run=client -o yaml | kubectl_apply_retry; then

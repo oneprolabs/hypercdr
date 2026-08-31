@@ -3237,6 +3237,7 @@ func (s *PostgresStore) listTasks(filter TaskFilter) ([]Task, error) {
 		payloadExpr = `jsonb_strip_nulls(jsonb_build_object(
 			'namespace',payload->'namespace','sourceNamespace',payload->'sourceNamespace',
 			'applicationName',payload->'applicationName','stage',payload->'stage',
+			'recoveryStages',payload->'recoveryStages',
 			'archivedClusterId',payload->'archivedClusterId','archivedClusterName',payload->'archivedClusterName',
 			'restorePointId',payload->'restorePointId','archivedRestorePointId',payload->'archivedRestorePointId',
 			'pointId',payload->'pointId','veleroBackupName',payload->'veleroBackupName','backupName',payload->'backupName',

@@ -1043,6 +1043,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   const [authSession, setAuthSession] = useState<AuthSession | null>(() => readStoredAuthSession());
   const [productInfo, setProductInfo] = useState<ApiProductInfo | null>(null);
   const [productCapabilities, setProductCapabilities] = useState<Record<string, { enabled?: boolean }>>({});
+  const clusterRegistrationAllowed = !hasEnterpriseAuditModule || productInfo?.license?.status === 'active';
   const [passwordChangeCompleted, setPasswordChangeCompleted] = useState(false);
   const [view, setView] = useState<View>(() => readStoredAuthSession() ? (readStoredView() || 'dashboard') : 'login');
   const [timeZonePreference, setTimeZonePreference] = useState(() => authSession?.user.timeZone || '');
@@ -1316,9 +1317,9 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   }, [prefetchAgentToken, requestAgentToken, takePrefetchedAgentToken]);
 
   useEffect(() => {
-    if (!authSession || view !== 'clusters') return;
+    if (!authSession || view !== 'clusters' || !clusterRegistrationAllowed) return;
     void prefetchAgentToken();
-  }, [authSession, prefetchAgentToken, view]);
+  }, [authSession, clusterRegistrationAllowed, prefetchAgentToken, view]);
 
   const refreshLoginCaptcha = useCallback(async (clearError = true) => {
     try {
@@ -1826,17 +1827,25 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     const loadApplicationActivity = async () => {
       if (document.visibilityState === 'hidden') return;
       try {
-        const [taskRes, restorePointRes] = await Promise.all([
+        // Task identity is owned by the persisted plan pointers. A recovery
+        // can be submitted by another browser or directly through the API, so
+        // poll the lightweight plan list in the same snapshot as tasks. Using
+        // a stale latestRecoveryTaskId makes the row keep rendering the prior
+        // drill until a full-page refresh.
+        const [taskRes, restorePointRes, planRes] = await Promise.all([
           apiGet<ApiList<ApiTask>>('/api/v1/tasks?view=summary&types=backup,restore,drill,takeover&limit=500'),
           apiGet<ApiList<ApiRestorePoint>>('/api/v1/restore-points?view=summary&pageSize=500'),
+          apiGet<ApiList<ApiProtectionPlan>>('/api/v1/protection-plans'),
         ]);
         if (cancelled) return;
-        const apiTasks = await includePointedTasks(listItems(taskRes), liveApiPlansRef.current);
+        const apiPlans = listItems(planRes);
+        const apiTasks = await includePointedTasks(listItems(taskRes), apiPlans);
         const apiRestorePoints = listItems(restorePointRes);
         const apiRestorePointViews = apiRestorePoints.map(mapRestorePoint);
         setLiveApiTasks(apiTasks);
-        const nextAppTasks = buildAppTaskMap(apiTasks, liveApiAppsRef.current, ['backup'], apiRestorePointViews, liveApiPlansRef.current);
-        const nextRecoveryTasks = buildAppTaskMap(apiTasks, liveApiAppsRef.current, ['restore', 'drill', 'takeover'], apiRestorePointViews, liveApiPlansRef.current);
+        setLiveApiPlans(apiPlans);
+        const nextAppTasks = buildAppTaskMap(apiTasks, liveApiAppsRef.current, ['backup'], apiRestorePointViews, apiPlans);
+        const nextRecoveryTasks = buildAppTaskMap(apiTasks, liveApiAppsRef.current, ['restore', 'drill', 'takeover'], apiRestorePointViews, apiPlans);
         setLiveAppTasks(previous => mergeTaskMapKeepingActive(previous, nextAppTasks));
         setLiveRecoveryTasks(previous => mergeTaskMapKeepingActive(previous, nextRecoveryTasks));
         setRestorePointCount(apiRestorePointViews.length);
@@ -2509,6 +2518,8 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
                 getAgentTokenForRegistration={getAgentTokenForRegistration}
                 prefetchAgentToken={prefetchAgentToken}
                 openDashboard={() => openView('dashboard', { preserveSelectedCluster: true })}
+                registrationAllowed={clusterRegistrationAllowed}
+                openLicenseManagement={() => openView('extension:enterprise-license')}
                 toast={setToast}
               /></React.Suspense>
             )}

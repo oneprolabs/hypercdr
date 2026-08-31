@@ -104,6 +104,7 @@ func BuildBackupStorageLocationManifest(input StorageBuildInput) (BackupStorageL
 			config[key] = text
 		}
 	}
+	applyS3VendorCompatibility(config, input.Command.Endpoint)
 
 	manifest := BackupStorageLocationManifest{
 		APIVersion: "velero.io/v1",
@@ -137,6 +138,31 @@ func BuildBackupStorageLocationManifest(input StorageBuildInput) (BackupStorageL
 		manifest.Spec.ObjectStorage.Prefix = prefix
 	}
 	return manifest, nil
+}
+
+// applyS3VendorCompatibility is the isolation boundary for vendor-specific
+// S3 behavior. Generic S3 configuration above remains vendor-neutral; each
+// compatibility rule must identify its own endpoint and only change the
+// settings required by that provider.
+func applyS3VendorCompatibility(config map[string]string, endpoint string) {
+	if isHuaweiOBSEndpoint(endpoint) {
+		applyHuaweiOBSCompatibility(config)
+	}
+}
+
+func applyHuaweiOBSCompatibility(config map[string]string) {
+	// Huawei OBS implements the S3 API but rejects the AWS plugin's payload
+	// checksum header for some uploads. Empty is the plugin-supported value
+	// for disabling that header.
+	config["checksumAlgorithm"] = ""
+}
+
+func isHuaweiOBSEndpoint(endpoint string) bool {
+	host := strings.ToLower(strings.TrimSpace(endpoint))
+	host = strings.TrimPrefix(host, "https://")
+	host = strings.TrimPrefix(host, "http://")
+	host = strings.SplitN(host, "/", 2)[0]
+	return strings.Contains(host, "huaweicloud.com") || strings.Contains(host, "myhuaweicloud.com")
 }
 
 func normalizedS3Region(storageType, region string) string {
@@ -243,9 +269,11 @@ func mapUIStorageConfig(key string, value string) (string, bool, bool, string) {
 	case "prefix":
 		return "", true, true, ""
 	case "urlStyle", "url_style":
-		switch value {
-		case "path", "path-style", "virtualHost", "virtual-hosted":
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "path", "path-style", "path_style":
 			return "s3ForcePathStyle", true, false, "true"
+		case "virtual", "virtual-host", "virtual_host", "virtualhost", "virtual-hosted", "dns":
+			return "s3ForcePathStyle", true, false, "false"
 		}
 		return "", true, true, ""
 	case "bucket", "caCert":

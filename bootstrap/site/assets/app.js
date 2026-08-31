@@ -21,6 +21,9 @@ function updateCommands() {
   const enterpriseVersion = releases.enterprise.version;
   const nodeIP = value('k8s-node-ip') || portalHost;
   const nodePort = value('k8s-node-port') || '30080';
+  const communityPublicFallback = value('host-agent-public-url');
+  const k8sPublicFallback = value('k8s-agent-public-url');
+  const enterprisePublicFallback = value('enterprise-agent-public-url');
 
   element('community-docker-command').textContent = [
     `curl -fsSL ${communityURL}/hypercdr-bootstrap.tar.gz -o hypercdr-bootstrap.tar.gz`,
@@ -28,6 +31,7 @@ function updateCommands() {
     'cd hypercdr-bootstrap',
     './install-platform.sh docker \\',
     `  --public-base-url ${shellQuote(value('host-public-url') || `https://${portalHost}:3002`)} \\`,
+    ...(communityPublicFallback ? [`  --agent-public-url ${shellQuote(communityPublicFallback)} \\`] : []),
     `  --image-tag ${shellQuote(communityVersion)} --execute`,
   ].join('\n');
 
@@ -38,6 +42,7 @@ function updateCommands() {
     './install-platform.sh k8s \\',
     '  --namespace hypercdr-system \\',
     `  --public-base-url https://${nodeIP}:${nodePort} \\`,
+    ...(k8sPublicFallback ? [`  --agent-public-url ${shellQuote(k8sPublicFallback)} \\`] : []),
     `  --image-tag ${shellQuote(communityVersion)} \\`,
     `  --storage-class ${shellQuote(value('k8s-storage-class') || 'longhorn')} --node-port ${shellQuote(nodePort)} --database-mode bundled --execute`,
   ].join('\n');
@@ -50,6 +55,7 @@ function updateCommands() {
     'cd hypercdr-enterprise',
     `./install-enterprise.sh ${enterpriseMode} \\`,
     `  --public-base-url ${shellQuote(value('enterprise-public-url') || `https://${portalHost}:3102`)} \\`,
+    ...(enterprisePublicFallback ? [`  --agent-public-url ${shellQuote(enterprisePublicFallback)} \\`] : []),
     `  --license-file ${shellQuote(value('enterprise-license-file') || './license.json')} \\`,
     `  --public-keys-file ${shellQuote(value('enterprise-public-keys-file') || './public-keys.json')} \\`,
     ...(enterpriseMode === 'k8s' ? [
@@ -112,7 +118,7 @@ for (const tab of document.querySelectorAll('[data-enterprise-mode]')) {
     updateCommands();
   });
 }
-for (const id of ['host-public-url', 'k8s-node-ip', 'k8s-node-port', 'k8s-storage-class', 'enterprise-public-url', 'enterprise-license-file', 'enterprise-public-keys-file', 'enterprise-namespace', 'enterprise-database-url']) element(id).addEventListener('input', updateCommands);
+for (const id of ['host-public-url', 'host-agent-public-url', 'k8s-node-ip', 'k8s-node-port', 'k8s-storage-class', 'k8s-agent-public-url', 'enterprise-public-url', 'enterprise-agent-public-url', 'enterprise-license-file', 'enterprise-public-keys-file', 'enterprise-namespace', 'enterprise-database-url']) element(id).addEventListener('input', updateCommands);
 for (const button of document.querySelectorAll('[data-copy-target]')) {
   button.addEventListener('click', async () => {
     try { await copyText(element(button.dataset.copyTarget).textContent); button.textContent = 'Copied'; }

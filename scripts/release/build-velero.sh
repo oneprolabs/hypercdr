@@ -31,4 +31,7 @@ fi
 require_registry "${REGISTRY}"
 args=(--registry "${REGISTRY}" --tag "${IMAGE_TAG}" --version "${IMAGE_TAG}" --build-dir "${HCDR_RUNTIME_ROOT:-${RUNTIME_ROOT}}/build/velero/${IMAGE_TAG}")
 [[ "${PUSH}" == "true" ]] && args+=(--push)
-"${ROOT_DIR}/third_party/velero/deployments/build-velero-image.sh" "${args[@]}"
+STAGING_PARENT="$(mktemp -d "${HCDR_RUNTIME_ROOT:-${RUNTIME_ROOT}}/build/velero-patched-${IMAGE_TAG}-XXXXXX")"
+PATCHED_SOURCE="${STAGING_PARENT}/source"
+"${ROOT_DIR}/third_party/velero/deployments/prepare-patched-source.sh" "${PATCHED_SOURCE}" >/dev/null
+"${PATCHED_SOURCE}/deployments/build-velero-image.sh" "${args[@]}"
