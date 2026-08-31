@@ -216,10 +216,11 @@ services:
     image: ${REGISTRATION_EXECUTOR_IMAGE}
     container_name: hypercdr-cluster-registration-executor
     environment:
+      HCDR_DATABASE_URL: ${HCDR_DATABASE_URL}
       HCDR_REGISTRATION_EXECUTOR_TOKEN: ${HCDR_REGISTRATION_EXECUTOR_TOKEN}
       HCDR_REGISTRATION_SESSION_DIR: /var/lib/hypercdr/registration-sessions
     volumes:
-      - ./registration-sessions:/var/lib/hypercdr/registration-sessions:ro
+      - ./registration-sessions:/var/lib/hypercdr/registration-sessions
     read_only: true
     tmpfs:
       - /tmp:size=32m,noexec,nosuid,nodev

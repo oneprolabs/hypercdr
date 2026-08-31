@@ -98,6 +98,9 @@ export default function ClusterPage(props: {
   const [cceUploadError, setCCEUploadError] = useState('');
   const [cceInspection, setCCEInspection] = useState<CCEInspection | null>(null);
   const [cceInspectionLoading, setCCEInspectionLoading] = useState(false);
+  const [cceStorageClass, setCCEStorageClass] = useState('');
+  const [cceRegistrationTask, setCCERegistrationTask] = useState<ApiTask | null>(null);
+  const [cceIdempotencyKey, setCCEIdempotencyKey] = useState('');
   const [registerStep, setRegisterStep] = useState<1 | 2 | 3>(1);
   const [copied, setCopied] = useState(false);
   const [caCopied, setCaCopied] = useState(false);
@@ -373,6 +376,10 @@ export default function ClusterPage(props: {
     setCCEContext('');
     setCCEUploadError('');
     setCCEInspection(null);
+    setCCEStorageClass('');
+    setCCERegistrationTask(null);
+    setCCEIdempotencyKey('');
+    setCCERegistrationTask(null);
   };
 
   const inspectCCECluster = async () => {
@@ -380,18 +387,45 @@ export default function ClusterPage(props: {
     setCCEInspectionLoading(true);
     setCCEUploadError('');
     try {
-      setCCEInspection(await apiPost<CCEInspection>('/api/v1/cluster-registrations/cce/inspections', { sessionId: cceUpload.id, context: cceContext }));
+      const inspection = await apiPost<CCEInspection>('/api/v1/cluster-registrations/cce/inspections', { sessionId: cceUpload.id, context: cceContext });
+      setCCEInspection(inspection);
+      setCCEStorageClass(inspection.defaultStorageClass || (inspection.storageClasses.length === 1 ? inspection.storageClasses[0] : ''));
     } catch (error) {
       setCCEInspection(null);
       setCCEUploadError(error instanceof Error ? error.message : 'CCE inspection failed.');
     } finally { setCCEInspectionLoading(false); }
   };
 
+  const startCCEDirectRegistration = async () => {
+    if (!cceUpload || !cceContext || !cceInspection) return;
+    setCCEUploadError('');
+    setCCEInspectionLoading(true);
+    try {
+      const key = cceIdempotencyKey || `cce-${crypto.randomUUID()}`;
+      setCCEIdempotencyKey(key);
+      setCCERegistrationTask(await apiPost<ApiTask>('/api/v1/cluster-registrations/cce/tasks', { sessionId: cceUpload.id, context: cceContext, storageClass: cceStorageClass, idempotencyKey: key }));
+    } catch (error) {
+      setCCEUploadError(error instanceof Error ? error.message : 'CCE registration could not be started.');
+    } finally { setCCEInspectionLoading(false); }
+  };
+
+  useEffect(() => {
+    const task = cceRegistrationTask;
+    if (!task || !['queued', 'running', 'accepted', 'dispatched'].includes(task.status)) return;
+    const timer = window.setInterval(() => {
+      void apiGet<ApiTask>(`/api/v1/tasks/${encodeURIComponent(task.id)}`).then(updated => setCCERegistrationTask(updated)).catch(() => undefined);
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [cceRegistrationTask?.id, cceRegistrationTask?.status]);
+
   const uploadCCEKubeconfig = async (file: File | undefined) => {
     if (!file) return;
     setCCEUploadLoading(true);
     setCCEUploadError('');
     setCCEInspection(null);
+    setCCEStorageClass('');
+    setCCERegistrationTask(null);
+    setCCEIdempotencyKey('');
     try {
       const body = new FormData();
       body.append('kubeconfig', file);
@@ -1130,6 +1164,19 @@ export default function ClusterPage(props: {
                         <div><span className="block text-[10px] font-bold uppercase tracking-wide text-emerald-600">Kubernetes</span><strong className="mt-0.5 block text-slate-800">{cceInspection.serverVersion}</strong></div>
                         <div><span className="block text-[10px] font-bold uppercase tracking-wide text-emerald-600">Worker nodes</span><strong className="mt-0.5 block text-slate-800">{cceInspection.nodeCount}</strong></div>
                         <div><span className="block text-[10px] font-bold uppercase tracking-wide text-emerald-600">StorageClass</span><strong className="mt-0.5 block text-slate-800">{cceInspection.defaultStorageClass || 'Selection required'}</strong></div>
+                      </div>}
+                      {cceInspection && !cceRegistrationTask && <div className="mt-3 flex items-end gap-3">
+                        <label className="min-w-0 flex-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">StorageClass
+                          <select value={cceStorageClass} onChange={event => setCCEStorageClass(event.target.value)} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold normal-case tracking-normal text-slate-800 outline-none focus:border-blue-500">
+                            <option value="" disabled>Select a StorageClass</option>
+                            {cceInspection.storageClasses.map(name => <option key={name} value={name}>{name}{name === cceInspection.defaultStorageClass ? ' (default)' : ''}</option>)}
+                          </select>
+                        </label>
+                        <button type="button" onClick={() => void startCCEDirectRegistration()} disabled={!cceStorageClass || cceInspectionLoading} className="h-9 rounded-lg bg-emerald-600 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">Register cluster</button>
+                      </div>}
+                      {cceRegistrationTask && <div className={`mt-3 rounded-xl border px-3 py-3 text-xs ${cceRegistrationTask.status === 'failed' ? 'border-rose-100 bg-rose-50 text-rose-700' : cceRegistrationTask.status === 'succeeded' ? 'border-emerald-100 bg-emerald-50 text-emerald-700' : 'border-blue-100 bg-blue-50 text-blue-700'}`}>
+                        <div className="flex items-center justify-between gap-3"><strong>{cceRegistrationTask.status === 'succeeded' ? 'Registration completed' : cceRegistrationTask.status === 'failed' ? 'Registration failed' : 'Registration in progress'}</strong><span className="tabular-nums">{cceRegistrationTask.progress || 0}%</span></div>
+                        <p className="mt-1 leading-5">{cceRegistrationTask.status === 'failed' ? cceRegistrationTask.errorMessage || 'The executor reported a registration failure.' : cceRegistrationTask.status === 'succeeded' ? 'Agent registration was confirmed and the temporary kubeconfig was destroyed.' : 'Preflight, installation, and agent readiness are being verified. You may keep this drawer open.'}</p>
                       </div>}
                     </RegistrationStep>
                   </div>}

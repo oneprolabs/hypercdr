@@ -36,6 +36,7 @@ type cceKubeconfigUpload struct {
 	Path      string
 	ExpiresAt time.Time
 	Contexts  []string
+	Inspected map[string]bool
 }
 
 type kubeconfigDocument struct {
@@ -143,7 +144,7 @@ func (r *Router) uploadCCEKubeconfig(w http.ResponseWriter, req *http.Request) {
 	for _, context := range contexts {
 		contextNames = append(contextNames, context.Name)
 	}
-	upload := cceKubeconfigUpload{ID: id, TenantID: registrationTenantID(req), Path: path, ExpiresAt: expiresAt, Contexts: contextNames}
+	upload := cceKubeconfigUpload{ID: id, TenantID: registrationTenantID(req), Path: path, ExpiresAt: expiresAt, Contexts: contextNames, Inspected: map[string]bool{}}
 	r.cceRegistrationMu.Lock()
 	r.cleanupExpiredCCEKubeconfigsLocked(time.Now().UTC())
 	r.cceRegistrationUploads[id] = upload
@@ -198,6 +199,85 @@ func (r *Router) inspectCCEKubeconfig(w http.ResponseWriter, req *http.Request) 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(response.StatusCode)
 	_, _ = w.Write(result)
+	if response.StatusCode >= 200 && response.StatusCode < 300 {
+		r.cceRegistrationMu.Lock()
+		if current, exists := r.cceRegistrationUploads[body.SessionID]; exists && current.TenantID == registrationTenantID(req) {
+			current.Inspected[body.Context] = true
+			r.cceRegistrationUploads[body.SessionID] = current
+		}
+		r.cceRegistrationMu.Unlock()
+	}
+}
+
+type cceDirectInstallRequest struct {
+	SessionID      string `json:"sessionId"`
+	Context        string `json:"context"`
+	StorageClass   string `json:"storageClass"`
+	IdempotencyKey string `json:"idempotencyKey"`
+}
+
+func (r *Router) startCCEDirectRegistration(w http.ResponseWriter, req *http.Request) {
+	var body cceDirectInstallRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, req.Body, 16<<10)).Decode(&body); err != nil || len(body.IdempotencyKey) < 16 || len(body.IdempotencyKey) > 128 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "registration_request_invalid", "message": "A validated session, context, and stable idempotency key are required."})
+		return
+	}
+	tenantID := registrationTenantID(req)
+	r.cceRegistrationMu.Lock()
+	r.cleanupExpiredCCEKubeconfigsLocked(time.Now().UTC())
+	upload, ok := r.cceRegistrationUploads[body.SessionID]
+	allowed := ok && upload.TenantID == tenantID && slices.Contains(upload.Contexts, body.Context) && upload.Inspected[body.Context]
+	if allowed {
+		upload.ExpiresAt = time.Now().UTC().Add(25 * time.Minute)
+		r.cceRegistrationUploads[body.SessionID] = upload
+	}
+	r.cceRegistrationMu.Unlock()
+	if !allowed {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "inspection_required", "message": "Inspect this exact kubeconfig context successfully before registration."})
+		return
+	}
+	go r.expireCCEKubeconfig(body.SessionID, upload.ExpiresAt)
+	existing, err := r.store.ListTasksFiltered(store.TaskFilter{TenantID: tenantID, Types: []string{"cluster-registration"}, Limit: 200})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "registration_task_lookup_failed"})
+		return
+	}
+	for _, task := range existing {
+		if stringPayload(task.Payload, "idempotencyKey") == body.IdempotencyKey {
+			writeJSON(w, http.StatusOK, task)
+			return
+		}
+	}
+	actor, _ := requestUser(req)
+	token, err := r.store.CreateAgentToken(tenantID, actor.ID, "CCE platform-direct registration", 30*time.Minute, "huaweicloud-cce")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "registration_token_create_failed"})
+		return
+	}
+	endpoint := strings.TrimSpace(r.cfg.AgentPrivateWSEndpoint)
+	if endpoint == "" {
+		endpoint = r.agentWSEndpoint(req)
+	}
+	requestData := map[string]string{
+		"token": token.Token, "installScriptUrl": r.publicBaseURL(req) + "/install.sh", "endpoint": endpoint,
+		"endpointPublic": strings.TrimSpace(r.cfg.AgentPublicWSEndpoint), "namespace": r.cfg.AgentNamespace,
+		"context": body.Context, "storageClass": strings.TrimSpace(body.StorageClass),
+	}
+	raw, _ := json.Marshal(requestData)
+	requestPath := filepath.Join(filepath.Dir(upload.Path), "install-request.json")
+	if err = os.WriteFile(requestPath, raw, 0600); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "registration_session_write_failed"})
+		return
+	}
+	task, err := r.store.CreateTask(store.TaskInput{TenantID: tenantID, Type: "cluster-registration", Status: "queued", CommandID: store.NewPublicID(), Payload: map[string]any{
+		"sessionId": body.SessionID, "context": body.Context, "storageClass": strings.TrimSpace(body.StorageClass), "idempotencyKey": body.IdempotencyKey, "provider": "huaweicloud-cce", "stage": "queued",
+	}})
+	if err != nil {
+		_ = os.Remove(requestPath)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "registration_task_create_failed"})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, task)
 }
 
 func inspectPlatformKubeconfig(raw []byte) (kubeconfigDocument, []cceContextSummary, error) {

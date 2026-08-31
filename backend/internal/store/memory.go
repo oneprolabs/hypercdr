@@ -2191,7 +2191,10 @@ func (s *MemoryStore) CreateTask(input TaskInput) (Task, error) {
 	if input.Status == "" {
 		input.Status = "queued"
 	}
-	tenantID := DefaultTenantID
+	tenantID := input.TenantID
+	if tenantID == "" {
+		tenantID = DefaultTenantID
+	}
 	if cluster, ok := s.clusters[input.ClusterID]; ok {
 		tenantID = cluster.TenantID
 	}
@@ -2231,6 +2234,33 @@ func (s *MemoryStore) CreateTask(input TaskInput) (Task, error) {
 		s.plans[plan.ID] = plan
 	}
 	return task, nil
+}
+
+func (s *MemoryStore) ClaimQueuedTask(taskType string, executorID string) (Task, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var selected *Task
+	for _, item := range s.tasks {
+		if item.Type != taskType || item.Status != "queued" {
+			continue
+		}
+		if selected == nil || item.CreatedAt.Before(selected.CreatedAt) {
+			copy := item
+			selected = &copy
+		}
+	}
+	if selected == nil {
+		return Task{}, false, nil
+	}
+	now := time.Now().UTC()
+	selected.Status, selected.AcceptedAt, selected.StartedAt = "running", now, now
+	if selected.Payload == nil {
+		selected.Payload = map[string]any{}
+	}
+	selected.Payload["executorId"] = executorID
+	selected.Payload["stage"] = "preparing"
+	s.tasks[selected.ID] = *selected
+	return *selected, true, nil
 }
 
 func (s *MemoryStore) ListTasks(clusterID string) ([]Task, error) {

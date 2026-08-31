@@ -2,12 +2,23 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"hypercdr-platform/platform/backend/internal/store"
 )
 
 type fakeRunner struct{ responses map[string]string }
+
+func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
 func (f fakeRunner) Run(_ context.Context, _, _ string, args ...string) ([]byte, error) {
 	key := strings.Join(args, " ")
@@ -16,6 +27,36 @@ func (f fakeRunner) Run(_ context.Context, _, _ string, args ...string) ([]byte,
 		return nil, fmt.Errorf("unexpected fixed kubectl invocation: %s", key)
 	}
 	return []byte(value), nil
+}
+
+func TestRegistrationTaskDestroysSessionAndCompletes(t *testing.T) {
+	installer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("#!/usr/bin/env bash\nexit 0\n")) }))
+	defer installer.Close()
+	base := t.TempDir()
+	sessionID := "ccer_abcdefghijklmnopqrstuvwxyz123456"
+	sessionDir := filepath.Join(base, sessionID)
+	if err := os.Mkdir(sessionDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	request := directInstallRequest{Token: "secret-token", InstallScriptURL: installer.URL, Endpoint: "wss://platform/ws/agent", Namespace: "hypercdr-agent", Context: "internal", StorageClass: "csi-disk"}
+	raw, _ := json.Marshal(request)
+	if err := os.WriteFile(filepath.Join(sessionDir, "install-request.json"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	repo := store.NewMemoryStore()
+	task, err := repo.CreateTask(store.TaskInput{TenantID: "tenant-a", Type: "cluster-registration", Status: "running", Payload: map[string]any{"sessionId": sessionID, "context": "internal"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &server{baseDir: base, runner: fakeRunner{}, logger: discardLogger()}
+	s.runRegistrationTask(repo, task)
+	updated, ok, err := repo.GetTask(task.ID)
+	if err != nil || !ok || updated.Status != "succeeded" || updated.Progress != 100 {
+		t.Fatalf("unexpected task result: %#v ok=%v err=%v", updated, ok, err)
+	}
+	if _, err = os.Stat(sessionDir); !os.IsNotExist(err) {
+		t.Fatalf("registration credential was not destroyed: %v", err)
+	}
 }
 
 func TestInspectClusterUsesFixedReadOnlyQueries(t *testing.T) {

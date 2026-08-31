@@ -122,6 +122,7 @@ type Store interface {
 	GetRestorePoint(id string) (RestorePoint, bool, error)
 	UpdateRestorePointState(input RestorePointStateInput) (RestorePoint, bool, error)
 	CreateTask(input TaskInput) (Task, error)
+	ClaimQueuedTask(taskType string, executorID string) (Task, bool, error)
 	ListTasks(clusterID string) ([]Task, error)
 	ListTasksFiltered(filter TaskFilter) ([]Task, error)
 	GetTask(id string) (Task, bool, error)
@@ -932,6 +933,7 @@ type RestorePointFilter struct {
 }
 
 type TaskInput struct {
+	TenantID         string         `json:"tenantId"`
 	ClusterID        string         `json:"clusterId"`
 	AppID            string         `json:"appId"`
 	ProtectionPlanID string         `json:"protectionPlanId"`

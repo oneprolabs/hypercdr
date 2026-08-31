@@ -7,6 +7,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -86,6 +88,63 @@ func TestCCEKubeconfigUploadRejectsExternalCredentialFiles(t *testing.T) {
 	if status != http.StatusUnprocessableEntity || response["error"] != "kubeconfig_unsupported" {
 		t.Fatalf("status = %d, response = %#v", status, response)
 	}
+}
+
+func TestCCEDirectRegistrationRequiresInspectionAndCreatesIdempotentTask(t *testing.T) {
+	executor := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Header.Get("Authorization") != "Bearer executor-token" {
+			t.Fatalf("missing executor authentication")
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"context": "internal", "clusterName": "cce-test", "clusterId": "cluster-uid", "serverVersion": "v1.35.3", "nodeCount": 1, "storageClasses": []string{"csi-disk"}, "defaultStorageClass": "csi-disk"})
+	}))
+	defer executor.Close()
+	sessionDir := t.TempDir()
+	repo := store.NewMemoryStore()
+	cfg := config.Config{RegistrationSessionDir: sessionDir, RegistrationExecutorEndpoint: executor.URL, RegistrationExecutorToken: "executor-token", AgentNamespace: "hypercdr-agent", AgentWSEndpoint: "wss://platform/ws/agent"}
+	server := httptest.NewServer(NewRouter(cfg, slog.Default(), repo))
+	defer server.Close()
+	status, uploaded := uploadTestKubeconfig(t, server.URL, "cce.yaml", validCCEKubeconfig)
+	if status != http.StatusCreated {
+		t.Fatalf("upload: %d %#v", status, uploaded)
+	}
+	sessionID := uploaded["id"].(string)
+	registration := map[string]any{"sessionId": sessionID, "context": "internal", "storageClass": "csi-disk", "idempotencyKey": "registration-request-0001"}
+	status, response := postTestJSON(t, server.URL+"/api/v1/cluster-registrations/cce/tasks", registration)
+	if status != http.StatusConflict || response["error"] != "inspection_required" {
+		t.Fatalf("registration bypassed inspection: %d %#v", status, response)
+	}
+	status, response = postTestJSON(t, server.URL+"/api/v1/cluster-registrations/cce/inspections", map[string]string{"sessionId": sessionID, "context": "internal"})
+	if status != http.StatusOK {
+		t.Fatalf("inspection: %d %#v", status, response)
+	}
+	status, first := postTestJSON(t, server.URL+"/api/v1/cluster-registrations/cce/tasks", registration)
+	if status != http.StatusAccepted {
+		t.Fatalf("registration: %d %#v", status, first)
+	}
+	status, second := postTestJSON(t, server.URL+"/api/v1/cluster-registrations/cce/tasks", registration)
+	if status != http.StatusOK || first["id"] != second["id"] {
+		t.Fatalf("idempotency failed: %d %#v %#v", status, first, second)
+	}
+	requestRaw, err := os.ReadFile(filepath.Join(sessionDir, sessionID, "install-request.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(requestRaw), "registration-request-0001") || !strings.Contains(string(requestRaw), `"token"`) {
+		t.Fatalf("sealed request content invalid: %s", requestRaw)
+	}
+}
+
+func postTestJSON(t *testing.T, endpoint string, body any) (int, map[string]any) {
+	t.Helper()
+	raw, _ := json.Marshal(body)
+	resp, err := http.Post(endpoint, "application/json", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	result := map[string]any{}
+	_ = json.NewDecoder(resp.Body).Decode(&result)
+	return resp.StatusCode, result
 }
 
 func uploadTestKubeconfig(t *testing.T, baseURL, filename, contents string) (int, map[string]any) {

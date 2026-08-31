@@ -3151,7 +3151,10 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 		return Task{}, err
 	}
 	defer tx.Rollback()
-	tenantID := DefaultTenantID
+	tenantID := input.TenantID
+	if tenantID == "" {
+		tenantID = DefaultTenantID
+	}
 	if input.ProtectionPlanID != "" {
 		// Locking the plan serializes same-plan task creation and makes insertion
 		// plus pointer publication one atomic ordering boundary.
@@ -3217,6 +3220,35 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 		return Task{}, err
 	}
 	return task, nil
+}
+
+func (s *PostgresStore) ClaimQueuedTask(taskType string, executorID string) (Task, bool, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Task{}, false, err
+	}
+	defer tx.Rollback()
+	var id string
+	err = tx.QueryRow(`select id from tasks where type=$1 and status='queued' order by created_at asc limit 1 for update skip locked`, taskType).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Task{}, false, nil
+	}
+	if err != nil {
+		return Task{}, false, err
+	}
+	result, err := tx.Exec(`update tasks set status='running', accepted_at=coalesce(accepted_at, now()), started_at=coalesce(started_at, now()), payload=coalesce(payload, '{}'::jsonb) || jsonb_build_object('executorId',$2,'stage','preparing') where id=$1 and status='queued'`, id, executorID)
+	if err != nil {
+		return Task{}, false, err
+	}
+	rows, _ := result.RowsAffected()
+	if rows != 1 {
+		return Task{}, false, nil
+	}
+	if err = tx.Commit(); err != nil {
+		return Task{}, false, err
+	}
+	task, ok, err := s.GetTask(id)
+	return task, ok, err
 }
 
 func (s *PostgresStore) ListTasks(clusterID string) ([]Task, error) {
