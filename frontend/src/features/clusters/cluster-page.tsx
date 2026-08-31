@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Check, CheckCircle2, ChevronRight, Edit2, Eye, GitBranch, MoreVertical, Plus, PlusCircle, RefreshCw, Server, Star, Trash2, Upload, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ApiRequestError, apiGet, apiPatch, apiPost } from '../../api/client';
+import { ApiRequestError, apiGet, apiHeaders, apiPatch, apiPost, ensureApiResponse } from '../../api/client';
 import { SearchBar } from '../../components/search-bar';
 import { HyperTable, type HyperTableColumn } from '../../components/table';
 import ClusterActivityPanel from './cluster-activity-panel';
@@ -13,6 +13,10 @@ import DRTopologyView from './dr-topology-view';
 
 type ApiList<T>={items:T[]};
 type ClusterRegistrationType='native-kubernetes'|'huaweicloud-cce';
+type CCERegistrationMode='platform-direct'|'command';
+type CCEKubeconfigContext={name:string;cluster:string;user:string;apiServer:string;isCurrent:boolean};
+type CCEKubeconfigUpload={id:string;fingerprint:string;currentContext:string;contexts:CCEKubeconfigContext[];expiresAt:string};
+type CCEInspection={context:string;clusterName:string;clusterId:string;region?:string;serverVersion:string;nodeCount:number;storageClasses:string[];defaultStorageClass?:string};
 type ApiAgentToken={installCommand:string;prepareNodeCommand?:string;clusterType?:ClusterRegistrationType};
 type ApiCluster={id:string;name:string};
 type ApiTask={id:string;clusterId:string;type:string;status:string;progress:number;errorCode?:string;errorMessage?:string;payload?:Record<string,any>;createdAt?:string;completedAt?:string};
@@ -87,6 +91,13 @@ export default function ClusterPage(props: {
   const [registerOpen, setRegisterOpen] = useState(false);
   const [licenseGuideOpen, setLicenseGuideOpen] = useState(false);
   const [registrationType, setRegistrationType] = useState<ClusterRegistrationType>('native-kubernetes');
+  const [cceRegistrationMode, setCCERegistrationMode] = useState<CCERegistrationMode>('platform-direct');
+  const [cceUpload, setCCEUpload] = useState<CCEKubeconfigUpload | null>(null);
+  const [cceContext, setCCEContext] = useState('');
+  const [cceUploadLoading, setCCEUploadLoading] = useState(false);
+  const [cceUploadError, setCCEUploadError] = useState('');
+  const [cceInspection, setCCEInspection] = useState<CCEInspection | null>(null);
+  const [cceInspectionLoading, setCCEInspectionLoading] = useState(false);
   const [registerStep, setRegisterStep] = useState<1 | 2 | 3>(1);
   const [copied, setCopied] = useState(false);
   const [caCopied, setCaCopied] = useState(false);
@@ -357,6 +368,46 @@ export default function ClusterPage(props: {
     setCopied(false);
     setCaCopied(false);
     setRegistrationWaiting(false);
+    if (cceUpload?.id) void fetch(`/api/v1/cluster-registrations/cce/kubeconfigs/${encodeURIComponent(cceUpload.id)}`, { method: 'DELETE', headers: apiHeaders() });
+    setCCEUpload(null);
+    setCCEContext('');
+    setCCEUploadError('');
+    setCCEInspection(null);
+  };
+
+  const inspectCCECluster = async () => {
+    if (!cceUpload || !cceContext) return;
+    setCCEInspectionLoading(true);
+    setCCEUploadError('');
+    try {
+      setCCEInspection(await apiPost<CCEInspection>('/api/v1/cluster-registrations/cce/inspections', { sessionId: cceUpload.id, context: cceContext }));
+    } catch (error) {
+      setCCEInspection(null);
+      setCCEUploadError(error instanceof Error ? error.message : 'CCE inspection failed.');
+    } finally { setCCEInspectionLoading(false); }
+  };
+
+  const uploadCCEKubeconfig = async (file: File | undefined) => {
+    if (!file) return;
+    setCCEUploadLoading(true);
+    setCCEUploadError('');
+    setCCEInspection(null);
+    try {
+      const body = new FormData();
+      body.append('kubeconfig', file);
+      const response = await ensureApiResponse(await fetch('/api/v1/cluster-registrations/cce/kubeconfigs', { method: 'POST', headers: apiHeaders(), body }), '/api/v1/cluster-registrations/cce/kubeconfigs');
+      const upload = await response.json() as CCEKubeconfigUpload;
+      if (cceUpload?.id && cceUpload.id !== upload.id) void fetch(`/api/v1/cluster-registrations/cce/kubeconfigs/${encodeURIComponent(cceUpload.id)}`, { method: 'DELETE', headers: apiHeaders() });
+      setCCEUpload(upload);
+      const current = upload.contexts.find(context => context.isCurrent)?.name || (upload.contexts.length === 1 ? upload.contexts[0].name : '');
+      setCCEContext(current);
+    } catch (error) {
+      setCCEUpload(null);
+      setCCEContext('');
+      setCCEUploadError(error instanceof Error ? error.message : 'Kubeconfig validation failed.');
+    } finally {
+      setCCEUploadLoading(false);
+    }
   };
 
   const openUpgrade = (cluster: Cluster, event: React.MouseEvent) => {
@@ -1043,6 +1094,46 @@ export default function ClusterPage(props: {
                       <option value="huaweicloud-cce">Huawei Cloud CCE</option>
                     </select>
                   </div>
+                  {registrationType === 'huaweicloud-cce' && <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-1.5" role="radiogroup" aria-label="CCE registration method">
+                    {([
+                      ['platform-direct', 'Platform direct', 'Upload a temporary kubeconfig'],
+                      ['command', 'Run command', 'Use a Linux administration host'],
+                    ] as const).map(([value, label, description]) => <button key={value} type="button" role="radio" aria-checked={cceRegistrationMode === value} onClick={() => setCCERegistrationMode(value)} className={`rounded-lg border px-3 py-2.5 text-left transition ${cceRegistrationMode === value ? 'border-blue-200 bg-white shadow-sm ring-1 ring-blue-100' : 'border-transparent text-slate-500 hover:bg-white/70'}`}>
+                      <span className={`block text-sm font-bold ${cceRegistrationMode === value ? 'text-blue-700' : 'text-slate-700'}`}>{label}</span>
+                      <span className="mt-0.5 block text-[11px] leading-4">{description}</span>
+                    </button>)}
+                  </div>}
+                  {registrationType === 'huaweicloud-cce' && cceRegistrationMode === 'platform-direct' && <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <RegistrationStep number={1} title="Upload CCE kubeconfig" description="The credential is encrypted in transit, used only for this registration session, and permanently deleted when the session ends.">
+                      <label className={`flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed px-4 text-center transition ${cceUploadLoading ? 'cursor-wait border-blue-200 bg-blue-50' : 'border-slate-300 bg-slate-50 hover:border-blue-300 hover:bg-blue-50/40'}`}>
+                        <Upload size={20} className={cceUploadLoading ? 'animate-pulse text-blue-600' : 'text-slate-400'} />
+                        <span className="mt-2 text-xs font-bold text-slate-700">{cceUploadLoading ? 'Validating kubeconfig…' : cceUpload ? 'Replace kubeconfig' : 'Choose YAML or JSON kubeconfig'}</span>
+                        <span className="mt-1 text-[11px] text-slate-500">Maximum 1 MiB. External credential plugins are not executed.</span>
+                        <input type="file" className="sr-only" accept=".yaml,.yml,.json,application/yaml,application/json" disabled={cceUploadLoading} onChange={event => void uploadCCEKubeconfig(event.target.files?.[0])} />
+                      </label>
+                      {cceUploadError && <p role="alert" className="mt-3 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-medium leading-5 text-rose-700">{cceUploadError}</p>}
+                    </RegistrationStep>
+                    {cceUpload && <RegistrationStep number={2} title="Select Kubernetes context" description="Confirm the exact CCE cluster that HyperCDR may inspect. No cluster resources are changed at this stage.">
+                      <select value={cceContext} onChange={event => setCCEContext(event.target.value)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                        <option value="" disabled>Select a context</option>
+                        {cceUpload.contexts.map(context => <option key={context.name} value={context.name}>{context.name} · {context.apiServer}</option>)}
+                      </select>
+                      <div className="mt-3 grid grid-cols-2 gap-3 rounded-lg bg-slate-50 p-3 text-[11px] text-slate-500">
+                        <div><span className="block font-bold uppercase tracking-wide text-slate-400">Credential fingerprint</span><span className="mt-1 block truncate font-mono text-slate-700" title={cceUpload.fingerprint}>{cceUpload.fingerprint}</span></div>
+                        <div><span className="block font-bold uppercase tracking-wide text-slate-400">Session expires</span><span className="mt-1 block text-slate-700">{new Date(cceUpload.expiresAt).toLocaleTimeString()}</span></div>
+                      </div>
+                    </RegistrationStep>}
+                    <RegistrationStep number={3} title="Inspect and register" description="HyperCDR will verify identity, permissions, network, images, capacity, and StorageClass before asking for final confirmation.">
+                      <button type="button" onClick={() => void inspectCCECluster()} disabled={!cceContext || cceUploadLoading || cceInspectionLoading} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300">{cceInspectionLoading && <RefreshCw size={13} className="animate-spin" />}{cceInspectionLoading ? 'Inspecting cluster…' : 'Inspect cluster'}</button>
+                      {cceInspection && <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl border border-emerald-100 bg-emerald-50/60 p-3 text-xs">
+                        <div><span className="block text-[10px] font-bold uppercase tracking-wide text-emerald-600">CCE cluster</span><strong className="mt-0.5 block text-slate-800">{cceInspection.clusterName}</strong></div>
+                        <div><span className="block text-[10px] font-bold uppercase tracking-wide text-emerald-600">Kubernetes</span><strong className="mt-0.5 block text-slate-800">{cceInspection.serverVersion}</strong></div>
+                        <div><span className="block text-[10px] font-bold uppercase tracking-wide text-emerald-600">Worker nodes</span><strong className="mt-0.5 block text-slate-800">{cceInspection.nodeCount}</strong></div>
+                        <div><span className="block text-[10px] font-bold uppercase tracking-wide text-emerald-600">StorageClass</span><strong className="mt-0.5 block text-slate-800">{cceInspection.defaultStorageClass || 'Selection required'}</strong></div>
+                      </div>}
+                    </RegistrationStep>
+                  </div>}
+                  {(registrationType !== 'huaweicloud-cce' || cceRegistrationMode === 'command') && <>
                   <div className="space-y-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                   {(() => {
                     let step = 0;
@@ -1107,10 +1198,11 @@ export default function ClusterPage(props: {
                   </>;
                   })()}
                   </div>
+                  </>}
 
                   <div className="flex justify-end gap-3 pt-1">
                     <button onClick={closeRegister} className="rounded-xl px-5 py-2 font-medium text-slate-600 transition-colors hover:bg-slate-50">Cancel</button>
-                    <button onClick={finishRegisterCluster} className="rounded-xl bg-emerald-600 px-6 py-2 font-bold text-white shadow-lg shadow-emerald-200 transition-all hover:bg-emerald-700 active:scale-95">Continue in Background</button>
+                    {(registrationType !== 'huaweicloud-cce' || cceRegistrationMode === 'command') && <button onClick={finishRegisterCluster} className="rounded-xl bg-emerald-600 px-6 py-2 font-bold text-white shadow-lg shadow-emerald-200 transition-all hover:bg-emerald-700 active:scale-95">Continue in Background</button>}
                   </div>
                 </div>
               </div>

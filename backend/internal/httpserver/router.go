@@ -596,6 +596,7 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("POST /api/v1/email-settings/configurations/{id}/test", r.testEmailSettingsByID)
 	r.mux.HandleFunc("GET /api/v1/clusters", r.listClusters)
 	r.mux.HandleFunc("POST /api/v1/cluster-registrations/cce/kubeconfigs", r.uploadCCEKubeconfig)
+	r.mux.HandleFunc("POST /api/v1/cluster-registrations/cce/inspections", r.inspectCCEKubeconfig)
 	r.mux.HandleFunc("DELETE /api/v1/cluster-registrations/cce/kubeconfigs/{id}", r.deleteCCEKubeconfig)
 	r.mux.HandleFunc("PATCH /api/v1/clusters/{id}", r.tenantGuard("cluster", r.updateCluster))
 	r.mux.HandleFunc("DELETE /api/v1/clusters/{id}", r.tenantGuard("cluster", r.deleteCluster))

@@ -1,10 +1,13 @@
 package httpserver
 
 import (
+	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -31,6 +35,7 @@ type cceKubeconfigUpload struct {
 	TenantID  string
 	Path      string
 	ExpiresAt time.Time
+	Contexts  []string
 }
 
 type kubeconfigDocument struct {
@@ -108,7 +113,21 @@ func (r *Router) uploadCCEKubeconfig(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "kubeconfig_session_failed"})
 		return
 	}
-	dir, err := os.MkdirTemp("", "hypercdr-cce-registration-")
+	baseDir := strings.TrimSpace(r.cfg.RegistrationSessionDir)
+	if baseDir == "" {
+		baseDir = filepath.Join(os.TempDir(), "hypercdr-registration-sessions")
+	}
+	baseDir = filepath.Clean(baseDir)
+	if !filepath.IsAbs(baseDir) || baseDir == "/" {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "kubeconfig_session_failed"})
+		return
+	}
+	if err = os.MkdirAll(baseDir, 0700); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "kubeconfig_session_failed"})
+		return
+	}
+	dir := filepath.Join(baseDir, id)
+	err = os.Mkdir(dir, 0700)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "kubeconfig_session_failed"})
 		return
@@ -120,7 +139,11 @@ func (r *Router) uploadCCEKubeconfig(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	expiresAt := time.Now().UTC().Add(cceUploadTTL)
-	upload := cceKubeconfigUpload{ID: id, TenantID: registrationTenantID(req), Path: path, ExpiresAt: expiresAt}
+	contextNames := make([]string, 0, len(contexts))
+	for _, context := range contexts {
+		contextNames = append(contextNames, context.Name)
+	}
+	upload := cceKubeconfigUpload{ID: id, TenantID: registrationTenantID(req), Path: path, ExpiresAt: expiresAt, Contexts: contextNames}
 	r.cceRegistrationMu.Lock()
 	r.cleanupExpiredCCEKubeconfigsLocked(time.Now().UTC())
 	r.cceRegistrationUploads[id] = upload
@@ -131,6 +154,50 @@ func (r *Router) uploadCCEKubeconfig(w http.ResponseWriter, req *http.Request) {
 		"id": id, "fingerprint": "sha256:" + hex.EncodeToString(fingerprint[:]), "currentContext": doc.CurrentContext,
 		"contexts": contexts, "expiresAt": expiresAt,
 	})
+}
+
+func (r *Router) inspectCCEKubeconfig(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		SessionID string `json:"sessionId"`
+		Context   string `json:"context"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, req.Body, 16<<10)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "inspection_request_invalid", "message": "A registration session and Kubernetes context are required."})
+		return
+	}
+	r.cceRegistrationMu.Lock()
+	r.cleanupExpiredCCEKubeconfigsLocked(time.Now().UTC())
+	upload, ok := r.cceRegistrationUploads[body.SessionID]
+	allowed := ok && upload.TenantID == registrationTenantID(req) && slices.Contains(upload.Contexts, body.Context)
+	r.cceRegistrationMu.Unlock()
+	if !allowed {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "kubeconfig_session_not_found", "message": "The registration session expired, was removed, or does not contain this context."})
+		return
+	}
+	if r.cfg.RegistrationExecutorToken == "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "registration_executor_unavailable", "message": "Platform-direct registration executor is not configured. Use command-based registration or contact the platform administrator."})
+		return
+	}
+	payload, _ := json.Marshal(map[string]string{"sessionId": body.SessionID, "context": body.Context})
+	ctx, cancel := context.WithTimeout(req.Context(), 50*time.Second)
+	defer cancel()
+	executorReq, _ := http.NewRequestWithContext(ctx, http.MethodPost, r.cfg.RegistrationExecutorEndpoint+"/v1/inspect", bytes.NewReader(payload))
+	executorReq.Header.Set("Content-Type", "application/json")
+	executorReq.Header.Set("Authorization", "Bearer "+r.cfg.RegistrationExecutorToken)
+	response, err := http.DefaultClient.Do(executorReq)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "registration_executor_unreachable", "message": "The registration executor could not be reached. Retry or use command-based registration."})
+		return
+	}
+	defer response.Body.Close()
+	result, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "registration_executor_invalid_response"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, _ = w.Write(result)
 }
 
 func inspectPlatformKubeconfig(raw []byte) (kubeconfigDocument, []cceContextSummary, error) {
