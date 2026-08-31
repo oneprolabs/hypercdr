@@ -44,6 +44,18 @@ echo "==> Building comm-agent binary outside the source tree"
 )
 
 cp "${ROOT_DIR}/docker/comm-agent.local.Dockerfile" "${WORK_DIR}/Dockerfile"
+# The scratch runtime needs the host trust bundle for TLS. Keep the build
+# context self-contained instead of relying on a file accidentally present in
+# the source tree.
+if [[ ! -r "${WORK_DIR}/ca-certificates.crt" ]]; then
+  for ca_file in /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt; do
+    if [[ -r "${ca_file}" ]]; then
+      cp "${ca_file}" "${WORK_DIR}/ca-certificates.crt"
+      break
+    fi
+  done
+fi
+[[ -r "${WORK_DIR}/ca-certificates.crt" ]] || { echo "error: system CA bundle not found" >&2; exit 1; }
 echo "==> Building ${IMAGE}"
 docker build -t "${IMAGE}" "${WORK_DIR}"
 
