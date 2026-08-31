@@ -178,7 +178,7 @@ func (r *Router) inspectCCEKubeconfig(w http.ResponseWriter, req *http.Request) 
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "kubeconfig_session_not_found", "message": "The registration session expired, was removed, or does not contain this context."})
 		return
 	}
-	if r.cfg.RegistrationExecutorToken == "" {
+	if r.cfg.DeployMode != "helm" && r.cfg.DeployMode != "kubernetes" && r.cfg.RegistrationExecutorToken == "" {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "registration_executor_unavailable", "message": "Platform-direct registration executor is not configured. Use command-based registration or contact the platform administrator."})
 		return
 	}

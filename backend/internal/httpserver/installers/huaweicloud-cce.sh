@@ -54,10 +54,12 @@ provider_huaweicloud_cce_prepare_dependencies() {
 }
 
 provider_huaweicloud_cce_align_kubectl_version() {
-  local server_version server_minor client_version client_minor compatible
+  local server_version server_major server_minor_number server_minor client_version client_minor compatible
   server_version="$(kubectl version -o json 2>/dev/null | grep -o '"gitVersion"[[:space:]]*:[[:space:]]*"v[0-9][^"]*"' | tail -n1 | cut -d'"' -f4)"
   [[ "$server_version" =~ ^v([0-9]+)\.([0-9]+)\. ]] || fail "Unable to determine the CCE Kubernetes server version."
-  server_minor="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+  server_major="${BASH_REMATCH[1]}"; server_minor_number="${BASH_REMATCH[2]}"
+  [[ "$server_major" == "1" && "$server_minor_number" -ge 27 && "$server_minor_number" -le 35 ]] || fail "CCE Kubernetes ${server_version} is outside the qualified range v1.27-v1.35."
+  server_minor="v${server_major}.${server_minor_number}"
   client_version="$(kubectl version --client -o json 2>/dev/null | grep -o '"gitVersion"[[:space:]]*:[[:space:]]*"v[0-9][^"]*"' | head -n1 | cut -d'"' -f4)"
   client_minor="$(sed -E 's/^(v[0-9]+\.[0-9]+).*/\1/' <<<"$client_version")"
   if [[ "$client_minor" != "$server_minor" ]]; then

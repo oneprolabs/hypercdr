@@ -63,7 +63,7 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
             - name: HCDR_REGISTRATION_CONFIG_SECRET
-              value: {{ include "hypercdr.fullname" . }}-config
+              value: {{ include "hypercdr.fullname" . }}-registration-executor-config
             - name: HCDR_REGISTRATION_PLATFORM_INSTANCE
               value: {{ .Release.Name | quote }}
             - name: HCDR_REGISTRATION_SESSION_PVC

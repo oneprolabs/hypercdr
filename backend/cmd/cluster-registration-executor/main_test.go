@@ -21,6 +21,10 @@ type fakeRunner struct{ responses map[string]string }
 
 func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
+const readyNodesJSON = `{"items":[{"spec":{"unschedulable":false},"status":{"allocatable":{"cpu":"2","memory":"4Gi"},"conditions":[{"type":"Ready","status":"True"}]}},{"spec":{"unschedulable":false},"status":{"allocatable":{"cpu":"1500m","memory":"2Gi"},"conditions":[{"type":"Ready","status":"True"}]}}]}`
+
+const oneReadyNodeJSON = `{"items":[{"spec":{"unschedulable":false},"status":{"allocatable":{"cpu":"2","memory":"4Gi"},"conditions":[{"type":"Ready","status":"True"}]}}]}`
+
 func (f fakeRunner) Run(_ context.Context, _, _ string, args ...string) ([]byte, error) {
 	key := strings.Join(args, " ")
 	value, ok := f.responses[key]
@@ -117,7 +121,7 @@ func TestInspectClusterUsesFixedReadOnlyQueries(t *testing.T) {
 		"get namespace kube-system -o jsonpath={.metadata.uid}":                             "12345678-abcd",
 		`get nodes -o jsonpath={range .items[*]}{.spec.providerID}{"\n"}{end}`:              "huaweicloud://node-1",
 		`get nodes -o jsonpath={.items[0].metadata.labels.topology\.kubernetes\.io/region}`: "ap-southeast-1",
-		"get nodes -o name": "node/node-1\nnode/node-2\n",
+		"get nodes -o json": readyNodesJSON,
 		`get storageclass -o jsonpath={range .items[*]}{.metadata.name}{"|"}{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}{"\n"}{end}`: "csi-disk|true\ncsi-nas|false\n",
 		"auth can-i create namespaces --all-namespaces":                                    "yes",
 		"auth can-i create clusterroles.rbac.authorization.k8s.io --all-namespaces":        "yes",
@@ -144,7 +148,7 @@ func TestInspectionJobWritesAtomicResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner := fakeRunner{responses: map[string]string{
-		"version -o json": `{"serverVersion":{"gitVersion":"v1.35.3"}}`, "-n kube-system get configmap cluster-config -o jsonpath={.data.alias}": "cce-test", "get namespace kube-system -o jsonpath={.metadata.uid}": "12345678-abcd", `get nodes -o jsonpath={range .items[*]}{.spec.providerID}{"\n"}{end}`: "huaweicloud://node", `get nodes -o jsonpath={.items[0].metadata.labels.topology\.kubernetes\.io/region}`: "region-a", "get nodes -o name": "node/node-a", `get storageclass -o jsonpath={range .items[*]}{.metadata.name}{"|"}{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}{"\n"}{end}`: "csi-disk|true",
+		"version -o json": `{"serverVersion":{"gitVersion":"v1.35.3"}}`, "-n kube-system get configmap cluster-config -o jsonpath={.data.alias}": "cce-test", "get namespace kube-system -o jsonpath={.metadata.uid}": "12345678-abcd", `get nodes -o jsonpath={range .items[*]}{.spec.providerID}{"\n"}{end}`: "huaweicloud://node", `get nodes -o jsonpath={.items[0].metadata.labels.topology\.kubernetes\.io/region}`: "region-a", "get nodes -o json": oneReadyNodeJSON, `get storageclass -o jsonpath={range .items[*]}{.metadata.name}{"|"}{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}{"\n"}{end}`: "csi-disk|true",
 		"auth can-i create namespaces --all-namespaces": "yes", "auth can-i create clusterroles.rbac.authorization.k8s.io --all-namespaces": "yes", "auth can-i create clusterrolebindings.rbac.authorization.k8s.io --all-namespaces": "yes", "auth can-i create deployments.apps --all-namespaces": "yes", "auth can-i create daemonsets.apps --all-namespaces": "yes", "auth can-i create secrets --all-namespaces": "yes", "auth can-i create persistentvolumeclaims --all-namespaces": "yes",
 	}}
 	s := &server{baseDir: base, runner: runner, logger: discardLogger()}
@@ -183,10 +187,51 @@ func TestInspectClusterRejectsIncompletePermissions(t *testing.T) {
 		"get namespace kube-system -o jsonpath={.metadata.uid}":                             "12345678-abcd",
 		`get nodes -o jsonpath={range .items[*]}{.spec.providerID}{"\n"}{end}`:              "huaweicloud://node-1",
 		`get nodes -o jsonpath={.items[0].metadata.labels.topology\.kubernetes\.io/region}`: "region-a",
-		"get nodes -o name": "node/node-1",
+		"get nodes -o json": oneReadyNodeJSON,
 		`get storageclass -o jsonpath={range .items[*]}{.metadata.name}{"|"}{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}{"\n"}{end}`: "csi-disk|true",
 	}}
 	if _, err := inspectCluster(context.Background(), runner, "/session/kubeconfig", "internal"); err == nil || !strings.Contains(err.Error(), "lacks required permissions") {
 		t.Fatalf("expected permission gate failure, got %v", err)
+	}
+}
+
+func TestSchedulableCapacityExcludesUnreadyAndCordonNodes(t *testing.T) {
+	raw := []byte(`{"items":[
+		{"spec":{},"status":{"allocatable":{"cpu":"750m","memory":"1Gi"},"conditions":[{"type":"Ready","status":"True"}]}},
+		{"spec":{"unschedulable":true},"status":{"allocatable":{"cpu":"8","memory":"32Gi"},"conditions":[{"type":"Ready","status":"True"}]}},
+		{"spec":{},"status":{"allocatable":{"cpu":"8","memory":"32Gi"},"conditions":[{"type":"Ready","status":"False"}]}}
+	]}`)
+	nodes, cpu, memory, err := schedulableCapacity(raw)
+	if err != nil || nodes != 1 || cpu != 750 || memory != 1024*1024*1024 {
+		t.Fatalf("unexpected capacity nodes=%d cpu=%d memory=%d err=%v", nodes, cpu, memory, err)
+	}
+}
+
+func TestValidateKubernetesVersionUsesQualifiedRange(t *testing.T) {
+	for _, version := range []string{"v1.27.0", "v1.35.3", "1.33.7-cce"} {
+		if err := validateKubernetesVersion(version); err != nil {
+			t.Fatalf("expected %s to be supported: %v", version, err)
+		}
+	}
+	for _, version := range []string{"v1.26.9", "v1.36.0", "v2.0.0", "unknown"} {
+		if err := validateKubernetesVersion(version); err == nil {
+			t.Fatalf("expected %s to be rejected", version)
+		}
+	}
+}
+
+func TestInspectClusterRejectsInsufficientCapacityBeforePermissions(t *testing.T) {
+	runner := fakeRunner{responses: map[string]string{
+		"version -o json": `{"serverVersion":{"gitVersion":"v1.35.3"}}`,
+		"-n kube-system get configmap cluster-config -o jsonpath={.data.alias}":             "cce-test",
+		"get namespace kube-system -o jsonpath={.metadata.uid}":                             "12345678-abcd",
+		`get nodes -o jsonpath={range .items[*]}{.spec.providerID}{"\n"}{end}`:              "huaweicloud://node-1",
+		`get nodes -o jsonpath={.items[0].metadata.labels.topology\.kubernetes\.io/region}`: "region-a",
+		"get nodes -o json": `{"items":[{"spec":{},"status":{"allocatable":{"cpu":"250m","memory":"256Mi"},"conditions":[{"type":"Ready","status":"True"}]}}]}`,
+		`get storageclass -o jsonpath={range .items[*]}{.metadata.name}{"|"}{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}{"\n"}{end}`: "csi-disk|true",
+	}}
+	_, err := inspectCluster(context.Background(), runner, "/session/kubeconfig", "internal")
+	if err == nil || !strings.Contains(err.Error(), "below registration policy v1") {
+		t.Fatalf("expected capacity policy failure, got %v", err)
 	}
 }

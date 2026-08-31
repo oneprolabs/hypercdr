@@ -1159,17 +1159,19 @@ export default function ClusterPage(props: {
                       </label>
                       {cceUploadError && <p role="alert" className="mt-3 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-medium leading-5 text-rose-700">{cceUploadError}</p>}
                     </RegistrationStep>
-                    {cceUpload && <RegistrationStep number={2} title="Select Kubernetes context" description="Confirm the exact CCE cluster that HyperCDR may inspect. No cluster resources are changed at this stage.">
-                      <select value={cceContext} onChange={event => setCCEContext(event.target.value)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
-                        <option value="" disabled>Select a context</option>
-                        {cceUpload.contexts.map(context => <option key={context.name} value={context.name}>{context.name} · {context.apiServer}</option>)}
-                      </select>
-                      <div className="mt-3 grid grid-cols-2 gap-3 rounded-lg bg-slate-50 p-3 text-[11px] text-slate-500">
-                        <div><span className="block font-bold uppercase tracking-wide text-slate-400">Credential fingerprint</span><span className="mt-1 block truncate font-mono text-slate-700" title={cceUpload.fingerprint}>{cceUpload.fingerprint}</span></div>
-                        <div><span className="block font-bold uppercase tracking-wide text-slate-400">Session expires</span><span className="mt-1 block text-slate-700">{new Date(cceUpload.expiresAt).toLocaleTimeString()}</span></div>
-                      </div>
-                    </RegistrationStep>}
-                    <RegistrationStep number={3} title="Inspect and register" description="HyperCDR will verify identity, permissions, network, images, capacity, and StorageClass before asking for final confirmation.">
+                    <RegistrationStep number={2} title="Select Kubernetes context" description="Confirm the exact CCE cluster that HyperCDR may inspect. No cluster resources are changed at this stage.">
+                      {cceUpload ? <>
+                        <select value={cceContext} onChange={event => setCCEContext(event.target.value)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                          <option value="" disabled>Select a context</option>
+                          {cceUpload.contexts.map(context => <option key={context.name} value={context.name}>{context.name} · {context.apiServer}</option>)}
+                        </select>
+                        <div className="mt-3 grid grid-cols-2 gap-3 rounded-lg bg-slate-50 p-3 text-[11px] text-slate-500">
+                          <div><span className="block font-bold uppercase tracking-wide text-slate-400">Credential fingerprint</span><span className="mt-1 block truncate font-mono text-slate-700" title={cceUpload.fingerprint}>{cceUpload.fingerprint}</span></div>
+                          <div><span className="block font-bold uppercase tracking-wide text-slate-400">Session expires</span><span className="mt-1 block text-slate-700">{new Date(cceUpload.expiresAt).toLocaleTimeString()}</span></div>
+                        </div>
+                      </> : <div className="flex min-h-10 items-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-400">Upload a kubeconfig to discover its available contexts.</div>}
+                    </RegistrationStep>
+                    <RegistrationStep number={3} title="Inspect and register" description="Inspect identity, version, permissions, capacity, and StorageClass. After confirmation, an isolated preflight verifies network and image pulls before installation.">
                       <button type="button" onClick={() => void inspectCCECluster()} disabled={!cceContext || cceUploadLoading || cceInspectionLoading} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300">{cceInspectionLoading && <RefreshCw size={13} className="animate-spin" />}{cceInspectionLoading ? 'Inspecting cluster…' : 'Inspect cluster'}</button>
                       {cceInspection && <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl border border-emerald-100 bg-emerald-50/60 p-3 text-xs">
                         <div><span className="block text-[10px] font-bold uppercase tracking-wide text-emerald-600">CCE cluster</span><strong className="mt-0.5 block text-slate-800">{cceInspection.clusterName}</strong></div>

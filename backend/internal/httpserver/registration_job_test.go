@@ -42,15 +42,31 @@ func TestCreateRegistrationExecutorJobUsesFixedHardenedTemplate(t *testing.T) {
 	if err = os.WriteFile(caPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}), 0600); err != nil {
 		t.Fatal(err)
 	}
-	router := &Router{cfg: config.Config{DeployMode: "helm", RegistrationExecutorImage: "registry/executor:v1", RegistrationExecutorNamespace: "hypercdr", RegistrationConfigSecret: "hypercdr-config", RegistrationSessionPVC: "hypercdr-sessions", RegistrationKubernetesAPI: server.URL, RegistrationServiceTokenPath: tokenPath, RegistrationServiceCAPath: caPath}, logger: slog.Default()}
+	router := &Router{cfg: config.Config{DeployMode: "helm", RegistrationExecutorImage: "registry/executor:v1", RegistrationExecutorNamespace: "hypercdr", RegistrationConfigSecret: "hypercdr-registration-executor-config", RegistrationSessionPVC: "hypercdr-sessions", RegistrationKubernetesAPI: server.URL, RegistrationServiceTokenPath: tokenPath, RegistrationServiceCAPath: caPath}, logger: slog.Default()}
 	if err = router.createRegistrationExecutorJob(context.Background(), "task-123"); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(received)
 	text := string(raw)
-	for _, expected := range []string{`"automountServiceAccountToken":false`, `"backoffLimit":0`, `"readOnlyRootFilesystem":true`, `"drop":["ALL"]`, `"HCDR_REGISTRATION_TASK_ID"`, `"task-123"`, `"claimName":"hypercdr-sessions"`} {
+	for _, expected := range []string{`"automountServiceAccountToken":false`, `"backoffLimit":0`, `"readOnlyRootFilesystem":true`, `"drop":["ALL"]`, `"HCDR_REGISTRATION_TASK_ID"`, `"task-123"`, `"claimName":"hypercdr-sessions"`, `"name":"hypercdr-registration-executor-config"`} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("Job is missing %s: %s", expected, text)
+		}
+	}
+	if strings.Contains(text, "HCDR_SECRET_KEY") || strings.Contains(text, `"name":"hypercdr-config"`) {
+		t.Fatalf("Job received the broad platform Secret: %s", text)
+	}
+	if strings.Contains(text, `"envFrom"`) {
+		t.Fatalf("Job imported an entire Secret instead of one required key: %s", text)
+	}
+	if err = router.createRegistrationInspectionJob(context.Background(), "ccer_abcdefghijklmnopqrstuvwxyz123456", "internal"); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = json.Marshal(received)
+	inspectionText := string(raw)
+	for _, forbidden := range []string{"HCDR_DATABASE_URL", "hypercdr-registration-executor-config", "HCDR_REGISTRATION_EXECUTOR_TOKEN", "HCDR_SECRET_KEY", `"envFrom"`} {
+		if strings.Contains(inspectionText, forbidden) {
+			t.Fatalf("inspection Job received unnecessary credential %s: %s", forbidden, inspectionText)
 		}
 	}
 }

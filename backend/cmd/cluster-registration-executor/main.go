@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -47,6 +48,17 @@ type inspectionGate struct {
 	Detail string `json:"detail"`
 }
 
+// Keep these requirements versioned and deliberately modest. They cover the
+// registration-time Agent and Velero control-plane footprint; application
+// restore capacity remains a workload-specific concern checked by Kubernetes.
+const (
+	registrationCapacityPolicyVersion = "v1"
+	minimumRegistrationMilliCPU       = int64(500)
+	minimumRegistrationMemoryBytes    = int64(512 * 1024 * 1024)
+	minimumSupportedKubernetesMinor   = 27
+	maximumSupportedKubernetesMinor   = 35
+)
+
 type kubectlRunner interface {
 	Run(context.Context, string, string, ...string) ([]byte, error)
 }
@@ -76,12 +88,7 @@ type server struct {
 
 func main() {
 	baseDir := env("HCDR_REGISTRATION_SESSION_DIR", "/var/lib/hypercdr/registration-sessions")
-	token := strings.TrimSpace(os.Getenv("HCDR_REGISTRATION_EXECUTOR_TOKEN"))
-	if token == "" {
-		slog.Error("HCDR_REGISTRATION_EXECUTOR_TOKEN is required")
-		os.Exit(1)
-	}
-	s := &server{baseDir: filepath.Clean(baseDir), token: token, runner: commandRunner{}, logger: slog.Default()}
+	s := &server{baseDir: filepath.Clean(baseDir), runner: commandRunner{}, logger: slog.Default()}
 	if sessionID := strings.TrimSpace(os.Getenv("HCDR_REGISTRATION_INSPECT_SESSION_ID")); sessionID != "" {
 		contextName := strings.TrimSpace(os.Getenv("HCDR_REGISTRATION_INSPECT_CONTEXT"))
 		if err := s.runInspectionJob(sessionID, contextName); err != nil {
@@ -111,6 +118,12 @@ func main() {
 		}
 		go s.runTaskLoop(repo, executorID)
 	}
+	token := strings.TrimSpace(os.Getenv("HCDR_REGISTRATION_EXECUTOR_TOKEN"))
+	if token == "" {
+		slog.Error("HCDR_REGISTRATION_EXECUTOR_TOKEN is required in HTTP service mode")
+		os.Exit(1)
+	}
+	s.token = token
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	mux.HandleFunc("POST /v1/inspect", s.inspect)
@@ -372,6 +385,9 @@ func inspectCluster(ctx context.Context, runner kubectlRunner, kubeconfig, conte
 	if json.Unmarshal([]byte(version), &versions) != nil || versions.ServerVersion.GitVersion == "" {
 		return inspection{}, errors.New("Kubernetes server version could not be determined.")
 	}
+	if err = validateKubernetesVersion(versions.ServerVersion.GitVersion); err != nil {
+		return inspection{}, err
+	}
 	alias, _ := run("-n", "kube-system", "get", "configmap", "cluster-config", "-o", "jsonpath={.data.alias}")
 	clusterID, err := run("get", "namespace", "kube-system", "-o", "jsonpath={.metadata.uid}")
 	if err != nil || clusterID == "" {
@@ -382,9 +398,9 @@ func inspectCluster(ctx context.Context, runner kubectlRunner, kubeconfig, conte
 		return inspection{}, errors.New("The selected context could not be verified as Huawei Cloud CCE.")
 	}
 	region, _ := run("get", "nodes", "-o", "jsonpath={.items[0].metadata.labels.topology\\.kubernetes\\.io/region}")
-	nodes, err := run("get", "nodes", "-o", "name")
+	nodes, err := run("get", "nodes", "-o", "json")
 	if err != nil {
-		return inspection{}, fmt.Errorf("Worker nodes could not be listed: %w", err)
+		return inspection{}, fmt.Errorf("Worker node capacity could not be read: %w", err)
 	}
 	classes, err := run("get", "storageclass", "-o", `jsonpath={range .items[*]}{.metadata.name}{"|"}{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}{"\n"}{end}`)
 	if err != nil {
@@ -394,10 +410,16 @@ func inspectCluster(ctx context.Context, runner kubectlRunner, kubeconfig, conte
 	if result.ClusterName == "" {
 		result.ClusterName = "cce-" + clusterID[:min(8, len(clusterID))]
 	}
-	for _, line := range strings.Split(nodes, "\n") {
-		if strings.TrimSpace(line) != "" {
-			result.NodeCount++
-		}
+	readyNodes, milliCPU, memoryBytes, err := schedulableCapacity([]byte(nodes))
+	if err != nil {
+		return inspection{}, fmt.Errorf("Worker node capacity is invalid: %w", err)
+	}
+	result.NodeCount = readyNodes
+	if readyNodes == 0 {
+		return inspection{}, errors.New("No Ready and schedulable worker node is available for HyperCDR.")
+	}
+	if milliCPU < minimumRegistrationMilliCPU || memoryBytes < minimumRegistrationMemoryBytes {
+		return inspection{}, fmt.Errorf("Ready worker capacity is below registration policy %s: available %dm CPU and %d MiB memory; require at least %dm CPU and %d MiB memory", registrationCapacityPolicyVersion, milliCPU, memoryBytes/(1024*1024), minimumRegistrationMilliCPU, minimumRegistrationMemoryBytes/(1024*1024))
 	}
 	for _, line := range strings.Split(classes, "\n") {
 		parts := strings.SplitN(strings.TrimSpace(line), "|", 2)
@@ -412,7 +434,7 @@ func inspectCluster(ctx context.Context, runner kubectlRunner, kubeconfig, conte
 	result.Gates = append(result.Gates,
 		inspectionGate{ID: "identity", Label: "CCE identity", Status: "passed", Detail: result.ClusterName + " · " + result.ClusterID},
 		inspectionGate{ID: "version", Label: "Kubernetes version", Status: "passed", Detail: result.ServerVersion},
-		inspectionGate{ID: "capacity", Label: "Worker capacity", Status: "passed", Detail: fmt.Sprintf("%d worker node(s) detected", result.NodeCount)},
+		inspectionGate{ID: "capacity", Label: "Worker capacity", Status: "passed", Detail: fmt.Sprintf("%d Ready schedulable worker node(s) · %dm CPU · %d MiB memory · policy %s", result.NodeCount, milliCPU, memoryBytes/(1024*1024), registrationCapacityPolicyVersion)},
 	)
 	permissions := [][2]string{{"create", "namespaces"}, {"create", "clusterroles.rbac.authorization.k8s.io"}, {"create", "clusterrolebindings.rbac.authorization.k8s.io"}, {"create", "deployments.apps"}, {"create", "daemonsets.apps"}, {"create", "secrets"}, {"create", "persistentvolumeclaims"}}
 	missing := []string{}
@@ -439,6 +461,86 @@ func inspectCluster(ctx context.Context, runner kubectlRunner, kubeconfig, conte
 		inspectionGate{ID: "network", Label: "Network and image pull", Status: "deferred", Detail: "An isolated temporary Pod performs DNS, TLS, platform, and image-pull checks before installation."},
 	)
 	return result, nil
+}
+
+func schedulableCapacity(raw []byte) (int, int64, int64, error) {
+	var list struct {
+		Items []struct {
+			Spec struct {
+				Unschedulable bool `json:"unschedulable"`
+			} `json:"spec"`
+			Status struct {
+				Allocatable map[string]string `json:"allocatable"`
+				Conditions  []struct {
+					Type   string `json:"type"`
+					Status string `json:"status"`
+				} `json:"conditions"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return 0, 0, 0, err
+	}
+	var ready int
+	var milliCPU, memoryBytes int64
+	for _, node := range list.Items {
+		isReady := false
+		for _, condition := range node.Status.Conditions {
+			if condition.Type == "Ready" && condition.Status == "True" {
+				isReady = true
+				break
+			}
+		}
+		if node.Spec.Unschedulable || !isReady {
+			continue
+		}
+		cpu, err := parseCPU(node.Status.Allocatable["cpu"])
+		if err != nil {
+			return 0, 0, 0, fmt.Errorf("invalid allocatable CPU: %w", err)
+		}
+		memory, err := parseMemory(node.Status.Allocatable["memory"])
+		if err != nil {
+			return 0, 0, 0, fmt.Errorf("invalid allocatable memory: %w", err)
+		}
+		ready++
+		milliCPU += cpu
+		memoryBytes += memory
+	}
+	return ready, milliCPU, memoryBytes, nil
+}
+
+func parseCPU(value string) (int64, error) {
+	value = strings.TrimSpace(value)
+	if strings.HasSuffix(value, "m") {
+		return strconv.ParseInt(strings.TrimSuffix(value, "m"), 10, 64)
+	}
+	cores, err := strconv.ParseFloat(value, 64)
+	return int64(cores * 1000), err
+}
+
+func parseMemory(value string) (int64, error) {
+	value = strings.TrimSpace(value)
+	multipliers := map[string]int64{"Ki": 1024, "Mi": 1024 * 1024, "Gi": 1024 * 1024 * 1024, "Ti": 1024 * 1024 * 1024 * 1024, "K": 1000, "M": 1000 * 1000, "G": 1000 * 1000 * 1000}
+	for suffix, multiplier := range multipliers {
+		if strings.HasSuffix(value, suffix) {
+			number, err := strconv.ParseInt(strings.TrimSuffix(value, suffix), 10, 64)
+			return number * multiplier, err
+		}
+	}
+	return strconv.ParseInt(value, 10, 64)
+}
+
+func validateKubernetesVersion(value string) error {
+	match := regexp.MustCompile(`^v?(\d+)\.(\d+)(?:\.|$)`).FindStringSubmatch(strings.TrimSpace(value))
+	if len(match) != 3 {
+		return fmt.Errorf("Kubernetes version %q is invalid", value)
+	}
+	major, _ := strconv.Atoi(match[1])
+	minor, _ := strconv.Atoi(match[2])
+	if major != 1 || minor < minimumSupportedKubernetesMinor || minor > maximumSupportedKubernetesMinor {
+		return fmt.Errorf("Kubernetes %s is outside the qualified range v1.%d-v1.%d; use command-based registration only after compatibility qualification", value, minimumSupportedKubernetesMinor, maximumSupportedKubernetesMinor)
+	}
+	return nil
 }
 
 func writeError(w http.ResponseWriter, status int, code, message string) {

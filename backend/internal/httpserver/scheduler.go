@@ -10,6 +10,7 @@ import (
 const schedulerTickInterval = 30 * time.Second
 const componentUpgradeVerificationTimeout = 10 * time.Minute
 const recoveryTaskInactivityTimeout = 15 * time.Minute
+const maintenanceTaskInactivityTimeout = 35 * time.Minute
 
 func (r *Router) startScheduler() {
 	r.schedulerOnce.Do(func() {
@@ -29,6 +30,7 @@ func (r *Router) runSchedulerTick(now time.Time) {
 	r.scheduleLogMaintenance(now)
 	r.reconcileComponentUpgradeTimeouts(now)
 	r.reconcileAbandonedRecoveryTasks(now)
+	r.reconcileAbandonedMaintenanceTasks(now)
 	if frozen, err := r.store.HasCommunityMigrationFreeze(); err != nil {
 		r.logger.Error("failed to check Community migration freeze", "error", err)
 		return
@@ -52,6 +54,46 @@ func (r *Router) runSchedulerTick(now time.Time) {
 	for _, schedule := range due {
 		r.fireProtectionPlanSchedule(schedule, now)
 	}
+}
+
+func (r *Router) reconcileAbandonedMaintenanceTasks(now time.Time) {
+	tasks, err := r.store.ListTasks("")
+	if err != nil {
+		r.logger.Warn("failed to reconcile abandoned maintenance tasks", "error", err)
+		return
+	}
+	for _, task := range tasks {
+		if !maintenanceTaskTimedOut(task, now) {
+			continue
+		}
+		message := "No cleanup status was received from the cluster agent for 35 minutes. The maintenance task was closed so it cannot indefinitely block cluster lifecycle operations. Review the task events and cluster resources before retrying."
+		if _, _, err := r.store.UpdateTaskStatus(store.TaskStatusInput{
+			TaskID: task.ID, Status: "failed", Progress: task.Progress, MarkDone: true,
+			ErrorCode: "MAINTENANCE_STATUS_TIMEOUT", ErrorMessage: message,
+		}); err != nil {
+			r.logger.Warn("failed to expire abandoned maintenance task", "task_id", task.ID, "error", err)
+			continue
+		}
+		_ = r.addTaskEventIfChanged(store.TaskEventInput{TaskID: task.ID, Level: "error", Reason: "maintenance_status_timeout", Message: message})
+	}
+}
+
+func maintenanceTaskTimedOut(task store.Task, now time.Time) bool {
+	if (task.Type != "protection-cleanup" && task.Type != "retention-cleanup") || !isActiveTaskStatus(task.Status) {
+		return false
+	}
+	lastActivity := task.CreatedAt
+	for _, candidate := range []time.Time{task.DispatchedAt, task.AcceptedAt, task.StartedAt} {
+		if candidate.After(lastActivity) {
+			lastActivity = candidate
+		}
+	}
+	if raw, ok := task.Payload["lastStatusAt"].(string); ok {
+		if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil && parsed.After(lastActivity) {
+			lastActivity = parsed
+		}
+	}
+	return !lastActivity.IsZero() && !now.Before(lastActivity.Add(maintenanceTaskInactivityTimeout))
 }
 
 func (r *Router) reconcileAbandonedRecoveryTasks(now time.Time) {
