@@ -215,6 +215,9 @@ services:
   hypercdr-cluster-registration-executor:
     image: ${REGISTRATION_EXECUTOR_IMAGE}
     container_name: hypercdr-cluster-registration-executor
+    depends_on:
+      hypercdr-postgres:
+        condition: service_healthy
     environment:
       HCDR_DATABASE_URL: ${HCDR_DATABASE_URL}
       HCDR_REGISTRATION_EXECUTOR_TOKEN: ${HCDR_REGISTRATION_EXECUTOR_TOKEN}

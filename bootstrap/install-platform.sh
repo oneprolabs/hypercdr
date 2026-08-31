@@ -473,11 +473,13 @@ run_docker() {
   local postgres_password=""
   local installed_secret_key=""
   local release_token=""
+  local registration_executor_token=""
   if [[ -f "${data_dir}/.env" ]]; then
     while IFS='=' read -r key value; do
       case "${key}" in
         HCDR_POSTGRES_PASSWORD) postgres_password="${value}" ;;
         HCDR_SECRET_KEY) installed_secret_key="${value}" ;;
+        HCDR_REGISTRATION_EXECUTOR_TOKEN) registration_executor_token="${value}" ;;
       esac
     done < "${data_dir}/.env"
     # Compatibility with installations created before the password setting was
@@ -493,6 +495,13 @@ run_docker() {
     release_token="$(tr -d '\r\n' < "${data_dir}/release-token")"
   else
     release_token="$(openssl rand -hex 32)"
+  fi
+  if [[ -z "${registration_executor_token}" ]]; then
+    if [[ -f "${data_dir}/registration-executor-token" ]]; then
+      registration_executor_token="$(tr -d '\r\n' < "${data_dir}/registration-executor-token")"
+    else
+      registration_executor_token="$(openssl rand -hex 32)"
+    fi
   fi
   local public_host
   public_host="$(extract_host_from_url "$public_base_url")"
@@ -568,6 +577,7 @@ EOF
       "${registry}/platform-api:${image_tag}" \
       "${registry}/platform-frontend:${image_tag}" \
       "${registry}/platform-upgrader:${image_tag}" \
+      "${registry}/cluster-registration-executor:${image_tag}" \
       "${registry}/postgres:16"; do
       docker manifest inspect "${required_image}" >/dev/null 2>&1 || {
         install_fail "Required image is unavailable: ${required_image}"
@@ -580,6 +590,8 @@ EOF
     mkdir -p "${data_dir}/certs"
     printf '%s\n' "${release_token}" > "${data_dir}/release-token"
     chmod 600 "${data_dir}/release-token"
+    printf '%s\n' "${registration_executor_token}" > "${data_dir}/registration-executor-token"
+    chmod 600 "${data_dir}/registration-executor-token"
     cp "${COMPOSE_TEMPLATE}" "${target_compose_file}"
     if [[ "${registry_trust}" == "private-ca" ]]; then
       cp "${registry_ca_file}" "${installed_registry_ca_file}"
@@ -629,6 +641,7 @@ RELEASE_VERSION=${image_tag}
 PLATFORM_API_IMAGE=${registry}/platform-api:${image_tag}
 PLATFORM_FRONTEND_IMAGE=${registry}/platform-frontend:${image_tag}
 PLATFORM_UPGRADER_IMAGE=${registry}/platform-upgrader:${image_tag}
+REGISTRATION_EXECUTOR_IMAGE=${registry}/cluster-registration-executor:${image_tag}
 POSTGRES_IMAGE=${registry}/postgres:16
 HCDR_POSTGRES_PASSWORD=${postgres_password}
 HCDR_DATABASE_URL=postgres://hypercdr:${postgres_password}@hypercdr-postgres:5432/hypercdr?sslmode=disable
@@ -644,6 +657,7 @@ HCDR_REGISTRY_CA_PATH=$([[ "${registry_trust}" == "private-ca" ]] && echo "/etc/
 HCDR_REGISTRY_CA_FILE=$([[ "${registry_trust}" == "private-ca" ]] && echo "${installed_registry_ca_file}" || echo "/dev/null")
 HCDR_SECRET_KEY=${secret_key}
 HCDR_RELEASE_TOKEN=${release_token}
+HCDR_REGISTRATION_EXECUTOR_TOKEN=${registration_executor_token}
 EOF
     chmod 600 "${data_dir}/.env"
     install_ok "Runtime settings saved"
