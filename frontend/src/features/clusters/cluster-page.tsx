@@ -1049,7 +1049,7 @@ export default function ClusterPage(props: {
                     const nextStep = () => ++step;
                     return <>
                   {registrationType === 'huaweicloud-cce' && <>
-                    <RegistrationStep number={nextStep()} title="Install kubectl" description="Install kubectl on the Linux or macOS host that will run the registration command." />
+                    <RegistrationStep number={nextStep()} title="Install kubectl" description="Install kubectl on the Linux host that will run the registration command." />
                     <RegistrationStep number={nextStep()} title="Download the CCE kubeconfig" description="Download the cluster credential from Huawei Cloud CCE and save it as ~/.kube/hypercdr-cce.yaml. The installer will detect it automatically." />
                   </>}
                   {prepareNodeCommand && <RegistrationStep number={nextStep()} title="Install the registry CA" description="Run this command on every Kubernetes node to trust the private image registry.">

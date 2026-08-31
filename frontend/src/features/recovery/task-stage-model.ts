@@ -128,7 +128,12 @@ export function groupTaskEventsByStage(task: ApiTask, events: ApiTaskEvent[]): T
   const snapshotCurrentStageID = recovery
     ? snapshots.find(stage => ['running', 'in_progress', 'failed'].includes(stage.status))?.id || ''
     : '';
-  const currentStageID = snapshotCurrentStageID || (currentEvent ? taskEventStageId(currentEvent, recovery) : '');
+  // The newest event for this task is the freshest execution signal.  Stage
+  // snapshots can legitimately lag one polling cycle, so they must not move
+  // the timeline backwards (which caused the status to flicker between
+  // stages). Use the event stage first and only fall back to the snapshot when
+  // no event identifies a stage.
+  const currentStageID = (currentEvent ? taskEventStageId(currentEvent, recovery) : '') || snapshotCurrentStageID;
   const taskFailed = isFailedStatus(task.status);
   const taskActive = isActiveTaskStatus(task.status);
   const taskSucceeded = !taskActive && !taskFailed && ['succeeded', 'completed', 'success'].includes(String(task.status || '').toLowerCase());
