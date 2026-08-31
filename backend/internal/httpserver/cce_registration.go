@@ -55,10 +55,15 @@ type kubeconfigDocument struct {
 	Users []struct {
 		Name string `yaml:"name"`
 		User struct {
-			ClientCertificate string         `yaml:"client-certificate"`
-			ClientKey         string         `yaml:"client-key"`
-			Exec              map[string]any `yaml:"exec"`
-			AuthProvider      map[string]any `yaml:"auth-provider"`
+			ClientCertificate     string         `yaml:"client-certificate"`
+			ClientKey             string         `yaml:"client-key"`
+			ClientCertificateData string         `yaml:"client-certificate-data"`
+			ClientKeyData         string         `yaml:"client-key-data"`
+			Token                 string         `yaml:"token"`
+			Username              string         `yaml:"username"`
+			Password              string         `yaml:"password"`
+			Exec                  map[string]any `yaml:"exec"`
+			AuthProvider          map[string]any `yaml:"auth-provider"`
 		} `yaml:"user"`
 	} `yaml:"users"`
 }
@@ -156,6 +161,9 @@ func inspectPlatformKubeconfig(raw []byte) (kubeconfigDocument, []cceContextSumm
 		}
 		if len(item.User.Exec) > 0 || len(item.User.AuthProvider) > 0 {
 			return doc, nil, fmt.Errorf("User %q uses an external authentication plugin, which platform-direct registration does not execute.", name)
+		}
+		if item.User.ClientCertificateData == "" && item.User.ClientKeyData == "" && item.User.Token == "" && (item.User.Username == "" || item.User.Password == "") {
+			return doc, nil, fmt.Errorf("User %q does not contain embedded credentials; use command-based registration instead.", name)
 		}
 		users[name] = struct{}{}
 	}
