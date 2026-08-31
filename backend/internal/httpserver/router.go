@@ -11958,6 +11958,7 @@ NODE_SSH_PORT="22"
 INTERACTIVE="true"
 SCENARIO="fresh-install"
 STORAGE_CLASS=""
+KUBECTL_BIN="kubectl"
 DETECTED_CLUSTER_NAME=""
 DETECTED_CLOUD_REGION=""
 DETECTED_CLOUD_CLUSTER_ID=""
@@ -12181,15 +12182,15 @@ fi
 if ! command -v curl >/dev/null 2>&1; then
   fail "curl is required but was not found in PATH"
 fi
-if ! command -v kubectl >/dev/null 2>&1; then
+kubectl() {
+  if [[ -n "$KUBECTL_CONTEXT" ]]; then command "$KUBECTL_BIN" --context "$KUBECTL_CONTEXT" "$@"; else command "$KUBECTL_BIN" "$@"; fi
+}
+
+provider_prepare_dependencies
+if [[ ! -x "$KUBECTL_BIN" ]] && ! command -v "$KUBECTL_BIN" >/dev/null 2>&1; then
   fail "kubectl is required but was not found in PATH"
 fi
-
 provider_select_context
-
-kubectl() {
-  if [[ -n "$KUBECTL_CONTEXT" ]]; then command kubectl --context "$KUBECTL_CONTEXT" "$@"; else command kubectl "$@"; fi
-}
 
 if [[ -z "$ENDPOINT" ]]; then
   if [[ -n "$ENDPOINT_PRIVATE" ]]; then
@@ -12231,6 +12232,8 @@ if ! kubectl cluster-info >/dev/null 2>&1; then
   exit 1
 fi
 log_ok "Kubernetes API is reachable"
+
+provider_align_kubectl_version
 
 provider_verify
 

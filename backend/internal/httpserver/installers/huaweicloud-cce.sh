@@ -2,6 +2,74 @@
 # provider; cloud-specific validation remains behind the provider contract.
 IMAGE_PULL_PREFLIGHT_STRATEGY="sequential"
 
+provider_huaweicloud_cce_download_kubectl() {
+  local version="$1" arch cache_dir binary checksum expected actual
+  case "$(uname -m)" in
+    x86_64|amd64) arch="amd64" ;;
+    aarch64|arm64) arch="arm64" ;;
+    *) fail "CCE registration supports amd64 and arm64 Linux execution hosts. Detected: $(uname -m)." ;;
+  esac
+  [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "The trusted kubectl source returned an invalid version: ${version}."
+  cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/hypercdr/kubectl/${version}/linux-${arch}"
+  binary="${cache_dir}/kubectl"
+  if [[ ! -x "$binary" ]]; then
+    mkdir -p "$cache_dir"
+    curl -fsSL --retry 2 --connect-timeout 10 "https://dl.k8s.io/release/${version}/bin/linux/${arch}/kubectl" -o "${binary}.tmp" || fail "Could not download kubectl ${version} from the trusted Kubernetes release service. Check DNS and outbound HTTPS."
+    curl -fsSL --retry 2 --connect-timeout 10 "https://dl.k8s.io/release/${version}/bin/linux/${arch}/kubectl.sha256" -o "${binary}.sha256" || fail "Could not download the kubectl ${version} checksum."
+    expected="$(tr -d '[:space:]' < "${binary}.sha256")"
+    actual="$(sha256sum "${binary}.tmp" | awk '{print $1}')"
+    [[ "$expected" =~ ^[0-9a-f]{64}$ && "$actual" == "$expected" ]] || { rm -f "${binary}.tmp"; fail "kubectl ${version} failed SHA256 verification; no executable was installed."; }
+    chmod 0755 "${binary}.tmp"
+    mv "${binary}.tmp" "$binary"
+  fi
+  KUBECTL_BIN="$binary"
+  log_ok "Using checksum-verified kubectl ${version} from the HyperCDR tool cache"
+}
+
+provider_huaweicloud_cce_prepare_dependencies() {
+  [[ "$(uname -s)" == "Linux" ]] || fail "CCE command-based registration phase one requires a Linux execution host."
+  [[ -r /etc/os-release ]] || fail "Unable to identify this Linux distribution from /etc/os-release."
+  # shellcheck disable=SC1091
+  . /etc/os-release
+  case "${ID:-}" in
+    ubuntu|debian|rhel|centos|rocky|almalinux) ;;
+    *) fail "Unsupported Linux distribution '${ID:-unknown}'. Supported: Ubuntu, Debian, RHEL, CentOS, Rocky Linux, and AlmaLinux." ;;
+  esac
+  command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required to verify kubectl downloads. Install coreutils and retry."
+  if command -v kubectl >/dev/null 2>&1; then
+    KUBECTL_BIN="$(command -v kubectl)"
+    return 0
+  fi
+  if [[ "$INTERACTIVE" != "true" ]] || ! { exec 3<>/dev/tty; } 2>/dev/null; then
+    fail "kubectl is missing. Install it first, or rerun interactively to let HyperCDR install a checksum-verified client in its tool cache."
+  fi
+  printf 'kubectl is not installed. Install a checksum-verified client in the HyperCDR tool cache? [Y/n] ' >&3
+  local answer latest
+  IFS= read -r answer <&3 || true
+  exec 3>&-
+  [[ -z "$answer" || "$answer" =~ ^[Yy]$ ]] || fail "kubectl installation was declined. Install kubectl and rerun registration."
+  latest="$(curl -fsSL --retry 2 --connect-timeout 10 https://dl.k8s.io/release/stable.txt || true)"
+  [[ -n "$latest" ]] || fail "Could not determine the current kubectl version from the trusted Kubernetes release service."
+  provider_huaweicloud_cce_download_kubectl "$latest"
+}
+
+provider_huaweicloud_cce_align_kubectl_version() {
+  local server_version server_minor client_version client_minor compatible
+  server_version="$(kubectl version -o json 2>/dev/null | grep -o '"gitVersion"[[:space:]]*:[[:space:]]*"v[0-9][^"]*"' | tail -n1 | cut -d'"' -f4)"
+  [[ "$server_version" =~ ^v([0-9]+)\.([0-9]+)\. ]] || fail "Unable to determine the CCE Kubernetes server version."
+  server_minor="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+  client_version="$(kubectl version --client -o json 2>/dev/null | grep -o '"gitVersion"[[:space:]]*:[[:space:]]*"v[0-9][^"]*"' | head -n1 | cut -d'"' -f4)"
+  client_minor="$(sed -E 's/^(v[0-9]+\.[0-9]+).*/\1/' <<<"$client_version")"
+  if [[ "$client_minor" != "$server_minor" ]]; then
+    # Kubernetes publishes every patch release at a stable, immutable URL.  Do
+    # not rely on the undocumented stable-vX.Y alias; CCE may run a patch that
+    # has no such alias.  The API's full server version is the source of truth.
+    compatible="$server_version"
+    provider_huaweicloud_cce_download_kubectl "$compatible"
+  fi
+  log_ok "kubectl client is aligned with CCE Kubernetes ${server_minor}"
+}
+
 provider_huaweicloud_cce_select_context() {
   local candidate resolved selection
   local -a candidates=()
@@ -44,14 +112,14 @@ provider_huaweicloud_cce_select_context() {
   [[ -r "$KUBECONFIG_PATH" ]] || fail "CCE kubeconfig is not readable: ${KUBECONFIG_PATH}"
   export KUBECONFIG="$KUBECONFIG_PATH"
   if [[ -z "$KUBECTL_CONTEXT" ]]; then
-    mapfile -t contexts < <(command kubectl config get-contexts -o name)
+    mapfile -t contexts < <(kubectl config get-contexts -o name)
     if [[ ${#contexts[@]} -eq 1 ]]; then
       KUBECTL_CONTEXT="${contexts[0]}"
     elif [[ ${#contexts[@]} -gt 1 ]]; then
       fail "The CCE kubeconfig contains multiple contexts. Rerun with --context <name>."
     fi
   fi
-  if [[ -n "$KUBECTL_CONTEXT" ]] && ! command kubectl config get-contexts -o name | grep -Fxq "$KUBECTL_CONTEXT"; then
+  if [[ -n "$KUBECTL_CONTEXT" ]] && ! kubectl config get-contexts -o name | grep -Fxq "$KUBECTL_CONTEXT"; then
     fail "Kubernetes context '${KUBECTL_CONTEXT}' was not found in ${KUBECONFIG_PATH}."
   fi
 }
