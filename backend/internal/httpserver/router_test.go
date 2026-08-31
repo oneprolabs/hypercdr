@@ -991,6 +991,7 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 		"Failed first-time installation was rolled back",
 		"Isolated installation preflight",
 		"provider_huaweicloud_cce_dynamic_pvc_preflight",
+		`"$HOME/.kube"/*kubeconfig*`,
 		"Dynamic PVC provisioning passed",
 		`target_namespace="${PREFLIGHT_NAMESPACE:-$NAMESPACE}"`,
 		"configmap hypercdr-agent-uninstaller",

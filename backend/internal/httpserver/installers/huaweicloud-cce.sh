@@ -16,7 +16,7 @@ provider_huaweicloud_cce_select_context() {
     add_kubeconfig_candidate "$candidate"
   done
   shopt -s nullglob
-  for candidate in "$PWD"/*kubeconfig* "$HOME/Downloads"/*kubeconfig* "$HOME/Downloads"/*config*.yaml; do
+  for candidate in "$HOME/.kube"/*kubeconfig* "$HOME/.kube"/*config*.yaml "$PWD"/*kubeconfig* "$HOME/Downloads"/*kubeconfig* "$HOME/Downloads"/*config*.yaml; do
     add_kubeconfig_candidate "$candidate"
   done
   shopt -u nullglob
