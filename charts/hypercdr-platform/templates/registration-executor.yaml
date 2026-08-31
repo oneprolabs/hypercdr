@@ -1,0 +1,48 @@
+{{- if .Values.registrationExecutor.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "hypercdr.fullname" . }}-registration-sessions
+  labels:
+    {{- include "hypercdr.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- if .Values.registrationExecutor.sessionStorage.storageClass }}
+  storageClassName: {{ .Values.registrationExecutor.sessionStorage.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.registrationExecutor.sessionStorage.size }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "hypercdr.fullname" . }}
+  labels:
+    {{- include "hypercdr.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "hypercdr.fullname" . }}-registration-jobs
+  labels:
+    {{- include "hypercdr.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "hypercdr.fullname" . }}-registration-jobs
+  labels:
+    {{- include "hypercdr.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "hypercdr.fullname" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "hypercdr.fullname" . }}-registration-jobs
+{{- end }}

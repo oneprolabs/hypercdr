@@ -182,27 +182,65 @@ func (r *Router) inspectCCEKubeconfig(w http.ResponseWriter, req *http.Request) 
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "registration_executor_unavailable", "message": "Platform-direct registration executor is not configured. Use command-based registration or contact the platform administrator."})
 		return
 	}
-	payload, _ := json.Marshal(map[string]string{"sessionId": body.SessionID, "context": body.Context})
 	ctx, cancel := context.WithTimeout(req.Context(), 50*time.Second)
 	defer cancel()
-	executorReq, _ := http.NewRequestWithContext(ctx, http.MethodPost, r.cfg.RegistrationExecutorEndpoint+"/v1/inspect", bytes.NewReader(payload))
-	executorReq.Header.Set("Content-Type", "application/json")
-	executorReq.Header.Set("Authorization", "Bearer "+r.cfg.RegistrationExecutorToken)
-	response, err := http.DefaultClient.Do(executorReq)
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "registration_executor_unreachable", "message": "The registration executor could not be reached. Retry or use command-based registration."})
-		return
-	}
-	defer response.Body.Close()
-	result, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "registration_executor_invalid_response"})
-		return
+	var result []byte
+	statusCode := http.StatusOK
+	if r.cfg.DeployMode == "helm" || r.cfg.DeployMode == "kubernetes" {
+		if err := r.createRegistrationInspectionJob(ctx, body.SessionID, body.Context); err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "registration_inspection_start_failed", "message": "The isolated CCE inspection Job could not be started. No cluster resources were changed."})
+			return
+		}
+		resultPath := filepath.Join(filepath.Dir(upload.Path), "inspection-result.json")
+		for {
+			raw, readErr := os.ReadFile(resultPath)
+			if readErr == nil {
+				_ = os.Remove(resultPath)
+				var jobResult struct {
+					Inspection json.RawMessage `json:"inspection"`
+					Error      string          `json:"error"`
+				}
+				if json.Unmarshal(raw, &jobResult) != nil {
+					writeJSON(w, http.StatusBadGateway, map[string]any{"error": "registration_executor_invalid_response"})
+					return
+				}
+				if jobResult.Error != "" {
+					statusCode = http.StatusUnprocessableEntity
+					result, _ = json.Marshal(map[string]string{"error": "cce_inspection_failed", "message": jobResult.Error})
+				} else {
+					result = jobResult.Inspection
+				}
+				break
+			}
+			select {
+			case <-ctx.Done():
+				writeJSON(w, http.StatusGatewayTimeout, map[string]any{"error": "cce_inspection_timeout", "message": "CCE inspection did not finish within 50 seconds. Retry or use command-based registration."})
+				return
+			case <-time.After(500 * time.Millisecond):
+			}
+		}
+	} else {
+		payload, _ := json.Marshal(map[string]string{"sessionId": body.SessionID, "context": body.Context})
+		executorReq, _ := http.NewRequestWithContext(ctx, http.MethodPost, r.cfg.RegistrationExecutorEndpoint+"/v1/inspect", bytes.NewReader(payload))
+		executorReq.Header.Set("Content-Type", "application/json")
+		executorReq.Header.Set("Authorization", "Bearer "+r.cfg.RegistrationExecutorToken)
+		response, err := http.DefaultClient.Do(executorReq)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]any{"error": "registration_executor_unreachable", "message": "The registration executor could not be reached. Retry or use command-based registration."})
+			return
+		}
+		defer response.Body.Close()
+		result, err = io.ReadAll(io.LimitReader(response.Body, 1<<20))
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]any{"error": "registration_executor_invalid_response"})
+			return
+		}
+		statusCode = response.StatusCode
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(response.StatusCode)
+	w.WriteHeader(statusCode)
 	_, _ = w.Write(result)
-	if response.StatusCode >= 200 && response.StatusCode < 300 {
+	if statusCode >= 200 && statusCode < 300 {
 		r.cceRegistrationMu.Lock()
 		if current, exists := r.cceRegistrationUploads[body.SessionID]; exists && current.TenantID == registrationTenantID(req) {
 			current.Inspected[body.Context] = true
@@ -278,6 +316,16 @@ func (r *Router) startCCEDirectRegistration(w http.ResponseWriter, req *http.Req
 	if err != nil {
 		_ = os.Remove(requestPath)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "registration_task_create_failed"})
+		return
+	}
+	if err = r.createRegistrationExecutorJob(req.Context(), task.ID); err != nil {
+		_ = os.RemoveAll(filepath.Dir(upload.Path))
+		r.cceRegistrationMu.Lock()
+		delete(r.cceRegistrationUploads, body.SessionID)
+		r.cceRegistrationMu.Unlock()
+		task, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "failed", Progress: 100, ErrorCode: "REGISTRATION_EXECUTOR_START_FAILED", ErrorMessage: err.Error(), Payload: map[string]any{"stage": "failed"}, MarkDone: true})
+		_ = r.store.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "error", Reason: "REGISTRATION_EXECUTOR_START_FAILED", Message: err.Error()})
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "registration_executor_start_failed", "message": "The isolated registration executor could not be started. No cluster resources were changed.", "task": task})
 		return
 	}
 	writeJSON(w, http.StatusAccepted, task)

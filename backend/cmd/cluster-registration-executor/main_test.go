@@ -60,6 +60,32 @@ func TestRegistrationTaskDestroysSessionAndCompletes(t *testing.T) {
 	}
 }
 
+func TestRegistrationFailureIsRedactedAndSessionDestroyed(t *testing.T) {
+	installer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("#!/usr/bin/env bash\necho token=secret-token >&2\nexit 23\n"))
+	}))
+	defer installer.Close()
+	base, sessionID := t.TempDir(), "ccer_abcdefghijklmnopqrstuvwxyz123456"
+	sessionDir := filepath.Join(base, sessionID)
+	if err := os.Mkdir(sessionDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(directInstallRequest{Token: "secret-token", InstallScriptURL: installer.URL, Endpoint: "wss://platform/ws/agent", Namespace: "hypercdr-agent", Context: "internal"})
+	if err := os.WriteFile(filepath.Join(sessionDir, "install-request.json"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	repo := store.NewMemoryStore()
+	task, _ := repo.CreateTask(store.TaskInput{TenantID: "tenant-a", Type: "cluster-registration", Status: "running", Payload: map[string]any{"sessionId": sessionID, "context": "internal"}})
+	(&server{baseDir: base, runner: fakeRunner{}, logger: discardLogger()}).runRegistrationTask(repo, task)
+	updated, _, _ := repo.GetTask(task.ID)
+	if updated.Status != "failed" || strings.Contains(updated.ErrorMessage, "secret-token") || !strings.Contains(updated.ErrorMessage, "[REDACTED]") {
+		t.Fatalf("failure was not safely recorded: %#v", updated)
+	}
+	if _, err := os.Stat(sessionDir); !os.IsNotExist(err) {
+		t.Fatalf("failed session remains: %v", err)
+	}
+}
+
 func TestRunInstallProcessHonorsCancellationAndTermTrap(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "install.sh")
@@ -107,6 +133,34 @@ func TestInspectClusterUsesFixedReadOnlyQueries(t *testing.T) {
 	}
 	if result.ClusterName != "cce-test-001" || result.ServerVersion != "v1.35.3" || result.NodeCount != 2 || result.DefaultStorageClass != "csi-disk" {
 		t.Fatalf("unexpected inspection: %#v", result)
+	}
+}
+
+func TestInspectionJobWritesAtomicResult(t *testing.T) {
+	base := t.TempDir()
+	sessionID := "ccer_abcdefghijklmnopqrstuvwxyz123456"
+	sessionDir := filepath.Join(base, sessionID)
+	if err := os.Mkdir(sessionDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	runner := fakeRunner{responses: map[string]string{
+		"version -o json": `{"serverVersion":{"gitVersion":"v1.35.3"}}`, "-n kube-system get configmap cluster-config -o jsonpath={.data.alias}": "cce-test", "get namespace kube-system -o jsonpath={.metadata.uid}": "12345678-abcd", `get nodes -o jsonpath={range .items[*]}{.spec.providerID}{"\n"}{end}`: "huaweicloud://node", `get nodes -o jsonpath={.items[0].metadata.labels.topology\.kubernetes\.io/region}`: "region-a", "get nodes -o name": "node/node-a", `get storageclass -o jsonpath={range .items[*]}{.metadata.name}{"|"}{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}{"\n"}{end}`: "csi-disk|true",
+		"auth can-i create namespaces --all-namespaces": "yes", "auth can-i create clusterroles.rbac.authorization.k8s.io --all-namespaces": "yes", "auth can-i create clusterrolebindings.rbac.authorization.k8s.io --all-namespaces": "yes", "auth can-i create deployments.apps --all-namespaces": "yes", "auth can-i create daemonsets.apps --all-namespaces": "yes", "auth can-i create secrets --all-namespaces": "yes", "auth can-i create persistentvolumeclaims --all-namespaces": "yes",
+	}}
+	s := &server{baseDir: base, runner: runner, logger: discardLogger()}
+	if err := s.runInspectionJob(sessionID, "internal"); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(sessionDir, "inspection-result.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result inspectionJobResult
+	if json.Unmarshal(raw, &result) != nil || result.Inspection == nil || result.Inspection.ClusterName != "cce-test" {
+		t.Fatalf("unexpected result: %s", raw)
+	}
+	if _, err = os.Stat(filepath.Join(sessionDir, "inspection-result.json.tmp")); !os.IsNotExist(err) {
+		t.Fatalf("temporary result remains: %v", err)
 	}
 }
 

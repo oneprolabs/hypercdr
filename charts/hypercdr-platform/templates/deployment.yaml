@@ -17,6 +17,9 @@ spec:
         app.kubernetes.io/component: platform
         {{- include "hypercdr.selectorLabels" . | nindent 8 }}
     spec:
+      {{- if .Values.registrationExecutor.enabled }}
+      serviceAccountName: {{ include "hypercdr.fullname" . }}
+      {{- end }}
       initContainers:
         - name: migrate
           image: {{ include "hypercdr.platformImage" . | quote }}
@@ -50,6 +53,24 @@ spec:
               value: {{ .Values.platform.agentNamespace | quote }}
             - name: HCDR_LOG_LEVEL
               value: {{ .Values.platform.logLevel | quote }}
+            {{- if .Values.registrationExecutor.enabled }}
+            - name: HCDR_DEPLOY_MODE
+              value: helm
+            - name: HCDR_REGISTRATION_EXECUTOR_IMAGE
+              value: {{ include "hypercdr.registrationExecutorImage" . | quote }}
+            - name: HCDR_REGISTRATION_EXECUTOR_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: HCDR_REGISTRATION_CONFIG_SECRET
+              value: {{ include "hypercdr.fullname" . }}-config
+            - name: HCDR_REGISTRATION_PLATFORM_INSTANCE
+              value: {{ .Release.Name | quote }}
+            - name: HCDR_REGISTRATION_SESSION_PVC
+              value: {{ include "hypercdr.fullname" . }}-registration-sessions
+            - name: HCDR_REGISTRATION_SESSION_DIR
+              value: /var/lib/hypercdr/registration-sessions
+            {{- end }}
             - name: HCDR_FRONTEND_DIR
               value: /opt/hypercdr/frontend
             {{- if .Values.platform.registryCA.enabled }}
@@ -84,6 +105,10 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 3
           volumeMounts:
+            {{- if .Values.registrationExecutor.enabled }}
+            - name: registration-sessions
+              mountPath: /var/lib/hypercdr/registration-sessions
+            {{- end }}
             {{- if .Values.platform.registryCA.enabled }}
             - name: registry-ca
               mountPath: /etc/hypercdr/registry
@@ -97,6 +122,11 @@ spec:
           resources:
             {{- toYaml .Values.platform.resources | nindent 12 }}
       volumes:
+        {{- if .Values.registrationExecutor.enabled }}
+        - name: registration-sessions
+          persistentVolumeClaim:
+            claimName: {{ include "hypercdr.fullname" . }}-registration-sessions
+        {{- end }}
         {{- if .Values.platform.registryCA.enabled }}
         - name: registry-ca
           secret:

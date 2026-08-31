@@ -2263,6 +2263,23 @@ func (s *MemoryStore) ClaimQueuedTask(taskType string, executorID string) (Task,
 	return *selected, true, nil
 }
 
+func (s *MemoryStore) ClaimQueuedTaskByID(taskID string, taskType string, executorID string) (Task, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := s.tasks[taskID]
+	if !ok || item.Type != taskType || item.Status != "queued" {
+		return Task{}, false, nil
+	}
+	now := time.Now().UTC()
+	item.Status, item.AcceptedAt, item.StartedAt = "running", now, now
+	if item.Payload == nil {
+		item.Payload = map[string]any{}
+	}
+	item.Payload["executorId"], item.Payload["stage"] = executorID, "preparing"
+	s.tasks[item.ID] = item
+	return item, true, nil
+}
+
 func (s *MemoryStore) ListTasks(clusterID string) ([]Task, error) {
 	return s.ListTasksFiltered(TaskFilter{ClusterID: clusterID})
 }

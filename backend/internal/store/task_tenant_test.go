@@ -34,3 +34,17 @@ func TestClaimQueuedTaskClaimsExactlyOnce(t *testing.T) {
 		t.Fatalf("task was claimed twice: ok=%v err=%v", ok, err)
 	}
 }
+
+func TestClaimQueuedTaskByIDCannotClaimSibling(t *testing.T) {
+	repo := NewMemoryStore()
+	first, _ := repo.CreateTask(TaskInput{TenantID: "tenant-a", Type: "cluster-registration", Status: "queued"})
+	second, _ := repo.CreateTask(TaskInput{TenantID: "tenant-a", Type: "cluster-registration", Status: "queued"})
+	claimed, ok, err := repo.ClaimQueuedTaskByID(second.ID, "cluster-registration", "job-second")
+	if err != nil || !ok || claimed.ID != second.ID {
+		t.Fatalf("wrong task claimed: %#v ok=%v err=%v", claimed, ok, err)
+	}
+	unchanged, _, _ := repo.GetTask(first.ID)
+	if unchanged.Status != "queued" {
+		t.Fatalf("sibling task changed: %#v", unchanged)
+	}
+}

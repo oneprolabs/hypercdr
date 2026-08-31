@@ -27,6 +27,16 @@ platform:
     cert: ""
     key: ""
 
+registrationExecutor:
+  enabled: true
+  image:
+    repository: cluster-registration-executor
+    tag: ""
+    pullPolicy: IfNotPresent
+  sessionStorage:
+    storageClass: ""
+    size: 1Gi
+
 postgresql:
   mode: bundled
   image:
@@ -50,3 +60,4 @@ postgresql:
 
 secrets:
   secretKey: dev-secret-change-me
+  registrationExecutorToken: ""

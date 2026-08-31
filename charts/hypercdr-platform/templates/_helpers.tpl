@@ -2,6 +2,11 @@
 hypercdr
 {{- end -}}
 
+{{- define "hypercdr.registrationExecutorImage" -}}
+{{- $tag := default .Values.platform.image.tag .Values.registrationExecutor.image.tag -}}
+{{- printf "%s/%s:%s" (.Values.global.imageRegistry | trimSuffix "/") .Values.registrationExecutor.image.repository $tag -}}
+{{- end -}}
+
 {{- define "hypercdr.fullname" -}}
 {{- printf "%s-platform" (include "hypercdr.name" .) -}}
 {{- end -}}

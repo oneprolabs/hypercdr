@@ -82,6 +82,14 @@ func main() {
 		os.Exit(1)
 	}
 	s := &server{baseDir: filepath.Clean(baseDir), token: token, runner: commandRunner{}, logger: slog.Default()}
+	if sessionID := strings.TrimSpace(os.Getenv("HCDR_REGISTRATION_INSPECT_SESSION_ID")); sessionID != "" {
+		contextName := strings.TrimSpace(os.Getenv("HCDR_REGISTRATION_INSPECT_CONTEXT"))
+		if err := s.runInspectionJob(sessionID, contextName); err != nil {
+			slog.Error("CCE inspection Job failed", "session", sessionID, "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if db := strings.TrimSpace(os.Getenv("HCDR_DATABASE_URL")); db != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		repo, err := store.NewPostgresStoreWithoutMigrations(ctx, db)
@@ -91,7 +99,17 @@ func main() {
 			os.Exit(1)
 		}
 		defer repo.Close()
-		go s.runTaskLoop(repo, env("HOSTNAME", "cluster-registration-executor"))
+		executorID := env("HOSTNAME", "cluster-registration-executor")
+		if taskID := strings.TrimSpace(os.Getenv("HCDR_REGISTRATION_TASK_ID")); taskID != "" {
+			task, ok, claimErr := repo.ClaimQueuedTaskByID(taskID, "cluster-registration", executorID)
+			if claimErr != nil || !ok {
+				slog.Error("claim specified registration task", "task", taskID, "error", claimErr)
+				os.Exit(1)
+			}
+			s.runRegistrationTask(repo, task)
+			return
+		}
+		go s.runTaskLoop(repo, executorID)
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
@@ -100,6 +118,37 @@ func main() {
 		slog.Error("registration executor stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+type inspectionJobResult struct {
+	Inspection *inspection `json:"inspection,omitempty"`
+	Error      string      `json:"error,omitempty"`
+}
+
+func (s *server) runInspectionJob(sessionID, contextName string) error {
+	if !sessionIDPattern.MatchString(sessionID) || contextName == "" || len(contextName) > 253 {
+		return errors.New("invalid inspection session or context")
+	}
+	sessionDir := filepath.Join(s.baseDir, sessionID)
+	result, inspectErr := inspectCluster(context.Background(), s.runner, filepath.Join(sessionDir, "kubeconfig"), contextName)
+	payload := inspectionJobResult{}
+	if inspectErr != nil {
+		payload.Error = inspectErr.Error()
+	} else {
+		payload.Inspection = &result
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	temporary := filepath.Join(sessionDir, "inspection-result.json.tmp")
+	if err = os.WriteFile(temporary, raw, 0600); err != nil {
+		return err
+	}
+	if err = os.Rename(temporary, filepath.Join(sessionDir, "inspection-result.json")); err != nil {
+		return err
+	}
+	return inspectErr
 }
 
 type directInstallRequest struct {

@@ -385,7 +385,9 @@ helm ${helm_args[*]} upgrade --install ${RELEASE_NAME} ${CHART_DIR} \\
   --set-string postgresql.mode=${database_mode} \\
   --set-string postgresql.storageClass=${storage_class} \\
   --set-string postgresql.image.repository=${registry}/postgres \\
-  --set-string secrets.secretKey=<redacted>
+  --set-string registrationExecutor.sessionStorage.storageClass=${storage_class} \\
+  --set-string secrets.secretKey=<redacted> \\
+  --set-string secrets.registrationExecutorToken=<redacted>
 EOF
 
   if [[ "$execute" != "true" ]]; then
@@ -424,6 +426,10 @@ EOF
     registry_ca_helm_args=(--set "platform.registryCA.enabled=true" --set-file "platform.registryCA.certificate=${registry_ca_file}")
   fi
 
+  local registration_executor_token
+  require_command openssl
+  registration_executor_token="$(openssl rand -hex 32)"
+
   helm "${helm_args[@]}" upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
     --namespace "${namespace}" \
     --create-namespace \
@@ -440,7 +446,9 @@ EOF
     --set-string "postgresql.mode=${database_mode}" \
     --set-string "postgresql.storageClass=${storage_class}" \
     --set-string "postgresql.image.repository=${registry}/postgres" \
-    --set-string "secrets.secretKey=${secret_key}"
+    --set-string "registrationExecutor.sessionStorage.storageClass=${storage_class}" \
+    --set-string "secrets.secretKey=${secret_key}" \
+    --set-string "secrets.registrationExecutorToken=${registration_executor_token}"
 
   kubectl "${kubectl_args[@]}" -n "${namespace}" rollout status "deployment/${RELEASE_NAME}-platform" --timeout="${timeout}"
 
