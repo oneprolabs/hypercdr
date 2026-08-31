@@ -90,11 +90,20 @@ if [[ ! -s "${POSTGRES_PASSWORD_FILE}" ]]; then
   chmod 600 "${POSTGRES_PASSWORD_FILE}"
 fi
 POSTGRES_PASSWORD="$(cat "${POSTGRES_PASSWORD_FILE}")"
+REGISTRATION_EXECUTOR_TOKEN_FILE="${DEPLOY_DIR}/registration_executor_token"
+if [[ ! -s "${REGISTRATION_EXECUTOR_TOKEN_FILE}" ]]; then
+  openssl rand -hex 32 > "${REGISTRATION_EXECUTOR_TOKEN_FILE}"
+  chmod 600 "${REGISTRATION_EXECUTOR_TOKEN_FILE}"
+fi
+REGISTRATION_EXECUTOR_TOKEN="$(cat "${REGISTRATION_EXECUTOR_TOKEN_FILE}")"
+mkdir -p "${DEPLOY_DIR}/registration-sessions"
+chmod 700 "${DEPLOY_DIR}/registration-sessions"
 
 PLATFORM_API_IMAGE="$(image_ref "${REGISTRY}" platform-api "${VERSION}")"
 PLATFORM_FRONTEND_IMAGE="$(image_ref "${REGISTRY}" platform-frontend "${VERSION}")"
 COMM_AGENT_IMAGE="$(image_ref "${REGISTRY}" comm-agent "${VERSION}")"
 PLATFORM_UPGRADER_IMAGE="$(image_ref "${REGISTRY}" platform-upgrader "${VERSION}")"
+REGISTRATION_EXECUTOR_IMAGE="$(image_ref "${REGISTRY}" cluster-registration-executor "${VERSION}")"
 
 log "Rendering ${DEPLOY_DIR}/.env"
 cat >"${DEPLOY_DIR}/.env" <<EOF
@@ -105,6 +114,7 @@ PLATFORM_HOST=${HOST}
 PLATFORM_API_IMAGE=${PLATFORM_API_IMAGE}
 PLATFORM_FRONTEND_IMAGE=${PLATFORM_FRONTEND_IMAGE}
 PLATFORM_UPGRADER_IMAGE=${PLATFORM_UPGRADER_IMAGE}
+REGISTRATION_EXECUTOR_IMAGE=${REGISTRATION_EXECUTOR_IMAGE}
 POSTGRES_IMAGE=${POSTGRES_IMAGE}
 
 HCDR_POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
@@ -123,6 +133,7 @@ HCDR_VELERO_AZURE_PLUGIN_IMAGE=${VELERO_AZURE_PLUGIN_IMAGE}
 HCDR_VELERO_GCP_PLUGIN_IMAGE=${VELERO_GCP_PLUGIN_IMAGE}
 HCDR_REGISTRY_CA_PATH=/etc/hypercdr/registry-ca.crt
 HCDR_SECRET_KEY=${SECRET_KEY}
+HCDR_REGISTRATION_EXECUTOR_TOKEN=${REGISTRATION_EXECUTOR_TOKEN}
 HCDR_TLS_ENABLED=false
 HCDR_LOG_LEVEL=info
 HCDR_DEPLOY_MODE=docker-compose
@@ -175,11 +186,15 @@ services:
       HCDR_LOG_LEVEL: ${HCDR_LOG_LEVEL}
       HCDR_DEPLOY_MODE: ${HCDR_DEPLOY_MODE}
       HCDR_DEPLOY_DIR: ${HCDR_DEPLOY_DIR}
+      HCDR_REGISTRATION_EXECUTOR_ENDPOINT: http://hypercdr-cluster-registration-executor:18082
+      HCDR_REGISTRATION_EXECUTOR_TOKEN: ${HCDR_REGISTRATION_EXECUTOR_TOKEN}
+      HCDR_REGISTRATION_SESSION_DIR: /var/lib/hypercdr/registration-sessions
     command: ["/bin/sh", "-c", "/usr/local/bin/platform-migrate && exec /usr/local/bin/platform-api"]
     ports:
       - "18080:18080"
     volumes:
       - ${HCDR_REGISTRY_CA_FILE:-/dev/null}:/etc/hypercdr/registry-ca.crt:ro
+      - ./registration-sessions:/var/lib/hypercdr/registration-sessions
     restart: unless-stopped
     logging:
       driver: local
@@ -192,6 +207,25 @@ services:
       - hypercdr-platform-api
     ports:
       - "3002:3002"
+    restart: unless-stopped
+    logging:
+      driver: local
+      options: { max-size: "50m", max-file: "5" }
+
+  hypercdr-cluster-registration-executor:
+    image: ${REGISTRATION_EXECUTOR_IMAGE}
+    container_name: hypercdr-cluster-registration-executor
+    environment:
+      HCDR_REGISTRATION_EXECUTOR_TOKEN: ${HCDR_REGISTRATION_EXECUTOR_TOKEN}
+      HCDR_REGISTRATION_SESSION_DIR: /var/lib/hypercdr/registration-sessions
+    volumes:
+      - ./registration-sessions:/var/lib/hypercdr/registration-sessions:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid,nodev
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
     logging:
       driver: local
@@ -227,6 +261,7 @@ Images:
   ${PLATFORM_FRONTEND_IMAGE}
   ${COMM_AGENT_IMAGE}
   ${PLATFORM_UPGRADER_IMAGE}
+  ${REGISTRATION_EXECUTOR_IMAGE}
   ${VELERO_IMAGE}
   ${VELERO_AWS_PLUGIN_IMAGE}
   ${VELERO_AZURE_PLUGIN_IMAGE}

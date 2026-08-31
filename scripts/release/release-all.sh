@@ -163,6 +163,7 @@ Images:
   ${REGISTRY}/platform-api:${VERSION}
   ${REGISTRY}/platform-frontend:${VERSION}
   ${REGISTRY}/platform-upgrader:${VERSION}
+  ${REGISTRY}/cluster-registration-executor:${VERSION}
   ${REGISTRY}/comm-agent:${VERSION}
   ${REGISTRY}/postgres:16
   ${REGISTRY}/velero:${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.2}
@@ -178,7 +179,7 @@ login_registry
 
 if [[ "${RESUME}" == "true" ]]; then
   log "Resume mode: verifying previously pushed core images"
-  for name in platform-api platform-frontend platform-upgrader comm-agent; do
+  for name in platform-api platform-frontend platform-upgrader cluster-registration-executor comm-agent; do
     image="${REGISTRY}/${name}:${VERSION}"
     docker manifest inspect "${image}" >/dev/null 2>&1 || die "cannot resume: core image is unavailable: ${image}"
     log "Resume prerequisite OK: ${image}"
@@ -206,6 +207,7 @@ for image in \
   "${REGISTRY}/platform-api:${VERSION}" \
   "${REGISTRY}/platform-frontend:${VERSION}" \
   "${REGISTRY}/platform-upgrader:${VERSION}" \
+  "${REGISTRY}/cluster-registration-executor:${VERSION}" \
   "${REGISTRY}/comm-agent:${VERSION}" \
   "${REGISTRY}/postgres:16" \
   "${REGISTRY}/velero:${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.2}" \

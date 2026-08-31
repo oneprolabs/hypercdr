@@ -42,6 +42,7 @@ REGISTRY_HOST="${REGISTRY%%/*}"
 log "Docker Compose services"
 (cd "${DEPLOY_DIR}" && docker compose ps)
 (cd "${DEPLOY_DIR}" && docker compose ps --services --status running | grep -q '^hypercdr-platform-upgrader$')
+(cd "${DEPLOY_DIR}" && docker compose ps --services --status running | grep -q '^hypercdr-cluster-registration-executor$')
 
 log "Checking frontend"
 curl -fsS "${FRONTEND_URL}/" >/dev/null

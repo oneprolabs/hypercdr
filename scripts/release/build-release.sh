@@ -13,6 +13,7 @@ GOPROXY="${HCDR_BUILD_GOPROXY:-${DEFAULT_GOPROXY}}"
 NPM_REGISTRY="${HCDR_BUILD_NPM_REGISTRY:-${DEFAULT_NPM_REGISTRY}}"
 NGINX_IMAGE="${HCDR_FRONTEND_NGINX_IMAGE:-nginx:1.27-alpine}"
 DEBIAN_IMAGE="${HCDR_API_RUNTIME_IMAGE:-debian:bookworm-slim}"
+KUBECTL_VERSION="${HCDR_REGISTRATION_KUBECTL_VERSION:-v1.35.3}"
 
 usage() {
   cat <<'USAGE'
@@ -49,6 +50,8 @@ require_version "${VERSION}"
 require_registry "${REGISTRY}"
 require_cmd docker
 require_cmd npm
+require_cmd curl
+require_cmd sha256sum
 
 GO_BIN="$(go_bin)"
 WORK_DIR="$(release_work_dir "${VERSION}")"
@@ -81,6 +84,7 @@ PLATFORM_API_IMAGE="$(image_ref "${REGISTRY}" platform-api "${VERSION}")"
 PLATFORM_FRONTEND_IMAGE="$(image_ref "${REGISTRY}" platform-frontend "${VERSION}")"
 COMM_AGENT_IMAGE="$(image_ref "${REGISTRY}" comm-agent "${VERSION}")"
 PLATFORM_UPGRADER_IMAGE="$(image_ref "${REGISTRY}" platform-upgrader "${VERSION}")"
+REGISTRATION_EXECUTOR_IMAGE="$(image_ref "${REGISTRY}" cluster-registration-executor "${VERSION}")"
 
 log "Release version: ${VERSION}"
 log "Registry: ${REGISTRY}"
@@ -96,6 +100,7 @@ mkdir -p \
   "${WORK_DIR}/platform-frontend/nginx" \
   "${WORK_DIR}/comm-agent" \
   "${WORK_DIR}/platform-upgrader" \
+  "${WORK_DIR}/cluster-registration-executor" \
   "${FRONTEND_DEPS_DIR}" \
   "${GO_BUILD_CACHE}" \
   "${GO_MOD_CACHE}" \
@@ -133,6 +138,8 @@ log "Building backend binaries"
     "${GO_BIN}" build -trimpath -ldflags="-s -w" -o "${WORK_DIR}/platform-api/platform-migrate" ./cmd/platform-migrate
   PATH="$(dirname "${GO_BIN}"):${PATH}" GOTOOLCHAIN=local GOPROXY="${GOPROXY}" GOCACHE="${GO_BUILD_CACHE}" GOMODCACHE="${GO_MOD_CACHE}" CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     "${GO_BIN}" build -trimpath -ldflags="${VERSION_LDFLAGS}" -o "${WORK_DIR}/platform-upgrader/platform-upgrader" ./cmd/platform-upgrader
+  PATH="$(dirname "${GO_BIN}"):${PATH}" GOTOOLCHAIN=local GOPROXY="${GOPROXY}" GOCACHE="${GO_BUILD_CACHE}" GOMODCACHE="${GO_MOD_CACHE}" CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    "${GO_BIN}" build -trimpath -ldflags="${VERSION_LDFLAGS}" -o "${WORK_DIR}/cluster-registration-executor/cluster-registration-executor" ./cmd/cluster-registration-executor
 )
 
 log "Building frontend dist"
@@ -187,6 +194,15 @@ cp "${ROOT_DIR}/docker/platform-frontend.Dockerfile" "${WORK_DIR}/platform-front
 
 cp "${ROOT_DIR}/docker/comm-agent.local.Dockerfile" "${WORK_DIR}/comm-agent/Dockerfile"
 cp "${ROOT_DIR}/docker/platform-upgrader.Dockerfile" "${WORK_DIR}/platform-upgrader/Dockerfile"
+cp /etc/ssl/certs/ca-certificates.crt "${WORK_DIR}/cluster-registration-executor/ca-certificates.crt"
+cp "${ROOT_DIR}/docker/cluster-registration-executor.Dockerfile" "${WORK_DIR}/cluster-registration-executor/Dockerfile"
+log "Downloading checksum-verified kubectl ${KUBECTL_VERSION} for registration executor"
+curl -fsSL --retry 3 --connect-timeout 10 "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" -o "${WORK_DIR}/cluster-registration-executor/kubectl"
+curl -fsSL --retry 3 --connect-timeout 10 "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl.sha256" -o "${WORK_DIR}/cluster-registration-executor/kubectl.sha256"
+KUBECTL_EXPECTED="$(tr -d '[:space:]' < "${WORK_DIR}/cluster-registration-executor/kubectl.sha256")"
+KUBECTL_ACTUAL="$(sha256sum "${WORK_DIR}/cluster-registration-executor/kubectl" | awk '{print $1}')"
+[[ "${KUBECTL_EXPECTED}" =~ ^[0-9a-f]{64}$ && "${KUBECTL_ACTUAL}" == "${KUBECTL_EXPECTED}" ]] || die "kubectl ${KUBECTL_VERSION} checksum verification failed"
+chmod 0755 "${WORK_DIR}/cluster-registration-executor/kubectl"
 
 log "Building image ${PLATFORM_API_IMAGE}"
 docker build -t "${PLATFORM_API_IMAGE}" "${WORK_DIR}/platform-api"
@@ -200,12 +216,16 @@ docker build -t "${COMM_AGENT_IMAGE}" "${WORK_DIR}/comm-agent"
 log "Building image ${PLATFORM_UPGRADER_IMAGE}"
 docker build -t "${PLATFORM_UPGRADER_IMAGE}" "${WORK_DIR}/platform-upgrader"
 
+log "Building image ${REGISTRATION_EXECUTOR_IMAGE}"
+docker build --build-arg DEBIAN_IMAGE="${DEBIAN_IMAGE}" -t "${REGISTRATION_EXECUTOR_IMAGE}" "${WORK_DIR}/cluster-registration-executor"
+
 if [[ "${PUSH}" == "true" ]]; then
   log "Pushing images"
   docker push "${PLATFORM_API_IMAGE}"
   docker push "${PLATFORM_FRONTEND_IMAGE}"
   docker push "${COMM_AGENT_IMAGE}"
   docker push "${PLATFORM_UPGRADER_IMAGE}"
+  docker push "${REGISTRATION_EXECUTOR_IMAGE}"
 fi
 
 cat <<EOF
@@ -215,6 +235,7 @@ Built images:
   ${PLATFORM_FRONTEND_IMAGE}
   ${COMM_AGENT_IMAGE}
   ${PLATFORM_UPGRADER_IMAGE}
+  ${REGISTRATION_EXECUTOR_IMAGE}
 
 Next:
   ${SCRIPT_DIR}/push-release.sh ${VERSION} --registry ${REGISTRY}
