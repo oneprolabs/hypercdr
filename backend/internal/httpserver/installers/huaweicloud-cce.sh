@@ -14,8 +14,8 @@ provider_huaweicloud_cce_download_kubectl() {
   binary="${cache_dir}/kubectl"
   if [[ ! -x "$binary" ]]; then
     mkdir -p "$cache_dir"
-    curl -fsSL --retry 2 --connect-timeout 10 "https://dl.k8s.io/release/${version}/bin/linux/${arch}/kubectl" -o "${binary}.tmp" || fail "Could not download kubectl ${version} from the trusted Kubernetes release service. Check DNS and outbound HTTPS."
-    curl -fsSL --retry 2 --connect-timeout 10 "https://dl.k8s.io/release/${version}/bin/linux/${arch}/kubectl.sha256" -o "${binary}.sha256" || fail "Could not download the kubectl ${version} checksum."
+    curl -fsSL --retry 2 --connect-timeout 10 --max-time 300 --speed-time 30 --speed-limit 1024 "https://dl.k8s.io/release/${version}/bin/linux/${arch}/kubectl" -o "${binary}.tmp" || fail "Could not download kubectl ${version} within 5 minutes from the trusted Kubernetes release service. Check DNS, outbound HTTPS, and bandwidth."
+    curl -fsSL --retry 2 --connect-timeout 10 --max-time 60 --speed-time 20 --speed-limit 32 "https://dl.k8s.io/release/${version}/bin/linux/${arch}/kubectl.sha256" -o "${binary}.sha256" || fail "Could not download the kubectl ${version} checksum."
     expected="$(tr -d '[:space:]' < "${binary}.sha256")"
     actual="$(sha256sum "${binary}.tmp" | awk '{print $1}')"
     [[ "$expected" =~ ^[0-9a-f]{64}$ && "$actual" == "$expected" ]] || { rm -f "${binary}.tmp"; fail "kubectl ${version} failed SHA256 verification; no executable was installed."; }
@@ -48,7 +48,7 @@ provider_huaweicloud_cce_prepare_dependencies() {
   IFS= read -r answer <&3 || true
   exec 3>&-
   [[ -z "$answer" || "$answer" =~ ^[Yy]$ ]] || fail "kubectl installation was declined. Install kubectl and rerun registration."
-  latest="$(curl -fsSL --retry 2 --connect-timeout 10 https://dl.k8s.io/release/stable.txt || true)"
+  latest="$(curl -fsSL --retry 2 --connect-timeout 10 --max-time 30 https://dl.k8s.io/release/stable.txt || true)"
   [[ -n "$latest" ]] || fail "Could not determine the current kubectl version from the trusted Kubernetes release service."
   provider_huaweicloud_cce_download_kubectl "$latest"
 }
