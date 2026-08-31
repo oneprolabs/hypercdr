@@ -29,14 +29,22 @@ type inspectRequest struct {
 }
 
 type inspection struct {
-	Context             string   `json:"context"`
-	ClusterName         string   `json:"clusterName"`
-	ClusterID           string   `json:"clusterId"`
-	Region              string   `json:"region,omitempty"`
-	ServerVersion       string   `json:"serverVersion"`
-	NodeCount           int      `json:"nodeCount"`
-	StorageClasses      []string `json:"storageClasses"`
-	DefaultStorageClass string   `json:"defaultStorageClass,omitempty"`
+	Context             string           `json:"context"`
+	ClusterName         string           `json:"clusterName"`
+	ClusterID           string           `json:"clusterId"`
+	Region              string           `json:"region,omitempty"`
+	ServerVersion       string           `json:"serverVersion"`
+	NodeCount           int              `json:"nodeCount"`
+	StorageClasses      []string         `json:"storageClasses"`
+	DefaultStorageClass string           `json:"defaultStorageClass,omitempty"`
+	Gates               []inspectionGate `json:"gates"`
+}
+
+type inspectionGate struct {
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	Status string `json:"status"`
+	Detail string `json:"detail"`
 }
 
 type kubectlRunner interface {
@@ -352,6 +360,35 @@ func inspectCluster(ctx context.Context, runner kubectlRunner, kubeconfig, conte
 			result.DefaultStorageClass = parts[0]
 		}
 	}
+	result.Gates = append(result.Gates,
+		inspectionGate{ID: "identity", Label: "CCE identity", Status: "passed", Detail: result.ClusterName + " · " + result.ClusterID},
+		inspectionGate{ID: "version", Label: "Kubernetes version", Status: "passed", Detail: result.ServerVersion},
+		inspectionGate{ID: "capacity", Label: "Worker capacity", Status: "passed", Detail: fmt.Sprintf("%d worker node(s) detected", result.NodeCount)},
+	)
+	permissions := [][2]string{{"create", "namespaces"}, {"create", "clusterroles.rbac.authorization.k8s.io"}, {"create", "clusterrolebindings.rbac.authorization.k8s.io"}, {"create", "deployments.apps"}, {"create", "daemonsets.apps"}, {"create", "secrets"}, {"create", "persistentvolumeclaims"}}
+	missing := []string{}
+	for _, permission := range permissions {
+		answer, permissionErr := run("auth", "can-i", permission[0], permission[1], "--all-namespaces")
+		answerFields := strings.Fields(answer)
+		if permissionErr != nil || len(answerFields) == 0 || answerFields[len(answerFields)-1] != "yes" {
+			missing = append(missing, permission[0]+" "+permission[1])
+		}
+	}
+	if len(missing) > 0 {
+		return inspection{}, fmt.Errorf("CCE kubeconfig lacks required permissions: %s", strings.Join(missing, ", "))
+	}
+	result.Gates = append(result.Gates, inspectionGate{ID: "permissions", Label: "Kubernetes permissions", Status: "passed", Detail: "All required namespace, RBAC, workload, Secret, and PVC permissions are available."})
+	storageStatus, storageDetail := "passed", result.DefaultStorageClass
+	if len(result.StorageClasses) == 0 {
+		return inspection{}, errors.New("No compatible StorageClass is available in this CCE cluster.")
+	}
+	if storageDetail == "" {
+		storageStatus, storageDetail = "warning", "No default StorageClass; select one before registration."
+	}
+	result.Gates = append(result.Gates,
+		inspectionGate{ID: "storage", Label: "StorageClass", Status: storageStatus, Detail: storageDetail},
+		inspectionGate{ID: "network", Label: "Network and image pull", Status: "deferred", Detail: "An isolated temporary Pod performs DNS, TLS, platform, and image-pull checks before installation."},
+	)
 	return result, nil
 }
 

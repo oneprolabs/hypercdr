@@ -16,7 +16,8 @@ type ClusterRegistrationType='native-kubernetes'|'huaweicloud-cce';
 type CCERegistrationMode='platform-direct'|'command';
 type CCEKubeconfigContext={name:string;cluster:string;user:string;apiServer:string;isCurrent:boolean};
 type CCEKubeconfigUpload={id:string;fingerprint:string;currentContext:string;contexts:CCEKubeconfigContext[];expiresAt:string};
-type CCEInspection={context:string;clusterName:string;clusterId:string;region?:string;serverVersion:string;nodeCount:number;storageClasses:string[];defaultStorageClass?:string};
+type CCEInspectionGate={id:string;label:string;status:'passed'|'warning'|'deferred';detail:string};
+type CCEInspection={context:string;clusterName:string;clusterId:string;region?:string;serverVersion:string;nodeCount:number;storageClasses:string[];defaultStorageClass?:string;gates:CCEInspectionGate[]};
 type ApiAgentToken={installCommand:string;prepareNodeCommand?:string;clusterType?:ClusterRegistrationType};
 type ApiCluster={id:string;name:string};
 type ApiTask={id:string;clusterId:string;type:string;status:string;progress:number;errorCode?:string;errorMessage?:string;payload?:Record<string,any>;createdAt?:string;completedAt?:string};
@@ -1175,6 +1176,12 @@ export default function ClusterPage(props: {
                         <div><span className="block text-[10px] font-bold uppercase tracking-wide text-emerald-600">Kubernetes</span><strong className="mt-0.5 block text-slate-800">{cceInspection.serverVersion}</strong></div>
                         <div><span className="block text-[10px] font-bold uppercase tracking-wide text-emerald-600">Worker nodes</span><strong className="mt-0.5 block text-slate-800">{cceInspection.nodeCount}</strong></div>
                         <div><span className="block text-[10px] font-bold uppercase tracking-wide text-emerald-600">StorageClass</span><strong className="mt-0.5 block text-slate-800">{cceInspection.defaultStorageClass || 'Selection required'}</strong></div>
+                      </div>}
+                      {cceInspection?.gates?.length > 0 && <div className="mt-3 divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white px-3">
+                        {cceInspection.gates.map(gate => <div key={gate.id} className="flex items-start gap-2.5 py-2.5">
+                          <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${gate.status === 'passed' ? 'bg-emerald-500' : gate.status === 'warning' ? 'bg-amber-500' : 'bg-blue-400'}`} />
+                          <div className="min-w-0"><strong className="block text-xs text-slate-800">{gate.label}</strong><span className="mt-0.5 block text-[11px] leading-4 text-slate-500">{gate.detail}</span></div>
+                        </div>)}
                       </div>}
                       {cceInspection && !cceRegistrationTask && <div className="mt-3 flex items-end gap-3">
                         <label className="min-w-0 flex-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">StorageClass

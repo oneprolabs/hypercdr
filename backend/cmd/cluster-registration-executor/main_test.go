@@ -93,6 +93,13 @@ func TestInspectClusterUsesFixedReadOnlyQueries(t *testing.T) {
 		`get nodes -o jsonpath={.items[0].metadata.labels.topology\.kubernetes\.io/region}`: "ap-southeast-1",
 		"get nodes -o name": "node/node-1\nnode/node-2\n",
 		`get storageclass -o jsonpath={range .items[*]}{.metadata.name}{"|"}{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}{"\n"}{end}`: "csi-disk|true\ncsi-nas|false\n",
+		"auth can-i create namespaces --all-namespaces":                                    "yes",
+		"auth can-i create clusterroles.rbac.authorization.k8s.io --all-namespaces":        "yes",
+		"auth can-i create clusterrolebindings.rbac.authorization.k8s.io --all-namespaces": "yes",
+		"auth can-i create deployments.apps --all-namespaces":                              "yes",
+		"auth can-i create daemonsets.apps --all-namespaces":                               "yes",
+		"auth can-i create secrets --all-namespaces":                                       "yes",
+		"auth can-i create persistentvolumeclaims --all-namespaces":                        "yes",
 	}}
 	result, err := inspectCluster(context.Background(), runner, "/session/kubeconfig", "internal")
 	if err != nil {
@@ -112,5 +119,20 @@ func TestInspectClusterRejectsNonCCE(t *testing.T) {
 	}}
 	if _, err := inspectCluster(context.Background(), runner, "/session/kubeconfig", "kind"); err == nil || !strings.Contains(err.Error(), "Huawei Cloud CCE") {
 		t.Fatalf("expected CCE rejection, got %v", err)
+	}
+}
+
+func TestInspectClusterRejectsIncompletePermissions(t *testing.T) {
+	runner := fakeRunner{responses: map[string]string{
+		"version -o json": `{"serverVersion":{"gitVersion":"v1.35.3"}}`,
+		"-n kube-system get configmap cluster-config -o jsonpath={.data.alias}":             "cce-test",
+		"get namespace kube-system -o jsonpath={.metadata.uid}":                             "12345678-abcd",
+		`get nodes -o jsonpath={range .items[*]}{.spec.providerID}{"\n"}{end}`:              "huaweicloud://node-1",
+		`get nodes -o jsonpath={.items[0].metadata.labels.topology\.kubernetes\.io/region}`: "region-a",
+		"get nodes -o name": "node/node-1",
+		`get storageclass -o jsonpath={range .items[*]}{.metadata.name}{"|"}{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}{"\n"}{end}`: "csi-disk|true",
+	}}
+	if _, err := inspectCluster(context.Background(), runner, "/session/kubeconfig", "internal"); err == nil || !strings.Contains(err.Error(), "lacks required permissions") {
+		t.Fatalf("expected permission gate failure, got %v", err)
 	}
 }
