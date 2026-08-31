@@ -20,9 +20,7 @@ provider_huaweicloud_cce_select_context() {
     add_kubeconfig_candidate "$candidate"
   done
   shopt -u nullglob
-  if [[ -z "$KUBECONFIG_PATH" && ${#candidates[@]} -eq 1 ]]; then
-    KUBECONFIG_PATH="${candidates[0]}"
-  elif [[ -z "$KUBECONFIG_PATH" && ${#candidates[@]} -gt 1 && "$INTERACTIVE" == "true" ]] && { exec 3<>/dev/tty; } 2>/dev/null; then
+  if [[ -z "$KUBECONFIG_PATH" && ${#candidates[@]} -gt 0 && "$INTERACTIVE" == "true" ]] && { exec 3<>/dev/tty; } 2>/dev/null; then
     echo "Detected Kubernetes configuration files:" >&3
     for selection in "${!candidates[@]}"; do printf '%d) %s\n' "$((selection+1))" "${candidates[$selection]}" >&3; done
     printf 'Select a CCE kubeconfig [1-%d], or 0 to enter another path: ' "${#candidates[@]}" >&3
@@ -31,6 +29,8 @@ provider_huaweicloud_cce_select_context() {
       KUBECONFIG_PATH="${candidates[$((selection-1))]}"
     fi
     exec 3>&-
+  elif [[ -z "$KUBECONFIG_PATH" && ${#candidates[@]} -eq 1 ]]; then
+    KUBECONFIG_PATH="${candidates[0]}"
   fi
   if [[ -z "$KUBECONFIG_PATH" && "$INTERACTIVE" == "true" ]] && { exec 3<>/dev/tty; } 2>/dev/null; then
     printf 'Enter the CCE kubeconfig file path: ' >&3
