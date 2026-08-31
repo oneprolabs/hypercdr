@@ -409,6 +409,17 @@ export default function ClusterPage(props: {
     } finally { setCCEInspectionLoading(false); }
   };
 
+  const cancelCCEDirectRegistration = async () => {
+    if (!cceRegistrationTask) return;
+    setCCEInspectionLoading(true);
+    try {
+      const response = await apiPost<{task: ApiTask}>(`/api/v1/tasks/${encodeURIComponent(cceRegistrationTask.id)}/cancel`, {});
+      setCCERegistrationTask(response.task);
+    } catch (error) {
+      setCCEUploadError(error instanceof Error ? error.message : 'Registration cancellation failed.');
+    } finally { setCCEInspectionLoading(false); }
+  };
+
   useEffect(() => {
     const task = cceRegistrationTask;
     if (!task || !['queued', 'running', 'accepted', 'dispatched'].includes(task.status)) return;
@@ -1174,9 +1185,10 @@ export default function ClusterPage(props: {
                         </label>
                         <button type="button" onClick={() => void startCCEDirectRegistration()} disabled={!cceStorageClass || cceInspectionLoading} className="h-9 rounded-lg bg-emerald-600 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">Register cluster</button>
                       </div>}
-                      {cceRegistrationTask && <div className={`mt-3 rounded-xl border px-3 py-3 text-xs ${cceRegistrationTask.status === 'failed' ? 'border-rose-100 bg-rose-50 text-rose-700' : cceRegistrationTask.status === 'succeeded' ? 'border-emerald-100 bg-emerald-50 text-emerald-700' : 'border-blue-100 bg-blue-50 text-blue-700'}`}>
-                        <div className="flex items-center justify-between gap-3"><strong>{cceRegistrationTask.status === 'succeeded' ? 'Registration completed' : cceRegistrationTask.status === 'failed' ? 'Registration failed' : 'Registration in progress'}</strong><span className="tabular-nums">{cceRegistrationTask.progress || 0}%</span></div>
-                        <p className="mt-1 leading-5">{cceRegistrationTask.status === 'failed' ? cceRegistrationTask.errorMessage || 'The executor reported a registration failure.' : cceRegistrationTask.status === 'succeeded' ? 'Agent registration was confirmed and the temporary kubeconfig was destroyed.' : 'Preflight, installation, and agent readiness are being verified. You may keep this drawer open.'}</p>
+                      {cceRegistrationTask && <div className={`mt-3 rounded-xl border px-3 py-3 text-xs ${cceRegistrationTask.status === 'failed' ? 'border-rose-100 bg-rose-50 text-rose-700' : cceRegistrationTask.status === 'succeeded' ? 'border-emerald-100 bg-emerald-50 text-emerald-700' : cceRegistrationTask.status === 'canceled' ? 'border-slate-200 bg-slate-50 text-slate-600' : 'border-blue-100 bg-blue-50 text-blue-700'}`}>
+                        <div className="flex items-center justify-between gap-3"><strong>{cceRegistrationTask.status === 'succeeded' ? 'Registration completed' : cceRegistrationTask.status === 'failed' ? 'Registration failed' : cceRegistrationTask.status === 'canceled' ? 'Registration canceled' : 'Registration in progress'}</strong><span className="tabular-nums">{cceRegistrationTask.progress || 0}%</span></div>
+                        <p className="mt-1 leading-5">{cceRegistrationTask.status === 'failed' ? cceRegistrationTask.errorMessage || 'The executor reported a registration failure.' : cceRegistrationTask.status === 'succeeded' ? 'Agent registration was confirmed and the temporary kubeconfig was destroyed.' : cceRegistrationTask.status === 'canceled' ? 'Installation stopped, rollback completed, and the temporary kubeconfig was destroyed.' : 'Preflight, installation, and agent readiness are being verified. You may keep this drawer open.'}</p>
+                        {['queued', 'running', 'accepted', 'dispatched', 'canceling'].includes(cceRegistrationTask.status) && <button type="button" onClick={() => void cancelCCEDirectRegistration()} disabled={cceInspectionLoading || cceRegistrationTask.status === 'canceling'} className="mt-2 rounded-lg border border-current px-3 py-1.5 text-[11px] font-bold transition hover:bg-white/60 disabled:cursor-wait disabled:opacity-60">{cceRegistrationTask.status === 'canceling' ? 'Canceling and rolling back…' : 'Cancel registration'}</button>}
                       </div>}
                     </RegistrationStep>
                   </div>}

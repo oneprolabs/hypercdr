@@ -988,6 +988,7 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 		"generate a new registration command in HyperCDR before retrying",
 		"TENANT_LICENSE_[A-Z_]+",
 		"rollback_failed_registration",
+		`trap 'status=130; if [[ "$ROLLBACK_ACTIVE" == "true" ]]; then rollback_failed_registration; fi; exit $status' TERM INT`,
 		"Failed first-time installation was rolled back",
 		"Isolated installation preflight",
 		"provider_huaweicloud_cce_dynamic_pvc_preflight",

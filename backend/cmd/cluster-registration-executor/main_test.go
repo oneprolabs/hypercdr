@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"hypercdr-platform/platform/backend/internal/store"
 )
@@ -56,6 +57,30 @@ func TestRegistrationTaskDestroysSessionAndCompletes(t *testing.T) {
 	}
 	if _, err = os.Stat(sessionDir); !os.IsNotExist(err) {
 		t.Fatalf("registration credential was not destroyed: %v", err)
+	}
+}
+
+func TestRunInstallProcessHonorsCancellationAndTermTrap(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "install.sh")
+	marker := filepath.Join(dir, "rolled-back")
+	contents := "#!/usr/bin/env bash\ntrap 'touch \"" + marker + "\"; exit 130' TERM INT\nwhile true; do sleep 1; done\n"
+	if err := os.WriteFile(script, []byte(contents), 0700); err != nil {
+		t.Fatal(err)
+	}
+	repo := store.NewMemoryStore()
+	task, err := repo.CreateTask(store.TaskInput{TenantID: "tenant-a", Type: "cluster-registration", Status: "canceling"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, canceled, timedOut, err := runInstallProcess(ctx, repo, task.ID, []string{script})
+	if !canceled || timedOut {
+		t.Fatalf("cancel result: canceled=%v timedOut=%v err=%v", canceled, timedOut, err)
+	}
+	if _, statErr := os.Stat(marker); statErr != nil {
+		t.Fatalf("TERM rollback trap did not execute: %v", statErr)
 	}
 }
 

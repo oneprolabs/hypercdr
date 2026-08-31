@@ -134,6 +134,24 @@ func TestCCEDirectRegistrationRequiresInspectionAndCreatesIdempotentTask(t *test
 	}
 }
 
+func TestQueuedCCEDirectRegistrationCanBeCanceled(t *testing.T) {
+	repo := store.NewMemoryStore()
+	task, err := repo.CreateTask(store.TaskInput{TenantID: store.DefaultTenantID, Type: "cluster-registration", Status: "queued", Payload: map[string]any{"sessionId": "ccer_abcdefghijklmnopqrstuvwxyz123456"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewRouter(config.Config{}, slog.Default(), repo))
+	defer server.Close()
+	status, response := postTestJSON(t, server.URL+"/api/v1/tasks/"+task.ID+"/cancel", map[string]any{})
+	if status != http.StatusAccepted {
+		t.Fatalf("cancel: %d %#v", status, response)
+	}
+	updated, ok, err := repo.GetTask(task.ID)
+	if err != nil || !ok || updated.Status != "canceled" || updated.CompletedAt.IsZero() {
+		t.Fatalf("queued registration was not canceled: %#v ok=%v err=%v", updated, ok, err)
+	}
+}
+
 func postTestJSON(t *testing.T, endpoint string, body any) (int, map[string]any) {
 	t.Helper()
 	raw, _ := json.Marshal(body)

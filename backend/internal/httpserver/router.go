@@ -6656,6 +6656,36 @@ func (r *Router) cancelTask(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "task_not_found"})
 		return
 	}
+	if task.Type == "cluster-registration" {
+		if !isActiveTaskStatus(task.Status) || !task.CompletedAt.IsZero() {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "task_not_active", "message": "This cluster registration task is no longer active."})
+			return
+		}
+		if task.Status == "canceling" {
+			writeJSON(w, http.StatusOK, map[string]any{"task": task, "reused": true})
+			return
+		}
+		status, done := "canceling", false
+		if task.Status == "queued" {
+			status, done = "canceled", true
+		}
+		task, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: status, Progress: task.Progress, ErrorCode: "REGISTRATION_CANCEL_REQUESTED", ErrorMessage: "Registration cancellation requested by user.", Payload: map[string]any{"stage": status}, MarkDone: done})
+		_ = r.store.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "warning", Reason: "cancel_requested", Message: "Registration cancellation requested by user."})
+		if done {
+			sessionID := stringPayload(task.Payload, "sessionId")
+			if cceRegistrationSessionIDPattern.MatchString(sessionID) {
+				r.cceRegistrationMu.Lock()
+				upload := r.cceRegistrationUploads[sessionID]
+				delete(r.cceRegistrationUploads, sessionID)
+				r.cceRegistrationMu.Unlock()
+				if upload.Path != "" {
+					_ = os.RemoveAll(filepath.Dir(upload.Path))
+				}
+			}
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"task": task})
+		return
+	}
 	if task.Type != "backup" {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "task_cancel_unsupported", "message": "Only running sync tasks can be force stopped."})
 		return
@@ -12905,6 +12935,7 @@ rollback_failed_registration() {
 
 ROLLBACK_ACTIVE="true"
 trap 'status=$?; if [[ "$ROLLBACK_ACTIVE" == "true" ]]; then rollback_failed_registration; fi; exit $status' ERR
+trap 'status=130; if [[ "$ROLLBACK_ACTIVE" == "true" ]]; then rollback_failed_registration; fi; exit $status' TERM INT
 
 log_section "Registry trust"
 REGISTRY_HOST="$(image_registry_host "$AGENT_IMAGE")"

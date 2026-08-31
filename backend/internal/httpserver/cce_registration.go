@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -29,6 +30,8 @@ const (
 	maxCCEKubeconfigBytes = 1 << 20
 	cceUploadTTL          = 15 * time.Minute
 )
+
+var cceRegistrationSessionIDPattern = regexp.MustCompile(`^ccer_[A-Za-z0-9_-]{20,64}$`)
 
 type cceKubeconfigUpload struct {
 	ID        string

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"hypercdr-platform/platform/backend/internal/store"
@@ -165,20 +167,62 @@ func (s *server) runRegistrationTask(repo store.Store, task store.Task) {
 	if request.StorageClass != "" {
 		args = append(args, "--storage-class", request.StorageClass)
 	}
-	cmd := exec.CommandContext(ctx, "/bin/bash", args...)
-	output, runErr := cmd.CombinedOutput()
+	output, canceled, timedOut, runErr := runInstallProcess(ctx, repo, task.ID, args)
 	_ = os.RemoveAll(sessionDir)
+	if canceled {
+		_, _, _ = repo.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "canceled", Progress: 100, ErrorCode: "REGISTRATION_CANCELED", ErrorMessage: "Registration was canceled and rollback completed.", Payload: map[string]any{"stage": "canceled"}, MarkDone: true})
+		_ = repo.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "warning", Reason: "registration_canceled", Message: "Registration was canceled and rollback completed."})
+		return
+	}
+	if timedOut {
+		fail("REGISTRATION_TIMEOUT", "Registration exceeded 20 minutes and was stopped; installer rollback was requested.")
+		return
+	}
 	if runErr != nil {
 		message := sanitizeInstallFailure(output, request.Token, runErr)
 		code := "REGISTRATION_INSTALL_FAILED"
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			code, message = "REGISTRATION_TIMEOUT", "Registration exceeded 20 minutes and was stopped; installer rollback was requested."
-		}
 		fail(code, message)
 		return
 	}
 	_ = repo.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "info", Reason: "registration_completed", Message: "Agent and Velero installation completed and agent registration was confirmed."})
 	_, _, _ = repo.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "succeeded", Progress: 100, Payload: map[string]any{"stage": "completed"}, MarkDone: true})
+}
+
+func runInstallProcess(ctx context.Context, repo store.Store, taskID string, args []string) ([]byte, bool, bool, error) {
+	cmd := exec.Command("/bin/bash", args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	var output bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &output, &output
+	if err := cmd.Start(); err != nil {
+		return output.Bytes(), false, false, err
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	terminate := func(canceled, timedOut bool) ([]byte, bool, bool, error) {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+		select {
+		case err := <-done:
+			return output.Bytes(), canceled, timedOut, err
+		case <-time.After(20 * time.Second):
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			return output.Bytes(), canceled, timedOut, <-done
+		}
+	}
+	for {
+		select {
+		case err := <-done:
+			return output.Bytes(), false, false, err
+		case <-ctx.Done():
+			return terminate(false, true)
+		case <-ticker.C:
+			task, ok, err := repo.GetTask(taskID)
+			if err == nil && ok && task.Status == "canceling" {
+				return terminate(true, false)
+			}
+		}
+	}
 }
 
 func downloadInstaller(ctx context.Context, rawURL string) ([]byte, error) {
