@@ -68,6 +68,8 @@ type Router struct {
 	logMaintMu             sync.Mutex
 	logMaintRun            bool
 	logCleanupAt           time.Time
+	cceRegistrationMu      sync.Mutex
+	cceRegistrationUploads map[string]cceKubeconfigUpload
 	diagnosticLogRetention time.Duration
 	extensionRoutes        []ExtensionRoute
 	logRetryAfter          map[string]time.Time
@@ -286,6 +288,7 @@ func NewRouterWithProductInfo(cfg config.Config, logger *slog.Logger, repo store
 		contentIndexing:        map[string]struct{}{},
 		contentIndexSlots:      make(chan struct{}, 2),
 		logRetryAfter:          map[string]time.Time{},
+		cceRegistrationUploads: map[string]cceKubeconfigUpload{},
 		productInfo:            productInfo,
 		diagnosticLogRetention: 30 * 24 * time.Hour,
 	}
@@ -592,6 +595,8 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("POST /api/v1/email-settings/configurations/{id}/default", r.setDefaultEmailSettings)
 	r.mux.HandleFunc("POST /api/v1/email-settings/configurations/{id}/test", r.testEmailSettingsByID)
 	r.mux.HandleFunc("GET /api/v1/clusters", r.listClusters)
+	r.mux.HandleFunc("POST /api/v1/cluster-registrations/cce/kubeconfigs", r.uploadCCEKubeconfig)
+	r.mux.HandleFunc("DELETE /api/v1/cluster-registrations/cce/kubeconfigs/{id}", r.deleteCCEKubeconfig)
 	r.mux.HandleFunc("PATCH /api/v1/clusters/{id}", r.tenantGuard("cluster", r.updateCluster))
 	r.mux.HandleFunc("DELETE /api/v1/clusters/{id}", r.tenantGuard("cluster", r.deleteCluster))
 	r.mux.HandleFunc("POST /api/v1/clusters/{id}/default", r.tenantGuard("cluster", r.setDefaultCluster))
