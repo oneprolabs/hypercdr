@@ -68,7 +68,11 @@ provider_huaweicloud_cce_verify() {
     verb="${permission%% *}"; resource="${permission#* }"
     kubectl auth can-i "$verb" "$resource" --all-namespaces | grep -qx yes || fail "CCE kubeconfig lacks required permission: ${verb} ${resource}"
   done
-  DETECTED_CLUSTER_NAME="${KUBECTL_CONTEXT:-$(kubectl config current-context 2>/dev/null || true)}"
+  # CCE kubeconfigs commonly expose the generic context "internal". The
+  # provider-owned ConfigMap contains the user-visible cluster name and is
+  # authoritative when available.
+  DETECTED_CLUSTER_NAME="$(kubectl -n kube-system get configmap cluster-config -o jsonpath='{.data.alias}' 2>/dev/null || true)"
+  [[ -n "$DETECTED_CLUSTER_NAME" ]] || DETECTED_CLUSTER_NAME="${KUBECTL_CONTEXT:-$(kubectl config current-context 2>/dev/null || true)}"
   DETECTED_CLOUD_REGION="$(kubectl get nodes -o jsonpath='{.items[0].metadata.labels.topology\.kubernetes\.io/region}' 2>/dev/null || true)"
   DETECTED_CLOUD_CLUSTER_ID="$(kubectl get namespace kube-system -o jsonpath='{.metadata.uid}' 2>/dev/null || true)"
   [[ -n "$DETECTED_CLOUD_CLUSTER_ID" ]] || fail "Unable to read the stable CCE cluster identity from namespace/kube-system."
