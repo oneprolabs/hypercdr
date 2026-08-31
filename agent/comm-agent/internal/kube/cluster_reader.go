@@ -37,6 +37,21 @@ type ControlPlaneIdentity struct {
 	InternalIP string
 }
 
+// DetectCCEClusterName reads Huawei CCE's authoritative cluster alias. CCE
+// kubeconfigs commonly use the generic context name "internal", so the
+// provider-owned cluster-config ConfigMap must be preferred for display.
+func (r *KubernetesClusterReader) DetectCCEClusterName(ctx context.Context) (string, error) {
+	cm, err := r.clientset.CoreV1().ConfigMaps("kube-system").Get(ctx, "cluster-config", metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	name := strings.TrimSpace(cm.Data["alias"])
+	if name == "" {
+		return "", fmt.Errorf("CCE cluster-config alias is empty")
+	}
+	return name, nil
+}
+
 // DetectControlPlaneIdentity returns a deterministic control-plane node name
 // and its InternalIP. Kubernetes has no standard cluster-name field, while
 // control-plane node identity is available to an in-cluster Agent.

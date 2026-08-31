@@ -80,7 +80,18 @@ func main() {
 		}
 		if strings.TrimSpace(cfg.ClusterName) == "" || cfg.ClusterName == "unknown-cluster" || cfg.ClusterName == "unnamed cluster" {
 			detectCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			identity, detectErr := reader.DetectControlPlaneIdentity(detectCtx)
+			var identity kube.ControlPlaneIdentity
+			var detectErr error
+			if strings.EqualFold(cfg.ClusterType, "huaweicloud-cce") {
+				if cceName, err := reader.DetectCCEClusterName(detectCtx); err == nil {
+					identity.Name = cceName
+				} else {
+					detectErr = err
+				}
+			}
+			if identity.Name == "" {
+				identity, detectErr = reader.DetectControlPlaneIdentity(detectCtx)
+			}
 			cancel()
 			if detectErr != nil {
 				logger.Warn("failed to detect default cluster name", "error", detectErr)
