@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -301,7 +302,14 @@ func downloadInstaller(ctx context.Context, rawURL string) ([]byte, error) {
 		return nil, errors.New("The platform installer URL is invalid.")
 	}
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
-	resp, err := http.DefaultClient.Do(req)
+	client := http.DefaultClient
+	// Bootstrap install commands intentionally use curl -k for the platform's
+	// self-signed development certificate. Keep executor behavior explicit and
+	// opt-in rather than silently weakening TLS verification.
+	if os.Getenv("HCDR_REGISTRATION_TLS_INSECURE_SKIP_VERIFY") == "true" {
+		client = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}, Timeout: 30 * time.Second} //nolint:gosec
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("installer download failed: %w", err)
 	}
