@@ -223,6 +223,7 @@ services:
     environment:
       HCDR_DATABASE_URL: ${HCDR_DATABASE_URL}
       HCDR_REGISTRATION_EXECUTOR_TOKEN: ${HCDR_REGISTRATION_EXECUTOR_TOKEN}
+      HCDR_REGISTRATION_TLS_INSECURE_SKIP_VERIFY: ${HCDR_REGISTRATION_TLS_INSECURE_SKIP_VERIFY:-true}
       HCDR_REGISTRATION_SESSION_DIR: /var/lib/hypercdr/registration-sessions
     volumes:
       - ./registration-sessions:/var/lib/hypercdr/registration-sessions
