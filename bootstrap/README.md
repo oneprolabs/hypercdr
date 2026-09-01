@@ -147,6 +147,11 @@ Start or refresh the bootstrap portal:
   --execute
 ```
 
+When the deployment host cannot reach Docker Hub, mirror the small Nginx image
+to the selected customer registry and set `HCDR_BOOTSTRAP_NGINX_IMAGE` before
+running the installer. The portal will use that image without changing the
+control-plane registry configuration.
+
 ### 4. Install the HyperCDR Control Plane
 
 Open the bootstrap portal:

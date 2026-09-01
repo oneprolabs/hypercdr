@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DATA_DIR="${HCDR_BOOTSTRAP_DATA_DIR:-/opt/hypercdr-bootstrap}"
 PORT="${HCDR_BOOTSTRAP_PORT:-8080}"
+NGINX_IMAGE="${HCDR_BOOTSTRAP_NGINX_IMAGE:-nginx:1.27-alpine}"
 SOURCE_DIR="${HCDR_BOOTSTRAP_PORTAL_SOURCE_DIR:-}"
 PORTAL_DIR="${HCDR_BOOTSTRAP_PORTAL_DIR:-${DATA_DIR}/portal}"
 MODE="${HCDR_BOOTSTRAP_PORTAL_MODE:-docker}"
@@ -71,6 +72,7 @@ Mode:            ${MODE}
 Source dir:      ${SOURCE_DIR}
 Install dir:     ${PORTAL_DIR}
 HTTP port:       ${PORT}
+Portal image:    ${NGINX_IMAGE}
 Execute changes: ${EXECUTE}
 EOF
 
@@ -94,6 +96,7 @@ case "${MODE}" in
   docker)
     require_command docker
     HCDR_BOOTSTRAP_PORT="${PORT}" \
+    HCDR_BOOTSTRAP_NGINX_IMAGE="${NGINX_IMAGE}" \
     HCDR_BOOTSTRAP_PORTAL_DIR="${PORTAL_DIR}" \
     docker compose -f "${SCRIPT_DIR}/portal-compose.yaml" up -d
     ;;
