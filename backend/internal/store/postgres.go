@@ -3189,7 +3189,7 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 			id, tenant_id, cluster_id, app_id, protection_plan_id, restore_point_id, type, status,
 			progress, command_id, payload, created_at
 		)
-		values ($1, $2, $3, nullif($4, '')::uuid, nullif($5, '')::uuid, nullif($6, '')::uuid,
+		values ($1, $2, nullif($3, '')::uuid, nullif($4, '')::uuid, nullif($5, '')::uuid, nullif($6, '')::uuid,
 			$7, $8, 0, nullif($9, '')::uuid, $10, $11)
 	`, task.ID, task.TenantID, task.ClusterID, task.AppID, task.ProtectionPlanID, task.RestorePointID,
 		task.Type, task.Status, task.CommandID, payloadRaw, now)

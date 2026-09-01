@@ -315,7 +315,8 @@ func (r *Router) startCCEDirectRegistration(w http.ResponseWriter, req *http.Req
 	}})
 	if err != nil {
 		_ = os.Remove(requestPath)
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "registration_task_create_failed"})
+		r.logger.Error("failed to create CCE registration task", "tenant_id", tenantID, "session_id", body.SessionID, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "registration_task_create_failed", "message": "The registration task could not be created. No cluster resources were changed; retry the operation."})
 		return
 	}
 	if err = r.createRegistrationExecutorJob(req.Context(), task.ID); err != nil {
