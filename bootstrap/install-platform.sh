@@ -98,7 +98,7 @@ Docker options:
   --registry-trust MODE        system (default) or private-ca
   --registry-ca-file PATH      PEM CA certificate, required for private-ca
   --image-tag TAG              Platform/agent image tag, default v20260714.5.
-  --velero-image IMAGE         Velero image, default <registry>/velero:v1.18.2-hcdr.2.
+  --velero-image IMAGE         Velero image, default <registry>/velero:v1.18.2-hcdr.3.
   --velero-aws-plugin-image IMAGE
                               Velero AWS plugin image, default <registry>/velero-plugin-for-aws:v1.13.0.
   --http-port PORT             Frontend host port. Defaults to the port in --public-base-url, or 3002.
@@ -315,7 +315,7 @@ run_k8s() {
     http_port="3002"
   fi
   if [[ -z "${velero_image}" ]]; then
-    velero_image="${registry}/velero:v1.18.2-hcdr.2"
+    velero_image="${registry}/velero:v1.18.2-hcdr.3"
   fi
   if [[ -z "${velero_aws_plugin_image}" ]]; then
     velero_aws_plugin_image="${registry}/velero-plugin-for-aws:v1.13.0"
@@ -520,7 +520,7 @@ run_docker() {
     http_port="3002"
   fi
   if [[ -z "${velero_image}" ]]; then
-    velero_image="${registry}/velero:v1.18.2-hcdr.2"
+    velero_image="${registry}/velero:v1.18.2-hcdr.3"
   fi
   if [[ -z "${velero_aws_plugin_image}" ]]; then
     velero_aws_plugin_image="${registry}/velero-plugin-for-aws:v1.13.0"
