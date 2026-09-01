@@ -13,7 +13,7 @@ HCDR_DEV_TLS_KEY_FILE=/data/hypercdr-runtime/shared/certs/platform.key
 
 HCDR_IMAGE_REGISTRY=crpi-tne0uo16mzanbvpi.cn-zhangjiakou.personal.cr.aliyuncs.com/hypercdr
 HCDR_AGENT_IMAGE=crpi-tne0uo16mzanbvpi.cn-zhangjiakou.personal.cr.aliyuncs.com/hypercdr/comm-agent:v20260824.2
-HCDR_VELERO_IMAGE=crpi-tne0uo16mzanbvpi.cn-zhangjiakou.personal.cr.aliyuncs.com/hypercdr/velero:v1.18.2-hcdr.2
+HCDR_VELERO_IMAGE=crpi-tne0uo16mzanbvpi.cn-zhangjiakou.personal.cr.aliyuncs.com/hypercdr/velero:v1.18.2-hcdr.3
 HCDR_VELERO_AWS_PLUGIN_IMAGE=crpi-tne0uo16mzanbvpi.cn-zhangjiakou.personal.cr.aliyuncs.com/hypercdr/velero-plugin-for-aws:v1.13.0
 HCDR_REGISTRY_CA_PATH=
 

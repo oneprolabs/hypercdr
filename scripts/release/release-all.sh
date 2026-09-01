@@ -166,7 +166,7 @@ Images:
   ${REGISTRY}/cluster-registration-executor:${VERSION}
   ${REGISTRY}/comm-agent:${VERSION}
   ${REGISTRY}/postgres:16
-  ${REGISTRY}/velero:${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.2}
+  ${REGISTRY}/velero:${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.3}
   ${REGISTRY}/velero-plugin-for-aws:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}
   ${REGISTRY}/velero-plugin-for-microsoft-azure:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}
   ${REGISTRY}/velero-plugin-for-gcp:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}
@@ -210,7 +210,7 @@ for image in \
   "${REGISTRY}/cluster-registration-executor:${VERSION}" \
   "${REGISTRY}/comm-agent:${VERSION}" \
   "${REGISTRY}/postgres:16" \
-  "${REGISTRY}/velero:${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.2}" \
+  "${REGISTRY}/velero:${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.3}" \
   "${REGISTRY}/velero-plugin-for-aws:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}" \
   "${REGISTRY}/velero-plugin-for-microsoft-azure:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}" \
   "${REGISTRY}/velero-plugin-for-gcp:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}"; do
