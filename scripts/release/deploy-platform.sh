@@ -65,7 +65,7 @@ REGISTRY="${REGISTRY%/}"
 REGISTRY_TRUST="${HCDR_REGISTRY_TRUST:-system}"
 REGISTRY_CA_SOURCE="${HCDR_REGISTRY_CA_FILE:-/dev/null}"
 if [[ -z "${VELERO_IMAGE}" ]]; then
-  VELERO_IMAGE="${REGISTRY}/velero:${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.4}"
+  VELERO_IMAGE="${REGISTRY}/velero:${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.3}"
 fi
 if [[ -z "${VELERO_AWS_PLUGIN_IMAGE}" ]]; then
   VELERO_AWS_PLUGIN_IMAGE="${REGISTRY}/velero-plugin-for-aws:v1.13.0"
