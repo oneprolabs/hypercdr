@@ -3236,7 +3236,7 @@ func (s *PostgresStore) ClaimQueuedTask(taskType string, executorID string) (Tas
 	if err != nil {
 		return Task{}, false, err
 	}
-	result, err := tx.Exec(`update tasks set status='running', accepted_at=coalesce(accepted_at, now()), started_at=coalesce(started_at, now()), payload=coalesce(payload, '{}'::jsonb) || jsonb_build_object('executorId',$2,'stage','preparing') where id=$1 and status='queued'`, id, executorID)
+	result, err := tx.Exec(`update tasks set status='running', accepted_at=coalesce(accepted_at, now()), started_at=coalesce(started_at, now()), payload=coalesce(payload, '{}'::jsonb) || jsonb_build_object('executorId',$2::text,'stage','preparing') where id=$1::uuid and status='queued'`, id, executorID)
 	if err != nil {
 		return Task{}, false, err
 	}
