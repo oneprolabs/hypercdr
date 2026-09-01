@@ -71,7 +71,6 @@ export default function ApplicationDrPage(props: {
   const [selectedConfigApps, setSelectedConfigApps] = useState<string[]>([]);
   const [selectedRunApps, setSelectedRunApps] = useState<string[]>([]);
   const [submittingSyncTasks, setSubmittingSyncTasks] = useState<Record<string, ApiTask>>({});
-  const [preferredSyncTaskIds, setPreferredSyncTaskIds] = useState<Record<string, string>>({});
   const [submittingRecoveryTasks, setSubmittingRecoveryTasks] = useState<Record<string, ApiTask>>({});
   const [syncSubmitting, setSyncSubmitting] = useState(false);
   const [recoverySubmitting, setRecoverySubmitting] = useState(false);
@@ -640,11 +639,6 @@ export default function ApplicationDrPage(props: {
         const taskPlanId = String(task?.protectionPlanId || task?.payload?.protectionPlanId || '').trim();
         return taskPlanId === planId && allowedTypes.includes(task.type);
       });
-    const preferredTaskId = allowedTypes.length === 1 && allowedTypes[0] === 'backup'
-      ? preferredSyncTaskIds[app.name]
-      : '';
-    const preferred = preferredTaskId ? matching.find(task => task.id === preferredTaskId) : undefined;
-    if (preferred) return preferred;
     const latestTaskId = allowedTypes.length === 1 && allowedTypes[0] === 'backup'
       ? plan?.latestSyncTaskId
       : allowedTypes.some(type => ['drill', 'restore', 'takeover'].includes(type))
@@ -2242,18 +2236,6 @@ export default function ApplicationDrPage(props: {
           if (!task?.id) return;
           [app.name, ...unitMembers(app).map(member => member.name)].forEach(key => {
             next[key] = task;
-          });
-        });
-        return next;
-      });
-      setPreferredSyncTaskIds(prev => {
-        const next = { ...prev };
-        selectedRunRows.forEach((app, index) => {
-          const response = responses[index];
-          const task = 'task' in response ? response.task : response;
-          if (!task?.id) return;
-          [app.name, ...unitMembers(app).map(member => member.name)].forEach(key => {
-            next[key] = task.id;
           });
         });
         return next;
