@@ -7594,6 +7594,18 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "restore_point_application_mismatch", "message": "The selected restore point does not belong to the selected protection plan application."})
 		return
 	}
+	// Cross-cluster recovery cannot safely inherit the source StorageClass: a
+	// target cluster may use a different provisioner (for example Longhorn vs
+	// CCE csi-disk). Refuse an ambiguous request before creating a task so the
+	// user can provide an explicit mapping in Advanced options instead of
+	// receiving a misleading 2% stall later.
+	if taskType == "drill" && recoveryPlan.SourceClusterID != "" && body.ClusterID != recoveryPlan.SourceClusterID && len(body.StorageClassMappings) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error":   "storage_class_mapping_required",
+			"message": "Cross-cluster Drill requires a StorageClass mapping. Open Advanced options and map the source StorageClass to a StorageClass available on the target cluster.",
+		})
+		return
+	}
 	commandID := store.NewPublicID()
 	task, err := r.store.CreateTask(store.TaskInput{
 		ClusterID:        body.ClusterID,
