@@ -3252,7 +3252,7 @@ func (s *PostgresStore) ClaimQueuedTask(taskType string, executorID string) (Tas
 }
 
 func (s *PostgresStore) ClaimQueuedTaskByID(taskID string, taskType string, executorID string) (Task, bool, error) {
-	result, err := s.db.Exec(`update tasks set status='running', accepted_at=coalesce(accepted_at, now()), started_at=coalesce(started_at, now()), payload=coalesce(payload, '{}'::jsonb) || jsonb_build_object('executorId',$3,'stage','preparing') where id=$1 and type=$2 and status='queued'`, taskID, taskType, executorID)
+	result, err := s.db.Exec(`update tasks set status='running', accepted_at=coalesce(accepted_at, now()), started_at=coalesce(started_at, now()), payload=coalesce(payload, '{}'::jsonb) || jsonb_build_object('executorId',$3::text,'stage','preparing') where id=$1::uuid and type=$2::text and status='queued'`, taskID, taskType, executorID)
 	if err != nil {
 		return Task{}, false, err
 	}
