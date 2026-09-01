@@ -42,6 +42,20 @@ These scripts build and push:
 - `platform-upgrader`
 - `comm-agent`
 
+The registration executor embeds a checksum-verified `kubectl`. Normal builds
+download it from the Kubernetes release service within a bounded total time.
+For an air-gapped or slow build host, provide a previously trusted binary and
+its pinned digest instead:
+
+```bash
+HCDR_REGISTRATION_KUBECTL_VERSION=v1.35.7 \
+HCDR_REGISTRATION_KUBECTL_BINARY=/secure/cache/kubectl-v1.35.7 \
+HCDR_REGISTRATION_KUBECTL_SHA256=<64-character-sha256> \
+./release-all.sh v20260901.1 --config ./release.conf
+```
+
+The build rejects a local binary unless the supplied digest matches exactly.
+
 Build work is written to `/data/hypercdr-runtime/build/platform/<version>` and shared
 Go/npm caches are written to `/data/hypercdr-runtime/cache` by default. Override them
 with `HCDR_BUILD_ROOT` and `HCDR_CACHE_ROOT`. The source tree is not used for

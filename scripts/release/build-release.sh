@@ -14,6 +14,9 @@ NPM_REGISTRY="${HCDR_BUILD_NPM_REGISTRY:-${DEFAULT_NPM_REGISTRY}}"
 NGINX_IMAGE="${HCDR_FRONTEND_NGINX_IMAGE:-nginx:1.27-alpine}"
 DEBIAN_IMAGE="${HCDR_API_RUNTIME_IMAGE:-debian:bookworm-slim}"
 KUBECTL_VERSION="${HCDR_REGISTRATION_KUBECTL_VERSION:-v1.35.3}"
+KUBECTL_BINARY="${HCDR_REGISTRATION_KUBECTL_BINARY:-}"
+KUBECTL_SHA256="${HCDR_REGISTRATION_KUBECTL_SHA256:-}"
+KUBECTL_DOWNLOAD_MAX_TIME="${HCDR_REGISTRATION_KUBECTL_DOWNLOAD_MAX_TIME:-300}"
 
 usage() {
   cat <<'USAGE'
@@ -198,12 +201,24 @@ cp "${ROOT_DIR}/docker/comm-agent.local.Dockerfile" "${WORK_DIR}/comm-agent/Dock
 cp "${ROOT_DIR}/docker/platform-upgrader.Dockerfile" "${WORK_DIR}/platform-upgrader/Dockerfile"
 cp /etc/ssl/certs/ca-certificates.crt "${WORK_DIR}/cluster-registration-executor/ca-certificates.crt"
 cp "${ROOT_DIR}/docker/cluster-registration-executor.Dockerfile" "${WORK_DIR}/cluster-registration-executor/Dockerfile"
-log "Downloading checksum-verified kubectl ${KUBECTL_VERSION} for registration executor"
-curl -fsSL --retry 3 --connect-timeout 10 --max-time 300 --speed-time 30 --speed-limit 1024 "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" -o "${WORK_DIR}/cluster-registration-executor/kubectl"
-curl -fsSL --retry 3 --connect-timeout 10 --max-time 60 --speed-time 20 --speed-limit 32 "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl.sha256" -o "${WORK_DIR}/cluster-registration-executor/kubectl.sha256"
-KUBECTL_EXPECTED="$(tr -d '[:space:]' < "${WORK_DIR}/cluster-registration-executor/kubectl.sha256")"
+if [[ -n "${KUBECTL_BINARY}" ]]; then
+  [[ -f "${KUBECTL_BINARY}" && -r "${KUBECTL_BINARY}" ]] || die "configured kubectl binary is not readable: ${KUBECTL_BINARY}"
+  [[ "${KUBECTL_SHA256}" =~ ^[0-9a-f]{64}$ ]] || die "HCDR_REGISTRATION_KUBECTL_SHA256 is required with a local kubectl binary"
+  log "Using local kubectl ${KUBECTL_VERSION} candidate for registration executor"
+  cp "${KUBECTL_BINARY}" "${WORK_DIR}/cluster-registration-executor/kubectl"
+else
+  log "Downloading checksum-verified kubectl ${KUBECTL_VERSION} for registration executor"
+  curl -fsSL --retry 2 --retry-max-time "${KUBECTL_DOWNLOAD_MAX_TIME}" \
+    --connect-timeout 10 --max-time "${KUBECTL_DOWNLOAD_MAX_TIME}" --speed-time 30 --speed-limit 1024 \
+    "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
+    -o "${WORK_DIR}/cluster-registration-executor/kubectl"
+  curl -fsSL --retry 1 --retry-max-time 60 --connect-timeout 10 --max-time 60 --speed-time 20 --speed-limit 32 \
+    "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl.sha256" \
+    -o "${WORK_DIR}/cluster-registration-executor/kubectl.sha256"
+  KUBECTL_SHA256="$(tr -d '[:space:]' < "${WORK_DIR}/cluster-registration-executor/kubectl.sha256")"
+fi
 KUBECTL_ACTUAL="$(sha256sum "${WORK_DIR}/cluster-registration-executor/kubectl" | awk '{print $1}')"
-[[ "${KUBECTL_EXPECTED}" =~ ^[0-9a-f]{64}$ && "${KUBECTL_ACTUAL}" == "${KUBECTL_EXPECTED}" ]] || die "kubectl ${KUBECTL_VERSION} checksum verification failed"
+[[ "${KUBECTL_SHA256}" =~ ^[0-9a-f]{64}$ && "${KUBECTL_ACTUAL}" == "${KUBECTL_SHA256}" ]] || die "kubectl ${KUBECTL_VERSION} checksum verification failed"
 chmod 0755 "${WORK_DIR}/cluster-registration-executor/kubectl"
 
 log "Building image ${PLATFORM_API_IMAGE}"
