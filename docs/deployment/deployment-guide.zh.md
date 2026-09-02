@@ -283,8 +283,8 @@ ${HCDR_HOST}:${HCDR_HARBOR_HTTPS_PORT}/base-images
 ```text
 debian:bookworm-slim
 node:22-bookworm-slim
-golang:1.24-bookworm
-golang:1.24
+golang:1.25.13-bookworm
+golang:1.25.13
 static-debian12:nonroot
 ```
 

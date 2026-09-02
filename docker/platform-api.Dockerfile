@@ -1,5 +1,5 @@
 ARG NODE_IMAGE=node:22-bookworm-slim
-ARG GOLANG_IMAGE=golang:1.24-bookworm
+ARG GOLANG_IMAGE=golang:1.25.13-bookworm
 ARG DEBIAN_IMAGE=debian:bookworm-slim
 ARG NPM_REGISTRY=
 ARG GOPROXY=

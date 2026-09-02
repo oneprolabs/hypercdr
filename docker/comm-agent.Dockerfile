@@ -1,4 +1,4 @@
-ARG GOLANG_IMAGE=golang:1.24
+ARG GOLANG_IMAGE=golang:1.25.13
 ARG DISTROLESS_IMAGE=gcr.io/distroless/static-debian12:nonroot
 ARG GOPROXY=
 ARG GOSUMDB=
