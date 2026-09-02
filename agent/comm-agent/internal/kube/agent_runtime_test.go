@@ -160,6 +160,29 @@ func TestPrepareVeleroUpgradeUsesNamespaceScopedRBAC(t *testing.T) {
 	}
 }
 
+func TestPrepareVeleroUpgradeDoesNotExpandWildcardReadRule(t *testing.T) {
+	role := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "hypercdr-agent"},
+		Rules: []rbacv1.PolicyRule{
+			{APIGroups: []string{"*"}, Resources: []string{"*"}, Verbs: []string{"get", "list"}},
+			{APIGroups: []string{"apps"}, Resources: []string{"daemonsets"}, Verbs: []string{"get", "patch", "update"}},
+			{APIGroups: []string{"apiextensions.k8s.io"}, Resources: []string{"customresourcedefinitions"}, Verbs: []string{"get", "list", "watch", "create", "patch", "update"}},
+		},
+	}
+	client := fake.NewSimpleClientset(role)
+	runtime := &KubernetesAgentRuntime{client: client}
+	if err := runtime.PrepareVeleroUpgrade(context.Background(), "hypercdr-agent"); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := client.RbacV1().ClusterRoles().Get(context.Background(), role.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := updated.Rules[0].Verbs; len(got) != 2 || got[0] != "get" || got[1] != "list" {
+		t.Fatalf("wildcard read rule was expanded: %#v", got)
+	}
+}
+
 func TestUpgradeVeleroReconcilesProviderPlugins(t *testing.T) {
 	labels := map[string]string{"app": "velero"}
 	nodeLabels := map[string]string{"app": "node-agent"}
