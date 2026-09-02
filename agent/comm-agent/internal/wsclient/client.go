@@ -1914,12 +1914,12 @@ func (c *Client) pollRestoreStatus(task protocol.TaskDispatchPayload, object kub
 				c.logger.Warn("failed to send post-restore image mapping progress; continuing restore", "task_id", task.TaskID, "error", err)
 			}
 			if c.imageMapper == nil {
-				_ = c.sendTaskFailedWithDetails(task, "RESTORE_IMAGE_MAPPING_UNAVAILABLE", "workload image mapping is not supported by this agent", map[string]any{"velero": payload})
+				c.failRestoreTask(task, object, "RESTORE_IMAGE_MAPPING_UNAVAILABLE", "workload image mapping is not supported by this agent", map[string]any{"velero": payload})
 				return
 			}
 			updated, err := c.imageMapper.ApplyWorkloadImageMappings(context.Background(), restoreTargetNamespace(task), task.Restore.ImageMappings)
 			if err != nil {
-				_ = c.sendTaskFailedWithDetails(task, "RESTORE_IMAGE_MAPPING_FAILED", err.Error(), map[string]any{"velero": payload})
+				c.failRestoreTask(task, object, "RESTORE_IMAGE_MAPPING_FAILED", err.Error(), map[string]any{"velero": payload})
 				return
 			}
 			payload["imageMappingStage"] = "succeeded"
@@ -1927,12 +1927,12 @@ func (c *Client) pollRestoreStatus(task protocol.TaskDispatchPayload, object kub
 		}
 		if task.Restore != nil && len(task.Restore.ServiceNodePortMappings) > 0 {
 			if c.serviceMapper == nil {
-				_ = c.sendTaskFailed(task, "RESTORE_SERVICE_MAPPING_UNAVAILABLE", "service NodePort mapping is not supported by this agent")
+				c.failRestoreTask(task, object, "RESTORE_SERVICE_MAPPING_UNAVAILABLE", "service NodePort mapping is not supported by this agent", nil)
 				return
 			}
 			updated, err := c.serviceMapper.ApplyServiceNodePortMappings(context.Background(), restoreTargetNamespace(task), task.Restore.ServiceNodePortMappings)
 			if err != nil {
-				_ = c.sendTaskFailedWithDetails(task, "RESTORE_SERVICE_MAPPING_FAILED", err.Error(), map[string]any{"velero": payload})
+				c.failRestoreTask(task, object, "RESTORE_SERVICE_MAPPING_FAILED", err.Error(), map[string]any{"velero": payload})
 				return
 			}
 			payload["serviceNodePortMapping"] = map[string]any{"updatedServices": updated, "namespace": restoreTargetNamespace(task)}
@@ -1945,7 +1945,7 @@ func (c *Client) pollRestoreStatus(task protocol.TaskDispatchPayload, object kub
 			}
 			return
 		}
-		c.pollRestoredNamespaceReady(task, payload, restoreTargetNamespace(task), message)
+		c.pollRestoredNamespaceReady(task, object, payload, restoreTargetNamespace(task), message)
 	})
 }
 
@@ -1978,7 +1978,7 @@ func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, 
 					continue
 				}
 			}
-			_ = c.sendTaskFailed(task, object.Kind+"_STATUS_READ_FAILED", err.Error())
+			c.failRestoreTask(task, object, object.Kind+"_STATUS_READ_FAILED", err.Error(), nil)
 			return
 		}
 		statusReadErrorSince = time.Time{}
@@ -2000,7 +2000,7 @@ func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, 
 			payload["volumeProgress"] = volumePayload
 			if failedCount := int64FromAny(volumePayload["failedCount"]); object.Kind == "Restore" && failedCount > 0 {
 				failureCode, failureMessage := restoreVolumeFailureDetails(volumePayload)
-				_ = c.sendTaskFailedWithDetails(task, failureCode, failureMessage, map[string]any{"velero": payload})
+				c.failRestoreTask(task, object, failureCode, failureMessage, map[string]any{"velero": payload})
 				return
 			}
 			volumeReady = ready
@@ -2025,7 +2025,7 @@ func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, 
 			if code == "" {
 				code = object.Kind + "_FAILED"
 			}
-			_ = c.sendTaskFailedWithDetails(task, code, message, map[string]any{"velero": payload})
+			c.failRestoreTask(task, object, code, message, map[string]any{"velero": payload})
 			return
 		}
 		if object.Kind == "Restore" && status.Phase == "InProgress" && volumeReady && time.Since(lastVolumeProgressAt) >= veleroStalledAfter {
@@ -2033,15 +2033,15 @@ func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, 
 				payload["dataPathFailure"] = map[string]any{
 					"pod": failure.Pod, "node": failure.Node, "logDetail": failure.LogDetail,
 				}
-				_ = c.sendTaskFailedWithDetails(task, failure.Code, failure.Message, map[string]any{"velero": payload})
+				c.failRestoreTask(task, object, failure.Code, failure.Message, map[string]any{"velero": payload})
 				return
 			}
 			message := fmt.Sprintf("persistent volume restoration made no progress for %s while Velero Restore remained InProgress", veleroStalledAfter)
-			_ = c.sendTaskFailedWithDetails(task, "RESTORE_VOLUME_PROGRESS_STALLED", message, map[string]any{"velero": payload})
+			c.failRestoreTask(task, object, "RESTORE_VOLUME_PROGRESS_STALLED", message, map[string]any{"velero": payload})
 			return
 		}
 		if time.Now().UTC().After(deadline) {
-			_ = c.sendTaskFailed(task, object.Kind+"_STATUS_TIMEOUT", "timed out waiting for Velero "+object.Kind+" to complete")
+			c.failRestoreTask(task, object, object.Kind+"_STATUS_TIMEOUT", "timed out waiting for Velero "+object.Kind+" to complete", nil)
 			return
 		}
 		if usesVolumeProgress(object) && !volumeReady {
@@ -2054,6 +2054,73 @@ func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, 
 		}
 		time.Sleep(interval)
 	}
+}
+
+// failRestoreTask preserves the ordering required for a safe Drill failure:
+// stop Velero's asynchronous volume work first, remove only the isolated Drill
+// namespace, and publish the terminal platform event last. This prevents a
+// failed task from leaving a DataDownload writing into a namespace that a
+// subsequent Drill may reuse.
+func (c *Client) failRestoreTask(task protocol.TaskDispatchPayload, object kube.AppliedObject, code, message string, details map[string]any) {
+	if details == nil {
+		details = map[string]any{}
+	} else {
+		details = cloneVeleroPayload(details)
+	}
+	cleanup := map[string]any{"cancelRequested": false, "cancelConfirmed": false, "restoreDeleted": false, "namespaceDeleted": false}
+	if canceler, ok := c.applier.(kube.RestoreVolumeCanceler); ok && canceler != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		err := canceler.CancelRestoreVolumeOperations(ctx, object.Namespace, object.Name)
+		cancel()
+		cleanup["cancelRequested"] = true
+		if err != nil {
+			cleanup["cancelWarning"] = err.Error()
+		} else {
+			cleanup["cancelConfirmed"] = true
+		}
+	} else {
+		cleanup["cancelWarning"] = "restore volume cancellation is not supported by this agent"
+	}
+	// Once node-agent work has stopped, deleting the Restore CR prevents stale
+	// Restore/PVR objects from being mistaken for the next attempt. Kubernetes
+	// garbage collection removes owner-linked volume-operation objects.
+	if cleanup["cancelConfirmed"] == true {
+		if deleter, ok := c.applier.(kube.ObjectDeleter); ok {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			err := deleter.DeleteObject(ctx, object)
+			cancel()
+			if err != nil {
+				cleanup["restoreDeleteWarning"] = err.Error()
+			} else {
+				cleanup["restoreDeleted"] = true
+			}
+		}
+	}
+
+	// Restore/takeover may intentionally target the source namespace. Automatic
+	// namespace deletion is therefore restricted to Drill and to a distinct,
+	// non-agent namespace, even if malformed input reaches an older platform.
+	target := strings.TrimSpace(restoreTargetNamespace(task))
+	source := ""
+	if task.Restore != nil {
+		source = strings.TrimSpace(task.Restore.SourceNamespace)
+	}
+	if task.Type == "drill" && target != "" && target != source && target != c.cfg.Namespace {
+		if waiter, ok := c.applier.(interface {
+			DeleteNamespaceAndWait(context.Context, string) error
+		}); ok {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			err := waiter.DeleteNamespaceAndWait(ctx, target)
+			cancel()
+			if err != nil {
+				cleanup["cleanupWarning"] = err.Error()
+			} else {
+				cleanup["namespaceDeleted"] = true
+			}
+		}
+	}
+	details["restoreCleanup"] = cleanup
+	_ = c.sendTaskFailedWithDetails(task, code, message, details)
 }
 
 func (c *Client) restoreDataPathFailure(task protocol.TaskDispatchPayload, object kube.AppliedObject, since time.Time) (kube.RestoreDataPathFailure, bool) {
@@ -2073,7 +2140,7 @@ func (c *Client) restoreDataPathFailure(task protocol.TaskDispatchPayload, objec
 	return failure, found
 }
 
-func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, basePayload map[string]any, namespace string, restoreMessage string) {
+func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, object kube.AppliedObject, basePayload map[string]any, namespace string, restoreMessage string) {
 	deadline := task.Deadline
 	if deadline.IsZero() {
 		deadline = time.Now().UTC().Add(30 * time.Minute)
@@ -2093,7 +2160,7 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, b
 		if err == nil {
 			payload["readiness"] = readiness
 			if readiness.FailureCode != "" {
-				_ = c.sendTaskFailedWithDetails(task, readiness.FailureCode, readiness.FailureMessage, map[string]any{"velero": payload})
+				c.failRestoreTask(task, object, readiness.FailureCode, readiness.FailureMessage, map[string]any{"velero": payload})
 				return
 			}
 			if readiness.Ready {
@@ -2113,7 +2180,7 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, b
 				return
 			}
 			if time.Now().UTC().After(deadline) {
-				_ = c.sendTaskFailedWithDetails(task, "RESTORE_READINESS_TIMEOUT", "timed out waiting for restored application readiness", map[string]any{"velero": payload})
+				c.failRestoreTask(task, object, "RESTORE_READINESS_TIMEOUT", "timed out waiting for restored application readiness", map[string]any{"velero": payload})
 				return
 			}
 			if err := c.sendTaskProgress(task, payload, 95, restoreReadinessProgressMessage(readiness)); err != nil {
@@ -2121,7 +2188,7 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, b
 			}
 		} else {
 			if time.Now().UTC().After(deadline) {
-				_ = c.sendTaskFailedWithDetails(task, "RESTORE_READINESS_READ_FAILED", err.Error(), map[string]any{"velero": payload})
+				c.failRestoreTask(task, object, "RESTORE_READINESS_READ_FAILED", err.Error(), map[string]any{"velero": payload})
 				return
 			}
 			if err := c.sendTaskProgress(task, payload, 90, "waiting for restored namespace to be created"); err != nil {

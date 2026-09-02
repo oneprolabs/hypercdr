@@ -24,8 +24,8 @@ log() {
 
 require_version() {
   local version="${1:-}"
-  [[ -n "${version}" ]] || die "version is required, for example v20260714.1"
-  [[ "${version}" =~ ^v[0-9]{8}\.[0-9]+$ ]] || die "version must match vYYYYMMDD.N, got ${version}"
+  [[ -n "${version}" ]] || die "version is required, for example 1.0.0.20260901"
+  [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ || "${version}" =~ ^v[0-9]{8}\.[0-9]+$ ]] || die "version must match MAJOR.MINOR.PATCH.YYYYMMDD, got ${version}"
 }
 
 require_cmd() {

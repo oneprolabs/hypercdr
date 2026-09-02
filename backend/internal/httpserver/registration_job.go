@@ -22,10 +22,11 @@ func (r *Router) createRegistrationExecutorJob(ctx context.Context, taskID strin
 	return r.createIsolatedRegistrationJob(ctx, "register-"+taskID, taskID, true, []any{map[string]string{"name": "HCDR_REGISTRATION_TASK_ID", "value": taskID}})
 }
 
-func (r *Router) createRegistrationInspectionJob(ctx context.Context, sessionID string, contextName string) error {
+func (r *Router) createRegistrationInspectionJob(ctx context.Context, sessionID string, contextName string, clusterType string) error {
 	return r.createIsolatedRegistrationJob(ctx, "inspect-"+sessionID, sessionID, false, []any{
 		map[string]string{"name": "HCDR_REGISTRATION_INSPECT_SESSION_ID", "value": sessionID},
 		map[string]string{"name": "HCDR_REGISTRATION_INSPECT_CONTEXT", "value": contextName},
+		map[string]string{"name": "HCDR_REGISTRATION_INSPECT_CLUSTER_TYPE", "value": clusterType},
 	})
 }
 

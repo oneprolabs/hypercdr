@@ -309,6 +309,7 @@ func NewRouterWithProductInfo(cfg config.Config, logger *slog.Logger, repo store
 	router.editionAuthorizer = editionAuthorizer
 	router.routes()
 	router.mountExtensionRoutes()
+	router.startCCEKubeconfigJanitor()
 	router.startScheduler()
 	return router.withPlatformAuth(router.withAccessLog(router.withAuditLog(router.mux)))
 }
@@ -338,7 +339,7 @@ func (r *Router) withPlatformAuth(next http.Handler) http.Handler {
 			next.ServeHTTP(w, req)
 			return
 		}
-		pipelineReleaseMutation := req.Method == http.MethodPost && (path == "/api/v1/platform/releases" || path == "/api/v1/component-releases")
+		pipelineReleaseMutation := req.Method == http.MethodPost && path == "/api/v1/platform/releases"
 		if pipelineReleaseMutation && validReleaseToken(r.cfg.ReleaseToken, req.Header.Get("X-HyperCDR-Release-Token")) {
 			pipeline := store.User{Email: "release-pipeline", Role: "admin", Status: "active"}
 			next.ServeHTTP(w, req.WithContext(context.WithValue(req.Context(), requestUserContextKey{}, pipeline)))
@@ -421,7 +422,7 @@ func requiresAdmin(req *http.Request) bool {
 	if strings.HasPrefix(p, "/api/v1/users") {
 		return true
 	}
-	if req.Method != http.MethodGet && (strings.HasPrefix(p, "/api/v1/platform/releases") || strings.HasPrefix(p, "/api/v1/platform/upgrades") || strings.HasPrefix(p, "/api/v1/component-releases")) {
+	if req.Method != http.MethodGet && (strings.HasPrefix(p, "/api/v1/platform/releases") || strings.HasPrefix(p, "/api/v1/platform/upgrades")) {
 		return true
 	}
 	return (strings.Contains(p, "/agent/upgrade") || strings.Contains(p, "/velero/upgrade")) && req.Method == http.MethodPost
@@ -435,7 +436,7 @@ func requiresSystemAdmin(req *http.Request) bool {
 	if strings.HasPrefix(p, "/api/v1/email-settings") {
 		return true
 	}
-	return strings.HasPrefix(p, "/api/v1/platform/releases") || strings.HasPrefix(p, "/api/v1/platform/upgrades") || strings.HasPrefix(p, "/api/v1/component-releases")
+	return strings.HasPrefix(p, "/api/v1/platform/releases") || strings.HasPrefix(p, "/api/v1/platform/upgrades")
 }
 
 type backupTaskRequest struct {
@@ -554,9 +555,7 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("GET /readyz", r.readyz)
 	r.mux.HandleFunc("GET /api/v1/platform/version", r.platformVersion)
 	r.mux.HandleFunc("GET /api/v1/platform/releases", r.listPlatformReleases)
-	r.mux.HandleFunc("GET /api/v1/platform/releases/discover", r.discoverPlatformReleases)
 	r.mux.HandleFunc("POST /api/v1/platform/releases", r.createPlatformRelease)
-	r.mux.HandleFunc("POST /api/v1/platform/releases/{id}/activate", r.activatePlatformRelease)
 	r.mux.HandleFunc("GET /api/v1/platform/upgrades", r.listPlatformUpgrades)
 	r.mux.HandleFunc("GET /api/v1/platform/upgrades/precheck", r.precheckPlatformUpgrade)
 	r.mux.HandleFunc("POST /api/v1/platform/upgrades", r.createPlatformUpgrade)
@@ -599,6 +598,10 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("POST /api/v1/cluster-registrations/cce/inspections", r.inspectCCEKubeconfig)
 	r.mux.HandleFunc("POST /api/v1/cluster-registrations/cce/tasks", r.startCCEDirectRegistration)
 	r.mux.HandleFunc("DELETE /api/v1/cluster-registrations/cce/kubeconfigs/{id}", r.deleteCCEKubeconfig)
+	r.mux.HandleFunc("POST /api/v1/cluster-registrations/kubeconfigs", r.uploadCCEKubeconfig)
+	r.mux.HandleFunc("POST /api/v1/cluster-registrations/inspections", r.inspectCCEKubeconfig)
+	r.mux.HandleFunc("POST /api/v1/cluster-registrations/tasks", r.startCCEDirectRegistration)
+	r.mux.HandleFunc("DELETE /api/v1/cluster-registrations/kubeconfigs/{id}", r.deleteCCEKubeconfig)
 	r.mux.HandleFunc("PATCH /api/v1/clusters/{id}", r.tenantGuard("cluster", r.updateCluster))
 	r.mux.HandleFunc("DELETE /api/v1/clusters/{id}", r.tenantGuard("cluster", r.deleteCluster))
 	r.mux.HandleFunc("POST /api/v1/clusters/{id}/default", r.tenantGuard("cluster", r.setDefaultCluster))
@@ -607,10 +610,6 @@ func (r *Router) routes() {
 	r.mux.HandleFunc("POST /api/v1/clusters/{id}/unregister", r.tenantGuard("cluster", r.unregisterCluster))
 	r.mux.HandleFunc("POST /api/v1/clusters/{id}/agent/upgrade", r.tenantGuard("cluster", r.upgradeClusterAgent))
 	r.mux.HandleFunc("POST /api/v1/clusters/{id}/velero/upgrade", r.tenantGuard("cluster", r.upgradeClusterVelero))
-	r.mux.HandleFunc("GET /api/v1/component-releases", r.listComponentReleases)
-	r.mux.HandleFunc("POST /api/v1/component-releases", r.createComponentRelease)
-	r.mux.HandleFunc("POST /api/v1/component-releases/{id}/activate", r.activateComponentRelease)
-	r.mux.HandleFunc("GET /api/v1/component-releases/discover", r.discoverComponentReleases)
 	r.mux.HandleFunc("POST /api/v1/clusters/{id}/inventory/request", r.tenantGuard("cluster", r.requestClusterInventory))
 	r.mux.HandleFunc("GET /api/v1/clusters/{id}/inventory/requests/{requestId}", r.tenantGuard("cluster", r.getClusterInventoryRequest))
 	r.mux.HandleFunc("GET /api/v1/applications", r.listApplications)
@@ -874,7 +873,7 @@ func auditOperation(req *http.Request) (string, string, string, bool) {
 		"POST /api/v1/policies": "Create Policy", "PATCH /api/v1/policies": "Update Policy", "DELETE /api/v1/policies": "Delete Policy",
 		"POST /api/v1/protection-plans": "Create DR Configuration", "POST /api/v1/protection-plans/storage/reconfigure": "Reconfigure DR Storage", "DELETE /api/v1/protection-plans": "Delete DR Configuration",
 		"POST /api/v1/restore-points/delete": "Delete Restore Point", "POST /api/v1/tasks/cancel": "Cancel Task", "POST /api/v1/tasks/backup": "Start Sync", "POST /api/v1/tasks/restore": "Start Restore", "POST /api/v1/tasks/drill": "Start Drill", "POST /api/v1/tasks/takeover": "Start Takeover",
-		"POST /api/v1/component-releases": "Register Component Version", "POST /api/v1/component-releases/activate": "Publish Component Version", "POST /api/v1/platform/releases": "Register Platform Version", "POST /api/v1/platform/releases/activate": "Publish Platform Version", "POST /api/v1/platform/upgrades": "Start Platform Upgrade",
+		"POST /api/v1/platform/releases": "Register HyperCDR Release", "POST /api/v1/platform/upgrades": "Start Platform Upgrade",
 	}
 	normalized := make([]string, 0, len(parts))
 	for _, segment := range parts {
@@ -972,99 +971,38 @@ func (r *Router) listPlatformReleases(w http.ResponseWriter, req *http.Request) 
 	writeJSON(w, 200, map[string]any{"items": nonNilSlice(items)})
 }
 
-func (r *Router) registryTags(ctx context.Context, image string) (string, string, []string, error) {
-	registry, repository, _, ok := splitContainerImage(image)
-	if !ok {
-		return "", "", nil, fmt.Errorf("invalid image")
-	}
-	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
-	tagsResp, err := registryRequest(ctx, client, http.MethodGet, fmt.Sprintf("https://%s/v2/%s/tags/list", registry, repository), repository, "")
-	if err != nil {
-		return "", "", nil, err
-	}
-	defer tagsResp.Body.Close()
-	// A newly installed registry legitimately has no platform repository yet.
-	// Treat Docker Distribution's NAME_UNKNOWN response as an empty discovery
-	// result; transport, authentication, and other registry failures remain
-	// errors so the UI does not hide an unavailable release source.
-	if tagsResp.StatusCode == http.StatusNotFound {
-		return registry, repository, []string{}, nil
-	}
-	var result struct {
-		Name string   `json:"name"`
-		Tags []string `json:"tags"`
-	}
-	if tagsResp.StatusCode >= 300 || json.NewDecoder(tagsResp.Body).Decode(&result) != nil {
-		return "", "", nil, fmt.Errorf("registry tags failed")
-	}
-	sort.Sort(sort.Reverse(sort.StringSlice(result.Tags)))
-	return registry, result.Name, result.Tags, nil
-}
-
-func (r *Router) discoverPlatformReleases(w http.ResponseWriter, req *http.Request) {
-	registry := strings.TrimRight(r.cfg.ImageRegistry, "/")
-	apiImage := registry + "/platform-api:latest"
-	frontendImage := registry + "/platform-frontend:latest"
-	upgraderImage := registry + "/platform-upgrader:latest"
-	_, _, apiTags, err := r.registryTags(req.Context(), apiImage)
-	if err != nil {
-		writeJSON(w, 502, map[string]any{"error": "platform_api_discovery_failed", "message": err.Error()})
-		return
-	}
-	_, _, frontendTags, err := r.registryTags(req.Context(), frontendImage)
-	if err != nil {
-		writeJSON(w, 502, map[string]any{"error": "platform_frontend_discovery_failed", "message": err.Error()})
-		return
-	}
-	_, _, upgraderTags, err := r.registryTags(req.Context(), upgraderImage)
-	if err != nil {
-		writeJSON(w, 502, map[string]any{"error": "platform_upgrader_discovery_failed", "message": err.Error()})
-		return
-	}
-	front := map[string]bool{}
-	for _, tag := range frontendTags {
-		front[tag] = true
-	}
-	upgrader := map[string]bool{}
-	for _, tag := range upgraderTags {
-		upgrader[tag] = true
-	}
-	versions := []string{}
-	for _, tag := range apiTags {
-		if front[tag] && upgrader[tag] {
-			versions = append(versions, tag)
-		}
-	}
-	writeJSON(w, 200, map[string]any{"registry": registry, "versions": versions})
-}
-
 func (r *Router) createPlatformRelease(w http.ResponseWriter, req *http.Request) {
 	var body struct {
 		Version, DatabaseSchemaVersion, MinimumAgentVersion, ReleaseNotes string
 		RollbackSupported                                                 bool
+		ComponentManifest                                                 map[string]store.ReleaseComponent
 	}
 	if decodeJSON(req, &body) != nil || strings.TrimSpace(body.Version) == "" {
 		writeJSON(w, 400, map[string]any{"error": "version_required"})
 		return
 	}
-	registry := strings.TrimRight(r.cfg.ImageRegistry, "/")
-	apiImage := registry + "/platform-api:" + body.Version
-	frontendImage := registry + "/platform-frontend:" + body.Version
-	upgraderImage := registry + "/platform-upgrader:" + body.Version
-	apiDigest, err := r.resolveImageDigest(req.Context(), apiImage)
-	if err != nil {
-		writeJSON(w, 502, map[string]any{"error": "platform_api_image_unavailable", "message": err.Error()})
-		return
+	manifest := body.ComponentManifest
+	required := []string{"platform-api", "platform-frontend", "platform-upgrader", "cluster-registration-executor", "comm-agent", "velero", "velero-plugin-for-aws", "velero-plugin-for-microsoft-azure", "velero-plugin-for-gcp"}
+	for _, name := range required {
+		component, ok := manifest[name]
+		if !ok || strings.TrimSpace(component.Version) == "" || strings.TrimSpace(component.Image) == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "release_manifest_incomplete", "message": "Release manifest is missing component " + name + "."})
+			return
+		}
+		digest, resolveErr := r.resolveImageDigest(req.Context(), component.Image)
+		if resolveErr != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]any{"error": "release_component_unavailable", "component": name, "message": resolveErr.Error()})
+			return
+		}
+		if component.ImageDigest != "" && component.ImageDigest != digest {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "release_component_digest_changed", "component": name})
+			return
+		}
+		component.ImageDigest = digest
+		manifest[name] = component
 	}
-	frontendDigest, err := r.resolveImageDigest(req.Context(), frontendImage)
-	if err != nil {
-		writeJSON(w, 502, map[string]any{"error": "platform_frontend_image_unavailable", "message": err.Error()})
-		return
-	}
-	if _, err = r.resolveImageDigest(req.Context(), upgraderImage); err != nil {
-		writeJSON(w, 502, map[string]any{"error": "platform_upgrader_image_unavailable", "message": err.Error()})
-		return
-	}
+	apiImage, apiDigest := manifest["platform-api"].Image, manifest["platform-api"].ImageDigest
+	frontendImage, frontendDigest := manifest["platform-frontend"].Image, manifest["platform-frontend"].ImageDigest
 	schema := strings.TrimSpace(body.DatabaseSchemaVersion)
 	if schema == "" {
 		schema = buildinfo.SchemaVersion
@@ -1073,46 +1011,12 @@ func (r *Router) createPlatformRelease(w http.ResponseWriter, req *http.Request)
 	if releases, listErr := r.store.ListPlatformReleases(); listErr == nil && len(releases) == 0 {
 		status, publishedBy = "active", "system"
 	}
-	item, err := r.store.UpsertPlatformRelease(store.PlatformReleaseInput{Version: body.Version, APIImage: apiImage, APIImageDigest: apiDigest, FrontendImage: frontendImage, FrontendImageDigest: frontendDigest, DatabaseSchemaVersion: schema, MinimumAgentVersion: body.MinimumAgentVersion, RollbackSupported: body.RollbackSupported, ReleaseNotes: body.ReleaseNotes, Status: status, PublishedBy: publishedBy})
+	item, err := r.store.UpsertPlatformRelease(store.PlatformReleaseInput{Version: body.Version, APIImage: apiImage, APIImageDigest: apiDigest, FrontendImage: frontendImage, FrontendImageDigest: frontendDigest, ComponentManifest: manifest, DatabaseSchemaVersion: schema, MinimumAgentVersion: body.MinimumAgentVersion, RollbackSupported: body.RollbackSupported, ReleaseNotes: body.ReleaseNotes, Status: status, PublishedBy: publishedBy})
 	if err != nil {
 		writeJSON(w, 500, map[string]any{"error": "create_platform_release_failed"})
 		return
 	}
 	writeJSON(w, 201, item)
-}
-func (r *Router) activatePlatformRelease(w http.ResponseWriter, req *http.Request) {
-	items, err := r.store.ListPlatformReleases()
-	if err != nil {
-		writeJSON(w, 500, map[string]any{"error": "list_platform_releases_failed"})
-		return
-	}
-	id := req.PathValue("id")
-	var selected store.PlatformRelease
-	for _, v := range items {
-		if v.ID == id {
-			selected = v
-		}
-	}
-	if selected.ID == "" {
-		writeJSON(w, 404, map[string]any{"error": "platform_release_not_found"})
-		return
-	}
-	apiDigest, e1 := r.resolveImageDigest(req.Context(), selected.APIImage)
-	frontDigest, e2 := r.resolveImageDigest(req.Context(), selected.FrontendImage)
-	if e1 != nil || e2 != nil || apiDigest != selected.APIImageDigest || frontDigest != selected.FrontendImageDigest {
-		writeJSON(w, 409, map[string]any{"error": "platform_release_images_changed"})
-		return
-	}
-	item, ok, err := r.store.ActivatePlatformRelease(id, "admin")
-	if err != nil {
-		writeJSON(w, 500, map[string]any{"error": "activate_platform_release_failed"})
-		return
-	}
-	if !ok {
-		writeJSON(w, 404, map[string]any{"error": "platform_release_not_found"})
-		return
-	}
-	writeJSON(w, 200, item)
 }
 
 func (r *Router) platformPrecheck(releaseID string) ([]map[string]any, bool, store.PlatformRelease) {
@@ -1137,7 +1041,16 @@ func (r *Router) platformPrecheck(releaseID string) ([]map[string]any, bool, sto
 			offline++
 		}
 	}
-	checks := []map[string]any{{"id": "release", "label": "Release package is registered", "passed": release.ID != "", "blocking": true}, {"id": "mode", "label": "Formal deployment mode", "passed": r.cfg.DeployMode != "development", "detail": r.cfg.DeployMode, "blocking": true}, {"id": "tasks", "label": "No active DR tasks", "passed": activeTasks == 0, "detail": activeTasks, "blocking": true}, {"id": "agents", "label": "Some registered agents are offline", "passed": offline == 0, "detail": offline, "blocking": false}, {"id": "version", "label": "Target differs from running version", "passed": release.Version != "" && release.Version != buildinfo.Version, "blocking": true}}
+	requiredComponents := []string{"platform-api", "platform-frontend", "platform-upgrader", "cluster-registration-executor", "comm-agent", "velero", "velero-plugin-for-aws", "velero-plugin-for-microsoft-azure", "velero-plugin-for-gcp"}
+	manifestComplete := release.ID != ""
+	for _, name := range requiredComponents {
+		component, ok := release.ComponentManifest[name]
+		if !ok || component.Version == "" || component.Image == "" || !validImageDigest(component.ImageDigest) {
+			manifestComplete = false
+			break
+		}
+	}
+	checks := []map[string]any{{"id": "release", "label": "Release package is registered", "passed": release.ID != "", "blocking": true}, {"id": "manifest", "label": "Complete immutable component manifest", "passed": manifestComplete, "blocking": true}, {"id": "mode", "label": "Formal deployment mode", "passed": r.cfg.DeployMode != "development", "detail": r.cfg.DeployMode, "blocking": true}, {"id": "tasks", "label": "No active DR tasks", "passed": activeTasks == 0, "detail": activeTasks, "blocking": true}, {"id": "agents", "label": "Some registered agents are offline", "passed": offline == 0, "detail": offline, "blocking": false}, {"id": "version", "label": "Target differs from running version", "passed": release.Version != "" && release.Version != buildinfo.Version, "blocking": true}}
 	passed := true
 	for _, c := range checks {
 		blocking, _ := c["blocking"].(bool)
@@ -1955,91 +1868,22 @@ func captchaImageDataURL(code string) string {
 	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(svg))
 }
 
-func validReleaseComponent(component string) bool {
-	return component == "comm-agent" || component == "velero"
-}
-
 func (r *Router) componentTarget(ctx context.Context, component string) (store.ComponentRelease, error) {
-	if active, ok, err := r.store.GetActiveComponentRelease(component); err != nil || ok {
-		return active, err
-	}
-	image, version := strings.TrimSpace(r.cfg.AgentImage), imageVersion(r.cfg.AgentImage)
-	if component == "velero" {
-		image, version = strings.TrimSpace(r.cfg.VeleroImage), strings.TrimSpace(r.cfg.VeleroVersion)
-	}
-	if image == "" {
-		return store.ComponentRelease{}, fmt.Errorf("%s target image is not configured", component)
-	}
-	digest, err := r.resolveImageDigest(ctx, image)
+	releases, err := r.store.ListPlatformReleases()
 	if err != nil {
 		return store.ComponentRelease{}, err
 	}
-	item, err := r.store.UpsertComponentRelease(store.ComponentReleaseInput{Component: component, Version: version, Image: image, ImageDigest: digest, Status: "active", ReleaseNotes: "Initialized from platform deployment configuration", PublishedBy: "system"})
-	if err == nil {
-		return item, nil
-	}
-	if active, ok, getErr := r.store.GetActiveComponentRelease(component); getErr == nil && ok {
-		return active, nil
-	}
-	return store.ComponentRelease{}, err
-}
-
-func (r *Router) listComponentReleases(w http.ResponseWriter, req *http.Request) {
-	component := strings.TrimSpace(req.URL.Query().Get("component"))
-	if component != "" && !validReleaseComponent(component) {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "component_invalid"})
-		return
-	}
-	components := []string{component}
-	if component == "" {
-		components = []string{"comm-agent", "velero"}
-	}
-	for _, name := range components {
-		if _, err := r.componentTarget(req.Context(), name); err != nil {
-			r.logger.Warn("failed to initialize component release", "component", name, "error", err)
+	for _, release := range releases {
+		if release.Status != "active" {
+			continue
 		}
-	}
-	items, err := r.store.ListComponentReleases(component)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_component_releases_failed"})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": nonNilSlice(items)})
-}
-
-func (r *Router) createComponentRelease(w http.ResponseWriter, req *http.Request) {
-	var body struct{ Component, Version, Image, ImageDigest, ReleaseNotes string }
-	if err := decodeJSON(req, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
-		return
-	}
-	body.Component, body.Image = strings.TrimSpace(body.Component), strings.TrimSpace(body.Image)
-	if !validReleaseComponent(body.Component) || body.Image == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "component_or_image_invalid"})
-		return
-	}
-	digest := strings.TrimSpace(body.ImageDigest)
-	if digest != "" && !validImageDigest(digest) {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "image_digest_invalid"})
-		return
-	}
-	if digest == "" {
-		var err error
-		digest, err = r.resolveImageDigest(req.Context(), body.Image)
-		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]any{"error": "image_unavailable", "message": err.Error()})
-			return
+		artifact, ok := release.ComponentManifest[component]
+		if !ok || artifact.Image == "" || artifact.ImageDigest == "" {
+			return store.ComponentRelease{}, fmt.Errorf("active platform release %s has no %s manifest entry", release.Version, component)
 		}
+		return store.ComponentRelease{ID: release.ID, TenantID: release.TenantID, Component: component, Version: artifact.Version, Image: artifact.Image, ImageDigest: artifact.ImageDigest, Status: "active", PublishedBy: release.PublishedBy, PublishedAt: release.PublishedAt, CreatedAt: release.CreatedAt, UpdatedAt: release.UpdatedAt}, nil
 	}
-	if strings.TrimSpace(body.Version) == "" {
-		body.Version = imageVersion(body.Image)
-	}
-	item, err := r.store.UpsertComponentRelease(store.ComponentReleaseInput{Component: body.Component, Version: strings.TrimSpace(body.Version), Image: body.Image, ImageDigest: digest, Status: "candidate", ReleaseNotes: strings.TrimSpace(body.ReleaseNotes)})
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "create_component_release_failed"})
-		return
-	}
-	writeJSON(w, http.StatusCreated, item)
+	return store.ComponentRelease{}, fmt.Errorf("no active platform release manifest is available")
 }
 
 func validImageDigest(value string) bool {
@@ -2052,91 +1896,6 @@ func validImageDigest(value string) bool {
 		}
 	}
 	return true
-}
-
-func (r *Router) activateComponentRelease(w http.ResponseWriter, req *http.Request) {
-	id := req.PathValue("id")
-	items, err := r.store.ListComponentReleases("")
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_component_releases_failed"})
-		return
-	}
-	var selected store.ComponentRelease
-	for _, item := range items {
-		if item.ID == id {
-			selected = item
-			break
-		}
-	}
-	if selected.ID == "" {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": "component_release_not_found"})
-		return
-	}
-	if active, found, activeErr := r.store.GetActiveComponentRelease(selected.Component); activeErr != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "active_component_release_failed"})
-		return
-	} else if found {
-		if comparison, comparable := compareNumericVersions(selected.Version, active.Version); comparable && comparison < 0 {
-			writeJSON(w, http.StatusConflict, map[string]any{"error": "component_downgrade_not_allowed", "message": "The selected version is older than the current target version."})
-			return
-		}
-	}
-	digest, resolveErr := r.resolveImageDigest(req.Context(), selected.Image)
-	if resolveErr == nil && digest != selected.ImageDigest {
-		writeJSON(w, http.StatusConflict, map[string]any{"error": "release_image_changed", "message": "The image is unavailable or its digest no longer matches the validated candidate."})
-		return
-	}
-	if resolveErr != nil && !validImageDigest(selected.ImageDigest) {
-		writeJSON(w, http.StatusConflict, map[string]any{"error": "release_image_unverified", "message": "The release has no verified image digest and the registry could not be queried."})
-		return
-	}
-	if resolveErr != nil {
-		r.logger.Warn("registry digest recheck unavailable; using publisher-verified component digest", "component", selected.Component, "version", selected.Version, "error", resolveErr)
-	}
-	item, ok, err := r.store.ActivateComponentRelease(id, "admin")
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "activate_component_release_failed"})
-		return
-	}
-	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": "component_release_not_found"})
-		return
-	}
-	writeJSON(w, http.StatusOK, item)
-}
-
-func (r *Router) discoverComponentReleases(w http.ResponseWriter, req *http.Request) {
-	component := strings.TrimSpace(req.URL.Query().Get("component"))
-	if !validReleaseComponent(component) {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "component_invalid"})
-		return
-	}
-	image := r.cfg.AgentImage
-	if component == "velero" {
-		image = r.cfg.VeleroImage
-	}
-	registry, repository, _, ok := splitContainerImage(image)
-	if !ok {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "registry_image_invalid"})
-		return
-	}
-	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}} // nolint:gosec
-	tagsResp, err := registryRequest(req.Context(), client, http.MethodGet, fmt.Sprintf("https://%s/v2/%s/tags/list", registry, repository), repository, "")
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "registry_unavailable"})
-		return
-	}
-	defer tagsResp.Body.Close()
-	var result struct {
-		Name string   `json:"name"`
-		Tags []string `json:"tags"`
-	}
-	if tagsResp.StatusCode >= 300 || json.NewDecoder(tagsResp.Body).Decode(&result) != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "registry_tags_failed"})
-		return
-	}
-	sort.Sort(sort.Reverse(sort.StringSlice(result.Tags)))
-	writeJSON(w, http.StatusOK, map[string]any{"component": component, "repository": result.Name, "registry": registry, "tags": result.Tags})
 }
 
 func (r *Router) listClusters(w http.ResponseWriter, req *http.Request) {
@@ -3313,6 +3072,13 @@ func (r *Router) upgradeClusterVelero(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 	targetImage, targetDigest := target.Image, target.ImageDigest
+	awsPlugin, awsErr := r.componentTarget(req.Context(), "velero-plugin-for-aws")
+	azurePlugin, azureErr := r.componentTarget(req.Context(), "velero-plugin-for-microsoft-azure")
+	gcpPlugin, gcpErr := r.componentTarget(req.Context(), "velero-plugin-for-gcp")
+	if awsErr != nil || azureErr != nil || gcpErr != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "release_manifest_plugins_missing", "message": "The active HyperCDR release does not contain a complete Velero plugin manifest."})
+		return
+	}
 	veleroIdentityMatches := strings.TrimSpace(cluster.VeleroImage) == targetImage && strings.TrimSpace(cluster.VeleroVersion) == strings.TrimSpace(target.Version)
 	veleroDigestMatches := cluster.VeleroImageDigest == targetDigest && cluster.VeleroNodeAgentImageDigest == targetDigest
 	if !input.Repair && (veleroIdentityMatches || veleroDigestMatches) && cluster.VeleroServerReady && cluster.VeleroNodeAgentDesired > 0 && cluster.VeleroNodeAgentReady == cluster.VeleroNodeAgentDesired {
@@ -3348,7 +3114,7 @@ func (r *Router) upgradeClusterVelero(w http.ResponseWriter, req *http.Request) 
 		"operation":   map[bool]string{true: "repair", false: "upgrade"}[input.Repair],
 		"clusterId":   clusterID, "namespace": r.agentNamespace(), "image": targetImage, "version": target.Version, "releaseId": target.ID,
 		"expectedDigest": targetDigest, "deploymentName": "velero", "daemonSetName": "node-agent",
-		"awsPluginImage": r.cfg.VeleroAWSPlugin, "azurePluginImage": r.cfg.VeleroAzurePlugin, "gcpPluginImage": r.cfg.VeleroGCPPlugin,
+		"awsPluginImage": awsPlugin.Image, "azurePluginImage": azurePlugin.Image, "gcpPluginImage": gcpPlugin.Image,
 		"concurrentBackups": 2, "nodeAgentConcurrency": 2, "prepareQueueLength": 4,
 		"cacheStorageClass": cacheStorageClass, "cacheResidentThresholdMB": 1024, "cacheLimitMB": 5120,
 		"crdsUrl": strings.TrimRight(r.cfg.PublicBaseURL, "/") + veleroCRDsPath,
@@ -3676,9 +3442,10 @@ func (r *Router) createAgentToken(w http.ResponseWriter, req *http.Request) {
 	if publicEndpoint := strings.TrimSpace(r.cfg.AgentPublicWSEndpoint); publicEndpoint != "" && publicEndpoint != primaryEndpoint {
 		installCommand += " --endpoint-public " + publicEndpoint
 	}
-	if clusterType == "huaweicloud-cce" {
-		installCommand += " --cluster-type huaweicloud-cce"
-	}
+	// Always make the selected provider explicit. The installer default is kept
+	// only for backward compatibility; generated commands must remain stable as
+	// more cluster providers are added.
+	installCommand += " --cluster-type " + clusterType
 	installCommand += " --namespace " + r.cfg.AgentNamespace +
 		" --executor-mode kubernetes --install-registry-ca false"
 	response := map[string]any{
@@ -3743,8 +3510,11 @@ func (r *Router) prepareNodeScript(w http.ResponseWriter, req *http.Request) {
 func (r *Router) installScript(w http.ResponseWriter, req *http.Request) {
 	agentTarget, agentErr := r.componentTarget(req.Context(), "comm-agent")
 	veleroTarget, veleroErr := r.componentTarget(req.Context(), "velero")
-	if agentErr != nil || veleroErr != nil {
-		r.logger.Error("failed to resolve active component releases for install script", "agent_error", agentErr, "velero_error", veleroErr)
+	awsTarget, awsErr := r.componentTarget(req.Context(), "velero-plugin-for-aws")
+	azureTarget, azureErr := r.componentTarget(req.Context(), "velero-plugin-for-microsoft-azure")
+	gcpTarget, gcpErr := r.componentTarget(req.Context(), "velero-plugin-for-gcp")
+	if agentErr != nil || veleroErr != nil || awsErr != nil || azureErr != nil || gcpErr != nil {
+		r.logger.Error("failed to resolve active release manifest for install script", "agent_error", agentErr, "velero_error", veleroErr, "aws_plugin_error", awsErr, "azure_plugin_error", azureErr, "gcp_plugin_error", gcpErr)
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "component_target_unavailable", "message": "Active cluster component versions are not available."})
 		return
 	}
@@ -3764,9 +3534,9 @@ func (r *Router) installScript(w http.ResponseWriter, req *http.Request) {
 	script = strings.ReplaceAll(script, "{{REGISTRY_CA_URL}}", r.publicBaseURL(req)+"/assets/registry/ca.crt")
 	script = strings.ReplaceAll(script, "{{PLATFORM_CA_URL}}", r.publicBaseURL(req)+"/assets/platform/ca.crt")
 	script = strings.ReplaceAll(script, "{{VELERO_IMAGE}}", veleroTarget.Image)
-	script = strings.ReplaceAll(script, "{{VELERO_AWS_PLUGIN_IMAGE}}", r.cfg.VeleroAWSPlugin)
-	script = strings.ReplaceAll(script, "{{VELERO_AZURE_PLUGIN_IMAGE}}", r.cfg.VeleroAzurePlugin)
-	script = strings.ReplaceAll(script, "{{VELERO_GCP_PLUGIN_IMAGE}}", r.cfg.VeleroGCPPlugin)
+	script = strings.ReplaceAll(script, "{{VELERO_AWS_PLUGIN_IMAGE}}", awsTarget.Image)
+	script = strings.ReplaceAll(script, "{{VELERO_AZURE_PLUGIN_IMAGE}}", azureTarget.Image)
+	script = strings.ReplaceAll(script, "{{VELERO_GCP_PLUGIN_IMAGE}}", gcpTarget.Image)
 	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(script))
@@ -12096,26 +11866,6 @@ while [[ $# -gt 0 ]]; do
       NAMESPACE="${2:-}"
       shift 2
       ;;
-    --agent-image)
-      AGENT_IMAGE="${2:-}"
-      shift 2
-      ;;
-    --velero-image)
-      VELERO_IMAGE="${2:-}"
-      shift 2
-      ;;
-    --velero-aws-plugin-image)
-      VELERO_AWS_PLUGIN_IMAGE="${2:-}"
-      shift 2
-      ;;
-    --velero-azure-plugin-image)
-      VELERO_AZURE_PLUGIN_IMAGE="${2:-}"
-      shift 2
-      ;;
-    --velero-gcp-plugin-image)
-      VELERO_GCP_PLUGIN_IMAGE="${2:-}"
-      shift 2
-      ;;
     --executor-mode)
       EXECUTOR_MODE="${2:-}"
       shift 2
@@ -12435,7 +12185,7 @@ check_registry_host() {
     return 0
   fi
   log_error "Image registry host '${host}' from image '${image}' is not resolvable on this machine."
-  log_error "Provide reachable images with --agent-image and --velero-image, or start the platform with HCDR_IMAGE_REGISTRY set to a resolvable internal registry."
+  log_error "The component images in the active HyperCDR release manifest must be reachable from every managed cluster node."
   log_error "Use --skip-image-preflight true only when cluster nodes already have these images cached or resolve the registry through node-local configuration."
   exit 1
 }

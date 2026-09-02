@@ -1807,8 +1807,7 @@ export default function ApplicationDrPage(props: {
     const point = restorePointsForApp(restoreAction.app).find(item => item.id === restoreAction.config.pointId);
     const livePoint = liveRestorePoints.find(item => item.id === restoreAction.config.pointId);
     if (!livePoint) {
-      toast('Select a real restore point before starting recovery');
-      return;
+      throw new Error('The selected restore point is no longer available. Refresh the restore point list and choose another point.');
     }
     const sourceNamespaces = unitNamespaces(restoreAction.app);
     const targetNamespaces = restoreAction.config.namespaceMode === 'original'
@@ -1824,8 +1823,7 @@ export default function ApplicationDrPage(props: {
       || clusters.find(cluster => cluster.name === restoreAction.app.targetCluster)
       || clusters.find(cluster => cluster.id !== currentCluster?.id);
     if (!targetCluster) {
-      toast('Select a target cluster before starting recovery');
-      return;
+      throw new Error('Select a target cluster before starting recovery.');
     }
     const action = restoreAction;
     const submittedMessage = `${action.mode === 'drill' ? 'Drill' : 'Takeover'} job submitted: ${action.config.targetCluster} / ${targetNamespace} / ${point?.time || 'selected recovery point'}`;
@@ -1887,7 +1885,7 @@ export default function ApplicationDrPage(props: {
       toast(submittedMessage);
       void refreshPlatformData();
     } catch (error) {
-      toast('Failed to submit recovery task: ' + (error instanceof Error ? error.message : 'unknown error'));
+      throw error;
     } finally {
       setRecoverySubmitting(false);
     }

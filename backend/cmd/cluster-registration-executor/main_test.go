@@ -131,7 +131,7 @@ func TestInspectClusterUsesFixedReadOnlyQueries(t *testing.T) {
 		"auth can-i create secrets --all-namespaces":                                       "yes",
 		"auth can-i create persistentvolumeclaims --all-namespaces":                        "yes",
 	}}
-	result, err := inspectCluster(context.Background(), runner, "/session/kubeconfig", "internal")
+	result, err := inspectCluster(context.Background(), runner, "/session/kubeconfig", "internal", "huaweicloud-cce")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestInspectionJobWritesAtomicResult(t *testing.T) {
 		"auth can-i create namespaces --all-namespaces": "yes", "auth can-i create clusterroles.rbac.authorization.k8s.io --all-namespaces": "yes", "auth can-i create clusterrolebindings.rbac.authorization.k8s.io --all-namespaces": "yes", "auth can-i create deployments.apps --all-namespaces": "yes", "auth can-i create daemonsets.apps --all-namespaces": "yes", "auth can-i create secrets --all-namespaces": "yes", "auth can-i create persistentvolumeclaims --all-namespaces": "yes",
 	}}
 	s := &server{baseDir: base, runner: runner, logger: discardLogger()}
-	if err := s.runInspectionJob(sessionID, "internal"); err != nil {
+	if err := s.runInspectionJob(sessionID, "internal", "huaweicloud-cce"); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(filepath.Join(sessionDir, "inspection-result.json"))
@@ -175,7 +175,7 @@ func TestInspectClusterRejectsNonCCE(t *testing.T) {
 		"get namespace kube-system -o jsonpath={.metadata.uid}":                 "12345678-abcd",
 		`get nodes -o jsonpath={range .items[*]}{.spec.providerID}{"\n"}{end}`:  "kind://node-1",
 	}}
-	if _, err := inspectCluster(context.Background(), runner, "/session/kubeconfig", "kind"); err == nil || !strings.Contains(err.Error(), "Huawei Cloud CCE") {
+	if _, err := inspectCluster(context.Background(), runner, "/session/kubeconfig", "kind", "huaweicloud-cce"); err == nil || !strings.Contains(err.Error(), "Huawei Cloud CCE") {
 		t.Fatalf("expected CCE rejection, got %v", err)
 	}
 }
@@ -190,7 +190,7 @@ func TestInspectClusterRejectsIncompletePermissions(t *testing.T) {
 		"get nodes -o json": oneReadyNodeJSON,
 		`get storageclass -o jsonpath={range .items[*]}{.metadata.name}{"|"}{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}{"\n"}{end}`: "csi-disk|true",
 	}}
-	if _, err := inspectCluster(context.Background(), runner, "/session/kubeconfig", "internal"); err == nil || !strings.Contains(err.Error(), "lacks required permissions") {
+	if _, err := inspectCluster(context.Background(), runner, "/session/kubeconfig", "internal", "huaweicloud-cce"); err == nil || !strings.Contains(err.Error(), "lacks required installation permissions") {
 		t.Fatalf("expected permission gate failure, got %v", err)
 	}
 }
@@ -230,7 +230,7 @@ func TestInspectClusterRejectsInsufficientCapacityBeforePermissions(t *testing.T
 		"get nodes -o json": `{"items":[{"spec":{},"status":{"allocatable":{"cpu":"250m","memory":"256Mi"},"conditions":[{"type":"Ready","status":"True"}]}}]}`,
 		`get storageclass -o jsonpath={range .items[*]}{.metadata.name}{"|"}{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}{"\n"}{end}`: "csi-disk|true",
 	}}
-	_, err := inspectCluster(context.Background(), runner, "/session/kubeconfig", "internal")
+	_, err := inspectCluster(context.Background(), runner, "/session/kubeconfig", "internal", "huaweicloud-cce")
 	if err == nil || !strings.Contains(err.Error(), "below registration policy v1") {
 		t.Fatalf("expected capacity policy failure, got %v", err)
 	}

@@ -125,26 +125,6 @@ func TestFrontendCacheAndMissingAssetBehavior(t *testing.T) {
 	}
 }
 
-func TestRegistryTagsTreatsMissingRepositoryAsEmpty(t *testing.T) {
-	registry := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.URL.Path != "/v2/hypercdr/platform-api/tags/list" {
-			t.Fatalf("unexpected registry path %q", req.URL.Path)
-		}
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"errors":[{"code":"NAME_UNKNOWN"}]}`))
-	}))
-	defer registry.Close()
-
-	host := strings.TrimPrefix(registry.URL, "https://")
-	gotRegistry, repository, tags, err := (&Router{}).registryTags(context.Background(), host+"/hypercdr/platform-api:latest")
-	if err != nil {
-		t.Fatalf("missing repository returned an error: %v", err)
-	}
-	if gotRegistry != host || repository != "hypercdr/platform-api" || len(tags) != 0 {
-		t.Fatalf("registry=%q repository=%q tags=%v", gotRegistry, repository, tags)
-	}
-}
-
 func TestValidReleaseToken(t *testing.T) {
 	for _, test := range []struct {
 		name, expected, provided string
@@ -893,10 +873,13 @@ func TestDrillTaskRejectsDuplicateActiveTask(t *testing.T) {
 
 func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 	repo := store.NewMemoryStore()
-	if _, err := repo.UpsertComponentRelease(store.ComponentReleaseInput{Component: "comm-agent", Version: "active", Image: "registry.local:5000/hypercdr/comm-agent:active", ImageDigest: "sha256:agent", Status: "active"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.UpsertComponentRelease(store.ComponentReleaseInput{Component: "velero", Version: "v1.17.2", Image: "registry.local:5000/hypercdr/velero:v1.17.2", ImageDigest: "sha256:velero", Status: "active"}); err != nil {
+	if _, err := repo.UpsertPlatformRelease(store.PlatformReleaseInput{Version: "active", APIImage: "registry.local:5000/hypercdr/platform-api:active", APIImageDigest: "sha256:api", FrontendImage: "registry.local:5000/hypercdr/platform-frontend:active", FrontendImageDigest: "sha256:frontend", Status: "active", ComponentManifest: map[string]store.ReleaseComponent{
+		"comm-agent":                        {Version: "active", Image: "registry.local:5000/hypercdr/comm-agent:active", ImageDigest: "sha256:agent"},
+		"velero":                            {Version: "v1.17.2", Image: "registry.local:5000/hypercdr/velero:v1.17.2", ImageDigest: "sha256:velero"},
+		"velero-plugin-for-aws":             {Version: "v1.13.0", Image: "registry.local:5000/hypercdr/velero-plugin-for-aws:v1.13.0", ImageDigest: "sha256:aws"},
+		"velero-plugin-for-microsoft-azure": {Version: "v1.13.0", Image: "registry.local:5000/hypercdr/velero-plugin-for-microsoft-azure:v1.13.0", ImageDigest: "sha256:azure"},
+		"velero-plugin-for-gcp":             {Version: "v1.13.0", Image: "registry.local:5000/hypercdr/velero-plugin-for-gcp:v1.13.0", ImageDigest: "sha256:gcp"},
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -1208,13 +1191,13 @@ func TestNativeAgentTokenInstallCommandUsesDualEndpoints(t *testing.T) {
 	if err = json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"--endpoint wss://10.0.0.10:3002/ws/agent", "--endpoint-public wss://203.0.113.10:3002/ws/agent"} {
+	for _, expected := range []string{"--cluster-type native-kubernetes", "--endpoint wss://10.0.0.10:3002/ws/agent", "--endpoint-public wss://203.0.113.10:3002/ws/agent"} {
 		if !strings.Contains(body.InstallCommand, expected) {
 			t.Fatalf("native install command %q does not contain %q", body.InstallCommand, expected)
 		}
 	}
-	if strings.Contains(body.InstallCommand, "--cluster-type") || strings.Contains(body.InstallCommand, "--endpoint-private") {
-		t.Fatalf("native install command contains provider-specific or legacy arguments: %q", body.InstallCommand)
+	if strings.Contains(body.InstallCommand, "--endpoint-private") {
+		t.Fatalf("native install command contains a legacy endpoint argument: %q", body.InstallCommand)
 	}
 }
 

@@ -59,7 +59,7 @@ func TestCreateRegistrationExecutorJobUsesFixedHardenedTemplate(t *testing.T) {
 	if strings.Contains(text, `"envFrom"`) {
 		t.Fatalf("Job imported an entire Secret instead of one required key: %s", text)
 	}
-	if err = router.createRegistrationInspectionJob(context.Background(), "ccer_abcdefghijklmnopqrstuvwxyz123456", "internal"); err != nil {
+	if err = router.createRegistrationInspectionJob(context.Background(), "ccer_abcdefghijklmnopqrstuvwxyz123456", "internal", "huaweicloud-cce"); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ = json.Marshal(received)

@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { ScopedResourceSelector, type ScopedResourceSelection } from './components/scoped-resource-selector';
+import { ApiRequestError } from './api/client';
 
 export type RecoveryWizardMode = 'drill' | 'takeover';
 
@@ -106,7 +107,7 @@ type Props = {
   config: RecoveryWizardConfig;
   setConfig: React.Dispatch<React.SetStateAction<RecoveryWizardConfig | null>>;
   onClose: () => void;
-  onSubmit: () => void;
+  onSubmit: () => void | Promise<void>;
   submitting?: boolean;
   readinessBlockers?: number;
   loadContents?: (restorePointId: string) => Promise<{ resources: BackupContentResource[]; truncated?: boolean }>;
@@ -137,6 +138,27 @@ function rememberImageMappings(mappings: Record<string, string>) {
   } catch {
     // Browser privacy settings can disable local storage; manual input remains available.
   }
+}
+
+function recoverySubmissionError(error: unknown): string {
+  if (error instanceof ApiRequestError) {
+    switch (error.code.toLowerCase()) {
+      case 'storage_class_mapping_required':
+        return 'A StorageClass mapping is required for this target cluster. Open Advanced options and select the target StorageClass.';
+      case 'original_namespace_confirmation_required':
+        return 'Confirm that you understand the impact of restoring to the original namespace.';
+      case 'service_nodeport_conflict':
+        return 'A selected NodePort is already in use on the target cluster. Open Advanced options and choose a different port, or leave it automatic.';
+      case 'restore_point_not_available':
+        return 'The selected restore point is no longer available. Refresh the restore point list and choose another point.';
+      case 'active_drill_task_exists':
+      case 'active_recovery_task_exists':
+        return 'A recovery task is already running for this protection plan. Wait for it to finish before starting another task.';
+      default:
+        return error.message || 'The recovery task could not be started.';
+    }
+  }
+  return error instanceof Error ? error.message : 'The recovery task could not be started.';
 }
 
 function sourceMeta(type: RecoveryWizardConfig['sourceType']) {
@@ -233,10 +255,19 @@ export function RecoveryWizardModal(props: Props) {
   const [contentsLoading, setContentsLoading] = React.useState(false);
   const [contentsError, setContentsError] = React.useState('');
   const [imageMappingHistory, setImageMappingHistory] = React.useState<Record<string, string[]>>({});
+  const [submitError, setSubmitError] = React.useState('');
+  const submitErrorRef = React.useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (open) setImageMappingHistory(readImageMappingHistory());
+    if (open) {
+      setImageMappingHistory(readImageMappingHistory());
+      setSubmitError('');
+    }
   }, [open]);
+
+  useEffect(() => {
+    setSubmitError('');
+  }, [config]);
 
   const currentClusterOption = clusterOptions.find(item => item.name === currentClusterName) || clusterOptions.find(item => item.isCurrent);
   const currentTargetClusterName = currentClusterOption?.name || currentClusterName;
@@ -254,7 +285,21 @@ export function RecoveryWizardModal(props: Props) {
   const nodePortEntries = Object.entries(config.serviceNodePortMappings || {});
   const nodePortError = nodePortEntries.find(([, port]) => !Number.isInteger(port) || port < 30000 || port > 32767)
     || (new Set(nodePortEntries.map(([, port]) => port)).size !== nodePortEntries.length ? ['duplicate', 0] as [string, number] : undefined);
-  const submitDisabled = !config.pointId || !config.targetCluster || !targetNamespace.trim() || Boolean(nodePortError) || restorePointUnavailable || (restoresToOriginalNamespace && !config.originalNamespaceConfirmed) || (readinessBlockers > 0 && !config.forceProceed);
+  const submissionBlocker = !config.pointId
+    ? 'Select a restore point before starting recovery.'
+    : !config.targetCluster
+      ? 'Select a target cluster before starting recovery.'
+      : !targetNamespace.trim()
+        ? 'Enter a target namespace before starting recovery.'
+        : nodePortError
+          ? (nodePortError[0] === 'duplicate' ? 'Each Service must use a different NodePort.' : 'NodePort must be an integer between 30000 and 32767.')
+          : restorePointUnavailable
+            ? 'The selected restore point is no longer available. Refresh the restore point list and choose another point.'
+            : restoresToOriginalNamespace && !config.originalNamespaceConfirmed
+              ? 'Confirm that you understand the impact of restoring to the original namespace.'
+              : readinessBlockers > 0 && !config.forceProceed
+                ? `Resolve the ${readinessBlockers} blocking readiness finding${readinessBlockers === 1 ? '' : 's'}, or confirm that you want to proceed.`
+                : '';
   const pointsBySource = {
     snapshot: points.filter(point => pointSourceType(point) === 'snapshot'),
     export: points.filter(point => pointSourceType(point) === 'export'),
@@ -667,6 +712,16 @@ export function RecoveryWizardModal(props: Props) {
                   )}
                 </div>
 
+                {submitError && (
+                  <div ref={submitErrorRef} className="hbdr-recovery-submit-error" role="alert" aria-live="assertive">
+                    <AlertCircle size={17} aria-hidden="true" />
+                    <div>
+                      <strong>Unable to start {mode === 'drill' ? 'drill' : 'takeover'}</strong>
+                      <span>{submitError}</span>
+                    </div>
+                  </div>
+                )}
+
               </div>
             </div>
 
@@ -681,11 +736,23 @@ export function RecoveryWizardModal(props: Props) {
               <button
                 type="button"
                 className="hbdr-protect-primary"
-                disabled={submitDisabled || submitting}
-                onClick={() => {
-                  if (submitDisabled || submitting) return;
+                disabled={submitting}
+                onClick={async () => {
+                  if (submitting) return;
+                  if (submissionBlocker) {
+                    setSubmitError(submissionBlocker);
+                    window.requestAnimationFrame(() => submitErrorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
+                    return;
+                  }
+                  setSubmitError('');
                   rememberImageMappings(config.imageMappings || {});
-                  onSubmit();
+                  try {
+                    await onSubmit();
+                  } catch (error) {
+                    const message = recoverySubmissionError(error);
+                    setSubmitError(message);
+                    window.requestAnimationFrame(() => submitErrorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
+                  }
                 }}
               >
                 <Play size={15} />{submitting ? 'Submitting…' : submitLabel}

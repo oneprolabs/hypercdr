@@ -4,7 +4,7 @@ set -euo pipefail
 VERSION="${1:-}"
 DEPLOY_DIR="${HCDR_DEPLOY_DIR:-/var/lib/hypercdr}"
 
-if [[ -z "${VERSION}" || ! "${VERSION}" =~ ^v[0-9]{8}\.[0-9]+$ ]]; then
+if [[ -z "${VERSION}" || ( ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ && ! "${VERSION}" =~ ^v[0-9]{8}\.[0-9]+$ ) ]]; then
   echo "Usage: stage-upgrade-ui.sh <version>" >&2
   exit 2
 fi

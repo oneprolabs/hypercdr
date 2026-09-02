@@ -33,7 +33,6 @@ type MemoryStore struct {
 	adminRecoveryEmail      string
 	resetTokens             map[string]memoryResetToken
 	platformSessions        map[string]PlatformSession
-	releases                map[string]ComponentRelease
 	platformReleases        map[string]PlatformRelease
 	platformUpgradeJobs     map[string]PlatformUpgradeJob
 	platformSettings        *PlatformSettings
@@ -237,7 +236,6 @@ func NewMemoryStore() *MemoryStore {
 		users:                   map[string]memoryUser{DefaultAdminEmail: {User: User{ID: "00000000-0000-0000-0000-00000000a001", TenantID: DefaultTenantID, Email: DefaultAdminEmail, Role: "admin", Status: "active", AuthProvider: "password", SystemAdmin: true, MustChangePassword: true}, Password: DefaultAdminPassword}},
 		resetTokens:             map[string]memoryResetToken{},
 		platformSessions:        map[string]PlatformSession{},
-		releases:                map[string]ComponentRelease{},
 		platformReleases:        map[string]PlatformRelease{},
 		platformUpgradeJobs:     map[string]PlatformUpgradeJob{},
 		emailSettings:           map[string]EmailSettings{},
@@ -405,72 +403,6 @@ func (s *MemoryStore) ListAuditLogs(limit, offset int) ([]AuditLog, error) {
 	return items[offset:end], nil
 }
 
-func (s *MemoryStore) ListComponentReleases(component string) ([]ComponentRelease, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	items := make([]ComponentRelease, 0)
-	for _, item := range s.releases {
-		if component == "" || item.Component == component {
-			items = append(items, item)
-		}
-	}
-	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
-	return items, nil
-}
-
-func (s *MemoryStore) GetActiveComponentRelease(component string) (ComponentRelease, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, item := range s.releases {
-		if item.Component == component && item.Status == "active" {
-			return item, true, nil
-		}
-	}
-	return ComponentRelease{}, false, nil
-}
-
-func (s *MemoryStore) UpsertComponentRelease(input ComponentReleaseInput) (ComponentRelease, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now().UTC()
-	for id, item := range s.releases {
-		if item.Component == input.Component && item.ImageDigest == input.ImageDigest {
-			item.Version, item.Image, item.ReleaseNotes, item.UpdatedAt = input.Version, input.Image, input.ReleaseNotes, now
-			s.releases[id] = item
-			return item, nil
-		}
-	}
-	status := input.Status
-	if status == "" {
-		status = "candidate"
-	}
-	item := ComponentRelease{ID: newID(), TenantID: DefaultTenantID, Component: input.Component, Version: input.Version, Image: input.Image, ImageDigest: input.ImageDigest, Status: status, ReleaseNotes: input.ReleaseNotes, PublishedBy: input.PublishedBy, CreatedAt: now, UpdatedAt: now}
-	if status == "active" {
-		item.PublishedAt = now
-	}
-	s.releases[item.ID] = item
-	return item, nil
-}
-
-func (s *MemoryStore) ActivateComponentRelease(id string, publishedBy string) (ComponentRelease, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	target, ok := s.releases[id]
-	if !ok {
-		return ComponentRelease{}, false, nil
-	}
-	now := time.Now().UTC()
-	for key, item := range s.releases {
-		if item.Component == target.Component && item.Status == "active" {
-			item.Status, item.UpdatedAt = "retired", now
-			s.releases[key] = item
-		}
-	}
-	target.Status, target.PublishedBy, target.PublishedAt, target.UpdatedAt = "active", publishedBy, now, now
-	s.releases[id] = target
-	return target, true, nil
-}
-
 func (s *MemoryStore) ListPlatformReleases() ([]PlatformRelease, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -485,18 +417,8 @@ func (s *MemoryStore) UpsertPlatformRelease(input PlatformReleaseInput) (Platfor
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now().UTC()
-	for id, v := range s.platformReleases {
+	for _, v := range s.platformReleases {
 		if v.Version == input.Version {
-			v.APIImage = input.APIImage
-			v.APIImageDigest = input.APIImageDigest
-			v.FrontendImage = input.FrontendImage
-			v.FrontendImageDigest = input.FrontendImageDigest
-			v.DatabaseSchemaVersion = input.DatabaseSchemaVersion
-			v.MinimumAgentVersion = input.MinimumAgentVersion
-			v.RollbackSupported = input.RollbackSupported
-			v.ReleaseNotes = input.ReleaseNotes
-			v.UpdatedAt = now
-			s.platformReleases[id] = v
 			return v, nil
 		}
 	}
@@ -504,7 +426,7 @@ func (s *MemoryStore) UpsertPlatformRelease(input PlatformReleaseInput) (Platfor
 	if status == "" {
 		status = "candidate"
 	}
-	v := PlatformRelease{ID: newID(), TenantID: DefaultTenantID, Version: input.Version, APIImage: input.APIImage, APIImageDigest: input.APIImageDigest, FrontendImage: input.FrontendImage, FrontendImageDigest: input.FrontendImageDigest, DatabaseSchemaVersion: input.DatabaseSchemaVersion, MinimumAgentVersion: input.MinimumAgentVersion, RollbackSupported: input.RollbackSupported, ReleaseNotes: input.ReleaseNotes, Status: status, PublishedBy: input.PublishedBy, CreatedAt: now, UpdatedAt: now}
+	v := PlatformRelease{ID: newID(), TenantID: DefaultTenantID, Version: input.Version, APIImage: input.APIImage, APIImageDigest: input.APIImageDigest, FrontendImage: input.FrontendImage, FrontendImageDigest: input.FrontendImageDigest, ComponentManifest: input.ComponentManifest, DatabaseSchemaVersion: input.DatabaseSchemaVersion, MinimumAgentVersion: input.MinimumAgentVersion, RollbackSupported: input.RollbackSupported, ReleaseNotes: input.ReleaseNotes, Status: status, PublishedBy: input.PublishedBy, CreatedAt: now, UpdatedAt: now}
 	if status == "active" {
 		v.PublishedAt = now
 	}

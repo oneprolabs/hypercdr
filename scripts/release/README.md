@@ -18,9 +18,17 @@ Edit `release.conf`, then build and push a release:
 ```
 
 After tests pass, the release script builds and pushes the images, mirrors the
-three Velero object-storage plugins, verifies Registry pulls, and registers the
-version as a platform candidate. It never starts an upgrade. Control plane
-upgrades remain an explicit administrator action in the platform UI.
+three Velero object-storage plugins, verifies Registry pulls, resolves the
+remote digest of every platform and cluster component, and writes one complete
+immutable `release-manifest.json`. It registers that whole version as a
+platform candidate. It never starts an upgrade. Control plane upgrades remain
+an explicit administrator action in the platform UI.
+
+The active platform release manifest is the sole runtime source for new Agent
+installations and existing Agent/Velero upgrade targets. Components are not
+published or activated independently. A platform upgrade activates its
+manifest only after the upgrade succeeds; a failure or rollback leaves the
+previous manifest active.
 
 For the initial seed release, when no platform exists yet, use
 `--skip-register`. Normal releases require the installer-generated token at
@@ -40,6 +48,7 @@ These scripts build and push:
 - `platform-api`
 - `platform-frontend`
 - `platform-upgrader`
+- `cluster-registration-executor`
 - `comm-agent`
 
 The registration executor embeds a checksum-verified `kubectl`. Normal builds

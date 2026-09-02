@@ -137,10 +137,6 @@ type Store interface {
 	UpsertClusterLogCoverage(input ClusterLogCoverageInput) (ClusterLogCoverage, error)
 	CreateAuditLog(input AuditLogInput) (AuditLog, error)
 	ListAuditLogs(limit, offset int) ([]AuditLog, error)
-	ListComponentReleases(component string) ([]ComponentRelease, error)
-	GetActiveComponentRelease(component string) (ComponentRelease, bool, error)
-	UpsertComponentRelease(input ComponentReleaseInput) (ComponentRelease, error)
-	ActivateComponentRelease(id string, publishedBy string) (ComponentRelease, bool, error)
 	ListPlatformReleases() ([]PlatformRelease, error)
 	UpsertPlatformRelease(input PlatformReleaseInput) (PlatformRelease, error)
 	ActivatePlatformRelease(id string, publishedBy string) (PlatformRelease, bool, error)
@@ -260,38 +256,36 @@ type ComponentRelease struct {
 	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
-type ComponentReleaseInput struct {
-	Component    string
-	Version      string
-	Image        string
-	ImageDigest  string
-	Status       string
-	ReleaseNotes string
-	PublishedBy  string
+type PlatformRelease struct {
+	ID                    string                      `json:"id"`
+	TenantID              string                      `json:"tenantId"`
+	Version               string                      `json:"version"`
+	APIImage              string                      `json:"apiImage"`
+	APIImageDigest        string                      `json:"apiImageDigest"`
+	FrontendImage         string                      `json:"frontendImage"`
+	FrontendImageDigest   string                      `json:"frontendImageDigest"`
+	ComponentManifest     map[string]ReleaseComponent `json:"componentManifest"`
+	DatabaseSchemaVersion string                      `json:"databaseSchemaVersion"`
+	MinimumAgentVersion   string                      `json:"minimumAgentVersion,omitempty"`
+	RollbackSupported     bool                        `json:"rollbackSupported"`
+	ReleaseNotes          string                      `json:"releaseNotes,omitempty"`
+	Status                string                      `json:"status"`
+	PublishedBy           string                      `json:"publishedBy,omitempty"`
+	PublishedAt           time.Time                   `json:"publishedAt,omitempty"`
+	CreatedAt             time.Time                   `json:"createdAt"`
+	UpdatedAt             time.Time                   `json:"updatedAt"`
 }
 
-type PlatformRelease struct {
-	ID                    string    `json:"id"`
-	TenantID              string    `json:"tenantId"`
-	Version               string    `json:"version"`
-	APIImage              string    `json:"apiImage"`
-	APIImageDigest        string    `json:"apiImageDigest"`
-	FrontendImage         string    `json:"frontendImage"`
-	FrontendImageDigest   string    `json:"frontendImageDigest"`
-	DatabaseSchemaVersion string    `json:"databaseSchemaVersion"`
-	MinimumAgentVersion   string    `json:"minimumAgentVersion,omitempty"`
-	RollbackSupported     bool      `json:"rollbackSupported"`
-	ReleaseNotes          string    `json:"releaseNotes,omitempty"`
-	Status                string    `json:"status"`
-	PublishedBy           string    `json:"publishedBy,omitempty"`
-	PublishedAt           time.Time `json:"publishedAt,omitempty"`
-	CreatedAt             time.Time `json:"createdAt"`
-	UpdatedAt             time.Time `json:"updatedAt"`
+type ReleaseComponent struct {
+	Version     string `json:"version"`
+	Image       string `json:"image"`
+	ImageDigest string `json:"imageDigest"`
 }
 
 type PlatformReleaseInput struct {
 	Version, APIImage, APIImageDigest, FrontendImage, FrontendImageDigest, DatabaseSchemaVersion, MinimumAgentVersion, ReleaseNotes, Status, PublishedBy string
 	RollbackSupported                                                                                                                                    bool
+	ComponentManifest                                                                                                                                    map[string]ReleaseComponent
 }
 
 type PlatformUpgradeJob struct {

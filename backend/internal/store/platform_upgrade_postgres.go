@@ -2,15 +2,20 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 )
 
-const platformReleaseColumns = `id,tenant_id,version,api_image,api_image_digest,frontend_image,frontend_image_digest,database_schema_version,coalesce(minimum_agent_version,''),rollback_supported,coalesce(release_notes,''),status,coalesce(published_by,''),coalesce(published_at,'0001-01-01'::timestamptz),created_at,updated_at`
+const platformReleaseColumns = `id,tenant_id,version,api_image,api_image_digest,frontend_image,frontend_image_digest,component_manifest,database_schema_version,coalesce(minimum_agent_version,''),rollback_supported,coalesce(release_notes,''),status,coalesce(published_by,''),coalesce(published_at,'0001-01-01'::timestamptz),created_at,updated_at`
 
 func scanPlatformRelease(row interface{ Scan(...any) error }) (PlatformRelease, error) {
 	var v PlatformRelease
-	err := row.Scan(&v.ID, &v.TenantID, &v.Version, &v.APIImage, &v.APIImageDigest, &v.FrontendImage, &v.FrontendImageDigest, &v.DatabaseSchemaVersion, &v.MinimumAgentVersion, &v.RollbackSupported, &v.ReleaseNotes, &v.Status, &v.PublishedBy, &v.PublishedAt, &v.CreatedAt, &v.UpdatedAt)
+	var manifest []byte
+	err := row.Scan(&v.ID, &v.TenantID, &v.Version, &v.APIImage, &v.APIImageDigest, &v.FrontendImage, &v.FrontendImageDigest, &manifest, &v.DatabaseSchemaVersion, &v.MinimumAgentVersion, &v.RollbackSupported, &v.ReleaseNotes, &v.Status, &v.PublishedBy, &v.PublishedAt, &v.CreatedAt, &v.UpdatedAt)
+	if err == nil && len(manifest) > 0 {
+		err = json.Unmarshal(manifest, &v.ComponentManifest)
+	}
 	return v, err
 }
 func (s *PostgresStore) ListPlatformReleases() ([]PlatformRelease, error) {
@@ -35,7 +40,11 @@ func (s *PostgresStore) UpsertPlatformRelease(input PlatformReleaseInput) (Platf
 	if status == "" {
 		status = "candidate"
 	}
-	return scanPlatformRelease(s.db.QueryRow(`insert into platform_releases(id,tenant_id,version,api_image,api_image_digest,frontend_image,frontend_image_digest,database_schema_version,minimum_agent_version,rollback_supported,release_notes,status,published_by,published_at,created_at,updated_at) values($1,$2,$3,$4,$5,$6,$7,$8,nullif($9,''),$10,nullif($11,''),$12,nullif($13,''),case when $12::text='active' then $14::timestamptz else null::timestamptz end,$14,$14) on conflict(tenant_id,version) do update set api_image=excluded.api_image,api_image_digest=excluded.api_image_digest,frontend_image=excluded.frontend_image,frontend_image_digest=excluded.frontend_image_digest,database_schema_version=excluded.database_schema_version,minimum_agent_version=excluded.minimum_agent_version,rollback_supported=excluded.rollback_supported,release_notes=excluded.release_notes,updated_at=excluded.updated_at returning `+platformReleaseColumns, newID(), DefaultTenantID, input.Version, input.APIImage, input.APIImageDigest, input.FrontendImage, input.FrontendImageDigest, input.DatabaseSchemaVersion, input.MinimumAgentVersion, input.RollbackSupported, input.ReleaseNotes, status, input.PublishedBy, now))
+	manifest, err := json.Marshal(input.ComponentManifest)
+	if err != nil {
+		return PlatformRelease{}, err
+	}
+	return scanPlatformRelease(s.db.QueryRow(`with inserted as (insert into platform_releases(id,tenant_id,version,api_image,api_image_digest,frontend_image,frontend_image_digest,component_manifest,database_schema_version,minimum_agent_version,rollback_supported,release_notes,status,published_by,published_at,created_at,updated_at) values($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,nullif($10,''),$11,nullif($12,''),$13,nullif($14,''),case when $13::text='active' then $15::timestamptz else null::timestamptz end,$15,$15) on conflict(tenant_id,version) do nothing returning `+platformReleaseColumns+`) select * from inserted union all select `+platformReleaseColumns+` from platform_releases where tenant_id=$2 and version=$3 limit 1`, newID(), DefaultTenantID, input.Version, input.APIImage, input.APIImageDigest, input.FrontendImage, input.FrontendImageDigest, manifest, input.DatabaseSchemaVersion, input.MinimumAgentVersion, input.RollbackSupported, input.ReleaseNotes, status, input.PublishedBy, now))
 }
 func (s *PostgresStore) ActivatePlatformRelease(id, publishedBy string) (PlatformRelease, bool, error) {
 	tx, err := s.db.Begin()

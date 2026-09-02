@@ -98,9 +98,6 @@ Docker options:
   --registry-trust MODE        system (default) or private-ca
   --registry-ca-file PATH      PEM CA certificate, required for private-ca
   --image-tag TAG              Platform/agent image tag, default v20260714.5.
-  --velero-image IMAGE         Velero image, default <registry>/velero:v1.18.2-hcdr.3.
-  --velero-aws-plugin-image IMAGE
-                              Velero AWS plugin image, default <registry>/velero-plugin-for-aws:v1.13.0.
   --http-port PORT             Frontend host port. Defaults to the port in --public-base-url, or 3002.
   --api-port PORT              API host port, default 18080.
   --tls-cert-file PATH         Existing platform certificate to use. Optional.
@@ -161,8 +158,6 @@ while [[ $# -gt 0 ]]; do
     --registry-trust) registry_trust="${2:?missing value for --registry-trust}"; shift 2 ;;
     --registry-ca-file) registry_ca_file="${2:?missing value for --registry-ca-file}"; shift 2 ;;
     --image-tag) image_tag="${2:?missing value for --image-tag}"; shift 2 ;;
-    --velero-image) velero_image="${2:?missing value for --velero-image}"; shift 2 ;;
-    --velero-aws-plugin-image) velero_aws_plugin_image="${2:?missing value for --velero-aws-plugin-image}"; shift 2 ;;
     --storage-class) storage_class="${2:?missing value for --storage-class}"; shift 2 ;;
     --database-mode) database_mode="${2:?missing value for --database-mode}"; shift 2 ;;
     --node-port) node_port="${2:?missing value for --node-port}"; shift 2 ;;
@@ -653,9 +648,6 @@ REGISTRATION_EXECUTOR_IMAGE=${registry}/cluster-registration-executor:${image_ta
 POSTGRES_IMAGE=${registry}/postgres:16
 HCDR_POSTGRES_PASSWORD=${postgres_password}
 HCDR_DATABASE_URL=postgres://hypercdr:${postgres_password}@hypercdr-postgres:5432/hypercdr?sslmode=disable
-HCDR_AGENT_IMAGE=${registry}/comm-agent:${image_tag}
-HCDR_VELERO_IMAGE=${velero_image}
-HCDR_VELERO_AWS_PLUGIN_IMAGE=${velero_aws_plugin_image}
 HCDR_DATA_DIR=${data_dir}
 HCDR_FRONTEND_PORT=${http_port}
 HCDR_API_PORT=${api_port}
@@ -690,14 +682,14 @@ EOF
     install_ok "Control plane is ready"
 
     install_step 7 7 "Initialize and verify release catalog"
-    local release_payload
-    release_payload="$(printf '{\"version\":\"%s\",\"databaseSchemaVersion\":\"current\",\"minimumAgentVersion\":\"%s\",\"rollbackSupported\":true,\"releaseNotes\":\"Initialized by the control plane installer\"}' "${image_tag}" "${image_tag}")"
+    local release_manifest_file="${SCRIPT_DIR}/release-manifest.json"
+    [[ -s "${release_manifest_file}" ]] || install_fail "Release package is missing release-manifest.json"
     run_logged "Platform release is registered" curl -kfsS --connect-timeout 5 --max-time 30 \
       -H "Content-Type: application/json" \
       -H "X-HyperCDR-Release-Token: ${release_token}" \
-      -d "${release_payload}" \
+      --data-binary "@${release_manifest_file}" \
       "${public_base_url%/}/api/v1/platform/releases"
-    run_logged "Cluster component releases are initialized" curl -kfsS --connect-timeout 5 --max-time 30 \
+    run_logged "Release component manifest is active" curl -kfsS --connect-timeout 5 --max-time 30 \
       "${public_base_url%/}/install.sh"
     cat <<EOF
 

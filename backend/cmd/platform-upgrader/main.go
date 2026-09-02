@@ -22,6 +22,7 @@ func main() {
 	deployDir := env("HCDR_DEPLOY_DIR", "/deploy")
 	hostDeployDir := env("HCDR_HOST_DEPLOY_DIR", "/var/lib/hypercdr")
 	healthURL := env("HCDR_PLATFORM_HEALTH_URL", "http://hypercdr-platform-api:18080/healthz")
+	layout := env("HCDR_PLATFORM_LAYOUT", "split")
 	if db == "" {
 		logger.Error("HCDR_DATABASE_URL is required")
 		os.Exit(1)
@@ -43,7 +44,7 @@ func main() {
 		} else {
 			for _, job := range jobs {
 				if job.Status == "queued" {
-					run(repo, job, deployDir, hostDeployDir, healthURL, executorID, logger)
+					run(repo, job, deployDir, hostDeployDir, healthURL, layout, executorID, logger)
 					break
 				}
 			}
@@ -59,7 +60,18 @@ func utcLogTime(_ []string, attr slog.Attr) slog.Attr {
 	return attr
 }
 
-func run(repo store.Store, job store.PlatformUpgradeJob, deployDir, hostDeployDir, healthURL, executorID string, logger *slog.Logger) {
+type deploymentLayout struct {
+	apiKey, frontendKey, platformService, frontendService string
+}
+
+func resolveDeploymentLayout(layout string) deploymentLayout {
+	if layout == "combined" {
+		return deploymentLayout{apiKey: "PLATFORM_IMAGE", frontendKey: "PLATFORM_IMAGE", platformService: env("HCDR_PLATFORM_SERVICE", "platform")}
+	}
+	return deploymentLayout{apiKey: "PLATFORM_API_IMAGE", frontendKey: "PLATFORM_FRONTEND_IMAGE", platformService: "hypercdr-platform-api", frontendService: "hypercdr-platform-frontend"}
+}
+
+func run(repo store.Store, job store.PlatformUpgradeJob, deployDir, hostDeployDir, healthURL, layout, executorID string, logger *slog.Logger) {
 	update := func(status, step string, progress int, errCode, errMessage string, done bool) {
 		_, _, _ = repo.UpdatePlatformUpgradeJob(store.PlatformUpgradeJobUpdate{ID: job.ID, Status: status, Step: step, Progress: progress, ErrorCode: errCode, ErrorMessage: errMessage, ExecutorID: executorID, MarkStarted: true, MarkDone: done})
 	}
@@ -73,14 +85,32 @@ func run(repo store.Store, job store.PlatformUpgradeJob, deployDir, hostDeployDi
 		fail("prechecking", err)
 		return
 	}
-	oldAPI, oldFrontend, oldUpgrader, oldVersion := values["PLATFORM_API_IMAGE"], values["PLATFORM_FRONTEND_IMAGE"], values["PLATFORM_UPGRADER_IMAGE"], values["RELEASE_VERSION"]
-	if oldAPI == "" || oldFrontend == "" || oldUpgrader == "" {
+	resolvedLayout := resolveDeploymentLayout(layout)
+	apiKey, frontendKey := resolvedLayout.apiKey, resolvedLayout.frontendKey
+	platformService, frontendService := resolvedLayout.platformService, resolvedLayout.frontendService
+	executorService := env("HCDR_REGISTRATION_EXECUTOR_SERVICE", "hypercdr-cluster-registration-executor")
+	postgresService := env("HCDR_POSTGRES_SERVICE", "hypercdr-postgres")
+	oldAPI, oldFrontend, oldUpgrader, oldExecutor, oldVersion := values[apiKey], values[frontendKey], values["PLATFORM_UPGRADER_IMAGE"], values["REGISTRATION_EXECUTOR_IMAGE"], values["RELEASE_VERSION"]
+	if oldAPI == "" || oldFrontend == "" || oldUpgrader == "" || oldExecutor == "" {
 		fail("prechecking", fmt.Errorf("deployment images are missing from %s", envPath))
 		return
 	}
-	targetUpgrader, err := platformComponentImage(job.APIImage, "platform-upgrader", job.TargetVersion)
+	releases, err := repo.ListPlatformReleases()
 	if err != nil {
 		fail("prechecking", err)
+		return
+	}
+	var release store.PlatformRelease
+	for _, candidate := range releases {
+		if candidate.ID == job.ReleaseID {
+			release = candidate
+			break
+		}
+	}
+	targetUpgrader, upgraderOK := release.ComponentManifest["platform-upgrader"]
+	targetExecutor, executorOK := release.ComponentManifest["cluster-registration-executor"]
+	if !upgraderOK || !executorOK || targetUpgrader.Image == "" || targetExecutor.Image == "" {
+		fail("prechecking", fmt.Errorf("target release manifest is missing platform upgrader or registration executor"))
 		return
 	}
 	_, _, _ = repo.UpdatePlatformUpgradeJob(store.PlatformUpgradeJobUpdate{ID: job.ID, PreviousAPIImage: oldAPI, PreviousFrontendImage: oldFrontend, ExecutorID: executorID, Progress: 1, MarkStarted: true})
@@ -96,7 +126,7 @@ func run(repo store.Store, job store.PlatformUpgradeJob, deployDir, hostDeployDi
 		fail("backing_up", err)
 		return
 	}
-	cmd := compose(deployDir, "exec", "-T", "hypercdr-postgres", "pg_dump", "-U", "hypercdr", "-d", "hypercdr")
+	cmd := compose(deployDir, "exec", "-T", postgresService, "pg_dump", "-U", "hypercdr", "-d", "hypercdr")
 	cmd.Stdout = backup
 	err = cmd.Run()
 	backup.Close()
@@ -110,17 +140,24 @@ func run(repo store.Store, job store.PlatformUpgradeJob, deployDir, hostDeployDi
 		fail("pulling", err)
 		return
 	}
-	update("pulling", "pulling_frontend", 40, "", "", false)
-	if err = runCmd(exec.Command("docker", "pull", job.FrontendImage)); err != nil {
-		fail("pulling", err)
-		return
+	if job.FrontendImage != job.APIImage {
+		update("pulling", "pulling_frontend", 40, "", "", false)
+		if err = runCmd(exec.Command("docker", "pull", job.FrontendImage)); err != nil {
+			fail("pulling", err)
+			return
+		}
 	}
 	update("pulling", "pulling_upgrader", 46, "", "", false)
-	if err = runCmd(exec.Command("docker", "pull", targetUpgrader)); err != nil {
+	if err = runCmd(exec.Command("docker", "pull", targetUpgrader.Image)); err != nil {
 		fail("pulling", err)
 		return
 	}
-	values["PLATFORM_API_IMAGE"], values["PLATFORM_FRONTEND_IMAGE"], values["PLATFORM_UPGRADER_IMAGE"] = job.APIImage, job.FrontendImage, targetUpgrader
+	update("pulling", "pulling_registration_executor", 49, "", "", false)
+	if err = runCmd(exec.Command("docker", "pull", targetExecutor.Image)); err != nil {
+		fail("pulling", err)
+		return
+	}
+	values[apiKey], values[frontendKey], values["PLATFORM_UPGRADER_IMAGE"], values["REGISTRATION_EXECUTOR_IMAGE"] = job.APIImage, job.FrontendImage, targetUpgrader.Image, targetExecutor.Image
 	values["RELEASE_VERSION"] = job.TargetVersion
 	if err = writeEnv(envPath, values); err != nil {
 		fail("switching_api", err)
@@ -128,14 +165,18 @@ func run(repo store.Store, job store.PlatformUpgradeJob, deployDir, hostDeployDi
 	}
 	rollback := func(cause error) {
 		update("rolling_back", "rolling_back", 90, "", "", false)
-		values["PLATFORM_API_IMAGE"], values["PLATFORM_FRONTEND_IMAGE"], values["PLATFORM_UPGRADER_IMAGE"] = oldAPI, oldFrontend, oldUpgrader
+		values[apiKey], values[frontendKey], values["PLATFORM_UPGRADER_IMAGE"], values["REGISTRATION_EXECUTOR_IMAGE"] = oldAPI, oldFrontend, oldUpgrader, oldExecutor
 		values["RELEASE_VERSION"] = oldVersion
 		_ = writeEnv(envPath, values)
-		_ = runCmd(compose(deployDir, "up", "-d", "hypercdr-platform-api", "hypercdr-platform-frontend"))
+		services := []string{"up", "-d", platformService, executorService}
+		if frontendService != "" {
+			services = append(services, frontendService)
+		}
+		_ = runCmd(compose(deployDir, services...))
 		fail("rolled_back", cause)
 	}
 	update("switching_api", "switching_api", 55, "", "", false)
-	if err = runCmd(compose(deployDir, "up", "-d", "hypercdr-platform-api")); err != nil {
+	if err = runCmd(compose(deployDir, "up", "-d", platformService)); err != nil {
 		rollback(err)
 		return
 	}
@@ -144,10 +185,17 @@ func run(repo store.Store, job store.PlatformUpgradeJob, deployDir, hostDeployDi
 		rollback(err)
 		return
 	}
-	update("switching_frontend", "switching_frontend", 82, "", "", false)
-	if err = runCmd(compose(deployDir, "up", "-d", "hypercdr-platform-frontend")); err != nil {
+	update("switching_api", "switching_registration_executor", 76, "", "", false)
+	if err = runCmd(compose(deployDir, "up", "-d", executorService)); err != nil {
 		rollback(err)
 		return
+	}
+	if frontendService != "" {
+		update("switching_frontend", "switching_frontend", 82, "", "", false)
+		if err = runCmd(compose(deployDir, "up", "-d", frontendService)); err != nil {
+			rollback(err)
+			return
+		}
 	}
 	update("verifying", "verifying", 92, "", "", false)
 	if err = waitHealth(healthURL, 60*time.Second); err != nil {
@@ -165,14 +213,6 @@ func run(repo store.Store, job store.PlatformUpgradeJob, deployDir, hostDeployDi
 	}
 }
 
-func platformComponentImage(apiImage, component, version string) (string, error) {
-	lastSlash := strings.LastIndex(apiImage, "/")
-	if lastSlash < 0 || strings.TrimSpace(version) == "" {
-		return "", fmt.Errorf("cannot derive %s image from %q", component, apiImage)
-	}
-	return apiImage[:lastSlash+1] + component + ":" + version, nil
-}
-
 func scheduleUpgraderReplacement(hostDeployDir, executorID string) error {
 	if !filepath.IsAbs(hostDeployDir) || hostDeployDir == "/" {
 		return fmt.Errorf("unsafe host deploy directory: %q", hostDeployDir)
@@ -181,7 +221,10 @@ func scheduleUpgraderReplacement(hostDeployDir, executorID string) error {
 	if len(name) > 60 {
 		name = name[:60]
 	}
-	script := "sleep 2; docker compose --project-name hypercdr --project-directory /deploy --env-file /deploy/.env -f /deploy/docker-compose.yaml up -d hypercdr-platform-upgrader"
+	projectName := env("HCDR_COMPOSE_PROJECT_NAME", "hypercdr")
+	upgraderService := env("HCDR_UPGRADER_SERVICE", "hypercdr-platform-upgrader")
+	composeFile := env("HCDR_COMPOSE_FILE", "docker-compose.yaml")
+	script := fmt.Sprintf("sleep 2; docker compose --project-name %s --project-directory /deploy --env-file /deploy/.env -f /deploy/%s up -d %s", projectName, composeFile, upgraderService)
 	return runCmd(exec.Command("docker", "run", "--rm", "-d", "--name", name,
 		"-v", "/var/run/docker.sock:/var/run/docker.sock",
 		"-v", hostDeployDir+":/deploy",
@@ -190,7 +233,8 @@ func scheduleUpgraderReplacement(hostDeployDir, executorID string) error {
 
 func compose(dir string, args ...string) *exec.Cmd {
 	projectName := env("HCDR_COMPOSE_PROJECT_NAME", "hypercdr")
-	all := append([]string{"compose", "--project-name", projectName, "--project-directory", dir, "--env-file", filepath.Join(dir, ".env"), "-f", filepath.Join(dir, "docker-compose.yaml")}, args...)
+	composeFile := env("HCDR_COMPOSE_FILE", "docker-compose.yaml")
+	all := append([]string{"compose", "--project-name", projectName, "--project-directory", dir, "--env-file", filepath.Join(dir, ".env"), "-f", filepath.Join(dir, composeFile)}, args...)
 	return exec.Command("docker", all...)
 }
 func runCmd(cmd *exec.Cmd) error { cmd.Stdout = os.Stdout; cmd.Stderr = os.Stderr; return cmd.Run() }

@@ -26,8 +26,9 @@ import (
 var sessionIDPattern = regexp.MustCompile(`^ccer_[A-Za-z0-9_-]{20,64}$`)
 
 type inspectRequest struct {
-	SessionID string `json:"sessionId"`
-	Context   string `json:"context"`
+	SessionID   string `json:"sessionId"`
+	Context     string `json:"context"`
+	ClusterType string `json:"clusterType"`
 }
 
 type inspection struct {
@@ -92,7 +93,8 @@ func main() {
 	s := &server{baseDir: filepath.Clean(baseDir), runner: commandRunner{}, logger: slog.Default()}
 	if sessionID := strings.TrimSpace(os.Getenv("HCDR_REGISTRATION_INSPECT_SESSION_ID")); sessionID != "" {
 		contextName := strings.TrimSpace(os.Getenv("HCDR_REGISTRATION_INSPECT_CONTEXT"))
-		if err := s.runInspectionJob(sessionID, contextName); err != nil {
+		clusterType := strings.TrimSpace(os.Getenv("HCDR_REGISTRATION_INSPECT_CLUSTER_TYPE"))
+		if err := s.runInspectionJob(sessionID, contextName, clusterType); err != nil {
 			slog.Error("CCE inspection Job failed", "session", sessionID, "error", err)
 			os.Exit(1)
 		}
@@ -139,12 +141,12 @@ type inspectionJobResult struct {
 	Error      string      `json:"error,omitempty"`
 }
 
-func (s *server) runInspectionJob(sessionID, contextName string) error {
+func (s *server) runInspectionJob(sessionID, contextName, clusterType string) error {
 	if !sessionIDPattern.MatchString(sessionID) || contextName == "" || len(contextName) > 253 {
 		return errors.New("invalid inspection session or context")
 	}
 	sessionDir := filepath.Join(s.baseDir, sessionID)
-	result, inspectErr := inspectCluster(context.Background(), s.runner, filepath.Join(sessionDir, "kubeconfig"), contextName)
+	result, inspectErr := inspectCluster(context.Background(), s.runner, filepath.Join(sessionDir, "kubeconfig"), contextName, clusterType)
 	payload := inspectionJobResult{}
 	if inspectErr != nil {
 		payload.Error = inspectErr.Error()
@@ -173,6 +175,7 @@ type directInstallRequest struct {
 	Namespace        string `json:"namespace"`
 	Context          string `json:"context"`
 	StorageClass     string `json:"storageClass"`
+	ClusterType      string `json:"clusterType"`
 }
 
 func (s *server) runTaskLoop(repo store.Store, executorID string) {
@@ -231,7 +234,14 @@ func (s *server) runRegistrationTask(repo store.Store, task store.Task) {
 		return
 	}
 	defer os.Remove(scriptPath)
-	args := []string{scriptPath, "--token", request.Token, "--endpoint", request.Endpoint, "--cluster-type", "huaweicloud-cce", "--kubeconfig", filepath.Join(sessionDir, "kubeconfig"), "--context", request.Context, "--namespace", request.Namespace, "--executor-mode", "kubernetes", "--install-registry-ca", "false", "--interactive", "false"}
+	clusterType := normalizeClusterType(request.ClusterType)
+	if clusterType == "" {
+		clusterType = normalizeClusterType(stringValue(task.Payload, "clusterType"))
+	}
+	if clusterType == "" {
+		clusterType = "huaweicloud-cce"
+	}
+	args := []string{scriptPath, "--token", request.Token, "--endpoint", request.Endpoint, "--cluster-type", clusterType, "--kubeconfig", filepath.Join(sessionDir, "kubeconfig"), "--context", request.Context, "--namespace", request.Namespace, "--executor-mode", "kubernetes", "--install-registry-ca", "false", "--interactive", "false"}
 	if request.EndpointPublic != "" && request.EndpointPublic != request.Endpoint {
 		args = append(args, "--endpoint-public", request.EndpointPublic)
 	}
@@ -366,7 +376,12 @@ func (s *server) inspect(w http.ResponseWriter, req *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(req.Context(), 45*time.Second)
 	defer cancel()
-	result, err := inspectCluster(ctx, s.runner, kubeconfig, body.Context)
+	clusterType := normalizeClusterType(body.ClusterType)
+	if clusterType == "" {
+		writeError(w, http.StatusBadRequest, "cluster_type_invalid", "Select Native Kubernetes or Huawei Cloud CCE.")
+		return
+	}
+	result, err := inspectCluster(ctx, s.runner, kubeconfig, body.Context, clusterType)
 	if err != nil {
 		s.logger.Warn("CCE inspection failed", "session", body.SessionID, "error", err)
 		writeError(w, http.StatusUnprocessableEntity, "cce_inspection_failed", err.Error())
@@ -376,14 +391,14 @@ func (s *server) inspect(w http.ResponseWriter, req *http.Request) {
 	_ = json.NewEncoder(w).Encode(result)
 }
 
-func inspectCluster(ctx context.Context, runner kubectlRunner, kubeconfig, contextName string) (inspection, error) {
+func inspectCluster(ctx context.Context, runner kubectlRunner, kubeconfig, contextName, clusterType string) (inspection, error) {
 	run := func(args ...string) (string, error) {
 		out, err := runner.Run(ctx, kubeconfig, contextName, args...)
 		return strings.TrimSpace(string(out)), err
 	}
 	version, err := run("version", "-o", "json")
 	if err != nil {
-		return inspection{}, fmt.Errorf("Kubernetes API connection failed: %w", err)
+		return inspection{}, fmt.Errorf("Kubernetes API connection failed: %s", conciseCommandError(err))
 	}
 	var versions struct {
 		ServerVersion struct {
@@ -402,7 +417,7 @@ func inspectCluster(ctx context.Context, runner kubectlRunner, kubeconfig, conte
 		return inspection{}, errors.New("CCE cluster identity could not be read.")
 	}
 	providerIDs, err := run("get", "nodes", "-o", "jsonpath={range .items[*]}{.spec.providerID}{\"\\n\"}{end}")
-	if err != nil || (!strings.Contains(strings.ToLower(providerIDs), "huaweicloud") && alias == "") {
+	if clusterType == "huaweicloud-cce" && (err != nil || (!strings.Contains(strings.ToLower(providerIDs), "huaweicloud") && alias == "")) {
 		return inspection{}, errors.New("The selected context could not be verified as Huawei Cloud CCE.")
 	}
 	region, _ := run("get", "nodes", "-o", "jsonpath={.items[0].metadata.labels.topology\\.kubernetes\\.io/region}")
@@ -416,7 +431,14 @@ func inspectCluster(ctx context.Context, runner kubectlRunner, kubeconfig, conte
 	}
 	result := inspection{Context: contextName, ClusterName: alias, ClusterID: clusterID, Region: region, ServerVersion: versions.ServerVersion.GitVersion}
 	if result.ClusterName == "" {
-		result.ClusterName = "cce-" + clusterID[:min(8, len(clusterID))]
+		controlPlaneName, _ := run("get", "nodes", "-l", "node-role.kubernetes.io/control-plane", "-o", "jsonpath={.items[0].metadata.name}")
+		if clusterType == "huaweicloud-cce" {
+			result.ClusterName = "cce-" + clusterID[:min(8, len(clusterID))]
+		} else if controlPlaneName != "" {
+			result.ClusterName = controlPlaneName
+		} else {
+			result.ClusterName = "k8s-" + clusterID[:min(8, len(clusterID))]
+		}
 	}
 	readyNodes, milliCPU, memoryBytes, err := schedulableCapacity([]byte(nodes))
 	if err != nil {
@@ -440,7 +462,7 @@ func inspectCluster(ctx context.Context, runner kubectlRunner, kubeconfig, conte
 		}
 	}
 	result.Gates = append(result.Gates,
-		inspectionGate{ID: "identity", Label: "CCE identity", Status: "passed", Detail: result.ClusterName + " · " + result.ClusterID},
+		inspectionGate{ID: "identity", Label: map[bool]string{true: "CCE identity", false: "Kubernetes identity"}[clusterType == "huaweicloud-cce"], Status: "passed", Detail: result.ClusterName + " · " + result.ClusterID},
 		inspectionGate{ID: "version", Label: "Kubernetes version", Status: "passed", Detail: result.ServerVersion},
 		inspectionGate{ID: "capacity", Label: "Worker capacity", Status: "passed", Detail: fmt.Sprintf("%d Ready schedulable worker node(s) · %dm CPU · %d MiB memory · policy %s", result.NodeCount, milliCPU, memoryBytes/(1024*1024), registrationCapacityPolicyVersion)},
 	)
@@ -454,12 +476,12 @@ func inspectCluster(ctx context.Context, runner kubectlRunner, kubeconfig, conte
 		}
 	}
 	if len(missing) > 0 {
-		return inspection{}, fmt.Errorf("CCE kubeconfig lacks required permissions: %s", strings.Join(missing, ", "))
+		return inspection{}, fmt.Errorf("Kubeconfig lacks required installation permissions: %s", strings.Join(missing, ", "))
 	}
 	result.Gates = append(result.Gates, inspectionGate{ID: "permissions", Label: "Kubernetes permissions", Status: "passed", Detail: "All required namespace, RBAC, workload, Secret, and PVC permissions are available."})
 	storageStatus, storageDetail := "passed", result.DefaultStorageClass
 	if len(result.StorageClasses) == 0 {
-		return inspection{}, errors.New("No compatible StorageClass is available in this CCE cluster.")
+		return inspection{}, errors.New("No compatible StorageClass is available in this Kubernetes cluster.")
 	}
 	if storageDetail == "" {
 		storageStatus, storageDetail = "warning", "No default StorageClass; select one before registration."
@@ -469,6 +491,28 @@ func inspectCluster(ctx context.Context, runner kubectlRunner, kubeconfig, conte
 		inspectionGate{ID: "network", Label: "Network and image pull", Status: "deferred", Detail: "An isolated temporary Pod performs DNS, TLS, platform, and image-pull checks before installation."},
 	)
 	return result, nil
+}
+
+func conciseCommandError(err error) string {
+	if err == nil {
+		return "unknown error"
+	}
+	lines := strings.Split(strings.TrimSpace(err.Error()), "\n")
+	for index := len(lines) - 1; index >= 0; index-- {
+		if message := strings.TrimSpace(lines[index]); message != "" {
+			return message
+		}
+	}
+	return "unknown error"
+}
+
+func normalizeClusterType(value string) string {
+	switch strings.TrimSpace(value) {
+	case "native-kubernetes", "huaweicloud-cce":
+		return strings.TrimSpace(value)
+	default:
+		return ""
+	}
 }
 
 func schedulableCapacity(raw []byte) (int, int64, int64, error) {

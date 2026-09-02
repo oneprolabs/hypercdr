@@ -29,17 +29,19 @@ import (
 const (
 	maxCCEKubeconfigBytes = 1 << 20
 	cceUploadTTL          = 15 * time.Minute
+	cceJanitorInterval    = time.Minute
 )
 
 var cceRegistrationSessionIDPattern = regexp.MustCompile(`^ccer_[A-Za-z0-9_-]{20,64}$`)
 
 type cceKubeconfigUpload struct {
-	ID        string
-	TenantID  string
-	Path      string
-	ExpiresAt time.Time
-	Contexts  []string
-	Inspected map[string]bool
+	ID          string
+	TenantID    string
+	Path        string
+	ExpiresAt   time.Time
+	Contexts    []string
+	Inspected   map[string]bool
+	ClusterType string
 }
 
 type kubeconfigDocument struct {
@@ -89,6 +91,14 @@ func (r *Router) uploadCCEKubeconfig(w http.ResponseWriter, req *http.Request) {
 	req.Body = http.MaxBytesReader(w, req.Body, maxCCEKubeconfigBytes+64*1024)
 	if err := req.ParseMultipartForm(maxCCEKubeconfigBytes + 64*1024); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "kubeconfig_upload_invalid", "message": "Upload one YAML or JSON kubeconfig no larger than 1 MiB."})
+		return
+	}
+	clusterType := normalizeDirectRegistrationClusterType(req.FormValue("clusterType"))
+	if clusterType == "" && strings.Contains(req.URL.Path, "/cce/") {
+		clusterType = "huaweicloud-cce"
+	}
+	if clusterType == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "cluster_type_invalid", "message": "Select Native Kubernetes or Huawei Cloud CCE before uploading a kubeconfig."})
 		return
 	}
 	file, header, err := req.FormFile("kubeconfig")
@@ -147,7 +157,7 @@ func (r *Router) uploadCCEKubeconfig(w http.ResponseWriter, req *http.Request) {
 	for _, context := range contexts {
 		contextNames = append(contextNames, context.Name)
 	}
-	upload := cceKubeconfigUpload{ID: id, TenantID: registrationTenantID(req), Path: path, ExpiresAt: expiresAt, Contexts: contextNames, Inspected: map[string]bool{}}
+	upload := cceKubeconfigUpload{ID: id, TenantID: registrationTenantID(req), Path: path, ExpiresAt: expiresAt, Contexts: contextNames, Inspected: map[string]bool{}, ClusterType: clusterType}
 	r.cceRegistrationMu.Lock()
 	r.cleanupExpiredCCEKubeconfigsLocked(time.Now().UTC())
 	r.cceRegistrationUploads[id] = upload
@@ -162,8 +172,9 @@ func (r *Router) uploadCCEKubeconfig(w http.ResponseWriter, req *http.Request) {
 
 func (r *Router) inspectCCEKubeconfig(w http.ResponseWriter, req *http.Request) {
 	var body struct {
-		SessionID string `json:"sessionId"`
-		Context   string `json:"context"`
+		SessionID   string `json:"sessionId"`
+		Context     string `json:"context"`
+		ClusterType string `json:"clusterType"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, req.Body, 16<<10)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "inspection_request_invalid", "message": "A registration session and Kubernetes context are required."})
@@ -172,7 +183,11 @@ func (r *Router) inspectCCEKubeconfig(w http.ResponseWriter, req *http.Request) 
 	r.cceRegistrationMu.Lock()
 	r.cleanupExpiredCCEKubeconfigsLocked(time.Now().UTC())
 	upload, ok := r.cceRegistrationUploads[body.SessionID]
-	allowed := ok && upload.TenantID == registrationTenantID(req) && slices.Contains(upload.Contexts, body.Context)
+	clusterType := normalizeDirectRegistrationClusterType(body.ClusterType)
+	if clusterType == "" && strings.Contains(req.URL.Path, "/cce/") {
+		clusterType = "huaweicloud-cce"
+	}
+	allowed := ok && clusterType != "" && upload.ClusterType == clusterType && upload.TenantID == registrationTenantID(req) && slices.Contains(upload.Contexts, body.Context)
 	r.cceRegistrationMu.Unlock()
 	if !allowed {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "kubeconfig_session_not_found", "message": "The registration session expired, was removed, or does not contain this context."})
@@ -187,7 +202,7 @@ func (r *Router) inspectCCEKubeconfig(w http.ResponseWriter, req *http.Request) 
 	var result []byte
 	statusCode := http.StatusOK
 	if r.cfg.DeployMode == "helm" || r.cfg.DeployMode == "kubernetes" {
-		if err := r.createRegistrationInspectionJob(ctx, body.SessionID, body.Context); err != nil {
+		if err := r.createRegistrationInspectionJob(ctx, body.SessionID, body.Context, clusterType); err != nil {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "registration_inspection_start_failed", "message": "The isolated CCE inspection Job could not be started. No cluster resources were changed."})
 			return
 		}
@@ -220,7 +235,7 @@ func (r *Router) inspectCCEKubeconfig(w http.ResponseWriter, req *http.Request) 
 			}
 		}
 	} else {
-		payload, _ := json.Marshal(map[string]string{"sessionId": body.SessionID, "context": body.Context})
+		payload, _ := json.Marshal(map[string]string{"sessionId": body.SessionID, "context": body.Context, "clusterType": clusterType})
 		executorReq, _ := http.NewRequestWithContext(ctx, http.MethodPost, r.cfg.RegistrationExecutorEndpoint+"/v1/inspect", bytes.NewReader(payload))
 		executorReq.Header.Set("Content-Type", "application/json")
 		executorReq.Header.Set("Authorization", "Bearer "+r.cfg.RegistrationExecutorToken)
@@ -255,6 +270,7 @@ type cceDirectInstallRequest struct {
 	Context        string `json:"context"`
 	StorageClass   string `json:"storageClass"`
 	IdempotencyKey string `json:"idempotencyKey"`
+	ClusterType    string `json:"clusterType"`
 }
 
 func (r *Router) startCCEDirectRegistration(w http.ResponseWriter, req *http.Request) {
@@ -264,10 +280,14 @@ func (r *Router) startCCEDirectRegistration(w http.ResponseWriter, req *http.Req
 		return
 	}
 	tenantID := registrationTenantID(req)
+	clusterType := normalizeDirectRegistrationClusterType(body.ClusterType)
+	if clusterType == "" && strings.Contains(req.URL.Path, "/cce/") {
+		clusterType = "huaweicloud-cce"
+	}
 	r.cceRegistrationMu.Lock()
 	r.cleanupExpiredCCEKubeconfigsLocked(time.Now().UTC())
 	upload, ok := r.cceRegistrationUploads[body.SessionID]
-	allowed := ok && upload.TenantID == tenantID && slices.Contains(upload.Contexts, body.Context) && upload.Inspected[body.Context]
+	allowed := ok && clusterType != "" && upload.ClusterType == clusterType && upload.TenantID == tenantID && slices.Contains(upload.Contexts, body.Context) && upload.Inspected[body.Context]
 	if allowed {
 		upload.ExpiresAt = time.Now().UTC().Add(25 * time.Minute)
 		r.cceRegistrationUploads[body.SessionID] = upload
@@ -290,7 +310,11 @@ func (r *Router) startCCEDirectRegistration(w http.ResponseWriter, req *http.Req
 		}
 	}
 	actor, _ := requestUser(req)
-	token, err := r.store.CreateAgentToken(tenantID, actor.ID, "CCE platform-direct registration", 30*time.Minute, "huaweicloud-cce")
+	displayType := "Native Kubernetes"
+	if clusterType == "huaweicloud-cce" {
+		displayType = "Huawei Cloud CCE"
+	}
+	token, err := r.store.CreateAgentToken(tenantID, actor.ID, displayType+" platform-direct registration", 30*time.Minute, clusterType)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "registration_token_create_failed"})
 		return
@@ -303,6 +327,7 @@ func (r *Router) startCCEDirectRegistration(w http.ResponseWriter, req *http.Req
 		"token": token.Token, "installScriptUrl": r.publicBaseURL(req) + "/install.sh", "endpoint": endpoint,
 		"endpointPublic": strings.TrimSpace(r.cfg.AgentPublicWSEndpoint), "namespace": r.cfg.AgentNamespace,
 		"context": body.Context, "storageClass": strings.TrimSpace(body.StorageClass),
+		"clusterType": clusterType,
 	}
 	raw, _ := json.Marshal(requestData)
 	requestPath := filepath.Join(filepath.Dir(upload.Path), "install-request.json")
@@ -311,7 +336,7 @@ func (r *Router) startCCEDirectRegistration(w http.ResponseWriter, req *http.Req
 		return
 	}
 	task, err := r.store.CreateTask(store.TaskInput{TenantID: tenantID, Type: "cluster-registration", Status: "queued", CommandID: store.NewPublicID(), Payload: map[string]any{
-		"sessionId": body.SessionID, "context": body.Context, "storageClass": strings.TrimSpace(body.StorageClass), "idempotencyKey": body.IdempotencyKey, "provider": "huaweicloud-cce", "stage": "queued",
+		"sessionId": body.SessionID, "context": body.Context, "storageClass": strings.TrimSpace(body.StorageClass), "idempotencyKey": body.IdempotencyKey, "provider": clusterType, "clusterType": clusterType, "stage": "queued",
 	}})
 	if err != nil {
 		_ = os.Remove(requestPath)
@@ -330,6 +355,15 @@ func (r *Router) startCCEDirectRegistration(w http.ResponseWriter, req *http.Req
 		return
 	}
 	writeJSON(w, http.StatusAccepted, task)
+}
+
+func normalizeDirectRegistrationClusterType(value string) string {
+	switch strings.TrimSpace(value) {
+	case "native-kubernetes", "huaweicloud-cce":
+		return strings.TrimSpace(value)
+	default:
+		return ""
+	}
 }
 
 func inspectPlatformKubeconfig(raw []byte) (kubeconfigDocument, []cceContextSummary, error) {
@@ -425,6 +459,53 @@ func (r *Router) cleanupExpiredCCEKubeconfigsLocked(now time.Time) {
 			_ = os.RemoveAll(filepath.Dir(upload.Path))
 		}
 	}
+}
+
+// cleanupOrphanedCCEKubeconfigs removes expired upload directories that are no
+// longer represented in memory, for example after an API restart. The
+// kubeconfig modification time is the upload time and remains unchanged while
+// inspection and installation artifacts are written beside it.
+func (r *Router) cleanupOrphanedCCEKubeconfigs(now time.Time) {
+	baseDir := strings.TrimSpace(r.cfg.RegistrationSessionDir)
+	if baseDir == "" {
+		return
+	}
+	baseDir = filepath.Clean(baseDir)
+	if !filepath.IsAbs(baseDir) || baseDir == "/" {
+		return
+	}
+	entries, err := os.ReadDir(baseDir)
+	if err != nil {
+		return
+	}
+	cutoff := now.UTC().Add(-cceUploadTTL)
+	for _, entry := range entries {
+		if !entry.IsDir() || !cceRegistrationSessionIDPattern.MatchString(entry.Name()) {
+			continue
+		}
+		dir := filepath.Join(baseDir, entry.Name())
+		info, statErr := os.Stat(filepath.Join(dir, "kubeconfig"))
+		if statErr != nil {
+			info, statErr = entry.Info()
+		}
+		if statErr == nil && !info.ModTime().After(cutoff) {
+			_ = os.RemoveAll(dir)
+		}
+	}
+}
+
+func (r *Router) startCCEKubeconfigJanitor() {
+	if strings.TrimSpace(r.cfg.RegistrationSessionDir) == "" {
+		return
+	}
+	r.cleanupOrphanedCCEKubeconfigs(time.Now().UTC())
+	go func() {
+		ticker := time.NewTicker(cceJanitorInterval)
+		defer ticker.Stop()
+		for now := range ticker.C {
+			r.cleanupOrphanedCCEKubeconfigs(now)
+		}
+	}()
 }
 
 func (r *Router) expireCCEKubeconfig(id string, expiresAt time.Time) {

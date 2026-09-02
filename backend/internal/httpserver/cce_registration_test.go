@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"hypercdr-platform/platform/backend/internal/config"
 	"hypercdr-platform/platform/backend/internal/store"
@@ -87,6 +88,33 @@ func TestCCEKubeconfigUploadRejectsExternalCredentialFiles(t *testing.T) {
 	status, response := uploadTestKubeconfig(t, server.URL, "cce.yaml", unsafe)
 	if status != http.StatusUnprocessableEntity || response["error"] != "kubeconfig_unsupported" {
 		t.Fatalf("status = %d, response = %#v", status, response)
+	}
+}
+
+func TestCCEKubeconfigJanitorRemovesExpiredRestartOrphans(t *testing.T) {
+	sessionDir := t.TempDir()
+	expiredID := "ccer_abcdefghijklmnopqrstuvwxyz123456"
+	recentID := "ccer_abcdefghijklmnopqrstuvwxyz654321"
+	for _, id := range []string{expiredID, recentID} {
+		dir := filepath.Join(sessionDir, id)
+		if err := os.Mkdir(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "kubeconfig"), []byte(validCCEKubeconfig), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := time.Now().UTC().Add(-cceUploadTTL - time.Minute)
+	if err := os.Chtimes(filepath.Join(sessionDir, expiredID, "kubeconfig"), old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = NewRouter(config.Config{RegistrationSessionDir: sessionDir}, slog.Default(), store.NewMemoryStore())
+	if _, err := os.Stat(filepath.Join(sessionDir, expiredID)); !os.IsNotExist(err) {
+		t.Fatalf("expired restart orphan was not removed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sessionDir, recentID, "kubeconfig")); err != nil {
+		t.Fatalf("unexpired upload was removed: %v", err)
 	}
 }
 

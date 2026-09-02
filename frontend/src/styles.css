@@ -24184,6 +24184,41 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   box-shadow: 0 4px 10px rgba(51, 122, 183, 0.2) !important;
 }
 
+.hbdr-recovery-submit-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 2px;
+  padding: 11px 12px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.hbdr-recovery-submit-error > svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.hbdr-recovery-submit-error > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.hbdr-recovery-submit-error strong {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.hbdr-recovery-submit-error span {
+  font-size: 11px;
+  line-height: 1.5;
+  color: #b42318;
+  overflow-wrap: anywhere;
+}
+
 /* DR Configuration drawer — aligned with the DR Drill visual language */
 .hbdr-config-drawer.hbdr-config-dialog {
   width: min(720px, calc(100vw - 48px)) !important;

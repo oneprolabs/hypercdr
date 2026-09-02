@@ -11,6 +11,27 @@ func platformReleaseInput(version string) PlatformReleaseInput {
 		FrontendImageDigest:   "sha256:frontend-" + version,
 		DatabaseSchemaVersion: "000009",
 		RollbackSupported:     true,
+		ComponentManifest: map[string]ReleaseComponent{
+			"comm-agent": {Version: version, Image: "registry/comm-agent:" + version, ImageDigest: "sha256:agent-" + version},
+			"velero":     {Version: "v1.18.2-hcdr.3", Image: "registry/velero:v1.18.2-hcdr.3", ImageDigest: "sha256:velero"},
+		},
+	}
+}
+
+func TestPlatformReleaseManifestIsImmutableForVersion(t *testing.T) {
+	repo := NewMemoryStore()
+	first, err := repo.UpsertPlatformRelease(platformReleaseInput("v1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := platformReleaseInput("v1")
+	changed.ComponentManifest["comm-agent"] = ReleaseComponent{Version: "changed", Image: "registry/comm-agent:changed", ImageDigest: "sha256:changed"}
+	second, err := repo.UpsertPlatformRelease(changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ComponentManifest["comm-agent"].Version != first.ComponentManifest["comm-agent"].Version {
+		t.Fatalf("release manifest changed for immutable version: %#v", second.ComponentManifest)
 	}
 }
 

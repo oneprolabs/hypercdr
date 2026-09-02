@@ -203,7 +203,7 @@ fi
 "${SCRIPT_DIR}/sync-velero-plugins.sh" "${plugin_sync_args[@]}"
 
 log "Verifying pushed image pulls"
-for image in \
+release_images=( \
   "${REGISTRY}/platform-api:${VERSION}" \
   "${REGISTRY}/platform-frontend:${VERSION}" \
   "${REGISTRY}/platform-upgrader:${VERSION}" \
@@ -213,13 +213,56 @@ for image in \
   "${REGISTRY}/velero:${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.3}" \
   "${REGISTRY}/velero-plugin-for-aws:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}" \
   "${REGISTRY}/velero-plugin-for-microsoft-azure:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}" \
-  "${REGISTRY}/velero-plugin-for-gcp:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}"; do
+  "${REGISTRY}/velero-plugin-for-gcp:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}" )
+for image in "${release_images[@]}"; do
   docker pull "${image}" >/dev/null
   log "Pull OK: ${image}"
 done
 
+remote_digest() {
+  local image="$1" repository digest
+  repository="${image%:*}"
+  digest="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "${image}" 2>/dev/null | \
+    awk -F@ -v repository="${repository}" '$1 == repository && $2 ~ /^sha256:[0-9a-f]{64}$/ {print $2; exit}')"
+  [[ -n "${digest}" ]] || die "remote digest is unavailable after pulling ${image}"
+  printf '%s' "${digest}"
+}
+
+PLATFORM_API_IMAGE="${REGISTRY}/platform-api:${VERSION}"
+PLATFORM_FRONTEND_IMAGE="${REGISTRY}/platform-frontend:${VERSION}"
+PLATFORM_UPGRADER_IMAGE="${REGISTRY}/platform-upgrader:${VERSION}"
+REGISTRATION_EXECUTOR_IMAGE="${REGISTRY}/cluster-registration-executor:${VERSION}"
+COMM_AGENT_IMAGE="${REGISTRY}/comm-agent:${VERSION}"
+VELERO_VERSION="${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.3}"
+VELERO_IMAGE="${REGISTRY}/velero:${VELERO_VERSION}"
+PLUGIN_VERSION="${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}"
+AWS_PLUGIN_IMAGE="${REGISTRY}/velero-plugin-for-aws:${PLUGIN_VERSION}"
+AZURE_PLUGIN_IMAGE="${REGISTRY}/velero-plugin-for-microsoft-azure:${PLUGIN_VERSION}"
+GCP_PLUGIN_IMAGE="${REGISTRY}/velero-plugin-for-gcp:${PLUGIN_VERSION}"
+
+RELEASE_MANIFEST="$(release_work_dir "${VERSION}")/release-manifest.json"
+cat >"${RELEASE_MANIFEST}" <<EOF
+{
+  "version": "${VERSION}",
+  "databaseSchemaVersion": "$(find "${ROOT_DIR}/backend/internal/migrations/sql" -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort | tail -n 1 | cut -d_ -f1)",
+  "rollbackSupported": true,
+  "componentManifest": {
+    "platform-api": {"version":"${VERSION}","image":"${PLATFORM_API_IMAGE}","imageDigest":"$(remote_digest "${PLATFORM_API_IMAGE}")"},
+    "platform-frontend": {"version":"${VERSION}","image":"${PLATFORM_FRONTEND_IMAGE}","imageDigest":"$(remote_digest "${PLATFORM_FRONTEND_IMAGE}")"},
+    "platform-upgrader": {"version":"${VERSION}","image":"${PLATFORM_UPGRADER_IMAGE}","imageDigest":"$(remote_digest "${PLATFORM_UPGRADER_IMAGE}")"},
+    "cluster-registration-executor": {"version":"${VERSION}","image":"${REGISTRATION_EXECUTOR_IMAGE}","imageDigest":"$(remote_digest "${REGISTRATION_EXECUTOR_IMAGE}")"},
+    "comm-agent": {"version":"${VERSION}","image":"${COMM_AGENT_IMAGE}","imageDigest":"$(remote_digest "${COMM_AGENT_IMAGE}")"},
+    "velero": {"version":"${VELERO_VERSION}","image":"${VELERO_IMAGE}","imageDigest":"$(remote_digest "${VELERO_IMAGE}")"},
+    "velero-plugin-for-aws": {"version":"${PLUGIN_VERSION}","image":"${AWS_PLUGIN_IMAGE}","imageDigest":"$(remote_digest "${AWS_PLUGIN_IMAGE}")"},
+    "velero-plugin-for-microsoft-azure": {"version":"${PLUGIN_VERSION}","image":"${AZURE_PLUGIN_IMAGE}","imageDigest":"$(remote_digest "${AZURE_PLUGIN_IMAGE}")"},
+    "velero-plugin-for-gcp": {"version":"${PLUGIN_VERSION}","image":"${GCP_PLUGIN_IMAGE}","imageDigest":"$(remote_digest "${GCP_PLUGIN_IMAGE}")"}
+  }
+}
+EOF
+log "Complete release manifest generated: ${RELEASE_MANIFEST}"
+
 log "Generating versioned installer package"
-"${ROOT_DIR}/bootstrap/release-bootstrap.sh" "${VERSION}"
+HCDR_RELEASE_MANIFEST="${RELEASE_MANIFEST}" "${ROOT_DIR}/bootstrap/release-bootstrap.sh" "${VERSION}"
 
 if [[ "${SKIP_REGISTER}" == "true" ]]; then
   log "Skipping platform release registration"
@@ -234,20 +277,8 @@ else
   else
     curl_args+=(--insecure)
   fi
-  DATABASE_SCHEMA_VERSION="$(find "${ROOT_DIR}/backend/internal/migrations/sql" -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort | tail -n 1 | cut -d_ -f1)"
-  [[ -n "${DATABASE_SCHEMA_VERSION}" ]] || die "failed to determine database schema version"
-  curl "${curl_args[@]}" --data "{\"version\":\"${VERSION}\",\"databaseSchemaVersion\":\"${DATABASE_SCHEMA_VERSION}\",\"minimumAgentVersion\":\"v20260721.4\",\"rollbackSupported\":true,\"releaseNotes\":\"HyperCDR platform ${VERSION}\"}" >/dev/null
+  curl "${curl_args[@]}" --data-binary "@${RELEASE_MANIFEST}" >/dev/null
   log "Candidate release registered: ${VERSION}"
-
-  log "Registering comm-agent candidate ${VERSION} with ${PLATFORM_URL}"
-  component_curl_args=(-fsS --max-time 30 -X POST "${PLATFORM_URL%/}/api/v1/component-releases" -H "Content-Type: application/json" -H "X-HyperCDR-Release-Token: ${RELEASE_TOKEN}")
-  if [[ -n "${HCDR_PLATFORM_CA_FILE:-}" ]]; then
-    component_curl_args+=(--cacert "${HCDR_PLATFORM_CA_FILE}")
-  else
-    component_curl_args+=(--insecure)
-  fi
-  curl "${component_curl_args[@]}" --data "{\"component\":\"comm-agent\",\"version\":\"${VERSION}\",\"image\":\"${REGISTRY}/comm-agent:${VERSION}\",\"releaseNotes\":\"HyperCDR Comm Agent ${VERSION}\"}" >/dev/null
-  log "Comm-agent candidate registered: ${VERSION}"
 fi
 
 cat <<EOF

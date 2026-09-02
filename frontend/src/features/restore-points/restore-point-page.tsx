@@ -999,7 +999,7 @@ export default function RealRestorePointPage({
               toast(action.mode === 'drill' ? 'DR drill job submitted' : 'DR takeover job submitted');
               void load();
             } catch (error) {
-              toast('Failed to submit recovery task: ' + (error instanceof Error ? error.message : 'unknown error'));
+              throw error;
             } finally {
               setRecoverySubmitting(false);
             }

@@ -22,7 +22,7 @@ import (
 
 func TestAgentUpgradeReturnsPersistedQueuedTaskBeforeAsyncDispatch(t *testing.T) {
 	repo := store.NewMemoryStore()
-	if _, err := repo.UpsertComponentRelease(store.ComponentReleaseInput{Component: "comm-agent", Version: "v2", Image: "registry.example/hypercdr/comm-agent:v2", ImageDigest: "sha256:v2", Status: "active"}); err != nil {
+	if _, err := repo.UpsertPlatformRelease(store.PlatformReleaseInput{Version: "v2", APIImage: "registry.example/hypercdr/platform-api:v2", APIImageDigest: "sha256:api", FrontendImage: "registry.example/hypercdr/platform-frontend:v2", FrontendImageDigest: "sha256:frontend", Status: "active", ComponentManifest: map[string]store.ReleaseComponent{"comm-agent": {Version: "v2", Image: "registry.example/hypercdr/comm-agent:v2", ImageDigest: "sha256:v2"}}}); err != nil {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))

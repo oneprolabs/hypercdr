@@ -222,7 +222,7 @@ Download the generated package from the Bootstrap portal, then run:
   --execute
 ```
 
-The installer validates ports and images before mutation, creates TLS and persistent configuration, starts the control plane, and initializes the Registry, platform release, and active cluster-component release records in PostgreSQL.
+The installer validates ports and images before mutation, creates TLS and persistent configuration, starts the control plane, and activates the packaged immutable platform release manifest in PostgreSQL. That manifest is the only runtime source for new cluster installations and cluster-component upgrade targets.
 
 Persistent standalone data is stored under `/var/lib/hypercdr` by default.
 

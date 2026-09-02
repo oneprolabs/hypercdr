@@ -82,7 +82,7 @@ export HCDR_TLS_CERT_FILE="${HCDR_DEV_TLS_CERT_FILE}"
 export HCDR_TLS_KEY_FILE="${HCDR_DEV_TLS_KEY_FILE}"
 if [[ "${reuse_platform_postgres}" == "true" && -r "${HCDR_PLATFORM_DEPLOY_ENV}" ]]; then
   platform_secret="$(awk -F= '$1 == "HCDR_SECRET_KEY" {print substr($0,index($0,"=")+1); exit}' "${HCDR_PLATFORM_DEPLOY_ENV}")"
-  for setting_name in HCDR_IMAGE_REGISTRY HCDR_AGENT_IMAGE HCDR_VELERO_IMAGE HCDR_VELERO_AWS_PLUGIN_IMAGE HCDR_REGISTRY_CA_PATH HCDR_RELEASE_TOKEN; do
+  for setting_name in HCDR_IMAGE_REGISTRY HCDR_REGISTRY_CA_PATH HCDR_RELEASE_TOKEN; do
     setting_value="$(awk -F= -v key="${setting_name}" '$1 == key {print substr($0,index($0,"=")+1); exit}' "${HCDR_PLATFORM_DEPLOY_ENV}")"
     if [[ -n "${setting_value}" ]]; then
       printf -v "${setting_name}" '%s' "${setting_value}"
@@ -127,9 +127,6 @@ export HCDR_TLS_ENABLED=false
 export HCDR_TLS_CERT_FILE="${HCDR_DEV_TLS_CERT_FILE}"
 export HCDR_SECRET_KEY="${HCDR_SECRET_KEY}"
 export HCDR_IMAGE_REGISTRY="${HCDR_IMAGE_REGISTRY}"
-export HCDR_AGENT_IMAGE="${HCDR_AGENT_IMAGE}"
-export HCDR_VELERO_IMAGE="${HCDR_VELERO_IMAGE}"
-export HCDR_VELERO_AWS_PLUGIN_IMAGE="${HCDR_VELERO_AWS_PLUGIN_IMAGE}"
 export HCDR_REGISTRY_CA_PATH="${HCDR_REGISTRY_CA_PATH}"
 export HCDR_RELEASE_TOKEN="${HCDR_RELEASE_TOKEN:-}"
 exec "${BIN_DIR}/platform-api" >> "${LOG_DIR}/platform-api.log" 2>&1

@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 )
 
@@ -27,6 +28,50 @@ type ManifestStatusReader interface {
 type VolumeProgressReader interface {
 	GetBackupVolumeProgress(ctx context.Context, namespace string, backupName string) (VolumeProgress, error)
 	GetRestoreVolumeProgress(ctx context.Context, namespace string, restoreName string) (VolumeProgress, error)
+}
+
+type RestoreVolumeCanceler interface {
+	CancelRestoreVolumeOperations(ctx context.Context, namespace, restoreName string) error
+}
+
+func (a *DynamicManifestApplier) CancelRestoreVolumeOperations(ctx context.Context, namespace, restoreName string) error {
+	resources := []schema.GroupVersionResource{
+		{Group: "velero.io", Version: "v1", Resource: "podvolumerestores"},
+		{Group: "velero.io", Version: "v2alpha1", Resource: "datadownloads"},
+	}
+	for _, gvr := range resources {
+		items, err := a.client.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{LabelSelector: "velero.io/restore-name=" + restoreName})
+		if apierrors.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		for _, item := range items.Items {
+			if _, err := a.client.Resource(gvr).Namespace(namespace).Patch(ctx, item.GetName(), types.MergePatchType, []byte(`{"spec":{"cancel":true}}`), metav1.PatchOptions{}); err != nil && !apierrors.IsNotFound(err) {
+				return err
+			}
+		}
+	}
+	// A successful PATCH only means that cancellation was requested. Do not let
+	// the platform finalize the task while a node-agent operation is still
+	// writing data. Wait until every matching operation leaves its running state.
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		progress, err := a.GetRestoreVolumeProgress(ctx, namespace, restoreName)
+		if err != nil {
+			return err
+		}
+		if progress.RunningCount == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timed out confirming cancellation of restore %q: %w", restoreName, ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 type BackupObjectStatsReader interface {

@@ -8,6 +8,7 @@ SITE_SOURCE_DIR="${SCRIPT_DIR}/site"
 VERSION="${1:-}"
 BUILD_ROOT="${HCDR_BOOTSTRAP_BUILD_ROOT:-${RUNTIME_ROOT}/build/bootstrap}"
 PUBLISH_DIR="${HCDR_BOOTSTRAP_PUBLISH_DIR:-${RUNTIME_ROOT}/services/bootstrap-portal/source}"
+RELEASE_MANIFEST="${HCDR_RELEASE_MANIFEST:-${RUNTIME_ROOT}/build/releases/${VERSION}/release-manifest.json}"
 WORK_DIR="${BUILD_ROOT}/${VERSION:-unknown}"
 RELEASE_DIR="${PUBLISH_DIR}/releases/community"
 LEGACY_RELEASE_DIR="${PUBLISH_DIR}/releases/dev"
@@ -35,8 +36,8 @@ if [[ -z "${VERSION}" || "${VERSION}" == "-h" || "${VERSION}" == "--help" ]]; th
   exit 2
 fi
 
-if [[ ! "${VERSION}" =~ ^v[0-9]{8}\.[0-9]+$ ]]; then
-  echo "version must match vYYYYMMDD.N, got ${VERSION}" >&2
+if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ && ! "${VERSION}" =~ ^v[0-9]{8}\.[0-9]+$ ]]; then
+  echo "version must match MAJOR.MINOR.PATCH.YYYYMMDD, got ${VERSION}" >&2
   exit 2
 fi
 
@@ -65,10 +66,12 @@ mkdir -p "${package_dir}/config" "${package_dir}/scripts/lib"
 cp "${ROOT_DIR}/config/registries.conf" "${package_dir}/config/registries.conf"
 cp "${ROOT_DIR}/scripts/lib/registry-config.sh" "${package_dir}/scripts/lib/registry-config.sh"
 cp "${ROOT_DIR}/docker-compose.yml" "${package_dir}/compose.yaml"
+[[ -s "${RELEASE_MANIFEST}" ]] || { echo "complete release manifest is required: ${RELEASE_MANIFEST}" >&2; exit 1; }
+cp "${RELEASE_MANIFEST}" "${package_dir}/release-manifest.json"
 cp -R "${ROOT_DIR}/charts" "${package_dir}/charts"
 chmod +x "${package_dir}"/*.sh
 
-sed -i -E "s/v[0-9]{8}\.[0-9]+/${VERSION}/g" \
+sed -i -E "s/(v[0-9]{8}\.[0-9]+|[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8})/${VERSION}/g" \
   "${package_dir}/install-platform.sh" \
   "${package_dir}/check-harbor.sh" \
   "${package_dir}/compose.yaml" \

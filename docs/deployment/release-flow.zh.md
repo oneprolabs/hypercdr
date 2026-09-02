@@ -274,9 +274,6 @@ REGISTRY=192.168.8.149:5001/hypercdr
 
 PLATFORM_API_IMAGE=192.168.8.149:5001/hypercdr/platform-api:v20260714.5
 PLATFORM_FRONTEND_IMAGE=192.168.8.149:5001/hypercdr/platform-frontend:v20260714.5
-COMM_AGENT_IMAGE=192.168.8.149:5001/hypercdr/comm-agent:v20260714.5
-VELERO_IMAGE=192.168.8.149:5001/hypercdr/velero:v1.18.2-hcdr.2
-VELERO_AWS_PLUGIN_IMAGE=192.168.8.149:5001/hypercdr/velero-plugin-for-aws:v1.13.0
 ```
 
 后端环境变量：
@@ -285,12 +282,9 @@ VELERO_AWS_PLUGIN_IMAGE=192.168.8.149:5001/hypercdr/velero-plugin-for-aws:v1.13.
 HCDR_PUBLIC_BASE_URL=http://192.168.8.149:3002
 HCDR_AGENT_WS_ENDPOINT=ws://192.168.8.149:3002/ws/agent
 HCDR_IMAGE_REGISTRY=192.168.8.149:5001/hypercdr
-HCDR_AGENT_IMAGE=192.168.8.149:5001/hypercdr/comm-agent:v20260714.5
-HCDR_VELERO_IMAGE=192.168.8.149:5001/hypercdr/velero:v1.18.2-hcdr.2
-HCDR_VELERO_AWS_PLUGIN_IMAGE=192.168.8.149:5001/hypercdr/velero-plugin-for-aws:v1.13.0
 ```
 
-通过 bootstrap 页面安装时，页面中的镜像仓库输入框是该值的唯一来源。安装脚本会把它写入 `HCDR_IMAGE_REGISTRY`，并生成 `HCDR_AGENT_IMAGE`、`HCDR_VELERO_IMAGE`、`HCDR_VELERO_AWS_PLUGIN_IMAGE`。因此 Harbor 地址或端口变化时，只需要改页面输入值，不需要修改 Compose 模板。
+通过 bootstrap 页面安装时，发布包内的 `release-manifest.json` 包含平台及集群组件的完整镜像、版本和远端 digest。平台安装成功后激活该清单；新集群安装、Agent/Velero 升级目标均只读取活动清单，不再由运行期环境变量分别指定组件版本。
 
 如果前端 nginx 代理 `/ws/agent` 到后端，则 agent 对外连接 `ws://192.168.8.149:3002/ws/agent`。
 
@@ -357,14 +351,8 @@ agent 当前版本：
 
 agent 最新版本：
 
-- 来自平台后端配置，例如：
-
-```bash
-HCDR_AGENT_IMAGE=192.168.8.149:5001/hypercdr/comm-agent:v20260720.1
-HCDR_AGENT_VERSION=v20260720.1
-```
-
-或者来自后续发布记录表。
+- 来自当前活动平台版本不可变的 `componentManifest`。
+- 只有整体平台升级成功后，新清单才会成为活动版本；失败或回滚不会改变集群组件目标。
 
 ### 手动升级动作
 
