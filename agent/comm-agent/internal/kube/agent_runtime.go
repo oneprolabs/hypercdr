@@ -574,14 +574,7 @@ func (r *KubernetesAgentRuntime) ensureDaemonSetUpgradePermission(ctx context.Co
 		if containsString(rule.Verbs, "patch") && containsString(rule.Verbs, "update") {
 			return nil
 		}
-		if !containsString(rule.Verbs, "patch") {
-			rule.Verbs = append(rule.Verbs, "patch")
-		}
-		if !containsString(rule.Verbs, "update") {
-			rule.Verbs = append(rule.Verbs, "update")
-		}
-		_, err = r.client.RbacV1().ClusterRoles().Update(ctx, role, metav1.UpdateOptions{})
-		return err
+		return fmt.Errorf("%s ClusterRole apps/daemonsets rule requires patch and update", roleName)
 	}
 	return fmt.Errorf("%s ClusterRole has no apps/daemonsets rule", roleName)
 }
@@ -604,13 +597,7 @@ func (r *KubernetesAgentRuntime) ensureVeleroCRDUpgradePermission(ctx context.Co
 		if complete {
 			return nil
 		}
-		for _, verb := range []string{"create", "update", "patch"} {
-			if !containsString(rule.Verbs, verb) {
-				rule.Verbs = append(rule.Verbs, verb)
-			}
-		}
-		_, err = r.client.RbacV1().ClusterRoles().Update(ctx, role, metav1.UpdateOptions{})
-		return err
+		return fmt.Errorf("%s ClusterRole apiextensions.k8s.io/customresourcedefinitions rule requires create, patch, and update", roleName)
 	}
 	return fmt.Errorf("%s ClusterRole has no apiextensions.k8s.io/customresourcedefinitions rule", roleName)
 }

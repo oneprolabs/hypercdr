@@ -924,6 +924,7 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 		`"prepareQueueLength": 4`,
 		`"cachePVC"`,
 		"resources: [\"services\"]\n    verbs: [\"patch\", \"update\"]",
+		"resources: [\"customresourcedefinitions\"]\n    verbs: [\"get\", \"list\", \"watch\", \"create\", \"patch\", \"update\", \"delete\"]",
 		"kind: Deployment",
 		"type: Recreate",
 		"name: velero",

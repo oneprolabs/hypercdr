@@ -2,6 +2,7 @@ package kube
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -71,7 +72,7 @@ func TestVeleroRuntimeStatusRequiresEveryNodeAgentDigest(t *testing.T) {
 	nodeLabels := map[string]string{"app": "node-agent"}
 	client := fake.NewSimpleClientset(
 		&storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: "fast"}, Provisioner: "csi.example.test"},
-		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "hypercdr-agent"}, Rules: []rbacv1.PolicyRule{{APIGroups: []string{"apps"}, Resources: []string{"daemonsets"}, Verbs: []string{"get", "patch", "update"}}, {APIGroups: []string{"apiextensions.k8s.io"}, Resources: []string{"customresourcedefinitions"}, Verbs: []string{"get", "list", "watch", "delete"}}}},
+		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "hypercdr-agent"}, Rules: []rbacv1.PolicyRule{{APIGroups: []string{"apps"}, Resources: []string{"daemonsets"}, Verbs: []string{"get", "patch", "update"}}, {APIGroups: []string{"apiextensions.k8s.io"}, Resources: []string{"customresourcedefinitions"}, Verbs: []string{"get", "list", "watch", "create", "patch", "update", "delete"}}}},
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "velero", Namespace: "hypercdr-agent"}, Spec: appsv1.DeploymentSpec{Selector: &metav1.LabelSelector{MatchLabels: labels}, Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "velero", Image: "registry/velero:v1.17.1-hcdr.1"}}}}}, Status: appsv1.DeploymentStatus{Replicas: 1, UpdatedReplicas: 1, AvailableReplicas: 1}},
 		&appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "node-agent", Namespace: "hypercdr-agent"}, Spec: appsv1.DaemonSetSpec{Selector: &metav1.LabelSelector{MatchLabels: nodeLabels}}, Status: appsv1.DaemonSetStatus{DesiredNumberScheduled: 2, NumberReady: 2, UpdatedNumberScheduled: 2}},
 		readyPod("velero-1", labels, "velero", "registry/velero@sha256:target"),
@@ -135,8 +136,8 @@ func TestPrepareVeleroUpgradeUsesNamespaceScopedRBAC(t *testing.T) {
 	enterpriseRole := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{Name: scopedRBACName("hypercdr-agent", namespace)},
 		Rules: []rbacv1.PolicyRule{
-			{APIGroups: []string{"apps"}, Resources: []string{"daemonsets"}, Verbs: []string{"get"}},
-			{APIGroups: []string{"apiextensions.k8s.io"}, Resources: []string{"customresourcedefinitions"}, Verbs: []string{"get", "list", "watch"}},
+			{APIGroups: []string{"apps"}, Resources: []string{"daemonsets"}, Verbs: []string{"get", "patch", "update"}},
+			{APIGroups: []string{"apiextensions.k8s.io"}, Resources: []string{"customresourcedefinitions"}, Verbs: []string{"get", "list", "watch", "create", "patch", "update"}},
 		},
 	}
 	client := fake.NewSimpleClientset(communityRole, enterpriseRole)
@@ -155,8 +156,30 @@ func TestPrepareVeleroUpgradeUsesNamespaceScopedRBAC(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !containsString(enterpriseAfter.Rules[0].Verbs, "patch") || !containsString(enterpriseAfter.Rules[1].Verbs, "create") {
-		t.Fatalf("enterprise scoped RBAC was not prepared: %#v", enterpriseAfter.Rules)
+	if !reflect.DeepEqual(enterpriseAfter.Rules, enterpriseRole.Rules) {
+		t.Fatalf("enterprise scoped RBAC was unexpectedly modified: %#v", enterpriseAfter.Rules)
+	}
+}
+
+func TestPrepareVeleroUpgradeRejectsMissingPermissionsWithoutSelfEscalation(t *testing.T) {
+	role := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "hypercdr-agent"},
+		Rules: []rbacv1.PolicyRule{
+			{APIGroups: []string{"apps"}, Resources: []string{"daemonsets"}, Verbs: []string{"get", "patch", "update"}},
+			{APIGroups: []string{"apiextensions.k8s.io"}, Resources: []string{"customresourcedefinitions"}, Verbs: []string{"get", "list", "watch"}},
+		},
+	}
+	client := fake.NewSimpleClientset(role)
+	runtime := &KubernetesAgentRuntime{client: client}
+	if err := runtime.PrepareVeleroUpgrade(context.Background(), "hypercdr-agent"); err == nil {
+		t.Fatal("expected missing CRD mutation permissions to be rejected")
+	}
+	updated, err := client.RbacV1().ClusterRoles().Get(context.Background(), role.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(updated.Rules, role.Rules) {
+		t.Fatalf("permission check attempted self-escalation: %#v", updated.Rules)
 	}
 }
 
@@ -188,7 +211,7 @@ func TestUpgradeVeleroReconcilesProviderPlugins(t *testing.T) {
 	nodeLabels := map[string]string{"app": "node-agent"}
 	client := fake.NewSimpleClientset(
 		&storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: "fast"}, Provisioner: "csi.example.test"},
-		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "hypercdr-agent"}, Rules: []rbacv1.PolicyRule{{APIGroups: []string{"apps"}, Resources: []string{"daemonsets"}, Verbs: []string{"get", "patch", "update"}}, {APIGroups: []string{"apiextensions.k8s.io"}, Resources: []string{"customresourcedefinitions"}, Verbs: []string{"get", "list", "watch", "delete"}}}},
+		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "hypercdr-agent"}, Rules: []rbacv1.PolicyRule{{APIGroups: []string{"apps"}, Resources: []string{"daemonsets"}, Verbs: []string{"get", "patch", "update"}}, {APIGroups: []string{"apiextensions.k8s.io"}, Resources: []string{"customresourcedefinitions"}, Verbs: []string{"get", "list", "watch", "create", "patch", "update", "delete"}}}},
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "velero", Namespace: "hypercdr-agent"}, Spec: appsv1.DeploymentSpec{Selector: &metav1.LabelSelector{MatchLabels: labels}, Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "velero", Image: "old"}}, InitContainers: []corev1.Container{{Name: "velero-plugin-for-aws", Image: "old-plugin"}}}}}, Status: appsv1.DeploymentStatus{Replicas: 1, UpdatedReplicas: 1, AvailableReplicas: 1}},
 		&appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "node-agent", Namespace: "hypercdr-agent"}, Spec: appsv1.DaemonSetSpec{Selector: &metav1.LabelSelector{MatchLabels: nodeLabels}, Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "node-agent", Image: "old"}}}}}, Status: appsv1.DaemonSetStatus{DesiredNumberScheduled: 1, UpdatedNumberScheduled: 1, NumberReady: 1}},
 	)
