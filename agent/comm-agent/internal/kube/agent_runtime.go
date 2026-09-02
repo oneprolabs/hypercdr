@@ -568,8 +568,11 @@ func (r *KubernetesAgentRuntime) ensureDaemonSetUpgradePermission(ctx context.Co
 	}
 	for i := range role.Rules {
 		rule := &role.Rules[i]
-		if !containsString(rule.APIGroups, "apps") || !containsString(rule.Resources, "daemonsets") {
+		if !containsExactString(rule.APIGroups, "apps") || !containsExactString(rule.Resources, "daemonsets") {
 			continue
+		}
+		if containsString(rule.Verbs, "patch") && containsString(rule.Verbs, "update") {
+			return nil
 		}
 		if !containsString(rule.Verbs, "patch") {
 			rule.Verbs = append(rule.Verbs, "patch")
@@ -591,8 +594,15 @@ func (r *KubernetesAgentRuntime) ensureVeleroCRDUpgradePermission(ctx context.Co
 	}
 	for i := range role.Rules {
 		rule := &role.Rules[i]
-		if !containsString(rule.APIGroups, "apiextensions.k8s.io") || !containsString(rule.Resources, "customresourcedefinitions") {
+		if !containsExactString(rule.APIGroups, "apiextensions.k8s.io") || !containsExactString(rule.Resources, "customresourcedefinitions") {
 			continue
+		}
+		complete := true
+		for _, verb := range []string{"create", "update", "patch"} {
+			complete = complete && containsString(rule.Verbs, verb)
+		}
+		if complete {
+			return nil
 		}
 		for _, verb := range []string{"create", "update", "patch"} {
 			if !containsString(rule.Verbs, verb) {
@@ -603,6 +613,15 @@ func (r *KubernetesAgentRuntime) ensureVeleroCRDUpgradePermission(ctx context.Co
 		return err
 	}
 	return fmt.Errorf("%s ClusterRole has no apiextensions.k8s.io/customresourcedefinitions rule", roleName)
+}
+
+func containsExactString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func containsString(values []string, target string) bool {
