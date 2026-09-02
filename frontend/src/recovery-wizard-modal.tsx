@@ -362,7 +362,12 @@ export function RecoveryWizardModal(props: Props) {
 
   const updateMapping = (field: 'storageClassMappings' | 'imageMappings', source: string, target: string) => {
     const next = { ...(config[field] || {}) };
-    if (target.trim() && target.trim() !== source) next[source] = target.trim(); else delete next[source];
+    const normalized = target.trim();
+    // A cross-cluster drill requires an explicit StorageClass decision even
+    // when both clusters use the same class name. Keep that identity mapping
+    // in the request; only image mappings treat source === target as a no-op.
+    if (normalized && (field === 'storageClassMappings' || normalized !== source)) next[source] = normalized;
+    else delete next[source];
     updateConfig({ [field]: next } as Partial<RecoveryWizardConfig>);
   };
   const updateNodePort = (service: string, value: string) => {
