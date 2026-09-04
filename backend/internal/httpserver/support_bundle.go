@@ -155,7 +155,7 @@ func runRedactedCommand(args ...string) string {
 	return text
 }
 func runRedactedCommandWithKubeconfig(kubeconfig string, args ...string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "oc", args...)
 	cmd.Env = append(os.Environ(), "KUBECONFIG="+kubeconfig)
