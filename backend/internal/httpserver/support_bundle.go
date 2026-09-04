@@ -140,7 +140,7 @@ func (r *Router) collectSupportBundle(root string, hours int) {
 }
 
 func runRedactedCommand(args ...string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, args[0], args[1:]...).CombinedOutput()
 	text := redactSensitive(string(out))
@@ -150,7 +150,7 @@ func runRedactedCommand(args ...string) string {
 	return text
 }
 func runRedactedCommandWithKubeconfig(kubeconfig string, args ...string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "oc", args...)
 	cmd.Env = append(os.Environ(), "KUBECONFIG="+kubeconfig)
