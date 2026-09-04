@@ -88,6 +88,10 @@ func writeTextBytes(root, name string, content []byte) error {
 }
 
 func (r *Router) collectSupportBundle(root string, hours int) {
+	started := time.Now()
+	if r.logger != nil {
+		r.logger.Info("support bundle collection started", "log_window_hours", hours)
+	}
 	since := fmt.Sprintf("%dh", hours)
 	commands := map[string][]string{
 		"platform/docker-ps.txt":         {"docker", "ps", "-a"},
@@ -106,7 +110,15 @@ func (r *Router) collectSupportBundle(root string, hours int) {
 	for name, args := range commands {
 		name, args := name, args
 		wg.Add(1)
-		go func() { defer wg.Done(); _ = writeText(root, name, runRedactedCommand(args...)) }()
+		go func() {
+			defer wg.Done()
+			begin := time.Now()
+			output := runRedactedCommand(args...)
+			_ = writeText(root, name, output)
+			if r.logger != nil {
+				r.logger.Info("support bundle item collected", "item", name, "duration_ms", time.Since(begin).Milliseconds(), "failed", strings.Contains(output, "[command error]"))
+			}
+		}()
 	}
 	wg.Wait()
 	// Collect read-only cluster-side diagnostics when an operator has supplied a
@@ -135,7 +147,12 @@ func (r *Router) collectSupportBundle(root string, hours int) {
 				defer clusterWG.Done()
 				clusterSem <- struct{}{}
 				defer func() { <-clusterSem }()
-				_ = writeText(root, name, runRedactedCommandWithKubeconfig(kubeconfig, args...))
+				begin := time.Now()
+				output := runRedactedCommandWithKubeconfig(kubeconfig, args...)
+				_ = writeText(root, name, output)
+				if r.logger != nil {
+					r.logger.Info("support bundle cluster item collected", "item", name, "duration_ms", time.Since(begin).Milliseconds(), "failed", strings.Contains(output, "[command error]"))
+				}
 			}()
 		}
 		clusterWG.Wait()
@@ -152,6 +169,9 @@ func (r *Router) collectSupportBundle(root string, hours int) {
 		_ = writeBundleJSON(root, "diagnostic-logs.json", logs)
 	}
 	_ = writeText(root, "collection.txt", fmt.Sprintf("Collected by HyperCDR\nLog window: %dh\nSecrets and credentials were redacted or omitted.\nCluster-side Kubernetes/OpenShift resource details are included when the control plane has a current inventory snapshot.\n", hours))
+	if r.logger != nil {
+		r.logger.Info("support bundle collection completed", "duration_ms", time.Since(started).Milliseconds())
+	}
 }
 
 func runRedactedCommand(args ...string) string {
