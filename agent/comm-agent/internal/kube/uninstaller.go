@@ -93,14 +93,23 @@ func (u *KubernetesUninstaller) Uninstall(ctx context.Context, options Uninstall
 	if err := errors.Join(preSelfRemovalErrs...); err != nil {
 		return err
 	}
+	if options.Namespace == "openshift-adp" && u.dynamicClient != nil {
+		// CatalogSource is outside the dedicated namespace and therefore is not
+		// garbage-collected with the Subscription/DPA. Remove only HyperCDR's
+		// qualified catalog; never touch Red Hat's shared catalogs.
+		catalogs := u.dynamicClient.Resource(schema.GroupVersionResource{Group: "operators.coreos.com", Version: "v1alpha1", Resource: "catalogsources"}).Namespace("openshift-marketplace")
+		if err := catalogs.Delete(ctx, "hypercdr-oadp", metav1.DeleteOptions{}); ignoreNotFound(err) != nil {
+			return fmt.Errorf("delete HyperCDR OADP CatalogSource: %w", err)
+		}
+	}
 
 	var errs []error
 	if options.DeleteNamespace {
 		reportUninstallProgress(options, "namespace_deleting", "deleting the dedicated Agent namespace")
-		if err := u.attachAgentRBACOwnerReferences(ctx, options.Namespace); err != nil {
-			return err
-		}
 		if err := u.client.CoreV1().Namespaces().Delete(ctx, options.Namespace, metav1.DeleteOptions{}); ignoreNotFound(err) != nil {
+			errs = append(errs, err)
+		}
+		if err := u.deleteAgentClusterRBACWithOwnerCascade(ctx, options.Namespace); err != nil {
 			errs = append(errs, err)
 		}
 	} else {
@@ -122,33 +131,29 @@ func reportUninstallProgress(options UninstallOptions, stage, message string) {
 	}
 }
 
-func (u *KubernetesUninstaller) attachAgentRBACOwnerReferences(ctx context.Context, namespace string) error {
-	ns, err := u.client.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
-	if ignoreNotFound(err) != nil {
-		return err
-	}
-	if err != nil {
-		return nil
-	}
-	patch, err := json.Marshal(map[string]any{
-		"metadata": map[string]any{
-			"ownerReferences": []map[string]any{{
-				"apiVersion": "v1",
-				"kind":       "Namespace",
-				"name":       ns.Name,
-				"uid":        string(ns.UID),
-			}},
-		},
-	})
-	if err != nil {
-		return err
-	}
+func (u *KubernetesUninstaller) deleteAgentClusterRBACWithOwnerCascade(ctx context.Context, namespace string) error {
 	var errs []error
 	for _, name := range uninstallAgentClusterRBACNames(namespace) {
-		if _, err := u.client.RbacV1().ClusterRoles().Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{}); ignoreNotFound(err) != nil {
+		role, err := u.client.RbacV1().ClusterRoles().Get(ctx, name, metav1.GetOptions{})
+		if ignoreNotFound(err) != nil {
 			errs = append(errs, err)
+			continue
 		}
-		if _, err := u.client.RbacV1().ClusterRoleBindings().Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{}); ignoreNotFound(err) != nil {
+		if err != nil {
+			continue
+		}
+		patch, marshalErr := json.Marshal(map[string]any{"metadata": map[string]any{"ownerReferences": []map[string]any{{
+			"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRole", "name": role.Name, "uid": string(role.UID),
+		}}}})
+		if marshalErr != nil {
+			errs = append(errs, marshalErr)
+			continue
+		}
+		if _, err = u.client.RbacV1().ClusterRoleBindings().Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{}); ignoreNotFound(err) != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if err = u.client.RbacV1().ClusterRoles().Delete(ctx, name, metav1.DeleteOptions{}); ignoreNotFound(err) != nil {
 			errs = append(errs, err)
 		}
 	}

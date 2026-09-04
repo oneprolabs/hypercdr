@@ -18,6 +18,10 @@ type DynamicManifestApplier struct {
 	client dynamic.Interface
 }
 
+func (a *DynamicManifestApplier) RequireRWO(ctx context.Context, namespaces []string) error {
+	return NewKubernetesPVCAccessValidatorWithClient(a.client).RequireRWO(ctx, namespaces)
+}
+
 func NewDynamicManifestApplierWithClient(client dynamic.Interface) *DynamicManifestApplier {
 	return &DynamicManifestApplier{client: client}
 }
@@ -349,7 +353,33 @@ func (a *DynamicManifestApplier) CleanupStaleRestoreState(ctx context.Context, a
 	if err := a.deleteMatchingPodVolumeRestores(ctx, agentNamespace, restoreNames); err != nil {
 		return err
 	}
+	if err := a.deleteMatchingDataDownloads(ctx, agentNamespace, restoreNames); err != nil {
+		return err
+	}
 	return a.waitForRestoreStateCleanup(ctx, agentNamespace, restoreNames)
+}
+
+func (a *DynamicManifestApplier) deleteMatchingDataDownloads(ctx context.Context, agentNamespace string, restoreNames map[string]struct{}) error {
+	if len(restoreNames) == 0 {
+		return nil
+	}
+	resource := a.client.Resource(schema.GroupVersionResource{Group: "velero.io", Version: "v2alpha1", Resource: "datadownloads"}).Namespace(agentNamespace)
+	list, err := resource.List(ctx, v1.ListOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, item := range list.Items {
+		if !matchesPodVolumeRestoreCleanupTarget(item, restoreNames) {
+			continue
+		}
+		if err := resource.Delete(ctx, item.GetName(), v1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *DynamicManifestApplier) deleteMatchingRestores(ctx context.Context, agentNamespace string, sourceNamespace string, targetNamespace string, currentRestoreName string) (map[string]struct{}, error) {
@@ -404,12 +434,13 @@ func (a *DynamicManifestApplier) waitForRestoreStateCleanup(ctx context.Context,
 	}
 	restoreResource := a.client.Resource(schema.GroupVersionResource{Group: "velero.io", Version: "v1", Resource: "restores"}).Namespace(agentNamespace)
 	pvrResource := a.client.Resource(schema.GroupVersionResource{Group: "velero.io", Version: "v1", Resource: "podvolumerestores"}).Namespace(agentNamespace)
+	dataDownloadResource := a.client.Resource(schema.GroupVersionResource{Group: "velero.io", Version: "v2alpha1", Resource: "datadownloads"}).Namespace(agentNamespace)
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	timeout := time.NewTimer(2 * time.Minute)
 	defer timeout.Stop()
 	for {
-		pending, err := restoreCleanupPending(ctx, restoreResource, pvrResource, restoreNames)
+		pending, err := restoreCleanupPending(ctx, restoreResource, pvrResource, dataDownloadResource, restoreNames)
 		if err != nil {
 			return err
 		}
@@ -426,7 +457,7 @@ func (a *DynamicManifestApplier) waitForRestoreStateCleanup(ctx context.Context,
 	}
 }
 
-func restoreCleanupPending(ctx context.Context, restoreResource dynamic.ResourceInterface, pvrResource dynamic.ResourceInterface, restoreNames map[string]struct{}) (bool, error) {
+func restoreCleanupPending(ctx context.Context, restoreResource dynamic.ResourceInterface, pvrResource dynamic.ResourceInterface, dataDownloadResource dynamic.ResourceInterface, restoreNames map[string]struct{}) (bool, error) {
 	for name := range restoreNames {
 		_, err := restoreResource.Get(ctx, name, v1.GetOptions{})
 		if err == nil {
@@ -446,6 +477,17 @@ func restoreCleanupPending(ctx context.Context, restoreResource dynamic.Resource
 	for _, item := range pvrList.Items {
 		if matchesPodVolumeRestoreCleanupTarget(item, restoreNames) {
 			return true, nil
+		}
+	}
+	dataDownloadList, err := dataDownloadResource.List(ctx, v1.ListOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return false, err
+	}
+	if err == nil {
+		for _, item := range dataDownloadList.Items {
+			if matchesPodVolumeRestoreCleanupTarget(item, restoreNames) {
+				return true, nil
+			}
 		}
 	}
 	return false, nil
@@ -564,21 +606,25 @@ func (a *DynamicManifestApplier) DeleteVeleroBackupArtifacts(ctx context.Context
 	}
 	for _, target := range []struct {
 		key      string
+		version  string
 		resource string
 		match    func(unstructured.Unstructured) bool
 	}{
-		{key: "restores", resource: "restores", match: func(item unstructured.Unstructured) bool {
+		{key: "restores", version: "v1", resource: "restores", match: func(item unstructured.Unstructured) bool {
 			return restoreMatchesAnyBackup(item, backupSet)
 		}},
-		{key: "podVolumeBackups", resource: "podvolumebackups", match: func(item unstructured.Unstructured) bool {
+		{key: "podVolumeBackups", version: "v1", resource: "podvolumebackups", match: func(item unstructured.Unstructured) bool {
 			return itemLabelInSet(item, "velero.io/backup-name", backupSet)
 		}},
-		{key: "backups", resource: "backups", match: func(item unstructured.Unstructured) bool {
+		{key: "dataUploads", version: "v2alpha1", resource: "datauploads", match: func(item unstructured.Unstructured) bool {
+			return itemLabelInSet(item, "velero.io/backup-name", backupSet)
+		}},
+		{key: "backups", version: "v1", resource: "backups", match: func(item unstructured.Unstructured) bool {
 			_, ok := backupSet[item.GetName()]
 			return ok
 		}},
 	} {
-		names, err := a.deleteMatchingVeleroObjects(ctx, agentNamespace, target.resource, target.match)
+		names, err := a.deleteMatchingVeleroObjectsVersion(ctx, agentNamespace, target.version, target.resource, target.match)
 		if err != nil {
 			return deleted, err
 		}
@@ -596,6 +642,13 @@ func (a *DynamicManifestApplier) DeleteVeleroBackupArtifacts(ctx context.Context
 			return deleted, err
 		}
 		deleted["podVolumeRestores"] = names
+		names, err = a.deleteMatchingVeleroObjectsVersion(ctx, agentNamespace, "v2alpha1", "datadownloads", func(item unstructured.Unstructured) bool {
+			return matchesAnyRestoreName(item, restoreSet)
+		})
+		if err != nil {
+			return deleted, err
+		}
+		deleted["dataDownloads"] = names
 	}
 	return deleted, nil
 }
@@ -645,7 +698,11 @@ func (a *DynamicManifestApplier) DeleteBackupRepositories(ctx context.Context, a
 }
 
 func (a *DynamicManifestApplier) deleteMatchingVeleroObjects(ctx context.Context, agentNamespace string, resourceName string, match func(unstructured.Unstructured) bool) ([]string, error) {
-	resource := a.client.Resource(schema.GroupVersionResource{Group: "velero.io", Version: "v1", Resource: resourceName}).Namespace(agentNamespace)
+	return a.deleteMatchingVeleroObjectsVersion(ctx, agentNamespace, "v1", resourceName, match)
+}
+
+func (a *DynamicManifestApplier) deleteMatchingVeleroObjectsVersion(ctx context.Context, agentNamespace string, version string, resourceName string, match func(unstructured.Unstructured) bool) ([]string, error) {
+	resource := a.client.Resource(schema.GroupVersionResource{Group: "velero.io", Version: version, Resource: resourceName}).Namespace(agentNamespace)
 	list, err := resource.List(ctx, v1.ListOptions{})
 	if apierrors.IsNotFound(err) {
 		return nil, nil

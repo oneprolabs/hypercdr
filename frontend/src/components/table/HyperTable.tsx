@@ -54,7 +54,6 @@ export function HyperTable<TData>(props: HyperTableProps<TData>) {
     initialPageSize = 10,
     pageSizeOptions = [10, 20, 50],
     selectedCount,
-    resetPageOnDataChange = false,
   } = props;
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [pagination, setPagination] = React.useState<PaginationState>({
@@ -67,15 +66,16 @@ export function HyperTable<TData>(props: HyperTableProps<TData>) {
   }, [sorting]);
 
   React.useEffect(() => {
-    if (resetPageOnDataChange) {
-      setPagination(prev => ({ ...prev, pageIndex: 0 }));
-      return;
-    }
+    // Polling pages can briefly publish an empty data set while replacing an
+    // inventory snapshot. Preserve the user's page through that transition;
+    // a subsequent non-empty snapshot will still clamp a genuinely invalid
+    // page after rows are deleted.
+    if (data.length === 0) return;
     setPagination(prev => {
       const maxPageIndex = Math.max(0, Math.ceil(data.length / prev.pageSize) - 1);
       return prev.pageIndex > maxPageIndex ? { ...prev, pageIndex: maxPageIndex } : prev;
     });
-  }, [data.length, resetPageOnDataChange]);
+  }, [data.length]);
 
   const table = useReactTable({
     data,
@@ -87,6 +87,10 @@ export function HyperTable<TData>(props: HyperTableProps<TData>) {
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getPaginationRowModel: paginationEnabled ? getPaginationRowModel() : undefined,
+    // TanStack resets pageIndex whenever the data reference changes by
+    // default. HyperCDR refreshes many lists on a timer, so that behavior
+    // would unexpectedly move users back to page 1 on every poll.
+    autoResetPageIndex: false,
     columnResizeMode,
     defaultColumn: {
       enableSorting: true,

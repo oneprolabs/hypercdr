@@ -12,7 +12,7 @@ import { buildDRTopology, type DRRelationship } from './dr-topology';
 import DRTopologyView from './dr-topology-view';
 
 type ApiList<T>={items:T[]};
-type ClusterRegistrationType='native-kubernetes'|'huaweicloud-cce';
+type ClusterRegistrationType='native-kubernetes'|'huaweicloud-cce'|'openshift';
 type CCERegistrationMode='platform-direct'|'command';
 type CCEKubeconfigContext={name:string;cluster:string;user:string;apiServer:string;isCurrent:boolean};
 type CCEKubeconfigUpload={id:string;fingerprint:string;currentContext:string;contexts:CCEKubeconfigContext[];expiresAt:string};
@@ -91,6 +91,7 @@ export default function ClusterPage(props: {
   const { clusters, loading, protectionPlans, onLoadTopology, canUpgrade, defaultClusterId, clusterMenuId, setClusterMenuId, setSelectedCluster, setDefaultCluster, clearDefaultCluster, unregisterCluster, onRenameCluster, onUpgradeCluster, onUpgradeVelero, onRegisterCluster, onRefreshRegistration, clusterTaskLogs, getAgentTokenForRegistration, prefetchAgentToken, openDashboard, registrationAllowed = true, openLicenseManagement, toast } = props;
   const [registerOpen, setRegisterOpen] = useState(false);
   const [licenseGuideOpen, setLicenseGuideOpen] = useState(false);
+  const [openshiftKubeconfigGuideOpen, setOpenshiftKubeconfigGuideOpen] = useState(false);
   const [registrationType, setRegistrationType] = useState<ClusterRegistrationType>('native-kubernetes');
   const [cceRegistrationMode, setCCERegistrationMode] = useState<CCERegistrationMode>('platform-direct');
   const [cceUpload, setCCEUpload] = useState<CCEKubeconfigUpload | null>(null);
@@ -378,6 +379,10 @@ export default function ClusterPage(props: {
   };
 
   const closeRegister = () => {
+	if (cceRegistrationTask && ['queued', 'running', 'accepted', 'dispatched', 'canceling'].includes(cceRegistrationTask.status)) {
+	  toast('Registration is still running. Cancel it explicitly before closing this panel.');
+	  return;
+	}
     setRegisterOpen(false);
     setRegisterStep(1);
     setCopied(false);
@@ -396,7 +401,7 @@ export default function ClusterPage(props: {
       setCCEStorageClass(inspection.defaultStorageClass || (inspection.storageClasses.length === 1 ? inspection.storageClasses[0] : ''));
     } catch (error) {
       setCCEInspection(null);
-      setCCEUploadError(error instanceof Error ? error.message : 'CCE inspection failed.');
+      setCCEUploadError(error instanceof Error ? error.message : 'Cluster inspection failed.');
     } finally { setCCEInspectionLoading(false); }
   };
 
@@ -409,7 +414,7 @@ export default function ClusterPage(props: {
       setCCEIdempotencyKey(key);
       setCCERegistrationTask(await apiPost<ApiTask>('/api/v1/cluster-registrations/tasks', { sessionId: cceUpload.id, context: cceContext, storageClass: cceStorageClass, idempotencyKey: key, clusterType: registrationType }));
     } catch (error) {
-      setCCEUploadError(error instanceof Error ? error.message : 'CCE registration could not be started.');
+      setCCEUploadError(error instanceof Error ? error.message : 'Cluster registration could not be started.');
     } finally { setCCEInspectionLoading(false); }
   };
 
@@ -608,17 +613,6 @@ export default function ClusterPage(props: {
       window.clearInterval(timer);
     };
   }, [registerOpen, registerStep, registrationBaseline, onRefreshRegistration, setSelectedCluster, toast]);
-
-  useEffect(() => {
-    if (!registerOpen || registrationWaiting) return;
-    const latest = clusters.find(cluster => !registrationBaseline.includes(cluster.id));
-    if (!latest) return;
-    if (latest) {
-      setSelectedCluster(latest);
-      toast(`${latest.name === 'unknown-cluster' ? 'Cluster' : latest.name} registered and connected`);
-    }
-    closeRegister();
-  }, [clusters, registerOpen, registrationBaseline, registrationWaiting, setSelectedCluster, toast]);
 
   useEffect(() => {
     if (!unregisterTaskId) return;
@@ -1027,7 +1021,7 @@ export default function ClusterPage(props: {
                       <h4>Overview</h4>
                     </div>
                     <div className="hbdr-cluster-overview-grid">
-                      <div><span>Cluster Type</span><strong>{cluster.clusterType === 'huaweicloud-cce' ? 'Huawei Cloud CCE' : 'Native Kubernetes'}</strong></div>
+                      <div><span>Cluster Type</span><strong>{cluster.clusterType === 'huaweicloud-cce' ? 'Huawei Cloud CCE' : cluster.clusterType === 'openshift' ? 'OpenShift' : 'Native Kubernetes'}</strong></div>
                       <div><span>Cloud Region</span><strong>{cluster.cloudRegion || 'N/A'}</strong></div>
                       <div><span>Nodes</span><strong>{cluster.nodes}</strong></div>
                       <div><span>Namespaces</span><strong>{cluster.namespaces}</strong></div>
@@ -1127,6 +1121,28 @@ export default function ClusterPage(props: {
       </AnimatePresence>
 
       <AnimatePresence>
+        {openshiftKubeconfigGuideOpen && (
+          <div className="fixed inset-0 z-[245]">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setOpenshiftKubeconfigGuideOpen(false)} className="absolute inset-0 bg-slate-900/15" />
+            <motion.aside initial={{ opacity: 0, x: 34 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 34 }} className="hbdr-filter-drawer" role="dialog" aria-modal="true" aria-labelledby="openshift-kubeconfig-guide-title">
+              <div className="hbdr-filter-drawer-head"><div><strong id="openshift-kubeconfig-guide-title">Get an OpenShift kubeconfig</strong><span>Create a self-contained credential from an OpenShift administrator session.</span></div><button onClick={() => setOpenshiftKubeconfigGuideOpen(false)} aria-label="Close kubeconfig guide"><X size={18} /></button></div>
+              <div className="hbdr-filter-drawer-body space-y-4 text-sm leading-6 text-slate-600">
+                <ol className="space-y-4">
+                  <li><p className="text-xs font-bold uppercase tracking-wide text-slate-500">1. Get the login command</p><p className="mt-1">Sign in to the OpenShift Web Console. Open the user menu in the top-right, select <strong>Copy login command</strong>, authenticate again if prompted, then select <strong>Display Token</strong> and copy the complete <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">oc login</code> command.</p></li>
+                  <li><p className="text-xs font-bold uppercase tracking-wide text-slate-500">2. Log in from a Linux administration host</p><p className="mt-1">Use a host that has the <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">oc</code> CLI and can reach the OpenShift API. Run the copied command. If this lab cluster uses an untrusted certificate, add the option shown below.</p><pre className="mt-2 whitespace-pre-wrap break-all rounded-lg bg-slate-900 p-3 font-mono text-xs leading-5 text-blue-200">oc login --token=&lt;token&gt; --server=https://api.&lt;cluster-domain&gt;:6443 --insecure-skip-tls-verify=true</pre></li>
+                  <li><p className="text-xs font-bold uppercase tracking-wide text-slate-500">3. Verify the active administrator session</p><pre className="mt-2 whitespace-pre-wrap break-all rounded-lg bg-slate-900 p-3 font-mono text-xs leading-5 text-blue-200">oc whoami{`\n`}oc get nodes{`\n`}oc auth can-i create clusterroles.rbac.authorization.k8s.io</pre><p className="mt-1 text-xs">The final command must return <strong>yes</strong>. Use a cluster-admin account; project-only credentials cannot install OADP and HyperCDR.</p></li>
+                  <li><p className="text-xs font-bold uppercase tracking-wide text-slate-500">4. Export a self-contained kubeconfig</p><pre className="mt-2 whitespace-pre-wrap break-all rounded-lg bg-slate-900 p-3 font-mono text-xs leading-5 text-blue-200">oc config view --raw --minify --flatten &gt; hypercdr-openshift-kubeconfig.yaml{`\n`}chmod 600 hypercdr-openshift-kubeconfig.yaml</pre><p className="mt-1 text-xs">The file is created in the current directory. For example, when run as <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">core</code> from its home directory, the path is <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">/home/core/hypercdr-openshift-kubeconfig.yaml</code>.</p></li>
+                  <li><p className="text-xs font-bold uppercase tracking-wide text-slate-500">5. Verify and upload</p><pre className="mt-2 whitespace-pre-wrap break-all rounded-lg bg-slate-900 p-3 font-mono text-xs leading-5 text-blue-200">oc --kubeconfig ./hypercdr-openshift-kubeconfig.yaml whoami{`\n`}oc --kubeconfig ./hypercdr-openshift-kubeconfig.yaml get nodes</pre><p className="mt-1">Copy the YAML file to your workstation if necessary, then upload it in the registration panel and select the displayed context.</p></li>
+                </ol>
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">This file contains an administrator token. Store it securely and delete local copies after registration. A token-based kubeconfig stops working when its OpenShift token expires or is revoked.</p>
+              </div>
+              <div className="hbdr-filter-drawer-actions"><button onClick={() => setOpenshiftKubeconfigGuideOpen(false)}>Done</button></div>
+            </motion.aside>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {licenseGuideOpen && (
           <div className="fixed inset-0 z-[240]">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setLicenseGuideOpen(false)} className="absolute inset-0 bg-slate-900/15" />
@@ -1155,10 +1171,11 @@ export default function ClusterPage(props: {
                 <div className="space-y-4">
                   <section>
                     <div className="mb-2"><strong className="text-xs uppercase tracking-wide text-slate-500">1. Cluster type</strong><p className="mt-1 text-[11px] text-slate-500">Select the Kubernetes environment you want to register.</p></div>
-                    <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Cluster type">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Cluster type">
                     {([
                       ['native-kubernetes', 'Native Kubernetes', 'Self-managed Kubernetes cluster', Server],
                       ['huaweicloud-cce', 'Huawei Cloud CCE', 'Huawei-managed Kubernetes service', Cloud],
+                      ['openshift', 'OpenShift', 'Red Hat OpenShift 4.14 or 4.15 with OADP', Cloud],
                     ] as const).map(([value, label, description, Icon]) => <button key={value} type="button" role="radio" aria-checked={registrationType === value} disabled={installLoading} onClick={() => { if (registrationType !== value) resetDirectRegistration(); void loadRegistrationCommand(value); }} className={`relative flex min-h-20 items-start gap-3 rounded-xl border p-3 text-left transition ${registrationType === value ? 'border-blue-300 bg-blue-50/70 ring-1 ring-blue-100' : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-slate-50'}`}>
                       <span className={`mt-0.5 rounded-lg p-2 ${registrationType === value ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}><Icon size={16} /></span>
                       <span className="min-w-0"><strong className="block text-sm text-slate-800">{label}</strong><span className="mt-1 block text-[11px] leading-4 text-slate-500">{description}</span></span>
@@ -1171,7 +1188,7 @@ export default function ClusterPage(props: {
                   <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-1.5" role="radiogroup" aria-label="Registration method">
                     {([
                       ['platform-direct', 'Platform direct install', 'Upload a temporary kubeconfig'],
-                      ['command', 'Run installation command', registrationType === 'huaweicloud-cce' ? 'Use a Linux administration host' : 'Run on the control-plane node'],
+                      ['command', 'Run installation command', registrationType === 'native-kubernetes' ? 'Run on the control-plane node' : 'Use a Linux administration host'],
                     ] as const).map(([value, label, description]) => <button key={value} type="button" role="radio" aria-checked={cceRegistrationMode === value} onClick={() => setCCERegistrationMode(value)} className={`rounded-lg border px-3 py-2.5 text-left transition ${cceRegistrationMode === value ? 'border-blue-200 bg-white shadow-sm ring-1 ring-blue-100' : 'border-transparent text-slate-500 hover:bg-white/70'}`}>
                       <span className={`block text-sm font-bold ${cceRegistrationMode === value ? 'text-blue-700' : 'text-slate-700'}`}>{label}</span>
                       <span className="mt-0.5 block text-[11px] leading-4">{description}</span>
@@ -1182,7 +1199,7 @@ export default function ClusterPage(props: {
                     {registrationType === 'native-kubernetes' && <RegistrationStep number={1} title="Export an administrator kubeconfig" description="Run this on the control-plane node. It exports only the current context into a self-contained file.">
                       <pre className="whitespace-pre-wrap break-all rounded-lg bg-slate-900 p-3 font-mono text-[11px] leading-5 text-blue-200">kubectl config view --raw --minify --flatten &gt; hypercdr-native-kubeconfig.yaml</pre>
                     </RegistrationStep>}
-                    <RegistrationStep number={registrationType === 'native-kubernetes' ? 2 : 1} title={registrationType === 'huaweicloud-cce' ? 'Upload CCE kubeconfig' : 'Upload exported kubeconfig'} description="The credential is encrypted in transit and used only for this registration attempt.">
+                    <RegistrationStep number={registrationType === 'native-kubernetes' ? 2 : 1} title={registrationType === 'huaweicloud-cce' ? 'Upload CCE kubeconfig' : registrationType === 'openshift' ? 'Upload OpenShift kubeconfig' : 'Upload exported kubeconfig'} description="The credential is encrypted in transit and used only for this registration attempt.">
                       <div className="mb-3 flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] leading-4 text-emerald-800">
                         <CheckCircle2 size={14} className="mt-0.5 shrink-0" />
                         <span><strong className="block">Temporary file · automatically deleted</strong>The uploaded kubeconfig is permanently deleted when registration succeeds or fails, when you cancel, or when the temporary session expires. No manual cleanup is required.</span>
@@ -1193,6 +1210,7 @@ export default function ClusterPage(props: {
                         <span className="mt-1 text-[11px] text-slate-500">Maximum 1 MiB. External credential plugins are not executed.</span>
                         <input type="file" className="sr-only" accept=".yaml,.yml,.json,application/yaml,application/json" disabled={cceUploadLoading} onChange={event => void uploadCCEKubeconfig(event.target.files?.[0])} />
                       </label>
+                      {registrationType === 'openshift' && <button type="button" onClick={() => setOpenshiftKubeconfigGuideOpen(true)} className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-blue-700 underline decoration-blue-200 underline-offset-4 hover:text-blue-800">How do I get an OpenShift kubeconfig?</button>}
                       {cceUploadError && <p role="alert" className="mt-3 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-medium leading-5 text-rose-700">{cceUploadError}</p>}
                     </RegistrationStep>
                     <RegistrationStep number={registrationType === 'native-kubernetes' ? 3 : 2} title="Select Kubernetes context" description="Confirm the exact cluster that HyperCDR may inspect. No cluster resources are changed at this stage.">
@@ -1272,7 +1290,7 @@ export default function ClusterPage(props: {
                   <RegistrationStep
                     number={nextStep()}
                     title="Install HyperCDR agent"
-                    description={registrationType === 'huaweicloud-cce' ? 'Run this command on the host with access to the CCE cluster. The installer will verify the kubeconfig before making changes.' : 'Log in to the Kubernetes control-plane node and run this command.'}
+                    description={registrationType === 'huaweicloud-cce' ? 'Run this command on the host with access to the CCE cluster. The installer will verify the kubeconfig before making changes.' : registrationType === 'openshift' ? 'Run this command on a Linux administration host with cluster-admin access to OpenShift. Do not modify RHCOS nodes.' : 'Log in to the Kubernetes control-plane node and run this command.'}
                   >
                   {!installError && <div className="relative">
                     <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900 p-4 font-mono text-[11px] leading-5 text-blue-300 shadow-inner">
@@ -1305,8 +1323,12 @@ export default function ClusterPage(props: {
                   </>}
 
                   <div className="flex justify-end gap-3 pt-1">
-                    <button onClick={closeRegister} className="rounded-xl px-5 py-2 font-medium text-slate-600 transition-colors hover:bg-slate-50">Cancel</button>
-                    {(registrationType !== 'huaweicloud-cce' || cceRegistrationMode === 'command') && <button onClick={finishRegisterCluster} className="rounded-xl bg-emerald-600 px-6 py-2 font-bold text-white shadow-lg shadow-emerald-200 transition-all hover:bg-emerald-700 active:scale-95">Continue in Background</button>}
+					{cceRegistrationMode === 'command' ? <>
+					  <button onClick={closeRegister} className="rounded-xl px-5 py-2 font-medium text-slate-600 transition-colors hover:bg-slate-50">Cancel</button>
+					  <button onClick={finishRegisterCluster} className="rounded-xl bg-emerald-600 px-6 py-2 font-bold text-white shadow-lg shadow-emerald-200 transition-all hover:bg-emerald-700 active:scale-95">Continue in Background</button>
+					</> : cceRegistrationTask && ['succeeded', 'failed', 'canceled'].includes(cceRegistrationTask.status) ?
+					  <button onClick={closeRegister} className="rounded-xl bg-emerald-600 px-6 py-2 font-bold text-white shadow-lg shadow-emerald-200 transition-all hover:bg-emerald-700 active:scale-95">Done</button> :
+					  <button onClick={closeRegister} className="rounded-xl px-5 py-2 font-medium text-slate-600 transition-colors hover:bg-slate-50">Cancel</button>}
                   </div>
                 </div>
               </div>

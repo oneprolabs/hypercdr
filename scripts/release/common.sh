@@ -43,6 +43,17 @@ go_bin() {
     go="$(command -v "${go}" || true)"
   fi
   [[ -n "${go}" && -x "${go}" ]] || die "Go binary not found or not executable: ${HCDR_GO_BIN:-${DEFAULT_GO}}"
+  # Respect the toolchain selected by go.mod/go.work. The system go command may
+  # be a bootstrap toolchain (for example 1.24) while `go env GOROOT` points at
+  # an already installed, module-qualified toolchain (for example 1.25.13).
+  # Build commands intentionally use GOTOOLCHAIN=local after this resolution so
+  # a formal release never downloads a compiler halfway through a build.
+  local selected_goroot selected_go
+  selected_goroot="$("${go}" env GOROOT 2>/dev/null || true)"
+  selected_go="${selected_goroot}/bin/go"
+  if [[ -n "${selected_goroot}" && -x "${selected_go}" ]]; then
+    go="${selected_go}"
+  fi
   echo "${go}"
 }
 

@@ -104,6 +104,21 @@ test('marks sync finalization completed when persisted task outcome is successfu
   assert.deepEqual(groups.map(group => group.status), ['completed', 'completed', 'completed', 'completed']);
 });
 
+test('uses storage configuration stages for storage-sync tasks', () => {
+  const storageTask = { id: 'storage-task', type: 'storage-sync', status: 'failed', progress: 100, clusterId: 'source' };
+  const groups = groupTaskEventsByStage(storageTask, [
+    event('1', 'dispatched', '2026-08-26T01:00:00Z'),
+    event('2', 'accepted', '2026-08-26T01:00:01Z'),
+    { ...event('3', 'failed', '2026-08-26T01:00:02Z'), level: 'error' },
+  ]);
+  assert.deepEqual(groups.map(group => group.name), [
+    'Preparing Storage Configuration',
+    'Validating Object Storage',
+    'Completing DR Configuration',
+  ]);
+  assert.equal(groups.some(group => group.name.includes('Backup') || group.name.includes('Backing Up')), false);
+});
+
 test('timeline reveals stages only after execution reaches them', () => {
   const groups = groupTaskEventsByStage(task(), [
     event('1', 'accepted', '2026-08-26T01:00:00Z'),

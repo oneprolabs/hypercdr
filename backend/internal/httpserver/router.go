@@ -971,6 +971,13 @@ func (r *Router) listPlatformReleases(w http.ResponseWriter, req *http.Request) 
 	writeJSON(w, 200, map[string]any{"items": nonNilSlice(items)})
 }
 
+var requiredReleaseComponents = []string{
+	"platform-api", "platform-frontend", "platform-upgrader", "cluster-registration-executor",
+	"comm-agent", "velero", "velero-plugin-for-aws", "velero-plugin-for-microsoft-azure", "velero-plugin-for-gcp",
+	"oadp-comm-agent", "oadp-operator", "oadp-velero", "oadp-openshift-plugin", "oadp-aws-plugin",
+	"oadp-restore-helper", "oadp-bundle", "oadp-catalog",
+}
+
 func (r *Router) createPlatformRelease(w http.ResponseWriter, req *http.Request) {
 	var body struct {
 		Version, DatabaseSchemaVersion, MinimumAgentVersion, ReleaseNotes string
@@ -982,8 +989,7 @@ func (r *Router) createPlatformRelease(w http.ResponseWriter, req *http.Request)
 		return
 	}
 	manifest := body.ComponentManifest
-	required := []string{"platform-api", "platform-frontend", "platform-upgrader", "cluster-registration-executor", "comm-agent", "velero", "velero-plugin-for-aws", "velero-plugin-for-microsoft-azure", "velero-plugin-for-gcp"}
-	for _, name := range required {
+	for _, name := range requiredReleaseComponents {
 		component, ok := manifest[name]
 		if !ok || strings.TrimSpace(component.Version) == "" || strings.TrimSpace(component.Image) == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "release_manifest_incomplete", "message": "Release manifest is missing component " + name + "."})
@@ -1041,9 +1047,8 @@ func (r *Router) platformPrecheck(releaseID string) ([]map[string]any, bool, sto
 			offline++
 		}
 	}
-	requiredComponents := []string{"platform-api", "platform-frontend", "platform-upgrader", "cluster-registration-executor", "comm-agent", "velero", "velero-plugin-for-aws", "velero-plugin-for-microsoft-azure", "velero-plugin-for-gcp"}
 	manifestComplete := release.ID != ""
-	for _, name := range requiredComponents {
+	for _, name := range requiredReleaseComponents {
 		component, ok := release.ComponentManifest[name]
 		if !ok || component.Version == "" || component.Image == "" || !validImageDigest(component.ImageDigest) {
 			manifestComplete = false
@@ -1898,6 +1903,21 @@ func validImageDigest(value string) bool {
 	return true
 }
 
+func immutableImageReference(image, digest string) string {
+	image, digest = strings.TrimSpace(image), strings.TrimSpace(digest)
+	if image == "" || !validImageDigest(digest) {
+		return image
+	}
+	if at := strings.IndexByte(image, '@'); at >= 0 {
+		image = image[:at]
+	}
+	lastSlash := strings.LastIndexByte(image, '/')
+	if colon := strings.LastIndexByte(image, ':'); colon > lastSlash {
+		image = image[:colon]
+	}
+	return image + "@" + digest
+}
+
 func (r *Router) listClusters(w http.ResponseWriter, req *http.Request) {
 	clusters, err := r.store.ListClusters()
 	if err != nil {
@@ -1932,8 +1952,14 @@ func (r *Router) listClusters(w http.ResponseWriter, req *http.Request) {
 	if veleroTargetErr != nil {
 		r.logger.Warn("failed to load velero target release", "error", veleroTargetErr)
 	}
-	latestAgentVersion, latestAgentImage, latestAgentDigest := agentTarget.Version, agentTarget.Image, agentTarget.ImageDigest
-	latestVeleroImage, latestVeleroDigest := veleroTarget.Image, veleroTarget.ImageDigest
+	oadpAgentTarget, oadpAgentTargetErr := r.componentTarget(req.Context(), "oadp-comm-agent")
+	if oadpAgentTargetErr != nil {
+		r.logger.Warn("failed to load oadp-comm-agent target release", "error", oadpAgentTargetErr)
+	}
+	oadpVeleroTarget, oadpVeleroTargetErr := r.componentTarget(req.Context(), "oadp-velero")
+	if oadpVeleroTargetErr != nil {
+		r.logger.Warn("failed to load OADP Velero target release", "error", oadpVeleroTargetErr)
+	}
 	upgradeTaskFilter := store.TaskFilter{
 		Types:    []string{"agent-upgrade", "velero-upgrade"},
 		Statuses: []string{"queued", "dispatched", "accepted", "running", "syncing", "finalizing"},
@@ -1948,20 +1974,31 @@ func (r *Router) listClusters(w http.ResponseWriter, req *http.Request) {
 		r.logger.Warn("failed to load agent upgrade status", "error", taskErr)
 	}
 	for i := range clusters {
+		clusterAgentTarget, clusterVeleroTarget := agentTarget, veleroTarget
+		if normalizedClusterTypeForRouting(clusters[i].ClusterType) == "openshift" {
+			clusterAgentTarget, clusterVeleroTarget = oadpAgentTarget, oadpVeleroTarget
+		}
 		clusters[i].RestoreCachePolicy = deriveRestoreCachePolicy(clusters[i].StorageClasses)
 		if r.hub.has(clusters[i].ID) {
 			clusters[i].ConnectionStatus = "online"
 		} else {
 			clusters[i].ConnectionStatus = "offline"
 		}
-		clusters[i].LatestAgentVersion = latestAgentVersion
-		clusters[i].LatestAgentImage = latestAgentImage
-		clusters[i].LatestAgentImageDigest = latestAgentDigest
-		clusters[i].AgentUpgradeAvailable = agentUpgradeIsAvailable(clusters[i], agentTarget)
-		clusters[i].LatestVeleroVersion = veleroTarget.Version
-		clusters[i].LatestVeleroImage = latestVeleroImage
-		clusters[i].LatestVeleroImageDigest = latestVeleroDigest
-		clusters[i].VeleroUpgradeAvailable = veleroUpgradeIsAvailable(clusters[i], veleroTarget)
+		clusters[i].LatestAgentVersion = clusterAgentTarget.Version
+		clusters[i].LatestAgentImage = clusterAgentTarget.Image
+		clusters[i].LatestAgentImageDigest = clusterAgentTarget.ImageDigest
+		clusters[i].AgentUpgradeAvailable = agentUpgradeIsAvailable(clusters[i], clusterAgentTarget)
+		clusters[i].LatestVeleroVersion = clusterVeleroTarget.Version
+		clusters[i].LatestVeleroImage = clusterVeleroTarget.Image
+		clusters[i].LatestVeleroImageDigest = clusterVeleroTarget.ImageDigest
+		if strings.TrimSpace(clusters[i].VeleroVersion) == "" &&
+			strings.TrimSpace(clusters[i].VeleroImage) == immutableImageReference(clusterVeleroTarget.Image, clusterVeleroTarget.ImageDigest) {
+			// OADP relatedImages are intentionally deployed by digest, so the
+			// runtime cannot recover a human-readable tag from the Pod spec.
+			// The immutable reference proves which qualified release is running.
+			clusters[i].VeleroVersion = clusterVeleroTarget.Version
+		}
+		clusters[i].VeleroUpgradeAvailable = veleroUpgradeIsAvailable(clusters[i], clusterVeleroTarget)
 		for _, task := range upgradeTasks {
 			if task.ClusterID != clusters[i].ID || isTerminalTaskStatus(task.Status) {
 				continue
@@ -2028,11 +2065,12 @@ func agentUpgradeIsAvailable(cluster store.Cluster, target store.ComponentReleas
 func veleroUpgradeIsAvailable(cluster store.Cluster, target store.ComponentRelease) bool {
 	identityMatches := strings.TrimSpace(cluster.VeleroImage) == strings.TrimSpace(target.Image) &&
 		strings.TrimSpace(cluster.VeleroVersion) == strings.TrimSpace(target.Version)
+	immutableIdentityMatches := strings.TrimSpace(cluster.VeleroImage) == immutableImageReference(target.Image, target.ImageDigest)
 	digestMatches := strings.TrimSpace(target.ImageDigest) != "" &&
 		cluster.VeleroImageDigest == target.ImageDigest && cluster.VeleroNodeAgentImageDigest == target.ImageDigest
 	fullyReady := cluster.VeleroServerReady && cluster.VeleroNodeAgentDesired > 0 &&
 		cluster.VeleroNodeAgentReady == cluster.VeleroNodeAgentDesired
-	if (identityMatches || digestMatches) && fullyReady {
+	if (identityMatches || immutableIdentityMatches || digestMatches) && fullyReady {
 		return false
 	}
 	currentImage := strings.TrimSpace(cluster.VeleroImage)
@@ -2858,7 +2896,13 @@ func (r *Router) unregisterCluster(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	cleanupObjectStorage := audit.ObjectStorageNeeded && (audit.RestorePointCount == 0 || body.DeleteBackupData)
-	namespace := r.agentNamespace()
+	namespace := r.agentNamespaceForCluster(clusterID)
+	// OADP owns the Velero installation and cluster-scoped CRDs on OpenShift.
+	// Unregister the dedicated openshift-adp namespace, but never run the
+	// community Velero/CRD removal path against an operator-managed install.
+	if r.clusterType(clusterID) == "openshift" {
+		deleteVelero = false
+	}
 	commandID := store.NewPublicID()
 	task, err := r.store.CreateTask(store.TaskInput{
 		ClusterID: clusterID,
@@ -2960,6 +3004,16 @@ func (r *Router) cleanupAndDispatchUnregister(task store.Task, repositoryIDs []s
 }
 
 func (r *Router) upgradeClusterAgent(w http.ResponseWriter, req *http.Request) {
+	var input struct {
+		Repair bool `json:"repair"`
+	}
+	if req.Body != nil {
+		decoder := json.NewDecoder(io.LimitReader(req.Body, 1<<20))
+		if err := decoder.Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_request"})
+			return
+		}
+	}
 	clusterID := req.PathValue("id")
 	if clusterID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "cluster_id_required"})
@@ -2969,19 +3023,27 @@ func (r *Router) upgradeClusterAgent(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "cluster_not_found"})
 		return
 	}
-	target, targetErr := r.componentTarget(req.Context(), "comm-agent")
+	targetName := "comm-agent"
+	clusterType := r.clusterType(clusterID)
+	if clusterType == "openshift" {
+		targetName = "oadp-comm-agent"
+	}
+	target, targetErr := r.componentTarget(req.Context(), targetName)
 	if targetErr != nil || target.Image == "" {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "agent_image_not_configured", "message": "Target agent image is not configured"})
 		return
 	}
 	targetImage, targetDigest := target.Image, target.ImageDigest
+	if clusterType == "openshift" {
+		targetImage = immutableImageReference(targetImage, targetDigest)
+	}
 	clusters, err := r.store.ListClusters()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_clusters_failed"})
 		return
 	}
 	for _, cluster := range clusters {
-		if cluster.ID == clusterID && agentUpgradeTargetMatches(cluster, targetImage, target.Version, targetDigest) {
+		if !input.Repair && cluster.ID == clusterID && agentUpgradeTargetMatches(cluster, targetImage, target.Version, targetDigest) {
 			writeJSON(w, http.StatusConflict, map[string]any{"error": "agent_already_current", "message": "Comm Agent already uses the target image."})
 			return
 		}
@@ -3004,21 +3066,24 @@ func (r *Router) upgradeClusterAgent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	commandID := store.NewPublicID()
-	namespace := r.agentNamespace()
+	namespace := r.agentNamespaceForCluster(clusterID)
 	task, err := r.store.CreateTask(store.TaskInput{
 		ClusterID: clusterID,
 		Type:      "agent-upgrade",
 		Status:    "queued",
 		CommandID: commandID,
 		Payload: map[string]any{
-			"requestedBy":       requestActor(req),
-			"clusterId":         clusterID,
-			"namespace":         namespace,
-			"image":             targetImage,
-			"version":           target.Version,
-			"releaseId":         target.ID,
-			"expectedDigest":    targetDigest,
-			"deploymentName":    "hypercdr-comm-agent",
+			"operation":      map[bool]string{true: "repair", false: "upgrade"}[input.Repair],
+			"requestedBy":    requestActor(req),
+			"clusterId":      clusterID,
+			"namespace":      namespace,
+			"image":          targetImage,
+			"version":        target.Version,
+			"releaseId":      target.ID,
+			"expectedDigest": targetDigest,
+			"deploymentName": "hypercdr-comm-agent",
+			// Both provider deployments intentionally keep the same Kubernetes
+			// container contract; only the OpenShift image/binary is independent.
 			"containerName":     "comm-agent",
 			"rolloutAnnotation": time.Now().UTC().Format(time.RFC3339Nano),
 		},
@@ -3060,6 +3125,10 @@ func (r *Router) upgradeClusterVelero(w http.ResponseWriter, req *http.Request) 
 	}
 	if clusterID == "" || !found {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "cluster_not_found"})
+		return
+	}
+	if cluster.ClusterType == "openshift" {
+		r.upgradeOpenShiftOADP(w, req, cluster, input.Repair)
 		return
 	}
 	if cluster.VeleroImageDigest == "" || cluster.VeleroNodeAgentImageDigest == "" {
@@ -3112,12 +3181,19 @@ func (r *Router) upgradeClusterVelero(w http.ResponseWriter, req *http.Request) 
 	task, err := r.store.CreateTask(store.TaskInput{ClusterID: clusterID, Type: "velero-upgrade", Status: "queued", CommandID: store.NewPublicID(), Payload: map[string]any{
 		"requestedBy": requestActor(req),
 		"operation":   map[bool]string{true: "repair", false: "upgrade"}[input.Repair],
-		"clusterId":   clusterID, "namespace": r.agentNamespace(), "image": targetImage, "version": target.Version, "releaseId": target.ID,
+		"clusterId":   clusterID, "namespace": r.dataProtectionNamespaceForCluster(clusterID), "image": targetImage, "version": target.Version, "releaseId": target.ID,
 		"expectedDigest": targetDigest, "deploymentName": "velero", "daemonSetName": "node-agent",
 		"awsPluginImage": awsPlugin.Image, "azurePluginImage": azurePlugin.Image, "gcpPluginImage": gcpPlugin.Image,
 		"concurrentBackups": 2, "nodeAgentConcurrency": 2, "prepareQueueLength": 4,
 		"cacheStorageClass": cacheStorageClass, "cacheResidentThresholdMB": 1024, "cacheLimitMB": 5120,
-		"crdsUrl": strings.TrimRight(r.cfg.PublicBaseURL, "/") + veleroCRDsPath,
+		"crdsUrl": func() string {
+			// Packaging-only HyperCDR builds do not change the upstream Velero
+			// CRDs. Reapplying them can block an otherwise simple image repair.
+			if strings.HasPrefix(strings.TrimSpace(target.Version), strings.TrimSpace(cluster.VeleroVersion)) {
+				return ""
+			}
+			return strings.TrimRight(r.cfg.PublicBaseURL, "/") + veleroCRDsPath
+		}(),
 	}})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "create_task_failed"})
@@ -3129,6 +3205,47 @@ func (r *Router) upgradeClusterVelero(w http.ResponseWriter, req *http.Request) 
 	}
 	writeJSON(w, http.StatusAccepted, task)
 	go r.dispatchComponentUpgrade(conn, task, dispatchMessage)
+}
+
+func (r *Router) upgradeOpenShiftOADP(w http.ResponseWriter, req *http.Request, cluster store.Cluster, repair bool) {
+	veleroTarget, veleroErr := r.componentTarget(req.Context(), "oadp-velero")
+	catalogTarget, catalogErr := r.componentTarget(req.Context(), "oadp-catalog")
+	if veleroErr != nil || catalogErr != nil || strings.TrimSpace(veleroTarget.Image) == "" || strings.TrimSpace(catalogTarget.Image) == "" {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "oadp_release_manifest_incomplete", "message": "The active release must contain immutable oadp-velero and oadp-catalog targets."})
+		return
+	}
+	if !repair && !veleroUpgradeIsAvailable(cluster, veleroTarget) {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "oadp_already_current", "message": "OADP Velero and node-agent already use the target release."})
+		return
+	}
+	tasks, err := r.store.ListTasks(cluster.ID)
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "list_tasks_failed"})
+		return
+	}
+	blocked := map[string]bool{"backup": true, "restore": true, "drill": true, "takeover": true, "failback": true, "retention-cleanup": true, "protection-cleanup": true, "agent-upgrade": true, "velero-upgrade": true}
+	for _, task := range tasks {
+		if blocked[task.Type] && !isTerminalTaskStatus(task.Status) {
+			writeJSON(w, 409, map[string]any{"error": "cluster_task_active", "message": "Wait for active backup, restore, drill, cleanup, or upgrade tasks to finish before upgrading OADP."})
+			return
+		}
+	}
+	conn, ok := r.hub.get(cluster.ID)
+	if !ok {
+		writeJSON(w, 409, map[string]any{"error": "agent_offline", "message": "OpenShift agent is offline. Reconnect it before upgrading OADP."})
+		return
+	}
+	task, err := r.store.CreateTask(store.TaskInput{ClusterID: cluster.ID, Type: "velero-upgrade", Status: "queued", CommandID: store.NewPublicID(), Payload: map[string]any{
+		"requestedBy": requestActor(req), "operation": map[bool]string{true: "repair", false: "upgrade"}[repair], "clusterId": cluster.ID,
+		"namespace": "openshift-adp", "oadp": true, "catalogImage": immutableImageReference(catalogTarget.Image, catalogTarget.ImageDigest), "oadpPackage": "oadp-operator", "oadpChannel": "stable-1.3", "oadpTargetCsv": "oadp-operator.v1.3.10",
+		"image": immutableImageReference(veleroTarget.Image, veleroTarget.ImageDigest), "version": veleroTarget.Version, "releaseId": veleroTarget.ID, "expectedDigest": veleroTarget.ImageDigest,
+	}})
+	if err != nil {
+		writeJSON(w, 500, map[string]any{"error": "create_task_failed"})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, task)
+	go r.dispatchComponentUpgrade(conn, task, "OADP upgrade task dispatched to OpenShift agent")
 }
 
 func (r *Router) dispatchComponentUpgrade(conn *websocket.Conn, task store.Task, message string) {
@@ -3161,6 +3278,40 @@ func (r *Router) agentNamespace() string {
 		return r.cfg.AgentNamespace
 	}
 	return "hypercdr-agent"
+}
+
+func (r *Router) clusterType(clusterID string) string {
+	clusters, err := r.store.ListClusters()
+	if err != nil {
+		return ""
+	}
+	for _, cluster := range clusters {
+		if cluster.ID == clusterID {
+			return normalizedClusterTypeForRouting(cluster.ClusterType)
+		}
+	}
+	return ""
+}
+
+func normalizedClusterTypeForRouting(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func (r *Router) agentNamespaceForCluster(clusterID string) string {
+	if r.clusterType(clusterID) == "openshift" {
+		return "openshift-adp"
+	}
+	return r.agentNamespace()
+}
+
+// dataProtectionNamespaceForCluster resolves the namespace that owns the
+// Velero/OADP resources. It is intentionally separate from the agent
+// namespace even though both map to the same namespace in phase 1.
+func (r *Router) dataProtectionNamespaceForCluster(clusterID string) string {
+	if r.clusterType(clusterID) == "openshift" {
+		return "openshift-adp"
+	}
+	return r.agentNamespace()
 }
 
 func (r *Router) listApplications(w http.ResponseWriter, req *http.Request) {
@@ -3446,7 +3597,7 @@ func (r *Router) createAgentToken(w http.ResponseWriter, req *http.Request) {
 	// only for backward compatibility; generated commands must remain stable as
 	// more cluster providers are added.
 	installCommand += " --cluster-type " + clusterType
-	installCommand += " --namespace " + r.cfg.AgentNamespace +
+	installCommand += " --namespace " + r.agentNamespaceForType(clusterType) +
 		" --executor-mode kubernetes --install-registry-ca false"
 	response := map[string]any{
 		"id":             token.ID,
@@ -3462,10 +3613,18 @@ func (r *Router) createAgentToken(w http.ResponseWriter, req *http.Request) {
 }
 
 func storeClusterType(value string) string {
-	if strings.TrimSpace(value) == "huaweicloud-cce" {
-		return "huaweicloud-cce"
+	switch strings.TrimSpace(value) {
+	case "huaweicloud-cce", "openshift":
+		return strings.TrimSpace(value)
 	}
 	return "native-kubernetes"
+}
+
+func (r *Router) agentNamespaceForType(clusterType string) string {
+	if strings.TrimSpace(clusterType) == "openshift" {
+		return "openshift-adp"
+	}
+	return r.cfg.AgentNamespace
 }
 
 func (r *Router) validateAgentToken(w http.ResponseWriter, req *http.Request) {
@@ -3509,6 +3668,19 @@ func (r *Router) prepareNodeScript(w http.ResponseWriter, req *http.Request) {
 
 func (r *Router) installScript(w http.ResponseWriter, req *http.Request) {
 	agentTarget, agentErr := r.componentTarget(req.Context(), "comm-agent")
+	oadpAgentTarget, oadpAgentErr := r.componentTarget(req.Context(), "oadp-comm-agent")
+	oadpCatalogTarget, oadpCatalogErr := r.componentTarget(req.Context(), "oadp-catalog")
+	oadpRuntimeNames := []string{"oadp-bundle", "oadp-operator", "oadp-velero", "oadp-openshift-plugin", "oadp-aws-plugin", "oadp-restore-helper"}
+	oadpRuntimeImages := make([]string, 0, len(oadpRuntimeNames))
+	var oadpRuntimeErr error
+	for _, name := range oadpRuntimeNames {
+		target, err := r.componentTarget(req.Context(), name)
+		if err != nil || strings.TrimSpace(target.Image) == "" {
+			oadpRuntimeErr = fmt.Errorf("%s target unavailable: %w", name, err)
+			break
+		}
+		oadpRuntimeImages = append(oadpRuntimeImages, immutableImageReference(target.Image, target.ImageDigest))
+	}
 	veleroTarget, veleroErr := r.componentTarget(req.Context(), "velero")
 	awsTarget, awsErr := r.componentTarget(req.Context(), "velero-plugin-for-aws")
 	azureTarget, azureErr := r.componentTarget(req.Context(), "velero-plugin-for-microsoft-azure")
@@ -3518,6 +3690,17 @@ func (r *Router) installScript(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "component_target_unavailable", "message": "Active cluster component versions are not available."})
 		return
 	}
+	if oadpAgentErr != nil || strings.TrimSpace(oadpAgentTarget.Image) == "" {
+		// Backward-compatible fallback for an active release created before the
+		// OpenShift component was added. New releases publish it explicitly.
+		oadpAgentTarget.Image = strings.Replace(agentTarget.Image, "/comm-agent:", "/oadp-comm-agent:", 1)
+	}
+	if oadpCatalogErr != nil || strings.TrimSpace(oadpCatalogTarget.Image) == "" {
+		oadpCatalogTarget.Image = strings.Replace(agentTarget.Image, "/comm-agent:", "/oadp-catalog:", 1)
+	}
+	if oadpRuntimeErr != nil {
+		r.logger.Warn("active release does not contain a complete OADP runtime manifest", "error", oadpRuntimeErr)
+	}
 	modules, moduleErr := assembledInstallerModules()
 	if moduleErr != nil {
 		r.logger.Error("failed to assemble installer provider modules", "error", moduleErr)
@@ -3525,6 +3708,9 @@ func (r *Router) installScript(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	script := strings.ReplaceAll(installScriptTemplate, "{{AGENT_IMAGE}}", agentTarget.Image)
+	script = strings.ReplaceAll(script, "{{OADP_AGENT_IMAGE}}", immutableImageReference(oadpAgentTarget.Image, oadpAgentTarget.ImageDigest))
+	script = strings.ReplaceAll(script, "{{OADP_CATALOG_IMAGE}}", immutableImageReference(oadpCatalogTarget.Image, oadpCatalogTarget.ImageDigest))
+	script = strings.ReplaceAll(script, "{{OADP_RUNTIME_IMAGES}}", strings.Join(oadpRuntimeImages, " "))
 	script = strings.ReplaceAll(script, "{{INSTALLER_PROVIDER_MODULES}}", modules)
 	script = strings.ReplaceAll(script, "{{AGENT_NAMESPACE}}", r.cfg.AgentNamespace)
 	script = strings.ReplaceAll(script, "{{AGENT_WS_ENDPOINT}}", r.agentWSEndpoint(req))
@@ -4737,6 +4923,12 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 			Credentials:  storageCredentials(repo),
 			Config:       config,
 		}
+	case "schedule-sync":
+		command, err := r.scheduleSyncCommandFromPayload(task.Payload)
+		if err != nil {
+			return protocol.Message[protocol.TaskDispatchPayload]{}, err
+		}
+		payload.ScheduleSync = command
 	case "backup":
 		sourceNamespace := stringPayload(task.Payload, "sourceNamespace")
 		sourceNamespaces := stringSlicePayload(task.Payload, "sourceNamespaces")
@@ -4801,7 +4993,7 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 			payload.AgentUpgrade.ClusterID = task.ClusterID
 		}
 		if payload.AgentUpgrade.Namespace == "" {
-			payload.AgentUpgrade.Namespace = r.agentNamespace()
+			payload.AgentUpgrade.Namespace = r.agentNamespaceForCluster(task.ClusterID)
 		}
 		if payload.AgentUpgrade.Image == "" {
 			return protocol.Message[protocol.TaskDispatchPayload]{}, errors.New("agent upgrade image is required")
@@ -4809,7 +5001,10 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 	case "velero-upgrade":
 		payload.Deadline = time.Now().UTC().Add(15 * time.Minute)
 		payload.VeleroUpgrade = &protocol.VeleroUpgradeCommand{
-			ClusterID: task.ClusterID, Namespace: firstNonEmptyString(stringPayload(task.Payload, "namespace"), r.agentNamespace()),
+			OADP: boolPayload(task.Payload, "oadp"), CatalogImage: stringPayload(task.Payload, "catalogImage"),
+			OADPPackage: stringPayload(task.Payload, "oadpPackage"), OADPChannel: stringPayload(task.Payload, "oadpChannel"),
+			OADPTargetCSV: stringPayload(task.Payload, "oadpTargetCsv"),
+			ClusterID:     task.ClusterID, Namespace: firstNonEmptyString(stringPayload(task.Payload, "namespace"), r.dataProtectionNamespaceForCluster(task.ClusterID)),
 			Image: stringPayload(task.Payload, "image"), Version: stringPayload(task.Payload, "version"), ExpectedDigest: stringPayload(task.Payload, "expectedDigest"),
 			DeploymentName: stringPayload(task.Payload, "deploymentName"), DaemonSetName: stringPayload(task.Payload, "daemonSetName"),
 			AWSPluginImage: stringPayload(task.Payload, "awsPluginImage"), AzurePluginImage: stringPayload(task.Payload, "azurePluginImage"), GCPPluginImage: stringPayload(task.Payload, "gcpPluginImage"),
@@ -4829,32 +5024,44 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 			sourceNamespaces = []string{sourceNamespace}
 		}
 		payload.Restore = &protocol.RestoreCommand{
-			RestorePointID:          stringPayload(task.Payload, "restorePointId"),
-			VeleroBackupName:        stringPayload(task.Payload, "veleroBackupName"),
-			StorageRepo:             stringPayload(task.Payload, "storageRepo"),
-			SourceNamespace:         sourceNamespace,
-			SourceNamespaces:        sourceNamespaces,
-			TargetNamespace:         stringPayload(task.Payload, "targetNamespace"),
-			TargetNamespaces:        stringMapPayload(task.Payload, "targetNamespaces"),
-			TargetMode:              stringPayload(task.Payload, "targetMode"),
-			RestoreMode:             stringPayload(task.Payload, "restoreMode"),
-			ArtifactMode:            stringPayload(task.Payload, "artifactMode"),
-			ConflictPolicy:          stringPayload(task.Payload, "conflictPolicy"),
-			IncludeClusterScoped:    boolPayload(task.Payload, "includeClusterScoped"),
-			UseTransforms:           boolPayload(task.Payload, "useTransforms"),
-			TransformPreset:         stringPayload(task.Payload, "transformPreset"),
-			StorageProfileMode:      stringPayload(task.Payload, "storageProfileMode"),
-			AlternateProfileID:      stringPayload(task.Payload, "alternateProfileId"),
-			IncludedResources:       stringSlicePayload(task.Payload, "includedResources"),
-			ExcludedResources:       stringSlicePayload(task.Payload, "excludedResources"),
-			StorageClassMappings:    stringMapPayload(task.Payload, "storageClassMappings"),
-			ImageMappings:           stringMapPayload(task.Payload, "imageMappings"),
-			ServiceNodePortMappings: intMapPayload(task.Payload, "serviceNodePortMappings"),
-			WaitForWorkloads:        boolPayload(task.Payload, "waitForWorkloads"),
-			RunValidation:           boolPayload(task.Payload, "runValidation"),
-			ForceStart:              boolPayload(task.Payload, "forceStart"),
-			ContentCatalogLoaded:    boolPayload(task.Payload, "contentCatalogLoaded"),
-			PersistentDataExpected:  boolPayload(task.Payload, "persistentDataExpected"),
+			RestorePointID:             stringPayload(task.Payload, "restorePointId"),
+			VeleroBackupName:           stringPayload(task.Payload, "veleroBackupName"),
+			StorageRepo:                stringPayload(task.Payload, "storageRepo"),
+			SourceNamespace:            sourceNamespace,
+			SourceNamespaces:           sourceNamespaces,
+			TargetNamespace:            stringPayload(task.Payload, "targetNamespace"),
+			TargetNamespaces:           stringMapPayload(task.Payload, "targetNamespaces"),
+			TargetMode:                 stringPayload(task.Payload, "targetMode"),
+			RestoreMode:                stringPayload(task.Payload, "restoreMode"),
+			ArtifactMode:               stringPayload(task.Payload, "artifactMode"),
+			ConflictPolicy:             stringPayload(task.Payload, "conflictPolicy"),
+			IncludeClusterScoped:       boolPayload(task.Payload, "includeClusterScoped"),
+			UseTransforms:              boolPayload(task.Payload, "useTransforms"),
+			TransformPreset:            stringPayload(task.Payload, "transformPreset"),
+			StorageProfileMode:         stringPayload(task.Payload, "storageProfileMode"),
+			AlternateProfileID:         stringPayload(task.Payload, "alternateProfileId"),
+			IncludedResources:          stringSlicePayload(task.Payload, "includedResources"),
+			ExcludedResources:          stringSlicePayload(task.Payload, "excludedResources"),
+			StorageClassMappings:       stringMapPayload(task.Payload, "storageClassMappings"),
+			ImageMappings:              stringMapPayload(task.Payload, "imageMappings"),
+			ServiceNodePortMappings:    intMapPayload(task.Payload, "serviceNodePortMappings"),
+			WaitForWorkloads:           boolPayload(task.Payload, "waitForWorkloads"),
+			RunValidation:              boolPayload(task.Payload, "runValidation"),
+			ForceStart:                 boolPayload(task.Payload, "forceStart"),
+			ContentCatalogLoaded:       boolPayload(task.Payload, "contentCatalogLoaded"),
+			PersistentDataExpected:     boolPayload(task.Payload, "persistentDataExpected"),
+			ReadinessExpectationsKnown: boolPayload(task.Payload, "readinessExpectationsKnown"),
+			RuntimeWorkloadsExpected:   boolPayload(task.Payload, "runtimeWorkloadsExpected"),
+			ExpectedPVCs:               stringSlicePayload(task.Payload, "expectedPvcs"),
+		}
+		if !payload.Restore.ReadinessExpectationsKnown && task.RestorePointID != "" {
+			if point, ok, err := r.store.GetRestorePoint(task.RestorePointID); err == nil && ok {
+				if index, ready := restorePointContentIndex(point); ready && index.Status == "ready" && !index.Truncated {
+					payload.Restore.ReadinessExpectationsKnown = true
+					payload.Restore.RuntimeWorkloadsExpected, payload.Restore.ExpectedPVCs = readinessExpectationsFromCatalog(index.Resources, sourceNamespaces)
+					payload.Restore.ContentCatalogLoaded = true
+				}
+			}
 		}
 	case "unregister":
 		payload.Deadline = time.Now().UTC().Add(10 * time.Minute)
@@ -4869,7 +5076,7 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 			payload.Unregister.ClusterID = task.ClusterID
 		}
 		if payload.Unregister.Namespace == "" {
-			payload.Unregister.Namespace = r.agentNamespace()
+			payload.Unregister.Namespace = r.agentNamespaceForCluster(task.ClusterID)
 		}
 	case "control-plane-handover":
 		rollbackDeadline, err := time.Parse(time.RFC3339Nano, stringPayload(task.Payload, "rollbackDeadline"))
@@ -5119,7 +5326,8 @@ func (r *Router) scheduleSyncCommandFromPayload(payload map[string]any) (*protoc
 		SourceNamespace:         sourceNamespace,
 		SourceNamespaces:        sourceNamespaces,
 		Scope:                   stringPayload(payload, "scope"),
-		LabelSelector:           "",
+		IncludedResources:       stringSlicePayload(payload, "includedResources"),
+		Selector:                protocolLabelSelector(labelSelectorPayload(payload)),
 		StorageRepo:             repoName,
 		IncludeClusterResources: boolPayload(payload, "includeClusterResources"),
 		ExcludeResources:        excludeRules,
@@ -5468,7 +5676,7 @@ func (r *Router) createProtectionPlan(w http.ResponseWriter, req *http.Request) 
 		}
 		seenAppIDs[appID] = struct{}{}
 		if app, found, _ := r.store.GetApplication(appID); found && app.Namespace != "" {
-			if app.Namespace == r.agentNamespace() {
+			if app.Namespace == r.agentNamespaceForCluster(input.SourceClusterID) || app.Namespace == r.dataProtectionNamespaceForCluster(input.SourceClusterID) {
 				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "reserved_namespace", "message": "The HyperCDR Agent namespace cannot be protected as an application."})
 				return
 			}
@@ -5738,17 +5946,12 @@ func (r *Router) storageBindingActivationAction(clusterID string, storageRepoID 
 		return "wait", "storage binding is already being configured", nil
 	}
 	if strings.EqualFold(binding.Status, "failed") {
-		message := binding.LastErrorMessage
-		if message == "" {
-			message = binding.LastErrorCode
-		}
-		if message == "" {
-			message = "storage binding failed"
-		}
-		if role == "target" {
-			return "wait", message, nil
-		}
-		return "", "", errors.New(message)
+		// A failed binding describes the previous activation attempt. An explicit
+		// Retry must create and dispatch a fresh storage-sync task so a corrected
+		// environmental problem (for example clock skew or credentials) can
+		// recover. Returning the stored error here made the API acknowledge Retry
+		// without ever contacting the agent.
+		return "dispatch", "", nil
 	}
 	return "dispatch", "", nil
 }
@@ -6581,7 +6784,7 @@ func (r *Router) cleanupDrillTask(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	for _, namespace := range targetNamespaces {
-		if namespace == r.agentNamespace() || slices.Contains(sourceNamespaces, namespace) {
+		if namespace == r.agentNamespaceForCluster(drill.ClusterID) || namespace == r.dataProtectionNamespaceForCluster(drill.ClusterID) || slices.Contains(sourceNamespaces, namespace) {
 			writeJSON(w, http.StatusConflict, map[string]any{"error": "unsafe_drill_cleanup_target", "message": "Refusing to delete an agent or source namespace."})
 			return
 		}
@@ -6609,7 +6812,7 @@ func (r *Router) cleanupDrillTask(w http.ResponseWriter, req *http.Request) {
 			"planId":           drill.ProtectionPlanID,
 			"cleanupMode":      "drill",
 			"drillTaskId":      drill.ID,
-			"namespace":        r.agentNamespace(),
+			"namespace":        r.dataProtectionNamespaceForCluster(drill.ClusterID),
 			"sourceNamespaces": sourceNamespaces,
 			"drillNamespaces":  targetNamespaces,
 		},
@@ -7199,6 +7402,9 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 		ForceStart                 bool              `json:"forceStart"`
 		ContentCatalogLoaded       bool              `json:"contentCatalogLoaded"`
 		PersistentDataExpected     bool              `json:"persistentDataExpected"`
+		ReadinessExpectationsKnown bool              `json:"readinessExpectationsKnown"`
+		RuntimeWorkloadsExpected   bool              `json:"runtimeWorkloadsExpected"`
+		ExpectedPVCs               []string          `json:"expectedPvcs"`
 	}
 	if err := decodeJSON(req, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
@@ -7296,6 +7502,11 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 		}
 		if len(body.SourceNamespaces) == 0 {
 			body.SourceNamespaces = stringArrayFromAny(point.Metadata["includedNamespaces"])
+		}
+		if index, ready := restorePointContentIndex(point); ready && index.Status == "ready" && !index.Truncated {
+			body.ReadinessExpectationsKnown = true
+			body.RuntimeWorkloadsExpected, body.ExpectedPVCs = readinessExpectationsFromCatalog(index.Resources, body.SourceNamespaces)
+			body.ContentCatalogLoaded = true
 		}
 		if body.TargetNamespace == "" {
 			body.TargetNamespace = point.SourceNamespace
@@ -7416,6 +7627,9 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 			"forceStart":                 body.ForceStart,
 			"contentCatalogLoaded":       body.ContentCatalogLoaded,
 			"persistentDataExpected":     body.PersistentDataExpected,
+			"readinessExpectationsKnown": body.ReadinessExpectationsKnown,
+			"runtimeWorkloadsExpected":   body.RuntimeWorkloadsExpected,
+			"expectedPvcs":               body.ExpectedPVCs,
 		},
 	})
 	if err != nil {
@@ -10338,7 +10552,7 @@ func (r *Router) reconcileRetention(planID string, triggerTaskID string) {
 			"id":               point.ID,
 			"taskCreatedAt":    point.TaskCreatedAt,
 			"veleroBackupName": point.VeleroBackupName,
-			"namespace":        r.agentNamespace(),
+			"namespace":        r.dataProtectionNamespaceForCluster(plan.SourceClusterID),
 		})
 		_, _, _ = r.store.UpdateRestorePointState(store.RestorePointStateInput{
 			ID:     point.ID,
@@ -10422,7 +10636,7 @@ func (r *Router) createRestorePointDeleteTask(clusterID string, points []store.R
 			"id":               point.ID,
 			"taskCreatedAt":    point.TaskCreatedAt,
 			"veleroBackupName": point.VeleroBackupName,
-			"namespace":        r.agentNamespace(),
+			"namespace":        r.dataProtectionNamespaceForCluster(clusterID),
 		})
 	}
 	commandID := store.NewPublicID()
@@ -10529,7 +10743,7 @@ func (r *Router) createProtectionCleanupTask(plan store.ProtectionPlan) (store.T
 			"id":               point.ID,
 			"taskCreatedAt":    point.TaskCreatedAt,
 			"veleroBackupName": point.VeleroBackupName,
-			"namespace":        r.agentNamespace(),
+			"namespace":        r.dataProtectionNamespaceForCluster(plan.SourceClusterID),
 		})
 		_, _, _ = r.store.UpdateRestorePointState(store.RestorePointStateInput{
 			ID:     point.ID,
@@ -10551,7 +10765,7 @@ func (r *Router) createProtectionCleanupTask(plan store.ProtectionPlan) (store.T
 		"cleanupMode":            "source",
 		"scheduleName":           scheduleNameForPlan(plan.ID),
 		"backupNamePrefix":       scheduleNameForPlan(plan.ID),
-		"namespace":              r.agentNamespace(),
+		"namespace":              r.dataProtectionNamespaceForCluster(plan.SourceClusterID),
 		"sourceNamespaces":       sourceNamespaces,
 		"storageRepo":            storageName,
 		"storageRepoDisplayName": repo.Name,
@@ -10575,7 +10789,7 @@ func (r *Router) createProtectionCleanupTask(plan store.ProtectionPlan) (store.T
 			"cleanupRunId":           cleanupRunID,
 			"cleanupMode":            "target",
 			"backupNamePrefix":       scheduleNameForPlan(plan.ID),
-			"namespace":              r.agentNamespace(),
+			"namespace":              r.dataProtectionNamespaceForCluster(plan.TargetClusterID),
 			"sourceNamespaces":       sourceNamespaces,
 			"storageRepo":            storageName,
 			"storageRepoDisplayName": repo.Name,
@@ -11247,7 +11461,7 @@ func (r *Router) getRestorePointContents(w http.ResponseWriter, req *http.Reques
 	// Compatibility path for restore points created before content indexing
 	// was introduced. The successful result is persisted, so subsequent opens
 	// no longer depend on the source cluster or object storage.
-	report, status, err := r.requestBackupContents(clusterID, point.VeleroBackupName, r.cfg.AgentNamespace)
+	report, status, err := r.requestBackupContents(clusterID, point.VeleroBackupName, r.dataProtectionNamespaceForCluster(clusterID))
 	if err != nil {
 		r.persistRestorePointContentIndex(point, report, "failed", err.Error())
 		writeJSON(w, status, map[string]any{"error": "backup_contents_unavailable", "message": err.Error(), "errorCode": report.ErrorCode})
@@ -11266,6 +11480,37 @@ type restorePointIndex struct {
 	GeneratorVersion string                           `json:"generatorVersion,omitempty"`
 	LastError        string                           `json:"lastError,omitempty"`
 	RetryAt          time.Time                        `json:"retryAt,omitempty"`
+}
+
+func readinessExpectationsFromCatalog(resources []protocol.BackupResourceSummary, sourceNamespaces []string) (bool, []string) {
+	namespaces := map[string]struct{}{}
+	for _, namespace := range sourceNamespaces {
+		namespaces[strings.TrimSpace(namespace)] = struct{}{}
+	}
+	runtimeExpected := false
+	pvcs := []string{}
+	seenPVC := map[string]struct{}{}
+	for _, resource := range resources {
+		if resource.ClusterScoped {
+			continue
+		}
+		if len(namespaces) > 0 {
+			if _, included := namespaces[resource.Namespace]; !included {
+				continue
+			}
+		}
+		switch strings.ToLower(strings.TrimSpace(resource.Kind)) {
+		case "deployment", "statefulset", "daemonset", "deploymentconfig", "replicaset", "job", "cronjob":
+			runtimeExpected = true
+		case "persistentvolumeclaim":
+			if _, exists := seenPVC[resource.Name]; !exists && resource.Name != "" {
+				seenPVC[resource.Name] = struct{}{}
+				pvcs = append(pvcs, resource.Name)
+			}
+		}
+	}
+	slices.Sort(pvcs)
+	return runtimeExpected, pvcs
 }
 
 // Version 4 guarantees that cached catalogs were generated after JSON numeric
@@ -11379,7 +11624,7 @@ func (r *Router) scheduleRestorePointContentIndex(point store.RestorePoint) {
 			if delay > 0 {
 				time.Sleep(delay)
 			}
-			report, _, err := r.requestBackupContents(point.SourceClusterID, point.VeleroBackupName, r.cfg.AgentNamespace)
+			report, _, err := r.requestBackupContents(point.SourceClusterID, point.VeleroBackupName, r.dataProtectionNamespaceForCluster(point.SourceClusterID))
 			if err == nil {
 				r.persistRestorePointContentIndex(point, report, "ready", "")
 				r.logger.Info("restore point content index created", "restore_point_id", point.ID, "resources", len(report.Resources), "attempt", attempt+1)
@@ -11744,6 +11989,11 @@ TOKEN_VALIDATE_URL="{{TOKEN_VALIDATE_URL}}"
 AGENT_UNINSTALL_URL="{{AGENT_UNINSTALL_URL}}"
 NAMESPACE="{{AGENT_NAMESPACE}}"
 AGENT_IMAGE="{{AGENT_IMAGE}}"
+OADP_AGENT_IMAGE="{{OADP_AGENT_IMAGE}}"
+OADP_CATALOG_IMAGE="{{OADP_CATALOG_IMAGE}}"
+OADP_RUNTIME_IMAGES="{{OADP_RUNTIME_IMAGES}}"
+AGENT_COMMAND="/comm-agent"
+BACKUP_BACKEND="velero"
 VELERO_IMAGE="{{VELERO_IMAGE}}"
 VELERO_AWS_PLUGIN_IMAGE="{{VELERO_AWS_PLUGIN_IMAGE}}"
 VELERO_AZURE_PLUGIN_IMAGE="{{VELERO_AZURE_PLUGIN_IMAGE}}"
@@ -11760,6 +12010,9 @@ REGISTRY_PASSWORD=""
 REGISTRY_EMAIL="hypercdr@example.local"
 IMAGE_PULL_SECRET="hypercdr-registry"
 IMAGE_PULL_SECRETS_BLOCK=""
+AGENT_POD_SECURITY_CONTEXT_BLOCK=$'      securityContext:\n        fsGroup: 65532'
+AGENT_CONTAINER_SECURITY_CONTEXT_BLOCK=""
+AGENT_PLATFORM_RBAC_RULES=""
 RESET_AGENT_CREDENTIAL="true"
 SKIP_IMAGE_PREFLIGHT="false"
 IMAGE_PULL_PREFLIGHT="true"
@@ -11966,12 +12219,15 @@ fi
 if [[ -z "$ENDPOINT" && -z "$ENDPOINT_PRIVATE" && -z "$ENDPOINT_PUBLIC" ]]; then
   fail "Missing required argument: --endpoint" 2
 fi
-if [[ "$CLUSTER_TYPE" != "native-kubernetes" && "$CLUSTER_TYPE" != "huaweicloud-cce" ]]; then
-  fail "Unsupported --cluster-type '${CLUSTER_TYPE}'. Use native-kubernetes or huaweicloud-cce." 2
+if [[ "$CLUSTER_TYPE" != "native-kubernetes" && "$CLUSTER_TYPE" != "huaweicloud-cce" && "$CLUSTER_TYPE" != "openshift" ]]; then
+  fail "Unsupported --cluster-type '${CLUSTER_TYPE}'. Use native-kubernetes, huaweicloud-cce, or openshift." 2
 fi
 validate_registration_scenario
-if [[ "$NAMESPACE" != "hypercdr-agent" ]]; then
+if [[ "$CLUSTER_TYPE" != "openshift" && "$NAMESPACE" != "hypercdr-agent" ]]; then
   fail "HyperCDR uses the single canonical namespace 'hypercdr-agent'. Community and Enterprise Agent installations are identical; use the control-plane handover workflow to change editions." 2
+fi
+if [[ "$CLUSTER_TYPE" == "openshift" && "$NAMESPACE" != "openshift-adp" ]]; then
+  fail "OpenShift OADP Agent must use the canonical namespace 'openshift-adp'." 2
 fi
 if ! command -v curl >/dev/null 2>&1; then
   fail "curl is required but was not found in PATH"
@@ -11995,6 +12251,11 @@ if [[ -z "$ENDPOINT" ]]; then
 fi
 AGENT_RBAC_NAME="hypercdr-agent"
 VELERO_RBAC_NAME="hypercdr-velero"
+if [[ "$NAMESPACE" != "hypercdr-agent" ]]; then
+  namespace_rbac_suffix="$(printf '%s' "$NAMESPACE" | sha256sum | cut -c1-8)"
+  AGENT_RBAC_NAME="hypercdr-agent-${namespace_rbac_suffix}"
+  VELERO_RBAC_NAME="hypercdr-velero-${namespace_rbac_suffix}"
+fi
 print_install_summary
 
 log_section "Preflight checks"
@@ -12567,11 +12828,20 @@ spec:
   serviceAccountName: default
   automountServiceAccountToken: false
   restartPolicy: Never
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault
 ${IMAGE_PULL_SECRETS_BLOCK}
   containers:
     - name: image-check
       image: ${image}
       imagePullPolicy: IfNotPresent
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+        runAsNonRoot: true
 ${command_yaml}
 YAML
   local deadline=$((SECONDS + 90))
@@ -12676,6 +12946,7 @@ check_existing_velero_installation
 
 rollback_failed_registration() {
 	trap - ERR
+  provider_rollback_backup_backend
   [[ -z "${platform_ca_file:-}" ]] || rm -f "$platform_ca_file"
   log_warn "Rolling back changes because comm-agent registration did not complete"
   if [[ -n "${PREFLIGHT_NAMESPACE:-}" ]]; then
@@ -12765,6 +13036,7 @@ if [[ -n "$REGISTRY_SERVER" || -n "$REGISTRY_USERNAME" || -n "$REGISTRY_PASSWORD
   IMAGE_PULL_SECRETS_BLOCK=$'      imagePullSecrets:\n        - name: '"$IMAGE_PULL_SECRET"
   log_ok "Image pull secret ${IMAGE_PULL_SECRET} is ready"
 fi
+provider_install_backup_backend
 if [[ -n "$VELERO_CRDS_URL" ]]; then
   log_section "Velero CRDs"
   log_info "Installing Velero CRDs from ${VELERO_CRDS_URL}"
@@ -13104,6 +13376,7 @@ rules:
   - apiGroups: ["velero.io"]
     resources: ["backuprepositories", "backups", "backupstoragelocations", "datadownloads", "datauploads", "deletebackuprequests", "downloadrequests", "podvolumebackups", "podvolumerestores", "restores", "schedules", "serverstatusrequests", "volumesnapshotlocations"]
     verbs: ["get", "list", "watch", "create", "patch", "update", "delete"]
+${AGENT_PLATFORM_RBAC_RULES}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -13136,11 +13409,11 @@ spec:
         app.kubernetes.io/name: hypercdr-comm-agent
     spec:
       serviceAccountName: hypercdr-agent
-      securityContext:
-        fsGroup: 65532
+${AGENT_POD_SECURITY_CONTEXT_BLOCK}
 ${IMAGE_PULL_SECRETS_BLOCK}
       containers:
         - name: comm-agent
+${AGENT_CONTAINER_SECURITY_CONTEXT_BLOCK}
           image: ${AGENT_IMAGE}
           imagePullPolicy: Always
           envFrom:
@@ -13159,6 +13432,8 @@ ${IMAGE_PULL_SECRETS_BLOCK}
               value: "${EXECUTOR_MODE}"
             - name: HCDR_AGENT_IMAGE
               value: "${AGENT_IMAGE}"
+            - name: HCDR_BACKUP_BACKEND
+              value: "${BACKUP_BACKEND}"
             - name: HCDR_AGENT_VERSION
               value: "${AGENT_VERSION}"
             - name: HCDR_INVENTORY_MODE

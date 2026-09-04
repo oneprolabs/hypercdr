@@ -29,6 +29,12 @@ const SYNC_STAGE_DEFINITIONS = [
   { id: 'finalizing_sync', name: 'Finalizing Sync' },
 ];
 
+const STORAGE_SYNC_STAGE_DEFINITIONS = [
+  { id: 'preparing_storage', name: 'Preparing Storage Configuration' },
+  { id: 'validating_storage', name: 'Validating Object Storage' },
+  { id: 'finalizing_storage', name: 'Completing DR Configuration' },
+];
+
 export function keyTaskEvents(events: ApiTaskEvent[]): ApiTaskEvent[] {
   const result: ApiTaskEvent[] = [];
   let latestProgress: ApiTaskEvent | null = null;
@@ -69,9 +75,14 @@ function taskRecoveryStages(task: ApiTask, events: ApiTaskEvent[]): TaskStageSna
   }));
 }
 
-function taskEventStageId(event: ApiTaskEvent, recovery: boolean): string {
+function taskEventStageId(event: ApiTaskEvent, recovery: boolean, storageSync = false): string {
   const reason = String(event.reason || '').toLowerCase();
   const code = String(event.payload?.errorCode || event.payload?.code || '').toUpperCase();
+  if (storageSync) {
+    if (['completed', 'storage_sync_completed', 'storage_configured'].includes(reason)) return 'finalizing_storage';
+    if (['accepted', 'progress', 'storage_validation_started', 'storage_validation_succeeded'].includes(reason) || reason.includes('validation') || reason.includes('backup_storage_location')) return 'validating_storage';
+    return 'preparing_storage';
+  }
   if (!recovery) {
     if (reason === 'backup_completed') return 'creating_restore_point';
     if (['finalizing', 'completed'].includes(reason)) return 'finalizing_sync';
@@ -113,16 +124,18 @@ export function reachedTaskStages(groups: TaskStageGroup[]): TaskStageGroup[] {
 }
 
 export function groupTaskEventsByStage(task: ApiTask, events: ApiTaskEvent[]): TaskStageGroup[] {
-  const recovery = ['drill', 'restore', 'takeover'].includes(String(task.type || '').toLowerCase());
+  const taskType = String(task.type || '').toLowerCase();
+  const recovery = ['drill', 'restore', 'takeover'].includes(taskType);
+  const storageSync = taskType === 'storage-sync';
   const taskEvents = keyTaskEvents(events.filter(event => !event.taskId || event.taskId === task.id));
   const currentEvent = taskEvents.at(-1);
   const snapshots = recovery ? taskRecoveryStages(task, taskEvents) : [];
   const definitions = recovery
     ? RECOVERY_STAGE_DEFINITIONS.map(definition => snapshots.find(stage => stage.id === definition.id) || definition)
-    : SYNC_STAGE_DEFINITIONS;
+    : storageSync ? STORAGE_SYNC_STAGE_DEFINITIONS : SYNC_STAGE_DEFINITIONS;
   const eventMap = new Map(definitions.map(definition => [definition.id, [] as ApiTaskEvent[]]));
   taskEvents.forEach(event => {
-    const stageID = taskEventStageId(event, recovery);
+    const stageID = taskEventStageId(event, recovery, storageSync);
     (eventMap.get(stageID) || eventMap.get(definitions[0].id))?.push(event);
   });
   const snapshotCurrentStageID = recovery
@@ -133,7 +146,7 @@ export function groupTaskEventsByStage(task: ApiTask, events: ApiTaskEvent[]): T
   // the timeline backwards (which caused the status to flicker between
   // stages). Use the event stage first and only fall back to the snapshot when
   // no event identifies a stage.
-  const currentStageID = (currentEvent ? taskEventStageId(currentEvent, recovery) : '') || snapshotCurrentStageID;
+  const currentStageID = (currentEvent ? taskEventStageId(currentEvent, recovery, storageSync) : '') || snapshotCurrentStageID;
   const taskFailed = isFailedStatus(task.status);
   const taskActive = isActiveTaskStatus(task.status);
   const taskSucceeded = !taskActive && !taskFailed && ['succeeded', 'completed', 'success'].includes(String(task.status || '').toLowerCase());

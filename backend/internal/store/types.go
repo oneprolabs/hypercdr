@@ -573,7 +573,7 @@ func firstRequestedString(values []string) string {
 }
 
 func normalizedClusterType(value string) string {
-	if value == "huaweicloud-cce" {
+	if value == "huaweicloud-cce" || value == "openshift" {
 		return value
 	}
 	return "native-kubernetes"

@@ -18,6 +18,7 @@ var installerModuleOrder = []string{
 	"installers/provider-contract.sh",
 	"installers/native-kubernetes.sh",
 	"installers/huaweicloud-cce.sh",
+	"installers/openshift.sh",
 }
 
 func assembledInstallerModules() (string, error) {

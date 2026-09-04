@@ -47,6 +47,25 @@ func TestBuildBackupStorageLocationManifestMapsPathStyleConfig(t *testing.T) {
 	}
 }
 
+func TestBuildStorageManifestsUsesOpenShiftOADPNamespace(t *testing.T) {
+	manifests, err := BuildStorageManifests(StorageBuildInput{
+		TaskID: "task-oadp", CommandID: "command-oadp", AgentNamespace: "openshift-adp",
+		Command: protocol.StorageSyncCommand{Name: "aliyun-s3", Type: "S3-Compatible", Bucket: "hypercdr", SecretRef: "oadp-object-storage", Credentials: &protocol.S3Credentials{AccessKey: "access", SecretKey: "secret"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifests.BackupStorageLocation.Metadata.Namespace != "openshift-adp" {
+		t.Fatalf("BSL namespace = %q", manifests.BackupStorageLocation.Metadata.Namespace)
+	}
+	if manifests.Secret == nil || manifests.Secret.Metadata.Namespace != "openshift-adp" {
+		t.Fatalf("credential secret was not created in openshift-adp: %#v", manifests.Secret)
+	}
+	if manifests.BackupStorageLocation.Spec.Provider != "aws" {
+		t.Fatalf("provider = %q", manifests.BackupStorageLocation.Spec.Provider)
+	}
+}
+
 func TestBuildBackupStorageLocationManifestMapsVirtualHostStyleConfig(t *testing.T) {
 	manifest, err := BuildBackupStorageLocationManifest(StorageBuildInput{Command: protocol.StorageSyncCommand{
 		Name: "my-obs", Type: "S3-Compatible", Endpoint: "obs.cn-north-9.myhuaweicloud.com", Bucket: "backups", Region: "cn-north-9", TLSEnabled: true,

@@ -875,6 +875,8 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 	repo := store.NewMemoryStore()
 	if _, err := repo.UpsertPlatformRelease(store.PlatformReleaseInput{Version: "active", APIImage: "registry.local:5000/hypercdr/platform-api:active", APIImageDigest: "sha256:api", FrontendImage: "registry.local:5000/hypercdr/platform-frontend:active", FrontendImageDigest: "sha256:frontend", Status: "active", ComponentManifest: map[string]store.ReleaseComponent{
 		"comm-agent":                        {Version: "active", Image: "registry.local:5000/hypercdr/comm-agent:active", ImageDigest: "sha256:agent"},
+		"oadp-comm-agent":                   {Version: "active", Image: "registry.local:5000/hypercdr/oadp-comm-agent:active", ImageDigest: "sha256:oadp-agent"},
+		"oadp-catalog":                      {Version: "stable-1.3", Image: "registry.local:5000/hypercdr/oadp-catalog:stable-1.3", ImageDigest: "sha256:oadp-catalog"},
 		"velero":                            {Version: "v1.17.2", Image: "registry.local:5000/hypercdr/velero:v1.17.2", ImageDigest: "sha256:velero"},
 		"velero-plugin-for-aws":             {Version: "v1.13.0", Image: "registry.local:5000/hypercdr/velero-plugin-for-aws:v1.13.0", ImageDigest: "sha256:aws"},
 		"velero-plugin-for-microsoft-azure": {Version: "v1.13.0", Image: "registry.local:5000/hypercdr/velero-plugin-for-microsoft-azure:v1.13.0", ImageDigest: "sha256:azure"},
@@ -905,6 +907,8 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 	text := body.String()
 	for _, expected := range []string{
 		"registry.local:5000/hypercdr/comm-agent:active",
+		"registry.local:5000/hypercdr/oadp-comm-agent:active",
+		"registry.local:5000/hypercdr/oadp-catalog:stable-1.3",
 		`WAIT_TIMEOUT="300s"`,
 		"single canonical namespace 'hypercdr-agent'",
 		"Checking whether this cluster is already managed by HyperCDR",
@@ -1202,6 +1206,29 @@ func TestNativeAgentTokenInstallCommandUsesDualEndpoints(t *testing.T) {
 	}
 }
 
+func TestOpenShiftAgentTokenPreservesSelectedClusterType(t *testing.T) {
+	repo := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	cfg := config.Config{AgentNamespace: "hypercdr-agent", AgentPrivateWSEndpoint: "wss://10.0.0.10:3002/ws/agent"}
+	server := httptest.NewServer(NewRouter(cfg, logger, repo))
+	defer server.Close()
+	resp, err := http.Post(server.URL+"/api/v1/agent-tokens", "application/json", bytes.NewReader([]byte(`{"clusterType":"openshift"}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body struct{ ClusterType, InstallCommand string }
+	if err = json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.ClusterType != "openshift" || !strings.Contains(body.InstallCommand, "--cluster-type openshift") {
+		t.Fatalf("unexpected OpenShift registration response: %#v", body)
+	}
+	if !strings.Contains(body.InstallCommand, "--namespace openshift-adp") {
+		t.Fatalf("OpenShift registration must use openshift-adp namespace: %q", body.InstallCommand)
+	}
+}
+
 func TestInstallScriptDoesNotReplacePrimaryEndpointWithPublicFallback(t *testing.T) {
 	if strings.Contains(installScriptTemplate, `elif [[ -n "$ENDPOINT_PUBLIC" ]]; then ENDPOINT="$ENDPOINT_PUBLIC"`) {
 		t.Fatal("install script overwrites an explicit primary endpoint with the public fallback")
@@ -1374,6 +1401,73 @@ func TestBuildStoredUnregisterDispatch(t *testing.T) {
 		!dispatch.Payload.Unregister.DeleteVelero ||
 		!dispatch.Payload.Unregister.DeleteNamespace {
 		t.Fatalf("unexpected unregister dispatch: %#v", dispatch.Payload.Unregister)
+	}
+}
+
+func TestBuildStoredOADPUpgradeDispatch(t *testing.T) {
+	repo := store.NewMemoryStore()
+	task, err := repo.CreateTask(store.TaskInput{ClusterID: "openshift-a", Type: "velero-upgrade", Status: "queued", CommandID: store.NewPublicID(), Payload: map[string]any{
+		"namespace": "openshift-adp", "oadp": true, "catalogImage": "registry/oadp-catalog@sha256:catalog", "oadpPackage": "oadp-operator", "oadpChannel": "stable-1.3", "oadpTargetCsv": "oadp-operator.v1.3.10", "image": "registry/oadp-velero@sha256:velero", "version": "1.3.10", "expectedDigest": "sha256:velero",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := &Router{cfg: config.Config{AgentNamespace: "hypercdr-agent"}, store: repo}
+	dispatch, err := router.buildStoredTaskDispatch(task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := dispatch.Payload.VeleroUpgrade
+	if command == nil || !command.OADP || command.Namespace != "openshift-adp" || command.CatalogImage != "registry/oadp-catalog@sha256:catalog" || command.OADPPackage != "oadp-operator" || command.OADPChannel != "stable-1.3" || command.OADPTargetCSV != "oadp-operator.v1.3.10" {
+		t.Fatalf("unexpected OADP dispatch: %#v", command)
+	}
+}
+
+func TestBuildStoredScheduleSyncDispatch(t *testing.T) {
+	repo := store.NewMemoryStore()
+	task, err := repo.CreateTask(store.TaskInput{ClusterID: "cluster-a", Type: "schedule-sync", Status: "queued", CommandID: store.NewPublicID(), Payload: map[string]any{
+		"planId": "plan-a", "scheduleName": "hcdr-plan-a", "cron": "0 * * * *", "sourceNamespaces": []string{"demo"}, "storageRepo": "repo-a",
+		"includedResources": []string{"deployments.apps"}, "labelSelector": map[string]any{"matchLabels": map[string]any{"app": "demo"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := &Router{cfg: config.Config{AgentNamespace: "hypercdr-agent"}, store: repo}
+	dispatch, err := router.buildStoredTaskDispatch(task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dispatch.Payload.ScheduleSync == nil || dispatch.Payload.ScheduleSync.PlanID != "plan-a" || dispatch.Payload.ScheduleSync.SourceNamespaces[0] != "demo" {
+		t.Fatalf("unexpected schedule dispatch: %#v", dispatch.Payload.ScheduleSync)
+	}
+	command := dispatch.Payload.ScheduleSync
+	if len(command.IncludedResources) != 1 || command.IncludedResources[0] != "deployments.apps" || command.Selector.MatchLabels["app"] != "demo" {
+		t.Fatalf("schedule filters were not preserved: %#v", command)
+	}
+}
+
+func TestOpenShiftUsesOADPNamespace(t *testing.T) {
+	repo := store.NewMemoryStore()
+	token, err := repo.CreateAgentToken("tenant-a", "admin", "openshift", time.Hour, "openshift")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cluster, _, err := repo.RegisterCluster(store.RegisterClusterInput{Token: token.Token, ClusterType: "openshift", ClusterName: "ocp-415"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := &Router{cfg: config.Config{AgentNamespace: "hypercdr-agent"}, store: repo}
+	if got := router.agentNamespaceForCluster(cluster.ID); got != "openshift-adp" {
+		t.Fatalf("OpenShift agent namespace = %q", got)
+	}
+	if got := router.dataProtectionNamespaceForCluster(cluster.ID); got != "openshift-adp" {
+		t.Fatalf("OpenShift data protection namespace = %q", got)
+	}
+	if got := router.agentNamespaceForCluster("unknown"); got != "hypercdr-agent" {
+		t.Fatalf("native fallback namespace = %q", got)
+	}
+	if got := router.dataProtectionNamespaceForCluster("unknown"); got != "hypercdr-agent" {
+		t.Fatalf("native data protection namespace = %q", got)
 	}
 }
 

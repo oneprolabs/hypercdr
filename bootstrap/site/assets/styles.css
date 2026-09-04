@@ -327,6 +327,11 @@ h2 {
 .command-window { position: relative; }
 .command-copy { position: absolute; top: 7px; right: 9px; min-height: 28px; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.1); padding: 5px 9px; font-size: 10px; font-weight: 750; }
 .command-copy:hover { background: rgba(255,255,255,.18); }
+.command-copy:disabled { cursor: not-allowed; opacity: .45; }
+.prerequisite-confirm { margin: 16px 0; padding: 14px 16px; border: 1px solid #d5dde7; border-radius: 10px; background: #f8fafc; color: var(--ink); }
+.prerequisite-confirm p { margin: 5px 0 10px; color: var(--muted); font-size: 12px; }
+.prerequisite-confirm label { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 650; }
+.prerequisite-confirm input { width: 16px; height: 16px; margin: 0; }
 
 .panel {
   padding: 22px;
@@ -455,10 +460,17 @@ label small {
 }
 
 .optional {
-  margin-left: 5px;
+  margin-left: 4px;
   color: #7a8699;
   font-size: 10px;
   font-weight: 600;
+}
+
+.field-label {
+  display: inline-flex;
+  align-items: baseline;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .derived-url {

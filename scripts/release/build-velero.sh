@@ -8,7 +8,7 @@ source "${SCRIPT_DIR}/common.sh"
 REGISTRY="${HCDR_IMAGE_REGISTRY:-}"
 REGISTRY_CONFIG="${HCDR_REGISTRY_CONFIG:-${ROOT_DIR}/config/registries.conf}"
 REGISTRY_PROFILE="${HCDR_REGISTRY_PROFILE:-}"
-IMAGE_TAG="${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.3}"
+IMAGE_TAG="${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.4}"
 PUSH="false"
 
 while [[ $# -gt 0 ]]; do

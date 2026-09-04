@@ -69,7 +69,7 @@ func Load() Config {
 		ImageRegistry:                 imageRegistry,
 		AgentNamespace:                getEnv("HCDR_AGENT_NAMESPACE", "hypercdr-agent"),
 		VeleroVersion:                 getEnv("HCDR_VELERO_VERSION", "v1.18.2"),
-		VeleroImage:                   getEnv("HCDR_VELERO_IMAGE", defaultImage(imageRegistry, "velero:v1.18.2-hcdr.3")),
+		VeleroImage:                   getEnv("HCDR_VELERO_IMAGE", defaultImage(imageRegistry, "velero:v1.18.2-hcdr.4")),
 		VeleroAWSPlugin:               getEnv("HCDR_VELERO_AWS_PLUGIN_IMAGE", defaultImage(imageRegistry, "velero-plugin-for-aws:v1.13.0")),
 		VeleroAzurePlugin:             getEnv("HCDR_VELERO_AZURE_PLUGIN_IMAGE", defaultImage(imageRegistry, "velero-plugin-for-microsoft-azure:v1.13.0")),
 		VeleroGCPPlugin:               getEnv("HCDR_VELERO_GCP_PLUGIN_IMAGE", defaultImage(imageRegistry, "velero-plugin-for-gcp:v1.13.0")),

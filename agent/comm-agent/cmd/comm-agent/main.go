@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -26,7 +27,12 @@ func main() {
 	logger.Info("comm-agent starting",
 		"endpoint", cfg.PlatformEndpoint,
 		"namespace", cfg.Namespace,
+		"backup_backend", cfg.BackupBackend,
 	)
+	if err := validateClusterBackupBackend(cfg.ClusterType, cfg.BackupBackend); err != nil {
+		logger.Error("invalid cluster backup backend", "error", err)
+		os.Exit(1)
+	}
 	if cfg.PlatformPreflightOnly {
 		endpoint, err := wsclient.CheckPlatformConnectivity(cfg)
 		if err != nil {
@@ -171,6 +177,18 @@ func main() {
 		}
 		return
 	}
+}
+
+func validateClusterBackupBackend(clusterType, backupBackend string) error {
+	isOpenShift := strings.EqualFold(strings.TrimSpace(clusterType), "openshift")
+	isOADP := strings.EqualFold(strings.TrimSpace(backupBackend), "oadp")
+	if isOADP && !isOpenShift {
+		return fmt.Errorf("oadp backend requires an OpenShift cluster type")
+	}
+	if isOpenShift && !isOADP {
+		return fmt.Errorf("OpenShift cluster type requires the oadp backend")
+	}
+	return nil
 }
 
 func watchHandoverDeadline(ctx context.Context, logger *slog.Logger, manager kube.ControlPlaneHandoverManager, namespace string) {

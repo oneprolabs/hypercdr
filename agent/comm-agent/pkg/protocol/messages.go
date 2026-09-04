@@ -442,6 +442,11 @@ type AgentUpgradeCommand struct {
 }
 
 type VeleroUpgradeCommand struct {
+	OADP                     bool   `json:"oadp,omitempty"`
+	CatalogImage             string `json:"catalogImage,omitempty"`
+	OADPPackage              string `json:"oadpPackage,omitempty"`
+	OADPChannel              string `json:"oadpChannel,omitempty"`
+	OADPTargetCSV            string `json:"oadpTargetCsv,omitempty"`
 	ClusterID                string `json:"clusterId"`
 	Namespace                string `json:"namespace"`
 	Image                    string `json:"image"`
@@ -517,7 +522,9 @@ type ScheduleSyncCommand struct {
 	SourceNamespace         string            `json:"sourceNamespace"`
 	SourceNamespaces        []string          `json:"sourceNamespaces,omitempty"`
 	Scope                   string            `json:"scope"`
+	IncludedResources       []string          `json:"includedResources,omitempty"`
 	LabelSelector           string            `json:"labelSelector,omitempty"`
+	Selector                LabelSelector     `json:"selector,omitempty"`
 	StorageRepo             string            `json:"storageRepo"`
 	IncludeClusterResources bool              `json:"includeClusterResources"`
 	ExcludeResources        []ExcludeRule     `json:"excludeResources"`
@@ -551,32 +558,35 @@ type ProtectionCleanupCommand struct {
 }
 
 type RestoreCommand struct {
-	RestorePointID          string            `json:"restorePointId"`
-	VeleroBackupName        string            `json:"veleroBackupName"`
-	StorageRepo             string            `json:"storageRepo,omitempty"`
-	SourceNamespace         string            `json:"sourceNamespace"`
-	SourceNamespaces        []string          `json:"sourceNamespaces,omitempty"`
-	TargetNamespace         string            `json:"targetNamespace"`
-	TargetNamespaces        map[string]string `json:"targetNamespaces,omitempty"`
-	TargetMode              string            `json:"targetMode"`
-	RestoreMode             string            `json:"restoreMode"`
-	ArtifactMode            string            `json:"artifactMode"`
-	ConflictPolicy          string            `json:"conflictPolicy"`
-	IncludeClusterScoped    bool              `json:"includeClusterScoped"`
-	UseTransforms           bool              `json:"useTransforms"`
-	TransformPreset         string            `json:"transformPreset"`
-	StorageProfileMode      string            `json:"storageProfileMode"`
-	AlternateProfileID      string            `json:"alternateProfileId,omitempty"`
-	IncludedResources       []string          `json:"includedResources,omitempty"`
-	ExcludedResources       []string          `json:"excludedResources,omitempty"`
-	StorageClassMappings    map[string]string `json:"storageClassMappings,omitempty"`
-	ImageMappings           map[string]string `json:"imageMappings,omitempty"`
-	ServiceNodePortMappings map[string]int    `json:"serviceNodePortMappings,omitempty"`
-	WaitForWorkloads        bool              `json:"waitForWorkloads"`
-	RunValidation           bool              `json:"runValidation"`
-	ForceStart              bool              `json:"forceStart,omitempty"`
-	ContentCatalogLoaded    bool              `json:"contentCatalogLoaded,omitempty"`
-	PersistentDataExpected  bool              `json:"persistentDataExpected,omitempty"`
+	RestorePointID             string            `json:"restorePointId"`
+	VeleroBackupName           string            `json:"veleroBackupName"`
+	StorageRepo                string            `json:"storageRepo,omitempty"`
+	SourceNamespace            string            `json:"sourceNamespace"`
+	SourceNamespaces           []string          `json:"sourceNamespaces,omitempty"`
+	TargetNamespace            string            `json:"targetNamespace"`
+	TargetNamespaces           map[string]string `json:"targetNamespaces,omitempty"`
+	TargetMode                 string            `json:"targetMode"`
+	RestoreMode                string            `json:"restoreMode"`
+	ArtifactMode               string            `json:"artifactMode"`
+	ConflictPolicy             string            `json:"conflictPolicy"`
+	IncludeClusterScoped       bool              `json:"includeClusterScoped"`
+	UseTransforms              bool              `json:"useTransforms"`
+	TransformPreset            string            `json:"transformPreset"`
+	StorageProfileMode         string            `json:"storageProfileMode"`
+	AlternateProfileID         string            `json:"alternateProfileId,omitempty"`
+	IncludedResources          []string          `json:"includedResources,omitempty"`
+	ExcludedResources          []string          `json:"excludedResources,omitempty"`
+	StorageClassMappings       map[string]string `json:"storageClassMappings,omitempty"`
+	ImageMappings              map[string]string `json:"imageMappings,omitempty"`
+	ServiceNodePortMappings    map[string]int    `json:"serviceNodePortMappings,omitempty"`
+	WaitForWorkloads           bool              `json:"waitForWorkloads"`
+	RunValidation              bool              `json:"runValidation"`
+	ForceStart                 bool              `json:"forceStart,omitempty"`
+	ContentCatalogLoaded       bool              `json:"contentCatalogLoaded,omitempty"`
+	PersistentDataExpected     bool              `json:"persistentDataExpected,omitempty"`
+	ReadinessExpectationsKnown bool              `json:"readinessExpectationsKnown,omitempty"`
+	RuntimeWorkloadsExpected   bool              `json:"runtimeWorkloadsExpected,omitempty"`
+	ExpectedPVCs               []string          `json:"expectedPvcs,omitempty"`
 }
 
 type StorageSyncCommand struct {

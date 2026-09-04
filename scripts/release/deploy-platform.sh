@@ -65,7 +65,7 @@ REGISTRY="${REGISTRY%/}"
 REGISTRY_TRUST="${HCDR_REGISTRY_TRUST:-system}"
 REGISTRY_CA_SOURCE="${HCDR_REGISTRY_CA_FILE:-/dev/null}"
 if [[ -z "${VELERO_IMAGE}" ]]; then
-  VELERO_IMAGE="${REGISTRY}/velero:${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.3}"
+  VELERO_IMAGE="${REGISTRY}/velero:${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.4}"
 fi
 if [[ -z "${VELERO_AWS_PLUGIN_IMAGE}" ]]; then
   VELERO_AWS_PLUGIN_IMAGE="${REGISTRY}/velero-plugin-for-aws:v1.13.0"
@@ -76,10 +76,26 @@ if [[ "${POSTGRES_IMAGE}" == "postgres:16" ]]; then
   POSTGRES_IMAGE="${REGISTRY}/postgres:16"
 fi
 
-mkdir -p "${DEPLOY_DIR}/certs" "${DEPLOY_DIR}/data/postgres" "${DEPLOY_DIR}/logs"
+mkdir -p "${DEPLOY_DIR}/tls" "${DEPLOY_DIR}/data/postgres" "${DEPLOY_DIR}/logs"
+if [[ ! -s "${DEPLOY_DIR}/tls/platform.crt" || ! -s "${DEPLOY_DIR}/tls/platform.key" ]]; then
+  log "Generating a self-signed platform TLS certificate for ${HOST}"
+  openssl req -x509 -newkey rsa:3072 -nodes -days 825 \
+    -subj "/CN=${HOST}" -addext "subjectAltName=IP:${HOST}" \
+    -keyout "${DEPLOY_DIR}/tls/platform.key" -out "${DEPLOY_DIR}/tls/platform.crt" >/dev/null 2>&1
+  chmod 600 "${DEPLOY_DIR}/tls/platform.key"
+  chmod 644 "${DEPLOY_DIR}/tls/platform.crt"
+fi
 
 SECRET_KEY_FILE="${DEPLOY_DIR}/secret_key"
 if [[ ! -s "${SECRET_KEY_FILE}" ]]; then
+  # An existing database can contain credentials encrypted with the previous
+  # key. Silently generating a replacement makes every repository unreadable,
+  # so require operators to restore the original key instead.
+  if [[ -s "${DEPLOY_DIR}/data/postgres/PG_VERSION" ]]; then
+    echo "ERROR: ${SECRET_KEY_FILE} is missing while an existing PostgreSQL data directory is present." >&2
+    echo "Restore the original HyperCDR secret key before deploying; a new key would make stored repository credentials unreadable." >&2
+    exit 1
+  fi
   openssl rand -hex 32 > "${SECRET_KEY_FILE}"
   chmod 600 "${SECRET_KEY_FILE}"
 fi
@@ -96,6 +112,12 @@ if [[ ! -s "${REGISTRATION_EXECUTOR_TOKEN_FILE}" ]]; then
   chmod 600 "${REGISTRATION_EXECUTOR_TOKEN_FILE}"
 fi
 REGISTRATION_EXECUTOR_TOKEN="$(cat "${REGISTRATION_EXECUTOR_TOKEN_FILE}")"
+RELEASE_TOKEN_FILE="${DEPLOY_DIR}/release-token"
+if [[ ! -s "${RELEASE_TOKEN_FILE}" ]]; then
+  openssl rand -hex 32 > "${RELEASE_TOKEN_FILE}"
+  chmod 600 "${RELEASE_TOKEN_FILE}"
+fi
+RELEASE_TOKEN="$(tr -d '\r\n' < "${RELEASE_TOKEN_FILE}")"
 mkdir -p "${DEPLOY_DIR}/registration-sessions"
 chmod 700 "${DEPLOY_DIR}/registration-sessions"
 
@@ -120,8 +142,8 @@ POSTGRES_IMAGE=${POSTGRES_IMAGE}
 HCDR_POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 HCDR_DATABASE_URL=postgres://hypercdr:${POSTGRES_PASSWORD}@hypercdr-postgres:5432/hypercdr?sslmode=disable
 HCDR_HTTP_ADDR=0.0.0.0:18080
-HCDR_PUBLIC_BASE_URL=http://${HOST}:3002
-HCDR_AGENT_WS_ENDPOINT=ws://${HOST}:3002/ws/agent
+HCDR_PUBLIC_BASE_URL=https://${HOST}:3002
+HCDR_AGENT_WS_ENDPOINT=wss://${HOST}:3002/ws/agent
 HCDR_IMAGE_REGISTRY=${REGISTRY}
 HCDR_REGISTRY_PROFILE=${HCDR_SELECTED_REGISTRY:-custom}
 HCDR_REGISTRY_TRUST=${REGISTRY_TRUST}
@@ -130,6 +152,7 @@ HCDR_VELERO_AZURE_PLUGIN_IMAGE=${VELERO_AZURE_PLUGIN_IMAGE}
 HCDR_VELERO_GCP_PLUGIN_IMAGE=${VELERO_GCP_PLUGIN_IMAGE}
 HCDR_REGISTRY_CA_PATH=/etc/hypercdr/registry-ca.crt
 HCDR_SECRET_KEY=${SECRET_KEY}
+HCDR_RELEASE_TOKEN=${RELEASE_TOKEN}
 HCDR_REGISTRATION_EXECUTOR_TOKEN=${REGISTRATION_EXECUTOR_TOKEN}
 HCDR_REGISTRATION_TLS_INSECURE_SKIP_VERIFY=${HCDR_REGISTRATION_TLS_INSECURE_SKIP_VERIFY:-true}
 HCDR_TLS_ENABLED=false
@@ -177,6 +200,7 @@ services:
       HCDR_VELERO_GCP_PLUGIN_IMAGE: ${HCDR_VELERO_GCP_PLUGIN_IMAGE}
       HCDR_REGISTRY_CA_PATH: ${HCDR_REGISTRY_CA_PATH}
       HCDR_SECRET_KEY: ${HCDR_SECRET_KEY}
+      HCDR_RELEASE_TOKEN: ${HCDR_RELEASE_TOKEN}
       HCDR_TLS_ENABLED: ${HCDR_TLS_ENABLED}
       HCDR_LOG_LEVEL: ${HCDR_LOG_LEVEL}
       HCDR_DEPLOY_MODE: ${HCDR_DEPLOY_MODE}
@@ -203,6 +227,8 @@ services:
       - hypercdr-platform-api
     ports:
       - "3002:3002"
+    volumes:
+      - ./tls:/etc/hypercdr/tls:ro
     restart: unless-stopped
     logging:
       driver: local

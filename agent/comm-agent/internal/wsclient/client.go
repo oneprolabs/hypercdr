@@ -62,6 +62,7 @@ type Client struct {
 	applier        kube.ManifestApplier
 	deleteWaiter   kube.VeleroBackupDeletionWaiter
 	contentReader  kube.BackupContentReader
+	pvcValidator   kube.PVCAccessValidator
 	uninstaller    kube.Uninstaller
 	handover       kube.ControlPlaneHandoverManager
 	agentRuntime   interface {
@@ -114,6 +115,7 @@ func NewWithRuntimeDependencies(cfg config.Config, logger *slog.Logger, applier 
 	serviceMapper, _ := applier.(kube.ServiceNodePortMapper)
 	deleteWaiter, _ := applier.(kube.VeleroBackupDeletionWaiter)
 	contentReader, _ := applier.(kube.BackupContentReader)
+	pvcValidator, _ := applier.(kube.PVCAccessValidator)
 	outbox, err := newEventOutbox(cfg.StateDir)
 	if err != nil && logger != nil {
 		logger.Warn("failed to initialize event outbox; terminal events will not survive restart", "state_dir", cfg.StateDir, "error", err)
@@ -153,6 +155,7 @@ func NewWithRuntimeDependencies(cfg config.Config, logger *slog.Logger, applier 
 		applier:           applier,
 		deleteWaiter:      deleteWaiter,
 		contentReader:     contentReader,
+		pvcValidator:      pvcValidator,
 		uninstaller:       uninstaller,
 		handover:          handover,
 		agentRuntime:      agentRuntime,
@@ -695,6 +698,8 @@ func (c *Client) executeTask(task protocol.TaskDispatchPayload) {
 		c.executeRestoreTask(task)
 	case "storage-sync":
 		c.executeStorageSyncTask(task)
+	case "schedule-sync":
+		c.executeScheduleSyncTask(task)
 	case "retention-cleanup":
 		c.executeRetentionCleanupTask(task)
 	case "protection-cleanup":
@@ -710,6 +715,56 @@ func (c *Client) executeTask(task protocol.TaskDispatchPayload) {
 	default:
 		_ = c.sendTaskFailed(task, "TASK_UNSUPPORTED", "unsupported task type: "+task.Type)
 	}
+}
+
+func (c *Client) executeScheduleSyncTask(task protocol.TaskDispatchPayload) {
+	if task.ScheduleSync == nil {
+		_ = c.sendTaskFailed(task, "SCHEDULE_SYNC_COMMAND_INVALID", "schedule sync command is required")
+		return
+	}
+	if c.applier == nil {
+		_ = c.sendTaskFailed(task, "SCHEDULE_APPLIER_UNAVAILABLE", "Kubernetes manifest applier is not configured")
+		return
+	}
+	if strings.EqualFold(c.cfg.BackupBackend, "oadp") {
+		if err := validateOADPFullSchedule(*task.ScheduleSync); err != nil {
+			_ = c.sendTaskFailed(task, "OADP_FULL_BACKUP_REQUIRED", err.Error())
+			return
+		}
+	}
+	manifest, err := velero.BuildScheduleManifest(velero.ScheduleBuildInput{
+		TaskID: task.TaskID, CommandID: task.CommandID, SourceClusterID: c.cfg.ClusterID,
+		AgentNamespace: c.cfg.Namespace, Command: *task.ScheduleSync,
+	})
+	if err != nil {
+		_ = c.sendTaskFailed(task, "SCHEDULE_MANIFEST_INVALID", err.Error())
+		return
+	}
+	raw, err := kube.ManifestFromStruct(manifest)
+	if err != nil {
+		_ = c.sendTaskFailed(task, "SCHEDULE_MANIFEST_INVALID", err.Error())
+		return
+	}
+	if err := c.sendTaskAccepted(task); err != nil {
+		c.logger.Error("failed to send schedule sync accepted", "task_id", task.TaskID, "error", err)
+		return
+	}
+	object, err := c.applier.ApplyManifest(context.Background(), raw)
+	if err != nil {
+		_ = c.sendTaskFailed(task, "SCHEDULE_SUBMIT_FAILED", err.Error())
+		return
+	}
+	if err := c.sendTaskCompleted(task, manifestPayload(object.Kind, object.Name, object.Namespace), "Velero schedule synchronized"); err != nil {
+		c.logger.Error("failed to send schedule sync completed", "task_id", task.TaskID, "error", err)
+	}
+}
+
+func validateOADPFullSchedule(command protocol.ScheduleSyncCommand) error {
+	mode := strings.ToLower(strings.TrimSpace(command.ResourceSelection.Mode))
+	if (mode != "" && mode != "all") || len(command.IncludedResources) > 0 || strings.TrimSpace(command.LabelSelector) != "" || len(command.Selector.MatchLabels) > 0 || len(command.Selector.MatchExpressions) > 0 || len(command.ExcludeResources) > 0 {
+		return errors.New("OpenShift phase one supports full backups only; resource and label filters are not supported")
+	}
+	return nil
 }
 
 func (c *Client) executeControlPlaneHandoverTask(task protocol.TaskDispatchPayload) {
@@ -841,6 +896,17 @@ func (c *Client) executeVeleroUpgradeTask(task protocol.TaskDispatchPayload) {
 		return
 	}
 	command := task.VeleroUpgrade
+	if command.OADP {
+		_ = c.sendTaskProgress(task, map[string]any{"kind": "OADPUpgrade", "catalogImage": command.CatalogImage}, 15, "OADP upgrade accepted; updating the qualified OLM catalog")
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		defer cancel()
+		if err := c.agentRuntime.UpgradeOADP(ctx, kube.OADPUpgradeOptions{Namespace: command.Namespace, CatalogImage: command.CatalogImage, Package: command.OADPPackage, Channel: command.OADPChannel, TargetCSV: command.OADPTargetCSV}); err != nil {
+			_ = c.sendTaskFailedWithDetails(task, "OADP_UPGRADE_FAILED", "OADP Operator upgrade failed", map[string]any{"error": err.Error(), "catalogImage": command.CatalogImage})
+			return
+		}
+		_ = c.sendTaskCompleted(task, map[string]any{"kind": "OADPUpgrade", "image": command.Image, "expectedDigest": command.ExpectedDigest}, "OADP Operator, Velero, and node-agent rollout completed; waiting for heartbeat verification")
+		return
+	}
 	_ = c.sendTaskProgress(task, map[string]any{"kind": "VeleroUpgrade", "image": command.Image}, 15, "velero upgrade accepted; updating server and node agents")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -1001,6 +1067,24 @@ func (c *Client) executeBackupTask(task protocol.TaskDispatchPayload) {
 		_ = c.sendTaskFailed(task, "BACKUP_COMMAND_INVALID", "backup command is required")
 		return
 	}
+	if strings.EqualFold(c.cfg.BackupBackend, "oadp") {
+		if err := validateOADPFullBackup(*task.Backup); err != nil {
+			_ = c.sendTaskFailed(task, "OADP_FULL_BACKUP_REQUIRED", err.Error())
+			return
+		}
+		if c.pvcValidator == nil {
+			_ = c.sendTaskFailed(task, "OADP_RWO_CHECK_UNAVAILABLE", "OADP backup requires the PVC access-mode preflight")
+			return
+		}
+		namespaces := task.Backup.SourceNamespaces
+		if len(namespaces) == 0 && task.Backup.SourceNamespace != "" {
+			namespaces = []string{task.Backup.SourceNamespace}
+		}
+		if err := c.pvcValidator.RequireRWO(context.Background(), namespaces); err != nil {
+			_ = c.sendTaskFailedWithDetails(task, "OADP_UNSUPPORTED_PVC_ACCESS_MODE", err.Error(), map[string]any{"supportedAccessMode": "ReadWriteOnce"})
+			return
+		}
+	}
 	releasePlan, ok := c.acquireBackupPlan(task)
 	if !ok {
 		return
@@ -1082,6 +1166,18 @@ func (c *Client) executeBackupTask(task protocol.TaskDispatchPayload) {
 		c.logger.Error("failed to send task completed", "task_id", task.TaskID, "error", err)
 		return
 	}
+}
+
+func validateOADPFullBackup(command protocol.BackupCommand) error {
+	mode := strings.ToLower(strings.TrimSpace(command.ResourceSelection.Mode))
+	filtered := mode != "" && mode != "all"
+	filtered = filtered || len(command.ResourceSelection.NamespaceScoped) > 0 || len(command.ResourceSelection.ClusterScoped) > 0
+	filtered = filtered || len(command.IncludedResources) > 0 || len(command.ExcludedResources) > 0
+	filtered = filtered || len(command.LabelSelector.MatchLabels) > 0 || len(command.LabelSelector.MatchExpressions) > 0
+	if filtered {
+		return errors.New("OpenShift phase one supports full backups only; resource and label filters are not supported")
+	}
+	return nil
 }
 
 func (c *Client) executeBackupCancelTask(task protocol.TaskDispatchPayload) {
@@ -1299,6 +1395,12 @@ func (c *Client) executeRestoreTask(task protocol.TaskDispatchPayload) {
 		_ = c.sendTaskFailed(task, "RESTORE_COMMAND_INVALID", "restore command is required")
 		return
 	}
+	if strings.EqualFold(c.cfg.BackupBackend, "oadp") {
+		if err := validateOADPFullRestore(*task.Restore); err != nil {
+			_ = c.sendTaskFailed(task, "OADP_FULL_RESTORE_REQUIRED", err.Error())
+			return
+		}
+	}
 	if err := c.requireBackupStorageLocation(context.Background(), task.Restore.StorageRepo); err != nil {
 		_ = c.sendTaskFailedWithDetails(task, "BSL_NOT_READY", err.Error(), map[string]any{
 			"storageRepo": task.Restore.StorageRepo,
@@ -1378,6 +1480,15 @@ func (c *Client) executeRestoreTask(task protocol.TaskDispatchPayload) {
 	}
 }
 
+func validateOADPFullRestore(command protocol.RestoreCommand) error {
+	artifactMode := strings.ToLower(strings.TrimSpace(command.ArtifactMode))
+	restoreMode := strings.ToLower(strings.TrimSpace(command.RestoreMode))
+	if (artifactMode != "" && artifactMode != "all") || (restoreMode != "" && restoreMode != "full") || len(command.IncludedResources) > 0 || len(command.ExcludedResources) > 0 {
+		return errors.New("OpenShift phase one supports full Drill restores only; artifact and resource filters are not supported")
+	}
+	return nil
+}
+
 func restoreSubmitErrorCode(err error) string {
 	if err != nil && strings.Contains(strings.ToLower(err.Error()), "timed out waiting for stale restore state to be deleted") {
 		return "RESTORE_STALE_STATE_CLEANUP_TIMEOUT"
@@ -1388,6 +1499,10 @@ func restoreSubmitErrorCode(err error) string {
 func (c *Client) executeStorageSyncTask(task protocol.TaskDispatchPayload) {
 	if task.StorageSync == nil {
 		_ = c.sendTaskFailed(task, "STORAGE_SYNC_COMMAND_INVALID", "storage sync command is required")
+		return
+	}
+	if strings.EqualFold(c.cfg.BackupBackend, "oadp") && !isOADPS3StorageType(task.StorageSync.Type) {
+		_ = c.sendTaskFailed(task, "OADP_STORAGE_TYPE_UNSUPPORTED", "OpenShift phase one supports only S3-compatible object storage")
 		return
 	}
 	manifests, err := c.storageExec.BuildStorageManifests(task)
@@ -1432,6 +1547,15 @@ func (c *Client) executeStorageSyncTask(task protocol.TaskDispatchPayload) {
 	if err := c.sendTaskCompleted(task, storageVeleroPayload(manifests.BackupStorageLocation, true), "storage repository sync dry-run completed"); err != nil {
 		c.logger.Error("failed to send task completed", "task_id", task.TaskID, "error", err)
 		return
+	}
+}
+
+func isOADPS3StorageType(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "aws", "s3", "s3-compatible", "s3 compatible":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -1805,6 +1929,14 @@ func (c *Client) pollVeleroStatus(task protocol.TaskDispatchPayload, object kube
 		deadline = time.Now().UTC().Add(30 * time.Minute)
 	}
 	started := time.Now().UTC()
+	// A task deadline is generated by the control plane. If the managed
+	// cluster clock is ahead, an otherwise fresh storage task can appear
+	// expired before Velero has written the first BSL status. Always allow a
+	// short local observation window so the user receives Velero's real S3
+	// validation error instead of a misleading STATUS_TIMEOUT.
+	if object.Kind == "BackupStorageLocation" && deadline.Before(started.Add(2*time.Minute)) {
+		deadline = started.Add(2 * time.Minute)
+	}
 	progress := 0
 	samples := make([]volumeProgressSample, 0, 12)
 	var statusReadErrorSince time.Time
@@ -2151,7 +2283,11 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, o
 		c.logger.Warn("failed to send restore readiness start event; continuing readiness checks", "task_id", task.TaskID, "error", err)
 	}
 	for {
-		readiness, err := c.readiness.GetNamespaceReadiness(context.Background(), namespace)
+		readiness, err := c.readiness.GetNamespaceReadiness(context.Background(), namespace, kube.ReadinessExpectations{
+			Known:                    task.Restore.ReadinessExpectationsKnown,
+			RuntimeWorkloadsExpected: task.Restore.RuntimeWorkloadsExpected,
+			PVCNames:                 task.Restore.ExpectedPVCs,
+		})
 		payload := cloneVeleroPayload(basePayload)
 		// Keep the phase monotonic on every readiness poll. Without this marker,
 		// subsequent samples rebuild recoveryStages from the pre-readiness base

@@ -11,8 +11,35 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 )
+
+func TestUpgradeOADPUpdatesQualifiedCatalogAndWaitsForReadyRuntime(t *testing.T) {
+	catalog := &unstructured.Unstructured{Object: map[string]any{"apiVersion": "operators.coreos.com/v1alpha1", "kind": "CatalogSource", "metadata": map[string]any{"name": "hypercdr-oadp", "namespace": "openshift-marketplace"}, "spec": map[string]any{"image": "registry/old:1"}}}
+	subscription := &unstructured.Unstructured{Object: map[string]any{"apiVersion": "operators.coreos.com/v1alpha1", "kind": "Subscription", "metadata": map[string]any{"name": "hypercdr-oadp-operator", "namespace": "openshift-adp"}, "spec": map[string]any{"name": "oadp-operator", "channel": "stable-1.3"}, "status": map[string]any{"installedCSV": "oadp-operator.v1.3.10"}}}
+	csv := &unstructured.Unstructured{Object: map[string]any{"apiVersion": "operators.coreos.com/v1alpha1", "kind": "ClusterServiceVersion", "metadata": map[string]any{"name": "oadp-operator.v1.3.10", "namespace": "openshift-adp"}, "status": map[string]any{"phase": "Succeeded"}}}
+	dynamicClient := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), catalog, subscription, csv)
+	client := fake.NewSimpleClientset(
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "velero", Namespace: "openshift-adp"}, Status: appsv1.DeploymentStatus{Replicas: 1, UpdatedReplicas: 1, AvailableReplicas: 1}},
+		&appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "node-agent", Namespace: "openshift-adp"}, Status: appsv1.DaemonSetStatus{DesiredNumberScheduled: 3, UpdatedNumberScheduled: 3, NumberReady: 3}},
+	)
+	runtimeManager := &KubernetesAgentRuntime{client: client, dynamic: dynamicClient}
+	if err := runtimeManager.UpgradeOADP(context.Background(), OADPUpgradeOptions{Namespace: "openshift-adp", CatalogImage: "registry/catalog@sha256:new", Package: "oadp-operator", Channel: "stable-1.3", TargetCSV: "oadp-operator.v1.3.10"}); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := dynamicClient.Resource(schema.GroupVersionResource{Group: "operators.coreos.com", Version: "v1alpha1", Resource: "catalogsources"}).Namespace("openshift-marketplace").Get(context.Background(), "hypercdr-oadp", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	image, _, _ := unstructured.NestedString(updated.Object, "spec", "image")
+	if image != "registry/catalog@sha256:new" {
+		t.Fatalf("catalog image = %q", image)
+	}
+}
 
 func TestPreflightRestoreCache(t *testing.T) {
 	deletePolicy := corev1.PersistentVolumeReclaimDelete
@@ -233,6 +260,14 @@ func TestUpgradeVeleroReconcilesProviderPlugins(t *testing.T) {
 			t.Fatalf("plugin %s image = %q, want %q", name, images[name], expected)
 		}
 	}
+	if deployment.Spec.Template.Spec.Containers[0].ImagePullPolicy != corev1.PullAlways {
+		t.Fatalf("velero image pull policy = %q, want Always", deployment.Spec.Template.Spec.Containers[0].ImagePullPolicy)
+	}
+	for _, container := range deployment.Spec.Template.Spec.InitContainers {
+		if container.ImagePullPolicy != corev1.PullAlways {
+			t.Fatalf("plugin %s image pull policy = %q, want Always", container.Name, container.ImagePullPolicy)
+		}
+	}
 	if got := deployment.Spec.Template.Spec.Containers[0].Args; !containsString(got, "--concurrent-backups=2") {
 		t.Fatalf("velero args missing concurrent backup setting: %v", got)
 	}
@@ -245,6 +280,9 @@ func TestUpgradeVeleroReconcilesProviderPlugins(t *testing.T) {
 	}
 	if got := daemonSet.Spec.Template.Spec.Containers[0].Args; !containsString(got, "--backup-repository-configmap=backup-repository-config") {
 		t.Fatalf("node-agent args missing repository config map setting: %v", got)
+	}
+	if daemonSet.Spec.Template.Spec.Containers[0].ImagePullPolicy != corev1.PullAlways {
+		t.Fatalf("node-agent image pull policy = %q, want Always", daemonSet.Spec.Template.Spec.Containers[0].ImagePullPolicy)
 	}
 	configMap, err := client.CoreV1().ConfigMaps("hypercdr-agent").Get(context.Background(), "node-agent-config", metav1.GetOptions{})
 	if err != nil {

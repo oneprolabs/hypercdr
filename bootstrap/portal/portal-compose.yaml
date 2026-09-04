@@ -4,6 +4,8 @@ services:
     container_name: hypercdr-bootstrap-portal
     restart: unless-stopped
     ports:
-      - "${HCDR_BOOTSTRAP_PORT:-8080}:80"
+      - "${HCDR_BOOTSTRAP_PORT:-8080}:443"
     volumes:
       - ${HCDR_BOOTSTRAP_PORTAL_DIR:-/opt/hypercdr-bootstrap/portal}:/usr/share/nginx/html:ro
+      - ${HCDR_BOOTSTRAP_TLS_DIR:-/opt/hypercdr-bootstrap/tls}:/etc/nginx/tls:ro
+      - ./nginx-tls.conf:/etc/nginx/conf.d/default.conf:ro

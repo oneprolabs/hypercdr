@@ -170,6 +170,27 @@ func TestBuildScheduleManifestAddsSourceClusterLabel(t *testing.T) {
 	}
 }
 
+func TestBuildScheduleManifestPreservesLegacyResourceAndTypedLabelFilters(t *testing.T) {
+	manifest, err := BuildScheduleManifest(ScheduleBuildInput{
+		TaskID: "task-filtered-schedule",
+		Command: protocol.ScheduleSyncCommand{
+			PlanID: "plan-filtered", Cron: "0 * * * *", SourceNamespaces: []string{"demo"},
+			IncludedResources: []string{"deployments.apps"},
+			Selector:          protocol.LabelSelector{MatchLabels: map[string]string{"app": "demo"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := manifest.Spec.Template
+	if len(template.IncludedResources) != 1 || template.IncludedResources[0] != "deployments.apps" {
+		t.Fatalf("included resources = %v", template.IncludedResources)
+	}
+	if template.LabelSelector == nil || template.LabelSelector.MatchLabels["app"] != "demo" {
+		t.Fatalf("label selector = %#v", template.LabelSelector)
+	}
+}
+
 func TestBuildScheduleManifestUsesVeleroScopedResourceFields(t *testing.T) {
 	manifest, err := BuildScheduleManifest(ScheduleBuildInput{
 		TaskID: "task-scoped-schedule",

@@ -26,17 +26,17 @@ function updateCommands() {
   const enterprisePublicFallback = value('enterprise-agent-public-url');
 
   element('community-docker-command').textContent = [
-    `curl -fsSL ${communityURL}/hypercdr-bootstrap.tar.gz -o hypercdr-bootstrap.tar.gz`,
+    `curl -kfsSL ${communityURL}/hypercdr-bootstrap.tar.gz -o hypercdr-bootstrap.tar.gz`,
     'mkdir -p hypercdr-bootstrap && tar -xzf hypercdr-bootstrap.tar.gz -C hypercdr-bootstrap',
     'cd hypercdr-bootstrap',
     './install-platform.sh docker \\',
     `  --public-base-url ${shellQuote(value('host-public-url') || `https://${portalHost}:3002`)} \\`,
     ...(communityPublicFallback ? [`  --agent-public-url ${shellQuote(communityPublicFallback)} \\`] : []),
-    `  --image-tag ${shellQuote(communityVersion)} --execute`,
+    `  --image-tag ${shellQuote(communityVersion)} --confirm-prerequisites --execute`,
   ].join('\n');
 
   element('community-k8s-command').textContent = [
-    `curl -fsSL ${communityURL}/hypercdr-bootstrap.tar.gz -o hypercdr-bootstrap.tar.gz`,
+    `curl -kfsSL ${communityURL}/hypercdr-bootstrap.tar.gz -o hypercdr-bootstrap.tar.gz`,
     'mkdir -p hypercdr-bootstrap && tar -xzf hypercdr-bootstrap.tar.gz -C hypercdr-bootstrap',
     'cd hypercdr-bootstrap',
     './install-platform.sh k8s \\',
@@ -44,13 +44,13 @@ function updateCommands() {
     `  --public-base-url https://${nodeIP}:${nodePort} \\`,
     ...(k8sPublicFallback ? [`  --agent-public-url ${shellQuote(k8sPublicFallback)} \\`] : []),
     `  --image-tag ${shellQuote(communityVersion)} \\`,
-    `  --storage-class ${shellQuote(value('k8s-storage-class') || 'longhorn')} --node-port ${shellQuote(nodePort)} --database-mode bundled --execute`,
+    `  --storage-class ${shellQuote(value('k8s-storage-class') || 'longhorn')} --node-port ${shellQuote(nodePort)} --database-mode bundled --confirm-prerequisites --execute`,
   ].join('\n');
 
   const namespace = value('enterprise-namespace') || 'hypercdr-enterprise';
   const enterpriseMode = document.querySelector('[data-enterprise-mode].is-active')?.dataset.enterpriseMode || 'docker';
   element('enterprise-command').textContent = [
-    `curl -fsSL ${enterpriseURL}/hypercdr-enterprise-installer-${enterpriseVersion}.tar.gz -o hypercdr-enterprise.tar.gz`,
+    `curl -kfsSL ${enterpriseURL}/hypercdr-enterprise-installer-${enterpriseVersion}.tar.gz -o hypercdr-enterprise.tar.gz`,
     'mkdir -p hypercdr-enterprise && tar -xzf hypercdr-enterprise.tar.gz -C hypercdr-enterprise',
     'cd hypercdr-enterprise',
     `./install-enterprise.sh ${enterpriseMode} \\`,
@@ -64,6 +64,16 @@ function updateCommands() {
     ] : []),
     '  --execute',
   ].join('\n');
+}
+
+function updatePrerequisiteState() {
+  for (const button of document.querySelectorAll('[data-copy-target]')) {
+    const target = button.dataset.copyTarget;
+    const key = target.startsWith('community-docker') ? 'community-docker' : target.startsWith('community-k8s') ? 'community-k8s' : 'enterprise';
+    const checkbox = document.querySelector(`[data-prerequisite-confirm="${key}"]`);
+    button.disabled = !checkbox?.checked;
+    button.title = checkbox?.checked ? '' : 'Confirm the required software is installed before copying the installation command.';
+  }
 }
 
 async function loadManifest(edition) {
@@ -115,6 +125,9 @@ for (const tab of document.querySelectorAll('[data-enterprise-mode]')) {
     for (const item of document.querySelectorAll('[data-enterprise-mode]')) { const active = item === tab; item.classList.toggle('is-active', active); item.setAttribute('aria-selected', String(active)); }
     element('enterprise-namespace-field').classList.toggle('hidden', mode !== 'k8s');
     element('enterprise-database-field').classList.toggle('hidden', mode !== 'k8s');
+    element('enterprise-prerequisite-copy').textContent = mode === 'k8s'
+      ? 'Install kubectl, Helm, bash, curl, and openssl on the host running this command.'
+      : 'Install Docker Engine, Docker Compose V2, bash, curl, and openssl on the target host.';
     updateCommands();
   });
 }
@@ -126,5 +139,7 @@ for (const button of document.querySelectorAll('[data-copy-target]')) {
     setTimeout(() => { button.textContent = 'Copy'; }, 1200);
   });
 }
+for (const checkbox of document.querySelectorAll('[data-prerequisite-confirm]')) checkbox.addEventListener('change', updatePrerequisiteState);
 updateCommands();
+updatePrerequisiteState();
 void Promise.all([loadManifest('community'), loadManifest('enterprise')]);

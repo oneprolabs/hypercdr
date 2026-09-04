@@ -1275,6 +1275,18 @@ export function storageFailurePresentation(task: ApiTask | undefined): { message
     };
   }
   const normalized = raw.toLowerCase();
+  if (normalized.includes('requesttimetooskewed') || (normalized.includes('request time') && normalized.includes('server'))) {
+    return {
+      message: 'Cluster and object storage clocks are out of sync.',
+      solution: 'Synchronize the cluster nodes and object-storage server with NTP, then retry DR configuration.',
+    };
+  }
+  if (normalized.includes('backupstoragelocation') && normalized.includes('timed out')) {
+    return {
+      message: 'Backup storage validation timed out.',
+      solution: 'Review the detailed Velero status, verify cluster and object-storage time synchronization, then retry DR configuration.',
+    };
+  }
   if (normalized.includes('authorizationqueryparameterserror') && normalized.includes('incorrect date format')) {
     return {
       message: 'Object storage authentication failed: the configured region is invalid.',

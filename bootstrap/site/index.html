@@ -46,14 +46,16 @@
           <button class="mode-tab" type="button" data-mode="k8s" role="tab" aria-selected="false">Kubernetes</button>
         </div>
         <div id="community-docker" class="mode-panel">
+          <div class="prerequisite-confirm"><strong>Required software</strong><p>Install Docker Engine, Docker Compose V2, bash, curl, and openssl on the target host.</p><label><input type="checkbox" data-prerequisite-confirm="community-docker" /> I confirm that the required software is installed</label></div>
           <div class="form-grid">
-            <label>Control plane address<input id="host-public-url" placeholder="https://192.168.8.149:3002" /><small>Primary address used by users and clusters, usually the private address.</small></label>
-            <label>Public fallback address <span class="optional">Optional</span><input id="host-agent-public-url" placeholder="https://hypercdr.example.com:3002" /><small>Only required when clusters may connect through the public network.</small></label>
+            <label><span class="field-label">Private network address</span><input id="host-public-url" placeholder="https://192.168.8.149:3002" /><small>Used by users and cluster agents that access the control plane through the private network.</small></label>
+            <label><span class="field-label">Public network address <span class="optional">Optional</span></span><input id="host-agent-public-url" placeholder="https://hypercdr.example.com:3002" /><small>Used when cluster agents access the control plane through the public network.</small></label>
           </div>
           <div class="command-window"><div class="command-title"><span></span><span></span><span></span><strong>install-community.sh</strong></div><pre id="community-docker-command" class="command" tabindex="0"></pre><button type="button" class="command-copy" data-copy-target="community-docker-command">Copy</button></div>
         </div>
         <div id="community-k8s" class="mode-panel hidden">
-          <div class="form-grid"><label>Cluster node IP<input id="k8s-node-ip" placeholder="192.168.8.158" /><small>Primary address used by users and clusters.</small></label><label>NodePort<input id="k8s-node-port" value="30080" /></label><label>StorageClass<input id="k8s-storage-class" value="longhorn" /></label><label>Public fallback address <span class="optional">Optional</span><input id="k8s-agent-public-url" placeholder="https://hypercdr.example.com:30080" /></label></div>
+          <div class="prerequisite-confirm"><strong>Required software</strong><p>Install kubectl, Helm, bash, curl, and openssl on the host running this command.</p><label><input type="checkbox" data-prerequisite-confirm="community-k8s" /> I confirm that the required software is installed</label></div>
+          <div class="form-grid"><label><span class="field-label">Private network address</span><input id="k8s-node-ip" placeholder="192.168.8.158" /><small>Node IP used to access the control plane through the private network.</small></label><label><span class="field-label">NodePort</span><input id="k8s-node-port" value="30080" /></label><label><span class="field-label">StorageClass</span><input id="k8s-storage-class" value="longhorn" /></label><label><span class="field-label">Public network address <span class="optional">Optional</span></span><input id="k8s-agent-public-url" placeholder="https://hypercdr.example.com:30080" /><small>Used when cluster agents access the control plane through the public network.</small></label></div>
           <div class="command-window"><div class="command-title"><span></span><span></span><span></span><strong>install-community-k8s.sh</strong></div><pre id="community-k8s-command" class="command" tabindex="0"></pre><button type="button" class="command-copy" data-copy-target="community-k8s-command">Copy</button></div>
         </div>
       </section>
@@ -68,13 +70,14 @@
           <button class="mode-tab" type="button" data-enterprise-mode="k8s" role="tab" aria-selected="false">Kubernetes</button>
         </div>
         <div class="form-grid">
-          <label>Control plane address<input id="enterprise-public-url" placeholder="https://192.168.8.149:3102" /><small>Primary address used by users and clusters, usually the private address.</small></label>
-          <label>Public fallback address <span class="optional">Optional</span><input id="enterprise-agent-public-url" placeholder="https://hypercdr.example.com:3102" /><small>Only required when clusters may connect through the public network.</small></label>
+          <label><span class="field-label">Private network address</span><input id="enterprise-public-url" placeholder="https://192.168.8.149:3102" /><small>Used by users and cluster agents that access the control plane through the private network.</small></label>
+          <label><span class="field-label">Public network address <span class="optional">Optional</span></span><input id="enterprise-agent-public-url" placeholder="https://hypercdr.example.com:3102" /><small>Used when cluster agents access the control plane through the public network.</small></label>
           <label>License file<input id="enterprise-license-file" value="./license.json" /></label>
           <label>Public keys file<input id="enterprise-public-keys-file" value="./public-keys.json" /></label>
           <label id="enterprise-namespace-field" class="hidden">Namespace<input id="enterprise-namespace" value="hypercdr-enterprise" /></label>
           <label id="enterprise-database-field" class="hidden">Database URL<input id="enterprise-database-url" placeholder="postgres://user:password@host:5432/hypercdr" /></label>
         </div>
+        <div class="prerequisite-confirm"><strong>Required software</strong><p id="enterprise-prerequisite-copy">Install Docker Engine, Docker Compose V2, bash, curl, and openssl on the target host.</p><label><input type="checkbox" data-prerequisite-confirm="enterprise" /> I confirm that the required software is installed</label></div>
         <div class="command-window"><div class="command-title"><span></span><span></span><span></span><strong>install-enterprise.sh</strong></div><pre id="enterprise-command" class="command" tabindex="0"></pre><button type="button" class="command-copy" data-copy-target="enterprise-command">Copy</button></div>
         <p id="enterprise-unavailable" class="availability-note hidden">Enterprise installer is not published on this portal yet.</p>
       </section>

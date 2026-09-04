@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -12,7 +13,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -28,6 +32,7 @@ type VeleroRuntimeManager interface {
 	VeleroRuntimeStatus(ctx context.Context, namespace string) (VeleroRuntimeStatus, error)
 	PrepareVeleroUpgrade(ctx context.Context, namespace string) error
 	UpgradeVelero(ctx context.Context, options VeleroUpgradeOptions) error
+	UpgradeOADP(ctx context.Context, options OADPUpgradeOptions) error
 }
 
 type ComponentLogEntry struct {
@@ -93,6 +98,10 @@ type VeleroUpgradeOptions struct {
 	CacheLimitMB             int
 }
 
+type OADPUpgradeOptions struct {
+	Namespace, CatalogImage, Package, Channel, TargetCSV string
+}
+
 type AgentUpgradeOptions struct {
 	Namespace         string
 	DeploymentName    string
@@ -103,7 +112,8 @@ type AgentUpgradeOptions struct {
 }
 
 type KubernetesAgentRuntime struct {
-	client kubernetes.Interface
+	client  kubernetes.Interface
+	dynamic dynamic.Interface
 }
 
 func (r *KubernetesAgentRuntime) PreflightRestoreCache(ctx context.Context, namespace string) (RestoreCachePreflightResult, error) {
@@ -174,7 +184,86 @@ func NewKubernetesAgentRuntime(kubeconfigPath string) (*KubernetesAgentRuntime, 
 	if err != nil {
 		return nil, err
 	}
-	return &KubernetesAgentRuntime{client: client}, nil
+	dynamicClient, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &KubernetesAgentRuntime{client: client, dynamic: dynamicClient}, nil
+}
+
+func (r *KubernetesAgentRuntime) UpgradeOADP(ctx context.Context, options OADPUpgradeOptions) error {
+	if r.dynamic == nil {
+		return errors.New("dynamic Kubernetes client is unavailable")
+	}
+	namespace := firstNonEmpty(options.Namespace, "openshift-adp")
+	if strings.TrimSpace(options.CatalogImage) == "" {
+		return errors.New("OADP catalog image is required")
+	}
+	catalogs := r.dynamic.Resource(schema.GroupVersionResource{Group: "operators.coreos.com", Version: "v1alpha1", Resource: "catalogsources"}).Namespace("openshift-marketplace")
+	catalog, err := catalogs.Get(ctx, "hypercdr-oadp", metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("read OADP CatalogSource: %w", err)
+	}
+	if err = unstructured.SetNestedField(catalog.Object, options.CatalogImage, "spec", "image"); err != nil {
+		return err
+	}
+	if _, err = catalogs.Update(ctx, catalog, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("update OADP CatalogSource: %w", err)
+	}
+	subscriptions := r.dynamic.Resource(schema.GroupVersionResource{Group: "operators.coreos.com", Version: "v1alpha1", Resource: "subscriptions"}).Namespace(namespace)
+	subscription, err := subscriptions.Get(ctx, "hypercdr-oadp-operator", metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("read OADP Subscription: %w", err)
+	}
+	_ = unstructured.SetNestedField(subscription.Object, firstNonEmpty(options.Package, "oadp-operator"), "spec", "name")
+	_ = unstructured.SetNestedField(subscription.Object, firstNonEmpty(options.Channel, "stable-1.3"), "spec", "channel")
+	if _, err = subscriptions.Update(ctx, subscription, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("update OADP Subscription: %w", err)
+	}
+	csvs := r.dynamic.Resource(schema.GroupVersionResource{Group: "operators.coreos.com", Version: "v1alpha1", Resource: "clusterserviceversions"}).Namespace(namespace)
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+	for {
+		current, getErr := subscriptions.Get(ctx, "hypercdr-oadp-operator", metav1.GetOptions{})
+		if getErr == nil {
+			csvName, _, _ := unstructured.NestedString(current.Object, "status", "installedCSV")
+			if csvName != "" && (strings.TrimSpace(options.TargetCSV) == "" || csvName == options.TargetCSV) {
+				csv, csvErr := csvs.Get(ctx, csvName, metav1.GetOptions{})
+				if csvErr == nil {
+					phase, _, _ := unstructured.NestedString(csv.Object, "status", "phase")
+					if phase == "Succeeded" {
+						break
+					}
+					if phase == "Failed" {
+						return fmt.Errorf("OADP CSV %s entered phase %s", csvName, phase)
+					}
+				}
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait for OADP CSV: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
+	return r.waitForVeleroRollout(ctx, namespace, "velero", "node-agent")
+}
+
+func (r *KubernetesAgentRuntime) waitForVeleroRollout(ctx context.Context, namespace, deploymentName, daemonSetName string) error {
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+	for {
+		deployment, depErr := r.client.AppsV1().Deployments(namespace).Get(ctx, deploymentName, metav1.GetOptions{})
+		daemonSet, dsErr := r.client.AppsV1().DaemonSets(namespace).Get(ctx, daemonSetName, metav1.GetOptions{})
+		if depErr == nil && dsErr == nil && deployment.Status.Replicas > 0 && deployment.Status.UpdatedReplicas == deployment.Status.Replicas && deployment.Status.AvailableReplicas == deployment.Status.Replicas && daemonSet.Status.DesiredNumberScheduled > 0 && daemonSet.Status.UpdatedNumberScheduled == daemonSet.Status.DesiredNumberScheduled && daemonSet.Status.NumberReady == daemonSet.Status.DesiredNumberScheduled && daemonSet.Status.NumberUnavailable == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait for OADP Velero rollout: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func (r *KubernetesAgentRuntime) PodImageStatus(ctx context.Context, namespace string, podName string, containerName string) (string, string, string, error) {
@@ -435,10 +524,10 @@ func (r *KubernetesAgentRuntime) UpgradeVelero(ctx context.Context, options Vele
 		{"velero-plugin-for-gcp", options.GCPPluginImage},
 	} {
 		if strings.TrimSpace(plugin.image) != "" {
-			initContainers = append(initContainers, map[string]any{"name": plugin.name, "image": plugin.image})
+			initContainers = append(initContainers, map[string]any{"name": plugin.name, "image": plugin.image, "imagePullPolicy": "Always"})
 		}
 	}
-	serverContainer := map[string]any{"name": "velero", "image": options.Image}
+	serverContainer := map[string]any{"name": "velero", "image": options.Image, "imagePullPolicy": "Always"}
 	if options.ConcurrentBackups > 0 {
 		serverContainer["args"] = []string{"server", "--default-volumes-to-fs-backup", fmt.Sprintf("--concurrent-backups=%d", options.ConcurrentBackups), "--plugin-dir=/plugins"}
 	}
@@ -450,7 +539,7 @@ func (r *KubernetesAgentRuntime) UpgradeVelero(ctx context.Context, options Vele
 	if _, err := r.client.AppsV1().Deployments(namespace).Patch(ctx, deploymentName, types.StrategicMergePatchType, deploymentPatch, metav1.PatchOptions{}); err != nil {
 		return fmt.Errorf("update velero deployment: %w", err)
 	}
-	nodeAgentContainer := map[string]any{"name": "node-agent", "image": options.Image}
+	nodeAgentContainer := map[string]any{"name": "node-agent", "image": options.Image, "imagePullPolicy": "Always"}
 	if options.NodeAgentConcurrency > 0 {
 		nodeAgentContainer["args"] = []string{"node-agent", "server", "--node-agent-configmap=node-agent-config", "--backup-repository-configmap=backup-repository-config"}
 	}

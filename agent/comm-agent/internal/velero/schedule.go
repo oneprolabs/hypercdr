@@ -8,9 +8,9 @@ import (
 	"hypercdr-platform/agent/comm-agent/pkg/protocol"
 )
 
-// parseLegacyScheduleLabelSelector is retained only while the obsolete
-// schedule-sync path is being removed. Platform-managed backups use the
-// structured selector on BackupCommand.
+// parseLegacyScheduleLabelSelector preserves the ScheduleSync wire contract.
+// New on-demand Backup commands use a structured selector, while persisted
+// protection plans may still carry the schedule selector as key=value text.
 func parseLegacyScheduleLabelSelector(selector string) *protocol.LabelSelector {
 	labels := map[string]string{}
 	for _, part := range strings.Split(selector, ",") {
@@ -100,6 +100,7 @@ func BuildScheduleManifest(input ScheduleBuildInput) (ScheduleManifest, error) {
 			Labels: labels,
 		},
 		IncludedNamespaces:       sourceNamespaces,
+		IncludedResources:        input.Command.IncludedResources,
 		StorageLocation:          input.Command.StorageRepo,
 		IncludeClusterResources:  boolPtr(input.Command.IncludeClusterResources),
 		SnapshotVolumes:          boolPtr(false),
@@ -108,6 +109,9 @@ func BuildScheduleManifest(input ScheduleBuildInput) (ScheduleManifest, error) {
 	}
 	if input.Command.LabelSelector != "" {
 		template.LabelSelector = parseLegacyScheduleLabelSelector(input.Command.LabelSelector)
+	} else if len(input.Command.Selector.MatchLabels) > 0 || len(input.Command.Selector.MatchExpressions) > 0 {
+		selector := input.Command.Selector
+		template.LabelSelector = &selector
 	}
 	if input.Command.ResourceSelection.Mode == "exclude" {
 		template.IncludedResources = nil

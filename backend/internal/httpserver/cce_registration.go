@@ -108,8 +108,9 @@ func (r *Router) uploadCCEKubeconfig(w http.ResponseWriter, req *http.Request) {
 	}
 	defer file.Close()
 	ext := strings.ToLower(filepath.Ext(filepath.Base(header.Filename)))
-	if ext != ".yaml" && ext != ".yml" && ext != ".json" {
-		writeJSON(w, http.StatusUnsupportedMediaType, map[string]any{"error": "kubeconfig_file_type_invalid", "message": "Only .yaml, .yml, and .json kubeconfig files are accepted."})
+	filename := strings.ToLower(filepath.Base(header.Filename))
+	if ext != ".yaml" && ext != ".yml" && ext != ".json" && filename != "kubeconfig" && filename != "config" {
+		writeJSON(w, http.StatusUnsupportedMediaType, map[string]any{"error": "kubeconfig_file_type_invalid", "message": "Upload a .yaml, .yml, or .json kubeconfig, or a standard file named kubeconfig or config."})
 		return
 	}
 	raw, err := io.ReadAll(io.LimitReader(file, maxCCEKubeconfigBytes+1))
@@ -313,6 +314,8 @@ func (r *Router) startCCEDirectRegistration(w http.ResponseWriter, req *http.Req
 	displayType := "Native Kubernetes"
 	if clusterType == "huaweicloud-cce" {
 		displayType = "Huawei Cloud CCE"
+	} else if clusterType == "openshift" {
+		displayType = "OpenShift"
 	}
 	token, err := r.store.CreateAgentToken(tenantID, actor.ID, displayType+" platform-direct registration", 30*time.Minute, clusterType)
 	if err != nil {
@@ -325,7 +328,7 @@ func (r *Router) startCCEDirectRegistration(w http.ResponseWriter, req *http.Req
 	}
 	requestData := map[string]string{
 		"token": token.Token, "installScriptUrl": r.publicBaseURL(req) + "/install.sh", "endpoint": endpoint,
-		"endpointPublic": strings.TrimSpace(r.cfg.AgentPublicWSEndpoint), "namespace": r.cfg.AgentNamespace,
+		"endpointPublic": strings.TrimSpace(r.cfg.AgentPublicWSEndpoint), "namespace": r.agentNamespaceForType(clusterType),
 		"context": body.Context, "storageClass": strings.TrimSpace(body.StorageClass),
 		"clusterType": clusterType,
 	}
@@ -359,7 +362,7 @@ func (r *Router) startCCEDirectRegistration(w http.ResponseWriter, req *http.Req
 
 func normalizeDirectRegistrationClusterType(value string) string {
 	switch strings.TrimSpace(value) {
-	case "native-kubernetes", "huaweicloud-cce":
+	case "native-kubernetes", "huaweicloud-cce", "openshift":
 		return strings.TrimSpace(value)
 	default:
 		return ""

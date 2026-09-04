@@ -58,6 +58,51 @@ func TestDynamicManifestApplierCreatesAndUpdatesVeleroBackup(t *testing.T) {
 	}
 }
 
+func TestDeleteMatchingDataDownloadsRemovesOnlyStaleRestoreArtifacts(t *testing.T) {
+	gvr := schema.GroupVersionResource{Group: "velero.io", Version: "v2alpha1", Resource: "datadownloads"}
+	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{gvr: "DataDownloadList"},
+		&unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "velero.io/v2alpha1", "kind": "DataDownload",
+			"metadata": map[string]any{"name": "stale-download", "namespace": "openshift-adp", "labels": map[string]any{"velero.io/restore-name": "stale-restore"}},
+		}},
+		&unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "velero.io/v2alpha1", "kind": "DataDownload",
+			"metadata": map[string]any{"name": "current-download", "namespace": "openshift-adp", "labels": map[string]any{"velero.io/restore-name": "current-restore"}},
+		}},
+	)
+	applier := NewDynamicManifestApplierWithClient(client)
+	if err := applier.deleteMatchingDataDownloads(context.Background(), "openshift-adp", map[string]struct{}{"stale-restore": {}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Resource(gvr).Namespace("openshift-adp").Get(context.Background(), "stale-download", metav1.GetOptions{}); err == nil {
+		t.Fatal("stale DataDownload was not deleted")
+	}
+	if _, err := client.Resource(gvr).Namespace("openshift-adp").Get(context.Background(), "current-download", metav1.GetOptions{}); err != nil {
+		t.Fatalf("current DataDownload was deleted: %v", err)
+	}
+}
+
+func TestDeleteVeleroBackupArtifactsIncludesKopiaDataUploads(t *testing.T) {
+	backupGVR := schema.GroupVersionResource{Group: "velero.io", Version: "v1", Resource: "backups"}
+	restoreGVR := schema.GroupVersionResource{Group: "velero.io", Version: "v1", Resource: "restores"}
+	pvbGVR := schema.GroupVersionResource{Group: "velero.io", Version: "v1", Resource: "podvolumebackups"}
+	dataUploadGVR := schema.GroupVersionResource{Group: "velero.io", Version: "v2alpha1", Resource: "datauploads"}
+	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		backupGVR: "BackupList", restoreGVR: "RestoreList", pvbGVR: "PodVolumeBackupList", dataUploadGVR: "DataUploadList",
+	},
+		&unstructured.Unstructured{Object: map[string]any{"apiVersion": "velero.io/v1", "kind": "Backup", "metadata": map[string]any{"name": "backup-a", "namespace": "openshift-adp"}}},
+		&unstructured.Unstructured{Object: map[string]any{"apiVersion": "velero.io/v2alpha1", "kind": "DataUpload", "metadata": map[string]any{"name": "upload-a", "namespace": "openshift-adp", "labels": map[string]any{"velero.io/backup-name": "backup-a"}}}},
+	)
+	applier := NewDynamicManifestApplierWithClient(client)
+	deleted, err := applier.DeleteVeleroBackupArtifacts(context.Background(), "openshift-adp", []string{"backup-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(deleted["dataUploads"]) != 1 || deleted["dataUploads"][0] != "upload-a" {
+		t.Fatalf("Kopia DataUpload cleanup result = %#v", deleted)
+	}
+}
+
 func TestRestoreObjectPrefix(t *testing.T) {
 	prefix, err := restoreObjectPrefix("hypercdr/clusters/cluster-a", "hcdr-restore-demo-1234")
 	if err != nil {

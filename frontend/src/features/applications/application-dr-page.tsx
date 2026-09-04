@@ -746,7 +746,11 @@ export default function ApplicationDrPage(props: {
   const drSupportKeyForApp = (app: AppItem): string => `${app.clusterId || currentClusterId || ''}:${app.namespace || app.name}`;
   const isDRSupportUnknown = (app: AppItem): boolean => unitMembers(app).some(member => !drSupportStatus(member));
   const isDRSupportChecking = (app: AppItem): boolean => unitMembers(app).some(member => drSupportCheckingKeys.includes(drSupportKeyForApp(member)));
-  const isAgentNamespace = (app: AppItem): boolean => unitMembers(app).some(member => (member.namespace || member.name) === 'hypercdr-agent');
+  const isAgentNamespace = (app: AppItem): boolean => unitMembers(app).some(member => {
+    const cluster = clusters.find(item => item.id === (member.clusterId || currentClusterId)) || currentCluster;
+    const reservedNamespace = cluster?.clusterType === 'openshift' ? 'openshift-adp' : 'hypercdr-agent';
+    return (member.namespace || member.name) === reservedNamespace;
+  });
   const isDRUnsupported = (app: AppItem): boolean => isAgentNamespace(app) || unitMembers(app).some(member => drSupportStatus(member) === 'unsupported');
   const formatUnsupportedStorageSummary = (support: DRSupportSummary): string => {
     const checks = (support.checks || []).filter(check => (check.status || '').toLowerCase() === 'unsupported');
@@ -1070,7 +1074,7 @@ export default function ApplicationDrPage(props: {
   };
   const selectedNames = stage === 'select' ? selectedSelectApps : stage === 'config' ? selectedConfigApps : selectedRunApps;
   const setSelectedNames = stage === 'select' ? setSelectedSelectApps : stage === 'config' ? setSelectedConfigApps : setSelectedRunApps;
-  const selectableCurrentRows = currentRows;
+  const selectableCurrentRows = stage === 'select' ? currentRows.filter(app => !isAgentNamespace(app)) : currentRows;
   const selectedApps = selectedNames
     .map(name => currentRows.find(app => app.name === name) || apps.find(app => app.name === name))
     .filter((app): app is AppItem => Boolean(app));
@@ -1341,8 +1345,10 @@ export default function ApplicationDrPage(props: {
         <input
           type="checkbox"
           checked={selectedNames.includes(info.row.original.name)}
+          disabled={stage === 'select' && isAgentNamespace(info.row.original)}
           onClick={event => event.stopPropagation()}
           onChange={() => toggleSelectedName(info.row.original.name)}
+          aria-label={stage === 'select' && isAgentNamespace(info.row.original) ? 'Platform-managed namespace cannot be selected' : undefined}
         />
       );
     },
@@ -1471,19 +1477,21 @@ export default function ApplicationDrPage(props: {
 				<span className="hbdr-dr-storage-failure">
 				  <TaskErrorStatus
 					code={cleanupFailure.task.errorCode}
-					title={cleanupFailure.message}
+					title={taskFailureSummary(cleanupFailure.task).title}
 					onClick={() => setSyncTaskDetail({ app, task: cleanupFailure.task, failure: taskFailureSummary(cleanupFailure.task) })}
 				  />
-				  <span className="hbdr-dr-storage-failure-help">{cleanupFailure.solution}</span>
 				</span>
 			  ) : storageFailure ? (
                 <span className="hbdr-dr-storage-failure">
                   <TaskErrorStatus
                     code={storageFailure.task.errorCode}
                     title={storageFailure.presentation.message}
-                    onClick={() => setSyncTaskDetail({ app, task: storageFailure.task, failure: taskFailureSummary(storageFailure.task) })}
+                    onClick={() => setSyncTaskDetail({
+                      app,
+                      task: storageFailure.task,
+                      failure: { ...taskFailureSummary(storageFailure.task), title: storageFailure.presentation.message },
+                    })}
                   />
-                  <span className="hbdr-dr-storage-failure-help">{storageFailure.presentation.solution}</span>
                 </span>
 			  ) : <span className="hbdr-dr-status-line">
 				<button type="button" className={`hbdr-dr-status hbdr-dr-status-${meta.tone}`} title={`${meta.title}. Click to view execution log.`} onClick={event => { event.stopPropagation(); openPlanExecutionLog(app); }}>
@@ -1493,7 +1501,7 @@ export default function ApplicationDrPage(props: {
                   {meta.label}
 				</button>
               </span>}
-              {retryable && (
+              {retryable && !storageFailure && !cleanupFailure && (
                 <span className="hbdr-dr-status-actions">
                   <button
                     type="button"
@@ -1509,7 +1517,7 @@ export default function ApplicationDrPage(props: {
                   </button>
                 </span>
               )}
-              {canReconfigureStorage && (
+              {canReconfigureStorage && !storageFailure && !cleanupFailure && !retryable && (
                 <span className="hbdr-dr-status-actions">
                   <button
                     type="button"
@@ -1529,7 +1537,23 @@ export default function ApplicationDrPage(props: {
             </span>
           );
         },
-        meta: { title: app => drStatusMetaForApp(app).title },
+        meta: { title: app => {
+          const plan = protectionPlanForApp(app);
+          const normalizedPlanStatus = (plan?.status || '').toLowerCase();
+          const storageFailure = ['configuration_failed', 'storage_failed', 'ready_with_warning', 'active_with_warning'].includes(normalizedPlanStatus)
+            ? storageFailureForApp(app)
+            : null;
+          const cleanupFailure = normalizedPlanStatus === 'cleanup_failed' ? cleanupFailureForApp(app) : null;
+          if (storageFailure) {
+            const failure = { ...taskFailureSummary(storageFailure.task), title: storageFailure.presentation.message };
+            return `[${failure.code}] ${failure.title}`;
+          }
+          if (cleanupFailure) {
+            const failure = taskFailureSummary(cleanupFailure.task);
+            return `[${failure.code}] ${failure.title}`;
+          }
+          return drStatusMetaForApp(app).title;
+        } },
       });
     }
     if (visibleRunColumns.includes('score')) {
@@ -3206,10 +3230,17 @@ export default function ApplicationDrPage(props: {
 
       <AnimatePresence>
         {syncTaskDetail && (
-          <ErrorDetailModalFrame title={`${taskDetailLabel(syncTaskDetail.task.type)} Task Details`} onClose={() => setSyncTaskDetail(null)}>
+          <div className="fixed inset-0 z-[230]">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSyncTaskDetail(null)} className="absolute inset-0 bg-slate-900/15" />
+            <motion.aside initial={{ opacity: 0, x: 34 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 34 }} transition={{ duration: 0.18, ease: 'easeOut' }} className="hbdr-filter-drawer" role="dialog" aria-modal="true" aria-labelledby="dr-config-error-title">
+              <div className="hbdr-filter-drawer-head">
+                <div><strong id="dr-config-error-title">DR Configuration Error</strong><span>{syncTaskDetail.app.name} · {syncTaskDetail.task.id}</span></div>
+                <button type="button" onClick={() => setSyncTaskDetail(null)} aria-label="Close DR configuration error details"><X size={18} /></button>
+              </div>
+              <div className="hbdr-filter-drawer-body">
             {(() => {
               const events = drTaskEvents[syncTaskDetail.task.id] || [];
-              const failure = taskFailureSummary(syncTaskDetail.task, events);
+              const failure = syncTaskDetail.failure || taskFailureSummary(syncTaskDetail.task, events);
               const details = taskFailureDetails(syncTaskDetail.task, events);
               const showError = isFailedStatus(syncTaskDetail.task.status) || taskHasWarning(syncTaskDetail.task);
               return (
@@ -3220,7 +3251,23 @@ export default function ApplicationDrPage(props: {
                 </div>
               );
             })()}
-          </ErrorDetailModalFrame>
+              </div>
+              <div className="hbdr-filter-drawer-actions">
+                {(() => {
+                  const plan = protectionPlanForApp(syncTaskDetail.app);
+                  const retryable = syncTaskDetail.task.type === 'storage-sync' && canRetryDrActivation(plan?.status);
+                  return retryable ? (
+                    <button type="button" onClick={() => {
+                      const app = syncTaskDetail.app;
+                      setSyncTaskDetail(null);
+                      void retryDrActivation(app);
+                    }}><RefreshCw size={14} />Retry DR configuration</button>
+                  ) : null;
+                })()}
+                <button type="button" onClick={() => setSyncTaskDetail(null)}>Close</button>
+              </div>
+            </motion.aside>
+          </div>
         )}
       </AnimatePresence>
 

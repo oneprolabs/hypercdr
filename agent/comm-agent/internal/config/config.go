@@ -20,6 +20,7 @@ type Config struct {
 	ClusterID               string
 	ClusterName             string
 	ClusterType             string
+	BackupBackend           string
 	CloudProvider           string
 	CloudRegion             string
 	CloudClusterID          string
@@ -53,6 +54,7 @@ func Load() Config {
 		ClusterID:               os.Getenv("HCDR_CLUSTER_ID"),
 		ClusterName:             getEnv("HCDR_CLUSTER_NAME", "unknown-cluster"),
 		ClusterType:             getEnv("HCDR_CLUSTER_TYPE", "native-kubernetes"),
+		BackupBackend:           getEnv("HCDR_BACKUP_BACKEND", "velero"),
 		CloudProvider:           os.Getenv("HCDR_CLOUD_PROVIDER"),
 		CloudRegion:             os.Getenv("HCDR_CLOUD_REGION"),
 		CloudClusterID:          os.Getenv("HCDR_CLOUD_CLUSTER_ID"),

@@ -101,6 +101,60 @@ func TestAgentUpgradeReturnsPersistedQueuedTaskBeforeAsyncDispatch(t *testing.T)
 	}
 }
 
+func TestOpenShiftAgentUpgradeTargetsDedicatedImageAndExistingContainer(t *testing.T) {
+	repo := store.NewMemoryStore()
+	manifest := map[string]store.ReleaseComponent{
+		"oadp-comm-agent":   {Version: "v2", Image: "registry.example/oadp-comm-agent:v2", ImageDigest: "sha256:" + strings.Repeat("a", 64)},
+		"platform-api":      {Version: "v2", Image: "registry.example/platform-api:v2", ImageDigest: "sha256:" + strings.Repeat("b", 64)},
+		"platform-frontend": {Version: "v2", Image: "registry.example/platform-frontend:v2", ImageDigest: "sha256:" + strings.Repeat("c", 64)},
+	}
+	if _, err := repo.UpsertPlatformRelease(store.PlatformReleaseInput{Version: "v2", APIImage: manifest["platform-api"].Image, APIImageDigest: manifest["platform-api"].ImageDigest, FrontendImage: manifest["platform-frontend"].Image, FrontendImageDigest: manifest["platform-frontend"].ImageDigest, Status: "active", ComponentManifest: manifest}); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewRouter(config.Config{AgentNamespace: "hypercdr-agent"}, slog.New(slog.NewTextHandler(os.Stdout, nil)), repo))
+	defer server.Close()
+	resp, err := http.Post(server.URL+"/api/v1/agent-tokens", "application/json", bytes.NewReader([]byte(`{"clusterType":"openshift"}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tokenBody struct {
+		Token string `json:"token"`
+	}
+	if err = json.NewDecoder(resp.Body).Decode(&tokenBody); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/ws/agent", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err = conn.WriteJSON(protocol.Message[protocol.RegisterPayload]{Version: protocol.Version, MessageID: "oadp-upgrade-register", Type: protocol.MessageAgentRegister, AgentID: "oadp-agent", Timestamp: time.Now().UTC(), Payload: protocol.RegisterPayload{InstallToken: tokenBody.Token, Cluster: protocol.ClusterSummary{Name: "ocp", KubeVersion: "v1.28.0"}, Agent: protocol.AgentSummary{Version: "v1", Namespace: "openshift-adp"}}}); err != nil {
+		t.Fatal(err)
+	}
+	var accepted protocol.Message[protocol.RegisterAcceptedPayload]
+	if err = conn.ReadJSON(&accepted); err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.Post(server.URL+"/api/v1/clusters/"+accepted.Payload.ClusterID+"/agent/upgrade", "application/json", bytes.NewReader([]byte(`{}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("status=%d", response.StatusCode)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var dispatch protocol.Message[protocol.TaskDispatchPayload]
+	if err = conn.ReadJSON(&dispatch); err != nil {
+		t.Fatal(err)
+	}
+	command := dispatch.Payload.AgentUpgrade
+	if command == nil || command.Namespace != "openshift-adp" || command.ContainerName != "comm-agent" || !strings.Contains(command.Image, "/oadp-comm-agent@sha256:") {
+		t.Fatalf("unexpected OpenShift agent upgrade: %#v", command)
+	}
+}
+
 func TestResolveRegistryManifestDigestKeepsIndexAndManifestNegotiationSeparate(t *testing.T) {
 	var accepts []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -227,6 +281,17 @@ func TestAgentUpgradeIsAvailableForDifferentImageAtSameVersion(t *testing.T) {
 	}
 }
 
+func TestDedicatedComponentUpgradesAreAvailableForOpenShift(t *testing.T) {
+	cluster := store.Cluster{ClusterType: "openshift", AgentVersion: "v1", AgentImage: "registry/oadp-comm-agent:v1", VeleroVersion: "v1", VeleroImage: "registry/oadp-velero:v1"}
+	target := store.ComponentRelease{Version: "v2", Image: "registry/community:v2", ImageDigest: "sha256:new"}
+	if !agentUpgradeIsAvailable(cluster, target) {
+		t.Fatal("newer oadp-comm-agent target must be available for OpenShift")
+	}
+	if !veleroUpgradeIsAvailable(cluster, target) {
+		t.Fatal("newer OADP Velero target must be available for OpenShift")
+	}
+}
+
 func TestVeleroUpgradeIsNotAvailableForMatchingImageAndVersionWithDifferentDigestKinds(t *testing.T) {
 	cluster := store.Cluster{
 		VeleroVersion:          "v1.17.1",
@@ -282,6 +347,25 @@ func TestVeleroUpgradeRemainsAvailableWhenTargetDigestIsNotFullyReady(t *testing
 
 	if !veleroUpgradeIsAvailable(cluster, target) {
 		t.Fatal("an incomplete target rollout must still offer Update so the platform can reconcile it")
+	}
+}
+
+func TestOADPDigestPinnedRuntimeDoesNotOfferImmediateUpgrade(t *testing.T) {
+	target := store.ComponentRelease{
+		Version: "1.3.10-hcdr.1",
+		Image: "registry.example/hypercdr/oadp-velero:1.3.10-hcdr.1",
+		ImageDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}
+	cluster := store.Cluster{
+		VeleroImage: immutableImageReference(target.Image, target.ImageDigest),
+		VeleroImageDigest: "sha256:platform-specific-runtime-digest",
+		VeleroNodeAgentImageDigest: "sha256:platform-specific-runtime-digest",
+		VeleroServerReady: true,
+		VeleroNodeAgentDesired: 1,
+		VeleroNodeAgentReady: 1,
+	}
+	if veleroUpgradeIsAvailable(cluster, target) {
+		t.Fatal("a healthy OADP deployment pinned to the qualified manifest digest must not offer an immediate upgrade")
 	}
 }
 

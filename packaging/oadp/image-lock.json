@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "oadpVersion": "1.3.10",
+  "release": "1.3.10-hcdr.1",
+  "sourceCommit": "b62bbe2656a4681961a31d4e16c7863ee354cd59",
+  "platform": "linux/amd64",
+  "images": [
+    {"component":"oadp-operator","source":"quay.io/konveyor/oadp-operator:oadp-1.3","sourceDigest":"sha256:89034e14c1caf2957232dfbf4b62183923e99e0768ec25e78c7a1bce51f9ac01","required":true},
+    {"component":"oadp-velero","source":"quay.io/konveyor/velero:oadp-1.3","sourceDigest":"sha256:d518091e6e3bc06d3c97f96efb6efcc53f85a54de9bea7e6864629fe9ee4a6f0","required":true},
+    {"component":"oadp-openshift-plugin","source":"quay.io/konveyor/openshift-velero-plugin:oadp-1.3","sourceDigest":"sha256:3d738f5c92028368d67c737e0997ede57ffefd8f8b86d20a619f0daaba33845a","required":true},
+    {"component":"oadp-aws-plugin","source":"quay.io/konveyor/velero-plugin-for-aws:oadp-1.3","sourceDigest":"sha256:6e00251971fef8b1a159f882d89c1c357a7c1f65ee95dbe270dd87a020f05e15","required":true},
+    {"component":"oadp-restore-helper","source":"quay.io/konveyor/velero-restore-helper:oadp-1.3","sourceDigest":"sha256:bd486679eefa3a0efdc4e0d643c65b4a236fd6986e279bfe74d6c1ec8fc80ca6","required":true},
+    {"component":"oadp-csi-plugin","source":"quay.io/konveyor/velero-plugin-for-csi:oadp-1.3","sourceDigest":"sha256:638d4f116274daf271f25f077df37969e8cc6b6edc76c6ec8f399c988ffd0b39","required":false},
+    {"component":"oadp-azure-plugin","source":"quay.io/konveyor/velero-plugin-for-microsoft-azure:oadp-1.3","sourceDigest":"sha256:01d404eee4a6f4f233e3baa234b5cd91b8a39fa144eeeaaeca1bb1dde991d83b","required":false},
+    {"component":"oadp-gcp-plugin","source":"quay.io/konveyor/velero-plugin-for-gcp:oadp-1.3","sourceDigest":"sha256:ea2676a34f7418aea45d05198aa46adfd0c431125a80bba51a11327a4d590eb2","required":false},
+    {"component":"oadp-kubevirt-plugin","source":"quay.io/konveyor/kubevirt-velero-plugin:v0.6.2","sourceDigest":"sha256:be7ed443d7f191beabeb386daae22290d0fd8338c5714a09f3f1c6f7ecf0720f","required":false},
+    {"component":"oadp-must-gather","source":"quay.io/konveyor/oadp-must-gather:oadp-1.3","sourceDigest":"sha256:b0dc6e2d1b87687b581ee658fb19316df39a77b5374cc9a85c3cf763ddda8897","required":false},
+    {"component":"oadp-cli","source":"quay.io/konveyor/oadp-cli-binaries:oadp-1.3","sourceDigest":"sha256:7e87eac409432b5e0fb190875bc9daf019bca8a5ba9453527799cf908355b288","required":false}
+  ]
+}

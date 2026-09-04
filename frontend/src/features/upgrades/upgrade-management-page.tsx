@@ -11,6 +11,25 @@ type ApiPlatformUpgrade = { id:string; releaseId:string; fromVersion:string; tar
 type ApiPlatformPrecheck = { passed:boolean; currentVersion:string; checks:Array<{id:string;label:string;passed:boolean;blocking?:boolean;detail?:unknown}> };
 const listItems = <T,>(response:ApiList<T>) => response.items || [];
 const shortDigest = (digest?:string) => (digest || '').replace(/^sha256:/, '').slice(0, 12);
+const componentDisplayName = (name:string) => ({
+  'comm-agent': 'Comm-agent',
+  'oadp-comm-agent': 'OADP Comm-agent',
+  'oadp-operator': 'OADP Operator',
+  'oadp-velero': 'OADP Velero-agent',
+  'oadp-openshift-plugin': 'OADP OpenShift Plugin',
+  'oadp-aws-plugin': 'OADP AWS Plugin',
+  'oadp-restore-helper': 'OADP Restore Helper',
+  'oadp-bundle': 'OADP Bundle',
+  'oadp-catalog': 'OADP Operator Catalog',
+  'velero': 'Velero-agent',
+  'velero-plugin-for-aws': 'Velero Plugin for AWS',
+  'velero-plugin-for-microsoft-azure': 'Velero Plugin for Microsoft Azure',
+  'velero-plugin-for-gcp': 'Velero Plugin for GCP',
+}[name] || name);
+const componentDisplayVersion = (name:string, version?:string) => {
+  if (!version) return 'Not included';
+  return name === 'velero' ? version.replace(/-hcdr\.\d+$/, '') : version;
+};
 
 export default function UpgradeManagementPage({ isAdmin, toast, refreshPlatformData }: { isAdmin: boolean; toast: (message: string) => void; refreshPlatformData: () => Promise<unknown> }) {
   const [loading, setLoading] = useState(true);
@@ -95,7 +114,11 @@ export default function UpgradeManagementPage({ isAdmin, toast, refreshPlatformD
   const activePlatformUpgrade = platformUpgrades.find(job => !['succeeded', 'failed', 'cancelled', 'rolled_back'].includes(job.status));
   const currentRelease = platformReleases.find(item => item.status === 'active') || platformReleases.find(item => item.version === currentPlatformVersion);
   const displayedManifest = (platformUpdateAvailable ? latestPlatformRelease : currentRelease)?.componentManifest || {};
-  const clusterComponents = ['comm-agent', 'velero', 'velero-plugin-for-aws', 'velero-plugin-for-microsoft-azure', 'velero-plugin-for-gcp'];
+  const clusterComponents = [
+    'comm-agent', 'velero', 'velero-plugin-for-aws', 'velero-plugin-for-microsoft-azure', 'velero-plugin-for-gcp',
+    'oadp-comm-agent', 'oadp-operator', 'oadp-velero', 'oadp-openshift-plugin', 'oadp-aws-plugin',
+    'oadp-restore-helper', 'oadp-bundle', 'oadp-catalog',
+  ];
 
   return (
     <motion.div key="upgrades" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
@@ -115,7 +138,7 @@ export default function UpgradeManagementPage({ isAdmin, toast, refreshPlatformD
         {activePlatformUpgrade && <div className="border-t border-slate-100 px-5 py-4"><div className="flex items-center justify-between text-xs"><strong>{activePlatformUpgrade.fromVersion} → {activePlatformUpgrade.targetVersion}</strong><span className="text-slate-500">{activePlatformUpgrade.progress}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-blue-600 transition-all" style={{width:`${activePlatformUpgrade.progress}%`}} /></div><p className="mt-2 text-xs text-slate-500">{activePlatformUpgrade.step}</p></div>}
         {advancedOpen && <div className="border-t border-slate-100 px-5 py-4"><div className="mb-3"><h4 className="text-xs font-black text-slate-800">Registered HyperCDR releases</h4><p className="mt-1 text-xs text-slate-500">Release packages are registered by the build pipeline with a complete immutable component manifest.</p></div><div className="space-y-2">{platformReleases.map(release=><div key={release.id} className="rounded-lg border border-slate-100 bg-white px-3 py-3"><div className="flex items-center justify-between"><strong className="text-xs text-slate-800">HyperCDR {release.version}</strong><span className={`rounded-full px-2 py-0.5 text-[9px] font-black uppercase ${release.status === 'active' ? 'bg-emerald-50 text-emerald-700' : release.status === 'candidate' ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>{release.status}</span></div><div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{Object.entries(release.componentManifest || {}).map(([name, component])=><div key={name} className="min-w-0 rounded-md bg-slate-50 px-2.5 py-2"><span className="block truncate text-[10px] font-bold text-slate-600">{name}</span><span className="mt-0.5 block truncate text-[10px] text-slate-500">{component.version}</span><span className="mt-0.5 block font-mono text-[9px] text-slate-400">sha256:{shortDigest(component.imageDigest)}</span></div>)}</div></div>)}{!platformReleases.length&&<p className="py-4 text-center text-xs text-slate-400">{loading ? 'Loading releases…' : 'No complete release package has been registered.'}</p>}</div></div>}
       </section>
-      <section className="hbdr-section-card overflow-hidden"><div className="hbdr-section-toolbar"><div><h3>Cluster Components</h3><p>{platformUpdateAvailable ? `Included with HyperCDR ${latestPlatformRelease?.version}` : `Included with the current HyperCDR release`}</p></div></div><div className="divide-y divide-slate-100">{clusterComponents.map(name => { const component=displayedManifest[name]; return <div key={name} className="grid items-center gap-3 px-5 py-3.5 md:grid-cols-[minmax(220px,1fr)_160px_minmax(260px,1.5fr)]"><strong className="text-xs text-slate-800">{name}</strong><span className="text-xs font-semibold text-slate-600">{component?.version || 'Not included'}</span><div className="min-w-0"><span className="block truncate font-mono text-[10px] text-slate-400">{component?.image || 'No image in release manifest'}</span>{component?.imageDigest&&<span className="mt-0.5 block font-mono text-[9px] text-slate-400">sha256:{shortDigest(component.imageDigest)}</span>}</div></div>})}</div></section>
+      <section className="hbdr-section-card overflow-hidden"><div className="hbdr-section-toolbar"><div><h3>Cluster Components</h3><p>{platformUpdateAvailable ? `Included with HyperCDR ${latestPlatformRelease?.version}` : `Included with the current HyperCDR release`}</p></div></div><div className="divide-y divide-slate-100">{clusterComponents.map(name => { const component=displayedManifest[name]; return <div key={name} className="grid items-center gap-3 px-5 py-3.5 md:grid-cols-[minmax(220px,1fr)_160px_minmax(260px,1.5fr)]"><strong className="text-xs text-slate-800">{componentDisplayName(name)}</strong><span className="text-xs font-semibold text-slate-600">{componentDisplayVersion(name, component?.version)}</span><div className="min-w-0"><span className="block truncate font-mono text-[10px] text-slate-400">{component?.image || 'No image in release manifest'}</span>{component?.imageDigest&&<span className="mt-0.5 block font-mono text-[9px] text-slate-400">sha256:{shortDigest(component.imageDigest)}</span>}</div></div>})}</div></section>
       {platformUpgrades.length>0&&<section className="hbdr-section-card overflow-hidden"><div className="hbdr-section-toolbar"><div><h3>Upgrade History</h3><p>Recent platform upgrade results.</p></div></div><div className="divide-y divide-slate-100 px-5">{platformUpgrades.slice(0,5).map(job=><div key={job.id} className="flex items-center justify-between py-3 text-xs"><span>{job.fromVersion} → <strong>{job.targetVersion}</strong></span><span className={job.status==='succeeded'?'font-bold text-emerald-700':job.status==='failed'?'font-bold text-rose-700':'text-slate-500'}>{job.status==='succeeded'?'Succeeded':job.status==='failed'?'Failed':`${job.progress}%`}</span></div>)}</div></section>}
     </motion.div>
   );

@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"hypercdr-platform/platform/backend/internal/buildinfo"
 	"hypercdr-platform/platform/backend/internal/config"
 	"hypercdr-platform/platform/backend/internal/httpserver"
 	"hypercdr-platform/platform/backend/internal/store"
@@ -47,6 +48,9 @@ func Run(options Options) error {
 		postgresStore.SetDiagnosticLogWriter(diagnosticWriterAdapter{sink: options.DiagnosticSink})
 	}
 	repo := store.Store(postgresStore)
+	if err := reconcileRunningRelease(repo, buildinfo.Version); err != nil {
+		return err
+	}
 	logger = slog.New(store.NewDiagnosticSlogHandler(logger.Handler(), repo, "platform-api"))
 	settings, found, err := repo.GetPlatformSettings()
 	if err != nil {
@@ -115,6 +119,36 @@ func Run(options Options) error {
 	ctx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 	return server.Shutdown(ctx)
+}
+
+// reconcileRunningRelease keeps the release manifest aligned when the formal
+// compose deployment is applied directly (instead of being launched by an
+// in-product upgrade job). The release has already passed immutable-manifest
+// validation when it was registered; running its exact build version is the
+// final activation signal.
+func reconcileRunningRelease(repo store.Store, version string) error {
+	version = strings.TrimSpace(version)
+	if version == "" || version == "dev" {
+		return nil
+	}
+	releases, err := repo.ListPlatformReleases()
+	if err != nil {
+		return err
+	}
+	for _, release := range releases {
+		if release.Version != version || release.Status == "active" {
+			continue
+		}
+		_, found, err := repo.ActivatePlatformRelease(release.ID, "deployment")
+		if err != nil {
+			return err
+		}
+		if !found {
+			return errors.New("running platform release disappeared during activation")
+		}
+		return nil
+	}
+	return nil
 }
 
 type agentTaskDispatcherAdapter struct {

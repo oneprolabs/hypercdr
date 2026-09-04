@@ -114,6 +114,24 @@ func TestRunInstallProcessHonorsCancellationAndTermTrap(t *testing.T) {
 	}
 }
 
+func TestRegistrationProgressWriterReportsInstallerStages(t *testing.T) {
+	repo := store.NewMemoryStore()
+	task, err := repo.CreateTask(store.TaskInput{TenantID: "tenant-a", Type: "cluster-registration", Status: "running"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := &registrationProgressWriter{repo: repo, taskID: task.ID}
+	_, _ = writer.Write([]byte("==> OADP backend\n[OK] OADP and Kopia node-agent are ready\n==> Readiness\n"))
+	updated, ok, err := repo.GetTask(task.ID)
+	if err != nil || !ok || updated.Progress != 90 {
+		t.Fatalf("progress = %#v ok=%v err=%v", updated, ok, err)
+	}
+	events, err := repo.ListTaskEvents(task.ID)
+	if err != nil || len(events) != 3 {
+		t.Fatalf("events = %#v err=%v", events, err)
+	}
+}
+
 func TestInspectClusterUsesFixedReadOnlyQueries(t *testing.T) {
 	runner := fakeRunner{responses: map[string]string{
 		"version -o json": `{"serverVersion":{"gitVersion":"v1.35.3"}}`,
@@ -177,6 +195,57 @@ func TestInspectClusterRejectsNonCCE(t *testing.T) {
 	}}
 	if _, err := inspectCluster(context.Background(), runner, "/session/kubeconfig", "kind", "huaweicloud-cce"); err == nil || !strings.Contains(err.Error(), "Huawei Cloud CCE") {
 		t.Fatalf("expected CCE rejection, got %v", err)
+	}
+}
+
+func TestInspectClusterAcceptsQualifiedOpenShift(t *testing.T) {
+	runner := fakeRunner{responses: map[string]string{
+		"version -o json": `{"serverVersion":{"gitVersion":"v1.28.15"}}`, "-n kube-system get configmap cluster-config -o jsonpath={.data.alias}": "", "get namespace kube-system -o jsonpath={.metadata.uid}": "12345678-abcd", `get nodes -o jsonpath={range .items[*]}{.spec.providerID}{"\n"}{end}`: "", "get clusterversion version -o jsonpath={.status.desired.version}": "4.15.31", `get nodes -o jsonpath={range .items[*]}{.status.nodeInfo.operatingSystem}{"/"}{.status.nodeInfo.architecture}{"|"}{.status.nodeInfo.osImage}{"\n"}{end}`: "linux/amd64|Red Hat Enterprise Linux CoreOS 415\nlinux/amd64|Red Hat Enterprise Linux CoreOS 415", `get nodes -o jsonpath={.items[0].metadata.labels.topology\.kubernetes\.io/region}`: "region-a", "get nodes -o json": oneReadyNodeJSON, `get storageclass -o jsonpath={range .items[*]}{.metadata.name}{"|"}{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}{"\n"}{end}`: "ocs-storagecluster-ceph-rbd|true", "auth can-i create namespaces --all-namespaces": "yes", "auth can-i create clusterroles.rbac.authorization.k8s.io --all-namespaces": "yes", "auth can-i create clusterrolebindings.rbac.authorization.k8s.io --all-namespaces": "yes", "auth can-i create deployments.apps --all-namespaces": "yes", "auth can-i create daemonsets.apps --all-namespaces": "yes", "auth can-i create secrets --all-namespaces": "yes", "auth can-i create persistentvolumeclaims --all-namespaces": "yes", "auth can-i create subscriptions.operators.coreos.com --all-namespaces": "yes", "auth can-i create operatorgroups.operators.coreos.com --all-namespaces": "yes", "auth can-i create dataprotectionapplications.oadp.openshift.io --all-namespaces": "yes", "auth can-i create securitycontextconstraints.security.openshift.io --all-namespaces": "yes",
+	}}
+	result, err := inspectCluster(context.Background(), runner, "/session/kubeconfig", "ocp", "openshift")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.DefaultStorageClass != "ocs-storagecluster-ceph-rbd" {
+		t.Fatalf("unexpected inspection: %#v", result)
+	}
+}
+
+func TestRegistrationTaskTimeoutAllowsOADPInstallation(t *testing.T) {
+	t.Setenv("HCDR_OPENSHIFT_REGISTRATION_TIMEOUT_SECONDS", "")
+	if got := registrationTaskTimeout("openshift"); got != 35*time.Minute {
+		t.Fatalf("OpenShift registration timeout = %s", got)
+	}
+	for _, clusterType := range []string{"native-kubernetes", "huaweicloud-cce", ""} {
+		if got := registrationTaskTimeout(clusterType); got != 20*time.Minute {
+			t.Fatalf("%q registration timeout = %s", clusterType, got)
+		}
+	}
+}
+
+func TestOpenShiftRegistrationTaskTimeoutIsConfigurable(t *testing.T) {
+	t.Setenv("HCDR_OPENSHIFT_REGISTRATION_TIMEOUT_SECONDS", "2700")
+	if got := registrationTaskTimeout("openshift"); got != 45*time.Minute {
+		t.Fatalf("configured OpenShift registration timeout = %s", got)
+	}
+	if got := registrationTaskTimeout("native-kubernetes"); got != 20*time.Minute {
+		t.Fatalf("native timeout changed to %s", got)
+	}
+}
+
+func TestInspectClusterRejectsUnsupportedOpenShiftVersion(t *testing.T) {
+	runner := fakeRunner{responses: map[string]string{"version -o json": `{"serverVersion":{"gitVersion":"v1.29.0"}}`, "-n kube-system get configmap cluster-config -o jsonpath={.data.alias}": "", "get namespace kube-system -o jsonpath={.metadata.uid}": "12345678-abcd", `get nodes -o jsonpath={range .items[*]}{.spec.providerID}{"\n"}{end}`: "", "get clusterversion version -o jsonpath={.status.desired.version}": "4.16.1"}}
+	_, err := inspectCluster(context.Background(), runner, "/session/kubeconfig", "ocp", "openshift")
+	if err == nil || !strings.Contains(err.Error(), "OpenShift 4.14 or 4.15") {
+		t.Fatalf("expected version rejection, got %v", err)
+	}
+}
+
+func TestInspectClusterRejectsUnsupportedOpenShiftNodeOS(t *testing.T) {
+	runner := fakeRunner{responses: map[string]string{"version -o json": `{"serverVersion":{"gitVersion":"v1.28.15"}}`, "-n kube-system get configmap cluster-config -o jsonpath={.data.alias}": "", "get namespace kube-system -o jsonpath={.metadata.uid}": "12345678-abcd", `get nodes -o jsonpath={range .items[*]}{.spec.providerID}{"\n"}{end}`: "", "get clusterversion version -o jsonpath={.status.desired.version}": "4.15.31", `get nodes -o jsonpath={range .items[*]}{.status.nodeInfo.operatingSystem}{"/"}{.status.nodeInfo.architecture}{"|"}{.status.nodeInfo.osImage}{"\n"}{end}`: "linux/amd64|Ubuntu 22.04"}}
+	_, err := inspectCluster(context.Background(), runner, "/session/kubeconfig", "ocp", "openshift")
+	if err == nil || !strings.Contains(err.Error(), "RHCOS or RHEL") {
+		t.Fatalf("expected node OS rejection, got %v", err)
 	}
 }
 

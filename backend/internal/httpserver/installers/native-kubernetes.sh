@@ -11,3 +11,5 @@ provider_native_kubernetes_prepare_platform_trust() {
 provider_native_kubernetes_prepare_preflight() { :; }
 provider_native_kubernetes_run_preflight() { :; }
 provider_native_kubernetes_install_platform_trust() { :; }
+provider_native_kubernetes_install_backup_backend() { :; }
+provider_native_kubernetes_rollback_backup_backend() { :; }

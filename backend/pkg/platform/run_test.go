@@ -27,6 +27,32 @@ func TestMissingRegistryBackfillUsesConfiguredRegistryAndPreservesSettings(t *te
 	}
 }
 
+func TestReconcileRunningReleaseActivatesExactDeployedVersion(t *testing.T) {
+	repo := store.NewMemoryStore()
+	oldRelease, err := repo.UpsertPlatformRelease(store.PlatformReleaseInput{Version: "1.0.12.20260903", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentRelease, err := repo.UpsertPlatformRelease(store.PlatformReleaseInput{Version: "1.0.13.20260903", Status: "candidate"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reconcileRunningRelease(repo, currentRelease.Version); err != nil {
+		t.Fatal(err)
+	}
+	releases, err := repo.ListPlatformReleases()
+	if err != nil {
+		t.Fatal(err)
+	}
+	statuses := map[string]string{}
+	for _, release := range releases {
+		statuses[release.ID] = release.Status
+	}
+	if statuses[currentRelease.ID] != "active" || statuses[oldRelease.ID] != "retired" {
+		t.Fatalf("unexpected release statuses: %#v", statuses)
+	}
+}
+
 type recordingAuthorizer struct {
 	request AuthorizationRequest
 }

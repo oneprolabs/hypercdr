@@ -47,3 +47,18 @@ func TestLegacyRegistrationDefaultsToNativeKubernetes(t *testing.T) {
 		t.Fatalf("cluster type = %q", cluster.ClusterType)
 	}
 }
+
+func TestOpenShiftRegistrationPreservesClusterType(t *testing.T) {
+	repo := NewMemoryStore()
+	token, err := repo.CreateAgentToken(DefaultTenantID, "", "openshift", time.Hour, "openshift")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cluster, _, err := repo.RegisterCluster(RegisterClusterInput{Token: token.Token, ClusterType: "openshift", ClusterName: "ocp-production"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cluster.ClusterType != "openshift" {
+		t.Fatalf("cluster type = %q", cluster.ClusterType)
+	}
+}

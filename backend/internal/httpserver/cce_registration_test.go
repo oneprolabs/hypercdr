@@ -68,6 +68,16 @@ func TestCCEKubeconfigUploadListsContextsAndCanBeDeleted(t *testing.T) {
 	}
 }
 
+func TestKubeconfigUploadAcceptsStandardExtensionlessFilename(t *testing.T) {
+	server := httptest.NewServer(NewRouter(config.Config{}, slog.Default(), store.NewMemoryStore()))
+	defer server.Close()
+
+	status, response := uploadTestKubeconfig(t, server.URL, "kubeconfig", validCCEKubeconfig)
+	if status != http.StatusCreated {
+		t.Fatalf("status = %d, body = %#v", status, response)
+	}
+}
+
 func TestCCEKubeconfigUploadRejectsExecPlugin(t *testing.T) {
 	server := httptest.NewServer(NewRouter(config.Config{}, slog.Default(), store.NewMemoryStore()))
 	defer server.Close()

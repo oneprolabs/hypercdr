@@ -1,6 +1,8 @@
 # Huawei Cloud CCE provider. No function in this module is called by the Native
 # provider; cloud-specific validation remains behind the provider contract.
 IMAGE_PULL_PREFLIGHT_STRATEGY="sequential"
+provider_huaweicloud_cce_install_backup_backend() { :; }
+provider_huaweicloud_cce_rollback_backup_backend() { :; }
 
 provider_huaweicloud_cce_download_kubectl() {
   local version="$1" arch cache_dir binary checksum expected actual

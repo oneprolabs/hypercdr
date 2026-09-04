@@ -4,7 +4,7 @@ run_image_pull_preflights() {
   [[ "$IMAGE_PULL_PREFLIGHT" == "true" ]] || return 0
 
   if [[ "${IMAGE_PULL_PREFLIGHT_STRATEGY:-parallel}" == "sequential" ]]; then
-    preflight_image_pull "hypercdr-image-check-agent" "$AGENT_IMAGE" '      command: ["/comm-agent"]'
+    preflight_image_pull "hypercdr-image-check-agent" "$AGENT_IMAGE" "      command: [\"${AGENT_COMMAND:-/comm-agent}\"]"
     if [[ "$INSTALL_VELERO" == "true" ]]; then
       preflight_image_pull "hypercdr-image-check-velero" "$VELERO_IMAGE" '      command: ["/velero", "version", "--client-only"]'
       preflight_image_pull "hypercdr-image-check-velero-aws-plugin" "$VELERO_AWS_PLUGIN_IMAGE" '      command: ["/plugins/velero-plugin-for-aws"]'
@@ -25,7 +25,7 @@ run_image_pull_preflights() {
     pids+=("$!")
   }
 
-  start_image_preflight "Agent" "hypercdr-image-check-agent" "$AGENT_IMAGE" '      command: ["/comm-agent"]'
+  start_image_preflight "Agent" "hypercdr-image-check-agent" "$AGENT_IMAGE" "      command: [\"${AGENT_COMMAND:-/comm-agent}\"]"
   if [[ "$INSTALL_VELERO" == "true" ]]; then
     start_image_preflight "Velero" "hypercdr-image-check-velero" "$VELERO_IMAGE" '      command: ["/velero", "version", "--client-only"]'
     start_image_preflight "Velero AWS plugin" "hypercdr-image-check-velero-aws-plugin" "$VELERO_AWS_PLUGIN_IMAGE" '      command: ["/plugins/velero-plugin-for-aws"]'

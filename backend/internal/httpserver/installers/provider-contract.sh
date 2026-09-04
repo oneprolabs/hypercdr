@@ -8,3 +8,5 @@ provider_prepare_platform_trust() { "provider_${CLUSTER_TYPE//-/_}_prepare_platf
 provider_prepare_preflight() { "provider_${CLUSTER_TYPE//-/_}_prepare_preflight"; }
 provider_run_preflight() { "provider_${CLUSTER_TYPE//-/_}_run_preflight"; }
 provider_install_platform_trust() { "provider_${CLUSTER_TYPE//-/_}_install_platform_trust"; }
+provider_install_backup_backend() { "provider_${CLUSTER_TYPE//-/_}_install_backup_backend"; }
+provider_rollback_backup_backend() { "provider_${CLUSTER_TYPE//-/_}_rollback_backup_backend"; }

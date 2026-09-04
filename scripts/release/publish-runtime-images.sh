@@ -8,7 +8,7 @@ source "${SCRIPT_DIR}/common.sh"
 
 REGISTRY="${HCDR_IMAGE_REGISTRY:-}"
 POSTGRES_SOURCE="${HCDR_POSTGRES_SOURCE_IMAGE:-postgres:16}"
-VELERO_TAG="${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.3}"
+VELERO_TAG="${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.4}"
 FORCE_VELERO_BUILD="false"
 
 while [[ $# -gt 0 ]]; do

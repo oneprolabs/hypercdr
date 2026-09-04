@@ -13,7 +13,9 @@ GOPROXY="${HCDR_BUILD_GOPROXY:-${DEFAULT_GOPROXY}}"
 NPM_REGISTRY="${HCDR_BUILD_NPM_REGISTRY:-${DEFAULT_NPM_REGISTRY}}"
 NGINX_IMAGE="${HCDR_FRONTEND_NGINX_IMAGE:-nginx:1.27-alpine}"
 DEBIAN_IMAGE="${HCDR_API_RUNTIME_IMAGE:-debian:bookworm-slim}"
-KUBECTL_VERSION="${HCDR_REGISTRATION_KUBECTL_VERSION:-v1.35.3}"
+# OpenShift 4.14 and 4.15 use Kubernetes 1.27 and 1.28. A 1.28 client is
+# inside the supported kubectl minor-version skew for both server versions.
+KUBECTL_VERSION="${HCDR_REGISTRATION_KUBECTL_VERSION:-v1.28.15}"
 KUBECTL_BINARY="${HCDR_REGISTRATION_KUBECTL_BINARY:-}"
 KUBECTL_SHA256="${HCDR_REGISTRATION_KUBECTL_SHA256:-}"
 KUBECTL_DOWNLOAD_MAX_TIME="${HCDR_REGISTRATION_KUBECTL_DOWNLOAD_MAX_TIME:-300}"
@@ -86,6 +88,7 @@ restore_frontend_node_modules() {
 PLATFORM_API_IMAGE="$(image_ref "${REGISTRY}" platform-api "${VERSION}")"
 PLATFORM_FRONTEND_IMAGE="$(image_ref "${REGISTRY}" platform-frontend "${VERSION}")"
 COMM_AGENT_IMAGE="$(image_ref "${REGISTRY}" comm-agent "${VERSION}")"
+OADP_COMM_AGENT_IMAGE="$(image_ref "${REGISTRY}" oadp-comm-agent "${VERSION}")"
 PLATFORM_UPGRADER_IMAGE="$(image_ref "${REGISTRY}" platform-upgrader "${VERSION}")"
 REGISTRATION_EXECUTOR_IMAGE="$(image_ref "${REGISTRY}" cluster-registration-executor "${VERSION}")"
 
@@ -102,6 +105,7 @@ mkdir -p \
   "${WORK_DIR}/platform-api" \
   "${WORK_DIR}/platform-frontend/nginx" \
   "${WORK_DIR}/comm-agent" \
+  "${WORK_DIR}/oadp-comm-agent" \
   "${WORK_DIR}/platform-upgrader" \
   "${WORK_DIR}/cluster-registration-executor" \
   "${FRONTEND_DEPS_DIR}" \
@@ -188,9 +192,19 @@ log "Building comm-agent binary"
     "${GO_BIN}" build -trimpath -ldflags="-s -w" -o "${WORK_DIR}/comm-agent/comm-agent" ./cmd/comm-agent
 )
 
+log "Building oadp-comm-agent binary"
+(
+  cd "${ROOT_DIR}/agent/comm-agent"
+  PATH="$(dirname "${GO_BIN}"):${PATH}" \
+    GOTOOLCHAIN=local GOPROXY="${GOPROXY}" GOCACHE="${GO_BUILD_CACHE}" GOMODCACHE="${GO_MOD_CACHE}" \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    "${GO_BIN}" build -trimpath -ldflags="-s -w" -o "${WORK_DIR}/oadp-comm-agent/oadp-comm-agent" ./cmd/comm-agent
+)
+
 log "Preparing Docker contexts"
 cp /etc/ssl/certs/ca-certificates.crt "${WORK_DIR}/platform-api/ca-certificates.crt"
 cp /etc/ssl/certs/ca-certificates.crt "${WORK_DIR}/comm-agent/ca-certificates.crt"
+cp /etc/ssl/certs/ca-certificates.crt "${WORK_DIR}/oadp-comm-agent/ca-certificates.crt"
 cp "${ROOT_DIR}/docker/platform-api.runtime.Dockerfile" "${WORK_DIR}/platform-api/Dockerfile"
 sed -i "s#^FROM debian:bookworm-slim#FROM ${DEBIAN_IMAGE}#" "${WORK_DIR}/platform-api/Dockerfile"
 
@@ -198,6 +212,7 @@ cp -a "${ROOT_DIR}/docker/nginx/." "${WORK_DIR}/platform-frontend/nginx/"
 cp "${ROOT_DIR}/docker/platform-frontend.Dockerfile" "${WORK_DIR}/platform-frontend/Dockerfile"
 
 cp "${ROOT_DIR}/docker/comm-agent.local.Dockerfile" "${WORK_DIR}/comm-agent/Dockerfile"
+cp "${ROOT_DIR}/docker/oadp-comm-agent.local.Dockerfile" "${WORK_DIR}/oadp-comm-agent/Dockerfile"
 cp "${ROOT_DIR}/docker/platform-upgrader.Dockerfile" "${WORK_DIR}/platform-upgrader/Dockerfile"
 cp /etc/ssl/certs/ca-certificates.crt "${WORK_DIR}/cluster-registration-executor/ca-certificates.crt"
 cp "${ROOT_DIR}/docker/cluster-registration-executor.Dockerfile" "${WORK_DIR}/cluster-registration-executor/Dockerfile"
@@ -208,14 +223,33 @@ if [[ -n "${KUBECTL_BINARY}" ]]; then
   cp "${KUBECTL_BINARY}" "${WORK_DIR}/cluster-registration-executor/kubectl"
 else
   log "Downloading checksum-verified kubectl ${KUBECTL_VERSION} for registration executor"
-  curl -fsSL --retry 2 --retry-max-time "${KUBECTL_DOWNLOAD_MAX_TIME}" \
-    --connect-timeout 10 --max-time "${KUBECTL_DOWNLOAD_MAX_TIME}" --speed-time 30 --speed-limit 1024 \
-    "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
-    -o "${WORK_DIR}/cluster-registration-executor/kubectl"
+  KUBECTL_CACHE_DIR="${CACHE_ROOT}/downloads/kubectl/${KUBECTL_VERSION}/linux-amd64"
+  KUBECTL_CACHE_FILE="${KUBECTL_CACHE_DIR}/kubectl"
+  KUBECTL_PART_FILE="${KUBECTL_CACHE_FILE}.part"
+  mkdir -p "${KUBECTL_CACHE_DIR}"
+  if [[ ! -s "${KUBECTL_CACHE_FILE}" ]]; then
+    # Keep a partial file outside WORK_DIR so a failed release can resume the
+    # checksum-protected download instead of restarting a large transfer.
+    download_attempt=1
+    until curl -fL --retry 2 --retry-max-time "${KUBECTL_DOWNLOAD_MAX_TIME}" \
+      --connect-timeout 10 --max-time "${KUBECTL_DOWNLOAD_MAX_TIME}" --speed-time 30 --speed-limit 1024 \
+      --continue-at - "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
+      -o "${KUBECTL_PART_FILE}"; do
+      (( download_attempt < 5 )) || die "kubectl ${KUBECTL_VERSION} download failed after ${download_attempt} resumable attempts"
+      log "Resuming kubectl download after attempt ${download_attempt}"
+      download_attempt=$((download_attempt + 1))
+    done
+  fi
   curl -fsSL --retry 1 --retry-max-time 60 --connect-timeout 10 --max-time 60 --speed-time 20 --speed-limit 32 \
     "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl.sha256" \
     -o "${WORK_DIR}/cluster-registration-executor/kubectl.sha256"
   KUBECTL_SHA256="$(tr -d '[:space:]' < "${WORK_DIR}/cluster-registration-executor/kubectl.sha256")"
+  if [[ ! -s "${KUBECTL_CACHE_FILE}" ]]; then
+    KUBECTL_PART_SHA256="$(sha256sum "${KUBECTL_PART_FILE}" | awk '{print $1}')"
+    [[ "${KUBECTL_SHA256}" =~ ^[0-9a-f]{64}$ && "${KUBECTL_PART_SHA256}" == "${KUBECTL_SHA256}" ]] || die "downloaded kubectl ${KUBECTL_VERSION} checksum verification failed"
+    mv "${KUBECTL_PART_FILE}" "${KUBECTL_CACHE_FILE}"
+  fi
+  cp "${KUBECTL_CACHE_FILE}" "${WORK_DIR}/cluster-registration-executor/kubectl"
 fi
 KUBECTL_ACTUAL="$(sha256sum "${WORK_DIR}/cluster-registration-executor/kubectl" | awk '{print $1}')"
 [[ "${KUBECTL_SHA256}" =~ ^[0-9a-f]{64}$ && "${KUBECTL_ACTUAL}" == "${KUBECTL_SHA256}" ]] || die "kubectl ${KUBECTL_VERSION} checksum verification failed"
@@ -230,6 +264,9 @@ docker build --build-arg NGINX_IMAGE="${NGINX_IMAGE}" -t "${PLATFORM_FRONTEND_IM
 log "Building image ${COMM_AGENT_IMAGE}"
 docker build -t "${COMM_AGENT_IMAGE}" "${WORK_DIR}/comm-agent"
 
+log "Building image ${OADP_COMM_AGENT_IMAGE}"
+docker build -t "${OADP_COMM_AGENT_IMAGE}" "${WORK_DIR}/oadp-comm-agent"
+
 log "Building image ${PLATFORM_UPGRADER_IMAGE}"
 docker build -t "${PLATFORM_UPGRADER_IMAGE}" "${WORK_DIR}/platform-upgrader"
 
@@ -241,6 +278,7 @@ if [[ "${PUSH}" == "true" ]]; then
   docker push "${PLATFORM_API_IMAGE}"
   docker push "${PLATFORM_FRONTEND_IMAGE}"
   docker push "${COMM_AGENT_IMAGE}"
+  docker push "${OADP_COMM_AGENT_IMAGE}"
   docker push "${PLATFORM_UPGRADER_IMAGE}"
   docker push "${REGISTRATION_EXECUTOR_IMAGE}"
 fi

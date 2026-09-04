@@ -1257,7 +1257,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     }
   }, [selectedCluster?.id]);
 
-  const requestAgentToken = useCallback(async (clusterType: 'native-kubernetes' | 'huaweicloud-cce' = 'native-kubernetes') => apiPost<ApiAgentToken>('/api/v1/agent-tokens', {
+  const requestAgentToken = useCallback(async (clusterType: 'native-kubernetes' | 'huaweicloud-cce' | 'openshift' = 'native-kubernetes') => apiPost<ApiAgentToken>('/api/v1/agent-tokens', {
     description: 'cluster registration from console',
     ttlSeconds: 1800,
     clusterType,
@@ -1299,8 +1299,8 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     return isAgentTokenUsable(token) ? token : null;
   }, [authSession?.session.token]);
 
-  const getAgentTokenForRegistration = useCallback(async (clusterType: 'native-kubernetes' | 'huaweicloud-cce' = 'native-kubernetes') => {
-    if (clusterType === 'huaweicloud-cce') {
+  const getAgentTokenForRegistration = useCallback(async (clusterType: 'native-kubernetes' | 'huaweicloud-cce' | 'openshift' = 'native-kubernetes') => {
+    if (clusterType !== 'native-kubernetes') {
       const token = await requestAgentToken(clusterType);
       if (!isAgentTokenUsable(token)) throw new Error('agent token is unavailable');
       return token;
@@ -1706,7 +1706,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
         apiGet<ApiList<ApiStorageRepo>>('/api/v1/storage-repositories'),
         apiGet<ApiList<ApiPolicy>>('/api/v1/policies'),
         apiGet<ApiList<ApiProtectionPlan>>('/api/v1/protection-plans'),
-        apiGet<ApiList<ApiTask>>('/api/v1/tasks?view=summary&types=backup,restore,drill,takeover&limit=500'),
+        apiGet<ApiList<ApiTask>>('/api/v1/tasks?view=summary&types=backup,restore,drill,takeover,storage-sync,schedule-sync,protection-cleanup&limit=500'),
         apiGet<ApiList<TagItem>>('/api/v1/tags'),
         apiGet<ApiList<ApiRestorePoint>>('/api/v1/restore-points?view=summary&pageSize=500'),
       ]);
@@ -1833,7 +1833,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
         // a stale latestRecoveryTaskId makes the row keep rendering the prior
         // drill until a full-page refresh.
         const [taskRes, restorePointRes, planRes] = await Promise.all([
-          apiGet<ApiList<ApiTask>>('/api/v1/tasks?view=summary&types=backup,restore,drill,takeover&limit=500'),
+          apiGet<ApiList<ApiTask>>('/api/v1/tasks?view=summary&types=backup,restore,drill,takeover,storage-sync,schedule-sync,protection-cleanup&limit=500'),
           apiGet<ApiList<ApiRestorePoint>>('/api/v1/restore-points?view=summary&pageSize=500'),
           apiGet<ApiList<ApiProtectionPlan>>('/api/v1/protection-plans'),
         ]);

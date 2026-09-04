@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -219,9 +220,17 @@ func (s *server) runRegistrationTask(repo store.Store, task store.Task) {
 		fail("REGISTRATION_REQUEST_INVALID", "The sealed registration request is incomplete or inconsistent.")
 		return
 	}
+	clusterType := normalizeClusterType(request.ClusterType)
+	if clusterType == "" {
+		clusterType = normalizeClusterType(stringValue(task.Payload, "clusterType"))
+	}
+	if clusterType == "" {
+		clusterType = "huaweicloud-cce"
+	}
+	registrationTimeout := registrationTaskTimeout(clusterType)
 	_ = repo.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "info", Reason: "preflight_started", Message: "Running provider and cluster preflight checks."})
 	_, _, _ = repo.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "running", Progress: 5, Payload: map[string]any{"stage": "preflight"}, MarkStarted: true})
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), registrationTimeout)
 	defer cancel()
 	script, err := downloadInstaller(ctx, request.InstallScriptURL)
 	if err != nil {
@@ -234,13 +243,6 @@ func (s *server) runRegistrationTask(repo store.Store, task store.Task) {
 		return
 	}
 	defer os.Remove(scriptPath)
-	clusterType := normalizeClusterType(request.ClusterType)
-	if clusterType == "" {
-		clusterType = normalizeClusterType(stringValue(task.Payload, "clusterType"))
-	}
-	if clusterType == "" {
-		clusterType = "huaweicloud-cce"
-	}
 	args := []string{scriptPath, "--token", request.Token, "--endpoint", request.Endpoint, "--cluster-type", clusterType, "--kubeconfig", filepath.Join(sessionDir, "kubeconfig"), "--context", request.Context, "--namespace", request.Namespace, "--executor-mode", "kubernetes", "--install-registry-ca", "false", "--interactive", "false"}
 	if request.EndpointPublic != "" && request.EndpointPublic != request.Endpoint {
 		args = append(args, "--endpoint-public", request.EndpointPublic)
@@ -256,7 +258,7 @@ func (s *server) runRegistrationTask(repo store.Store, task store.Task) {
 		return
 	}
 	if timedOut {
-		fail("REGISTRATION_TIMEOUT", "Registration exceeded 20 minutes and was stopped; installer rollback was requested.")
+		fail("REGISTRATION_TIMEOUT", fmt.Sprintf("Registration exceeded %d minutes and was stopped; installer rollback was requested.", int(registrationTimeout/time.Minute)))
 		return
 	}
 	if runErr != nil {
@@ -269,11 +271,21 @@ func (s *server) runRegistrationTask(repo store.Store, task store.Task) {
 	_, _, _ = repo.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "succeeded", Progress: 100, Payload: map[string]any{"stage": "completed"}, MarkDone: true})
 }
 
+func registrationTaskTimeout(clusterType string) time.Duration {
+	if normalizeClusterType(clusterType) == "openshift" {
+		if seconds, err := strconv.Atoi(strings.TrimSpace(os.Getenv("HCDR_OPENSHIFT_REGISTRATION_TIMEOUT_SECONDS"))); err == nil && seconds >= 60 {
+			return time.Duration(seconds) * time.Second
+		}
+		return 35 * time.Minute
+	}
+	return 20 * time.Minute
+}
+
 func runInstallProcess(ctx context.Context, repo store.Store, taskID string, args []string) ([]byte, bool, bool, error) {
 	cmd := exec.Command("/bin/bash", args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	var output bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &output, &output
+	output := &registrationProgressWriter{repo: repo, taskID: taskID}
+	cmd.Stdout, cmd.Stderr = output, output
 	if err := cmd.Start(); err != nil {
 		return output.Bytes(), false, false, err
 	}
@@ -304,6 +316,65 @@ func runInstallProcess(ctx context.Context, repo store.Store, taskID string, arg
 			}
 		}
 	}
+}
+
+type registrationStage struct {
+	needle, reason, message, stage string
+	progress                       int
+}
+
+var registrationStages = []registrationStage{
+	{"==> Isolated installation preflight", "image_preflight_started", "Verifying cluster access and required images.", "image-preflight", 10},
+	{"==> Namespace and credentials", "agent_install_started", "Creating the HyperCDR namespace and credentials.", "agent-install", 20},
+	{"==> OADP backend", "oadp_install_started", "Installing and reconciling the OADP Operator.", "oadp-operator", 40},
+	{"OADP and Kopia node-agent are ready", "oadp_ready", "OADP, Velero, and the Kopia node-agent are ready.", "oadp-ready", 65},
+	{"==> HyperCDR agent", "agent_deployment_started", "Deploying the HyperCDR communication agent and state volume.", "agent-deployment", 80},
+	{"==> Readiness", "readiness_started", "Waiting for workloads and the Agent connection to become ready.", "readiness", 90},
+}
+
+type registrationProgressWriter struct {
+	mu      sync.Mutex
+	buffer  bytes.Buffer
+	pending string
+	seen    map[string]bool
+	repo    store.Store
+	taskID  string
+}
+
+func (w *registrationProgressWriter) Write(data []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n, err := w.buffer.Write(data)
+	w.pending += string(data)
+	for {
+		index := strings.IndexByte(w.pending, '\n')
+		if index < 0 {
+			break
+		}
+		w.observe(w.pending[:index])
+		w.pending = w.pending[index+1:]
+	}
+	return n, err
+}
+
+func (w *registrationProgressWriter) observe(line string) {
+	if w.seen == nil {
+		w.seen = map[string]bool{}
+	}
+	for _, stage := range registrationStages {
+		if w.seen[stage.reason] || !strings.Contains(line, stage.needle) {
+			continue
+		}
+		w.seen[stage.reason] = true
+		_, _, _ = w.repo.UpdateTaskStatus(store.TaskStatusInput{TaskID: w.taskID, Status: "running", Progress: stage.progress, Payload: map[string]any{"stage": stage.stage}})
+		_ = w.repo.AddTaskEvent(store.TaskEventInput{TaskID: w.taskID, Level: "info", Reason: stage.reason, Message: stage.message})
+	}
+}
+
+func (w *registrationProgressWriter) Bytes() []byte {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]byte(nil), w.buffer.Bytes()...)
 }
 
 func downloadInstaller(ctx context.Context, rawURL string) ([]byte, error) {
@@ -420,6 +491,28 @@ func inspectCluster(ctx context.Context, runner kubectlRunner, kubeconfig, conte
 	if clusterType == "huaweicloud-cce" && (err != nil || (!strings.Contains(strings.ToLower(providerIDs), "huaweicloud") && alias == "")) {
 		return inspection{}, errors.New("The selected context could not be verified as Huawei Cloud CCE.")
 	}
+	if clusterType == "openshift" {
+		openshiftVersion, versionErr := run("get", "clusterversion", "version", "-o", "jsonpath={.status.desired.version}")
+		if versionErr != nil || (openshiftVersion != "4.14" && openshiftVersion != "4.15" && !strings.HasPrefix(openshiftVersion, "4.14.") && !strings.HasPrefix(openshiftVersion, "4.15.")) {
+			return inspection{}, fmt.Errorf("The selected context must be OpenShift 4.14 or 4.15; detected %q", openshiftVersion)
+		}
+		architectures, architectureErr := run("get", "nodes", "-o", `jsonpath={range .items[*]}{.status.nodeInfo.operatingSystem}{"/"}{.status.nodeInfo.architecture}{"|"}{.status.nodeInfo.osImage}{"\n"}{end}`)
+		if architectureErr != nil || strings.TrimSpace(architectures) == "" {
+			return inspection{}, errors.New("OpenShift node operating systems and architectures could not be read.")
+		}
+		for _, line := range strings.Split(architectures, "\n") {
+			parts := strings.SplitN(strings.TrimSpace(line), "|", 2)
+			if parts[0] == "" {
+				continue
+			}
+			if parts[0] != "linux/amd64" && parts[0] != "linux/x86_64" {
+				return inspection{}, fmt.Errorf("OpenShift phase one supports Linux AMD64 nodes only; detected %s", parts[0])
+			}
+			if len(parts) != 2 || (!strings.Contains(parts[1], "Red Hat Enterprise Linux CoreOS") && !strings.Contains(parts[1], "Red Hat Enterprise Linux")) {
+				return inspection{}, fmt.Errorf("OpenShift nodes must use supported RHCOS or RHEL; detected %q", strings.TrimSpace(strings.Join(parts[1:], "|")))
+			}
+		}
+	}
 	region, _ := run("get", "nodes", "-o", "jsonpath={.items[0].metadata.labels.topology\\.kubernetes\\.io/region}")
 	nodes, err := run("get", "nodes", "-o", "json")
 	if err != nil {
@@ -461,12 +554,21 @@ func inspectCluster(ctx context.Context, runner kubectlRunner, kubeconfig, conte
 			result.DefaultStorageClass = parts[0]
 		}
 	}
+	identityLabel := "Kubernetes identity"
+	if clusterType == "huaweicloud-cce" {
+		identityLabel = "CCE identity"
+	} else if clusterType == "openshift" {
+		identityLabel = "OpenShift identity"
+	}
 	result.Gates = append(result.Gates,
-		inspectionGate{ID: "identity", Label: map[bool]string{true: "CCE identity", false: "Kubernetes identity"}[clusterType == "huaweicloud-cce"], Status: "passed", Detail: result.ClusterName + " · " + result.ClusterID},
+		inspectionGate{ID: "identity", Label: identityLabel, Status: "passed", Detail: result.ClusterName + " · " + result.ClusterID},
 		inspectionGate{ID: "version", Label: "Kubernetes version", Status: "passed", Detail: result.ServerVersion},
 		inspectionGate{ID: "capacity", Label: "Worker capacity", Status: "passed", Detail: fmt.Sprintf("%d Ready schedulable worker node(s) · %dm CPU · %d MiB memory · policy %s", result.NodeCount, milliCPU, memoryBytes/(1024*1024), registrationCapacityPolicyVersion)},
 	)
 	permissions := [][2]string{{"create", "namespaces"}, {"create", "clusterroles.rbac.authorization.k8s.io"}, {"create", "clusterrolebindings.rbac.authorization.k8s.io"}, {"create", "deployments.apps"}, {"create", "daemonsets.apps"}, {"create", "secrets"}, {"create", "persistentvolumeclaims"}}
+	if clusterType == "openshift" {
+		permissions = append(permissions, [2]string{"create", "subscriptions.operators.coreos.com"}, [2]string{"create", "operatorgroups.operators.coreos.com"}, [2]string{"create", "dataprotectionapplications.oadp.openshift.io"}, [2]string{"create", "securitycontextconstraints.security.openshift.io"})
+	}
 	missing := []string{}
 	for _, permission := range permissions {
 		answer, permissionErr := run("auth", "can-i", permission[0], permission[1], "--all-namespaces")
@@ -508,7 +610,7 @@ func conciseCommandError(err error) string {
 
 func normalizeClusterType(value string) string {
 	switch strings.TrimSpace(value) {
-	case "native-kubernetes", "huaweicloud-cce":
+	case "native-kubernetes", "huaweicloud-cce", "openshift":
 		return strings.TrimSpace(value)
 	default:
 		return ""

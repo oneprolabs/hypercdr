@@ -193,7 +193,13 @@ type VeleroScheduleSummary struct {
 }
 
 type RestoreReadinessReader interface {
-	GetNamespaceReadiness(ctx context.Context, namespace string) (NamespaceReadiness, error)
+	GetNamespaceReadiness(ctx context.Context, namespace string, expectations ReadinessExpectations) (NamespaceReadiness, error)
+}
+
+type ReadinessExpectations struct {
+	Known                    bool
+	RuntimeWorkloadsExpected bool
+	PVCNames                 []string
 }
 
 type NamespaceReadiness struct {
@@ -206,6 +212,8 @@ type NamespaceReadiness struct {
 	WorkloadCount   int
 	ReadyWorkloads  int
 	ServiceCount    int
+	PVCCount        int
+	ReadyPVCCount   int
 	UnreadyPods     []string
 	UnreadyWorkload []string
 	FailureCode     string
@@ -482,7 +490,7 @@ func nestedTime(object map[string]any, fields ...string) (time.Time, bool) {
 	return parsed, true
 }
 
-func (a *DynamicManifestApplier) GetNamespaceReadiness(ctx context.Context, namespace string) (NamespaceReadiness, error) {
+func (a *DynamicManifestApplier) GetNamespaceReadiness(ctx context.Context, namespace string, expectations ReadinessExpectations) (NamespaceReadiness, error) {
 	if strings.TrimSpace(namespace) == "" {
 		return NamespaceReadiness{}, fmt.Errorf("namespace is required")
 	}
@@ -503,6 +511,26 @@ func (a *DynamicManifestApplier) GetNamespaceReadiness(ctx context.Context, name
 	if err := a.readWorkloadReadiness(ctx, namespace, &result); err != nil {
 		return result, err
 	}
+	for _, name := range expectations.PVCNames {
+		result.PVCCount++
+		pvc, err := a.client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumeclaims"}).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			result.UnreadyWorkload = append(result.UnreadyWorkload, "PersistentVolumeClaim/"+name+" (not restored)")
+			continue
+		}
+		if err != nil {
+			return result, err
+		}
+		phase, _, _ := unstructured.NestedString(pvc.Object, "status", "phase")
+		if phase == "Bound" {
+			result.ReadyPVCCount++
+		} else {
+			if phase == "" {
+				phase = "Pending"
+			}
+			result.UnreadyWorkload = append(result.UnreadyWorkload, "PersistentVolumeClaim/"+name+" ("+phase+")")
+		}
+	}
 	services, err := a.client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "services"}).Namespace(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return result, err
@@ -510,6 +538,9 @@ func (a *DynamicManifestApplier) GetNamespaceReadiness(ctx context.Context, name
 	result.ServiceCount = len(services.Items)
 
 	switch {
+	case expectations.Known && !expectations.RuntimeWorkloadsExpected && len(result.UnreadyWorkload) == 0:
+		result.Ready = true
+		result.Message = fmt.Sprintf("restored namespace %q has no runtime workloads to wait for; expected persistent volume claims are ready", namespace)
 	case result.PodCount == 0 && result.WorkloadCount == 0:
 		result.Message = fmt.Sprintf("namespace %q has no restored pods or workloads yet", namespace)
 	case len(result.UnreadyPods) > 0:

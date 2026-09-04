@@ -103,6 +103,7 @@ Docker options:
   --tls-cert-file PATH         Existing platform certificate to use. Optional.
   --tls-key-file PATH          Existing platform private key to use. Optional.
   --execute                    Run docker compose commands. Without this flag, prints the plan only.
+  --confirm-prerequisites      Confirm Docker, Compose V2, curl, and openssl are installed.
 
 Recommended no-DNS Kubernetes flow:
   1. Download and extract hypercdr-bootstrap.tar.gz.
@@ -143,6 +144,7 @@ input_tls_cert_file=""
 input_tls_key_file=""
 timeout="5m"
 execute="false"
+prerequisites_confirmed="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -169,10 +171,21 @@ while [[ $# -gt 0 ]]; do
     --tls-key-file) input_tls_key_file="${2:?missing value for --tls-key-file}"; shift 2 ;;
     --timeout) timeout="${2:?missing value for --timeout}"; shift 2 ;;
     --execute) execute="true"; shift ;;
+    --confirm-prerequisites) prerequisites_confirmed="true"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; usage; exit 2 ;;
   esac
 done
+
+if [[ "${execute}" == "true" && "${prerequisites_confirmed}" != "true" ]]; then
+  if [[ "${mode}" == "docker" ]]; then
+    echo "Before installation, install Docker Engine, Docker Compose V2, curl, and openssl." >&2
+  else
+    echo "Before installation, install kubectl, Helm, curl, and openssl." >&2
+  fi
+  echo "Review the requirements, then rerun with --confirm-prerequisites." >&2
+  exit 2
+fi
 
 if [[ -z "$public_base_url" ]]; then
   echo "--public-base-url is required" >&2
@@ -268,6 +281,38 @@ preflight_host_port() {
   fi
 }
 
+preflight_docker_host() {
+  local available_kb disk_path
+  for command_name in docker curl openssl; do
+    require_command "${command_name}"
+  done
+  docker info >/dev/null 2>&1 || {
+    echo "Docker daemon is not running or the current user cannot access it." >&2
+    return 1
+  }
+  docker compose version >/dev/null 2>&1 || {
+    echo "Docker Compose V2 is required (the command 'docker compose' is unavailable)." >&2
+    return 1
+  }
+  disk_path="${data_dir}"
+  while [[ ! -e "${disk_path}" && "${disk_path}" != "/" ]]; do
+    disk_path="$(dirname "${disk_path}")"
+  done
+  [[ -d "${disk_path}" && -w "${disk_path}" ]] || {
+    echo "The existing parent of the HyperCDR data directory is not writable: ${disk_path}" >&2
+    return 1
+  }
+  available_kb="$(df -Pk "${disk_path}" | awk 'NR==2 {print $4}')"
+  [[ "${available_kb}" =~ ^[0-9]+$ ]] || {
+    echo "Unable to determine free disk space for ${data_dir}." >&2
+    return 1
+  }
+  if (( available_kb < 10 * 1024 * 1024 )); then
+    echo "At least 10 GiB of free space is required on ${data_dir}; 100 GiB is recommended." >&2
+    return 1
+  fi
+}
+
 print_common() {
   cat <<EOF
 HyperCDR control plane deployment plan
@@ -310,7 +355,7 @@ run_k8s() {
     http_port="3002"
   fi
   if [[ -z "${velero_image}" ]]; then
-    velero_image="${registry}/velero:v1.18.2-hcdr.3"
+    velero_image="${registry}/velero:v1.18.2-hcdr.4"
   fi
   if [[ -z "${velero_aws_plugin_image}" ]]; then
     velero_aws_plugin_image="${registry}/velero-plugin-for-aws:v1.13.0"
@@ -465,8 +510,6 @@ EOF
 }
 
 run_docker() {
-  require_command docker
-  require_command openssl
   local tls_enabled="false"
   local tls_dir="${data_dir}/tls"
   local tls_cert_file="${tls_dir}/platform.crt"
@@ -515,7 +558,7 @@ run_docker() {
     http_port="3002"
   fi
   if [[ -z "${velero_image}" ]]; then
-    velero_image="${registry}/velero:v1.18.2-hcdr.3"
+    velero_image="${registry}/velero:v1.18.2-hcdr.4"
   fi
   if [[ -z "${velero_aws_plugin_image}" ]]; then
     velero_aws_plugin_image="${registry}/velero-plugin-for-aws:v1.13.0"
@@ -537,8 +580,14 @@ run_docker() {
     [[ -r "${input_tls_key_file}" ]] || { echo "TLS private key is not readable: ${input_tls_key_file}" >&2; exit 1; }
   fi
 
+  install_header
+  install_step 1 1 "Validate installation prerequisites"
+  run_logged "Docker, Compose V2, tools, permissions, and disk space are ready" preflight_docker_host
+  run_logged "Frontend port ${http_port} is available" preflight_host_port "${http_port}" hypercdr-platform-frontend
+  run_logged "API port ${api_port} is available" preflight_host_port "${api_port}" hypercdr-platform-api
+  run_logged "Registry connection is trusted" preflight_registry
+
   if [[ "$execute" != "true" ]]; then
-    install_header
     cat <<EOF
  Mode             Docker Compose
  Platform URL     ${public_base_url}
@@ -571,9 +620,7 @@ EOF
     printf ' Data directory   %s\n' "${data_dir}"
 
     install_step 1 7 "Validate host and registry"
-    run_logged "Frontend port ${http_port} is available" preflight_host_port "${http_port}" hypercdr-platform-frontend
-    run_logged "API port ${api_port} is available" preflight_host_port "${api_port}" hypercdr-platform-api
-    run_logged "Registry connection is trusted" preflight_registry
+    install_ok "Host and registry preflight already passed"
 
     install_step 2 7 "Verify required images"
     for required_image in \

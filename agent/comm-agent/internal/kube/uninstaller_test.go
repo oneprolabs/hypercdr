@@ -19,10 +19,10 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 )
 
-func TestKubernetesUninstallerDeletesNamespaceAfterPreparingAgentRBACForGarbageCollection(t *testing.T) {
+func TestKubernetesUninstallerDeletesNamespaceAndOwnsBindingFromClusterRole(t *testing.T) {
 	client := fake.NewSimpleClientset(
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "hypercdr-agent", UID: types.UID("namespace-uid")}},
-		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "hypercdr-agent"}},
+		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "hypercdr-agent", UID: types.UID("agent-role-uid")}},
 		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "hypercdr-agent"}},
 		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "hypercdr-velero"}},
 		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "hypercdr-velero"}},
@@ -40,8 +40,10 @@ func TestKubernetesUninstallerDeletesNamespaceAfterPreparingAgentRBACForGarbageC
 	if _, err := client.CoreV1().Namespaces().Get(context.Background(), "hypercdr-agent", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
 		t.Fatalf("expected namespace deleted, got %v", err)
 	}
-	assertPatchedOwnerReference(t, client.Actions(), schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterroles"}, "hypercdr-agent")
 	assertPatchedOwnerReference(t, client.Actions(), schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterrolebindings"}, "hypercdr-agent")
+	if _, err := client.RbacV1().ClusterRoles().Get(context.Background(), "hypercdr-agent", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("expected agent cluster role deleted, got %v", err)
+	}
 	for _, name := range []string{"hypercdr-velero"} {
 		if _, err := client.RbacV1().ClusterRoles().Get(context.Background(), name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
 			t.Fatalf("expected cluster role %s deleted, got %v", name, err)
@@ -62,8 +64,8 @@ func assertPatchedOwnerReference(t *testing.T, actions []k8stesting.Action, gvr 
 		if patch.GetPatchType() != types.MergePatchType {
 			t.Fatalf("expected merge patch for %s, got %s", name, patch.GetPatchType())
 		}
-		if !strings.Contains(string(patch.GetPatch()), `"kind":"Namespace"`) ||
-			!strings.Contains(string(patch.GetPatch()), `"uid":"namespace-uid"`) {
+		if !strings.Contains(string(patch.GetPatch()), `"kind":"ClusterRole"`) ||
+			!strings.Contains(string(patch.GetPatch()), `"uid":"agent-role-uid"`) {
 			t.Fatalf("unexpected owner reference patch for %s: %s", name, string(patch.GetPatch()))
 		}
 		return
@@ -294,6 +296,25 @@ func TestKubernetesUninstallerDeletesVeleroCRsBeforeNamespace(t *testing.T) {
 	}
 	assertFinalizersNotForced(t, dynamicClient.Actions(), restoreGVR, "stale-restore")
 	assertFinalizersNotForced(t, dynamicClient.Actions(), pvbGVR, "stale-pvb")
+}
+
+func TestOpenShiftUninstallDeletesOnlyHyperCDROADPCatalog(t *testing.T) {
+	client := fake.NewSimpleClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "openshift-adp"}})
+	dynamicClient := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(),
+		&unstructured.Unstructured{Object: map[string]any{"apiVersion": "operators.coreos.com/v1alpha1", "kind": "CatalogSource", "metadata": map[string]any{"name": "hypercdr-oadp", "namespace": "openshift-marketplace"}}},
+		&unstructured.Unstructured{Object: map[string]any{"apiVersion": "operators.coreos.com/v1alpha1", "kind": "CatalogSource", "metadata": map[string]any{"name": "redhat-operators", "namespace": "openshift-marketplace"}}},
+	)
+	uninstaller := NewKubernetesUninstallerWithClients(client, dynamicClient)
+	if err := uninstaller.Uninstall(context.Background(), UninstallOptions{Namespace: "openshift-adp", DeleteNamespace: true}); err != nil {
+		t.Fatal(err)
+	}
+	gvr := schema.GroupVersionResource{Group: "operators.coreos.com", Version: "v1alpha1", Resource: "catalogsources"}
+	if _, err := dynamicClient.Resource(gvr).Namespace("openshift-marketplace").Get(context.Background(), "hypercdr-oadp", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("HyperCDR catalog must be removed: %v", err)
+	}
+	if _, err := dynamicClient.Resource(gvr).Namespace("openshift-marketplace").Get(context.Background(), "redhat-operators", metav1.GetOptions{}); err != nil {
+		t.Fatalf("shared Red Hat catalog must remain: %v", err)
+	}
 }
 
 func assertFinalizersNotForced(t *testing.T, actions []k8stesting.Action, gvr schema.GroupVersionResource, name string) {

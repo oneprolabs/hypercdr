@@ -26,6 +26,7 @@ PATH="${TEST_ROOT}/bin:${PATH}" "${SCRIPT_DIR}/install-platform.sh" docker \
   --registry registry.example.test/hypercdr \
   --registry-trust private-ca \
   --registry-ca-file "${PRIVATE_CA}" \
+  --confirm-prerequisites \
   --execute >/dev/null
 
 cmp "${PRIVATE_CA}" "${PRIVATE_DATA}/certs/registry-ca.crt"
@@ -57,6 +58,7 @@ PATH="${TEST_ROOT}/bin:${PATH}" "${SCRIPT_DIR}/install-platform.sh" docker \
   --registry registry.example.test/hypercdr \
   --registry-trust private-ca \
   --registry-ca-file "${PRIVATE_CA}" \
+  --confirm-prerequisites \
   --execute >/dev/null
 grep -qx "HCDR_POSTGRES_PASSWORD=${PRIVATE_DB_PASSWORD}" "${PRIVATE_DATA}/.env"
 
@@ -66,6 +68,7 @@ PATH="${TEST_ROOT}/bin:${PATH}" "${SCRIPT_DIR}/install-platform.sh" docker \
   --data-dir "${PUBLIC_DATA}" \
   --registry registry.example.test/hypercdr \
   --registry-trust system \
+  --confirm-prerequisites \
   --execute >/dev/null
 
 test ! -e "${PUBLIC_DATA}/certs/registry-ca.crt"

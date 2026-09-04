@@ -4476,6 +4476,11 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   color: #fff;
 }
 
+.hbdr-filter-drawer-actions button svg {
+  margin-right: 6px;
+  vertical-align: -2px;
+}
+
 .hbdr-filter-drawer-actions span {
   color: #7b8794;
   font-size: 12px;
@@ -7861,11 +7866,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 }
 
 .hbdr-dr-status-cell.is-storage-failure {
-  gap: 8px;
-  padding: 9px 10px;
-  border: 1px solid #fecaca;
-  border-radius: 8px;
-  background: linear-gradient(180deg, #fffafa 0%, #fff7f7 100%);
+  gap: 0;
 }
 
 .hbdr-dr-storage-failure {
@@ -7874,16 +7875,6 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   min-width: 0;
   flex-direction: column;
   gap: 4px;
-}
-
-.hbdr-dr-status-cell.is-storage-failure .hbdr-dr-task-error,
-.hbdr-dr-status-cell.is-storage-failure .hbdr-dr-task-error-title,
-.hbdr-dr-status-cell.is-storage-failure .hbdr-dr-task-error-title strong {
-  width: 100%;
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
-  overflow-wrap: anywhere;
 }
 
 .hbdr-dr-storage-failure-help {
