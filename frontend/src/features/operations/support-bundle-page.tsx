@@ -8,12 +8,12 @@ export default function SupportBundlePage({ toast }: { toast: (message: string) 
   const [description, setDescription] = useState('');
   const [reproducible, setReproducible] = useState('');
   const [busy, setBusy] = useState(false);
-  const [bundle, setBundle] = useState<Bundle | null>(null);
+  const [bundle, setBundle] = useState<Bundle | null>(() => { try { const raw = sessionStorage.getItem('hcdr.supportBundle'); return raw ? JSON.parse(raw) as Bundle : null; } catch { return null; } });
   const [screenshot, setScreenshot] = useState('');
   const create = async () => {
     if (!description.trim()) { toast('Please describe the problem before collecting diagnostics.'); return; }
     setBusy(true);
-    try { const result = await apiPost<Bundle>('/api/v1/support-bundles', { description, reproducible, screenshotBase64: screenshot, sinceHours: 24 }); setBundle(result); toast('Support bundle generated.'); }
+    try { const result = await apiPost<Bundle>('/api/v1/support-bundles', { description, reproducible, screenshotBase64: screenshot, sinceHours: 24 }); setBundle(result); sessionStorage.setItem('hcdr.supportBundle', JSON.stringify(result)); toast('Support bundle generated.'); }
     catch (e) { toast(`Failed to generate support bundle: ${e instanceof Error ? e.message : 'unknown error'}`); }
     finally { setBusy(false); }
   };
