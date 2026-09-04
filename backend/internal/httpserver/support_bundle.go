@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -49,7 +50,13 @@ func (r *Router) createSupportBundle(w http.ResponseWriter, req *http.Request) {
 	if strings.HasPrefix(input.ScreenshotBase64, "data:image/") && len(input.ScreenshotBase64) < 14*1024*1024 {
 		if comma := strings.IndexByte(input.ScreenshotBase64, ','); comma > 0 {
 			if b, e := base64.StdEncoding.DecodeString(input.ScreenshotBase64[comma+1:]); e == nil {
-				_ = os.WriteFile(filepath.Join(root, "incident/screenshot.png"), b, 0600)
+				name := "incident/screenshot.png"
+				if strings.HasPrefix(input.ScreenshotBase64, "data:image/jpeg") {
+					name = "incident/screenshot.jpg"
+				}
+				if len(b) <= 10*1024*1024 && validImageBytes(b, name) {
+					_ = writeTextBytes(root, name, b)
+				}
 			}
 		}
 	}
@@ -63,6 +70,20 @@ func (r *Router) createSupportBundle(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"name": name, "downloadUrl": "/api/v1/support-bundles/" + name + "/download", "size": stat.Size(), "expiresAt": time.Now().Add(48 * time.Hour).UTC()})
 }
 
+func validImageBytes(b []byte, name string) bool {
+	if strings.HasSuffix(name, ".png") {
+		return len(b) >= 8 && string(b[:8]) == "\x89PNG\r\n\x1a\n"
+	}
+	return len(b) >= 3 && b[0] == 0xff && b[1] == 0xd8 && b[2] == 0xff
+}
+func writeTextBytes(root, name string, content []byte) error {
+	p := filepath.Join(root, name)
+	if err := os.MkdirAll(filepath.Dir(p), 0700); err != nil {
+		return err
+	}
+	return os.WriteFile(p, content, 0600)
+}
+
 func (r *Router) collectSupportBundle(root string, hours int) {
 	since := fmt.Sprintf("%dh", hours)
 	commands := map[string][]string{
@@ -70,12 +91,37 @@ func (r *Router) collectSupportBundle(root string, hours int) {
 		"platform/docker-info.txt":    {"docker", "info"},
 		"platform/compose-config.txt": {"docker", "compose", "-f", "/deploy/docker-compose.yaml", "config"},
 		"platform/host.txt":           {"sh", "-c", "uname -a; df -h; free -m; date -u"},
+		"storage/docker-volumes.txt":  {"docker", "volume", "ls"},
+		"object-storage/config.txt":   {"sh", "-c", "env | sort | grep -Ei 'S3|MINIO|OBJECT|BUCKET|STORAGE' || true"},
 		"platform/container-logs.txt": {"sh", "-c", "for c in $(docker ps -a --format '{{.Names}}'); do echo \"===== $c =====\"; docker logs --since " + since + " \"$c\" 2>&1 || true; done"},
 		"database/status.txt":         {"sh", "-c", "docker exec hypercdr-postgres sh -c 'pg_isready; psql -U hypercdr -d hypercdr -c \"select id,type,status,progress,error_code,error_message,created_at,completed_at from tasks order by created_at desc limit 100\"' 2>&1"},
 		"network/connectivity.txt":    {"sh", "-c", "getent hosts registry-1.docker.io office.oneprocloud.com.cn 2>&1; (command -v ss >/dev/null && ss -tuna) || true"},
 	}
 	for name, args := range commands {
 		_ = writeText(root, name, runRedactedCommand(args...))
+	}
+	// Collect read-only cluster-side diagnostics when an operator has supplied a
+	// kubeconfig. Never copy the kubeconfig itself into the bundle.
+	kubeconfig := os.Getenv("HCDR_SUPPORT_KUBECONFIG")
+	if kubeconfig == "" {
+		if _, err := os.Stat("/data/openshift/kubeconfig"); err == nil {
+			kubeconfig = "/data/openshift/kubeconfig"
+		}
+	}
+	if kubeconfig != "" {
+		for name, args := range map[string][]string{
+			"openshift/pods.txt":             {"get", "pods", "-A", "-o", "wide"},
+			"openshift/events.txt":           {"get", "events", "-A", "--sort-by=.lastTimestamp"},
+			"openshift/oadp-dpa.txt":         {"get", "dpa", "-n", "openshift-adp", "-o", "yaml"},
+			"openshift/oadp-operators.txt":   {"get", "csv,subscription", "-n", "openshift-adp"},
+			"openshift/oadp-workloads.txt":   {"get", "deployment,daemonset,pvc", "-n", "openshift-adp"},
+			"openshift/velero-resources.txt": {"get", "backupstoragelocation,volumesnapshotlocation,backup,restore", "-A", "-o", "yaml"},
+			"storage/storageclasses.txt":     {"get", "storageclass,pvc", "-A"},
+		} {
+			_ = writeText(root, name, runRedactedCommandWithKubeconfig(kubeconfig, args...))
+		}
+	} else {
+		_ = writeText(root, "openshift/collection-status.txt", "kubeconfig not configured; cluster-side collection skipped (kubeconfig contents are never collected).\n")
 	}
 	if clusters, err := r.store.ListClusters(); err == nil {
 		_ = writeBundleJSON(root, "clusters.json", clusters)
@@ -96,17 +142,30 @@ func runRedactedCommand(args ...string) string {
 	}
 	return text
 }
-func redactSensitive(s string) string {
-	for _, key := range []string{"PASSWORD", "TOKEN", "SECRET", "ACCESS_KEY", "SECRET_KEY", "KUBECONFIG"} {
-		lines := strings.Split(s, "\n")
-		for i, l := range lines {
-			if strings.Contains(strings.ToUpper(l), key) {
-				lines[i] = "[REDACTED]"
-			}
-		}
-		s = strings.Join(lines, "\n")
+func runRedactedCommandWithKubeconfig(kubeconfig string, args ...string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "oc", args...)
+	cmd.Env = append(os.Environ(), "KUBECONFIG="+kubeconfig)
+	out, err := cmd.CombinedOutput()
+	text := redactSensitive(string(out))
+	if err != nil {
+		text += "\n[command error] " + err.Error()
 	}
-	return s
+	return text
+}
+func redactSensitive(s string) string {
+	lines := strings.Split(s, "\n")
+	keyRE := regexp.MustCompile(`(?i)(password|passwd|token|secret(key)?|access[_-]?key|kubeconfig|authorization)\s*[:=]\s*[^\s,;]+`)
+	for i, l := range lines {
+		l = keyRE.ReplaceAllString(l, "$1=[REDACTED]")
+		if strings.Contains(strings.ToLower(l), "data:") && strings.Contains(strings.ToLower(l), "secret") {
+			lines[i] = "[REDACTED SECRET DATA]"
+		} else {
+			lines[i] = l
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 func writeText(root, name, content string) error {
 	p := filepath.Join(root, name)

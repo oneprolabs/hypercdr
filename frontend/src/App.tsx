@@ -950,7 +950,7 @@ function moduleForView(view: View): TopModule {
   if (view === 'dashboard') return 'overview';
   if (view === 'applications' || view === 'restore_points' || view === 'dr_tasks' || view === 'failback') return 'dr';
   if (view === 'clusters' || view === 'storage' || view === 'policies' || view === 'tags') return 'config';
-  if (view === 'operations' || view === 'activity' || view === 'logs') return 'ops';
+  if (view === 'operations' || view === 'activity' || view === 'logs' || view === 'support_bundle') return 'ops';
   return 'settings';
 }
 
