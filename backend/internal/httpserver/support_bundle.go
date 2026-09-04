@@ -15,6 +15,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"hypercdr-platform/platform/backend/internal/store"
 )
 
 type supportBundleRequest struct {
@@ -130,6 +132,9 @@ func (r *Router) collectSupportBundle(root string, hours int) {
 	}
 	if tasks, err := r.store.ListTasks(""); err == nil {
 		_ = writeBundleJSON(root, "tasks.json", tasks)
+	}
+	if logs, err := r.store.ListDiagnosticLogs(store.DiagnosticLogFilter{Limit: 5000, From: time.Now().Add(-time.Duration(hours) * time.Hour)}); err == nil {
+		_ = writeBundleJSON(root, "diagnostic-logs.json", logs)
 	}
 	_ = writeText(root, "collection.txt", fmt.Sprintf("Collected by HyperCDR\nLog window: %dh\nSecrets and credentials were redacted or omitted.\nCluster-side Kubernetes/OpenShift resource details are included when the control plane has a current inventory snapshot.\n", hours))
 }
