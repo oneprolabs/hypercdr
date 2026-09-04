@@ -87,15 +87,17 @@ func writeTextBytes(root, name string, content []byte) error {
 func (r *Router) collectSupportBundle(root string, hours int) {
 	since := fmt.Sprintf("%dh", hours)
 	commands := map[string][]string{
-		"platform/docker-ps.txt":      {"docker", "ps", "-a"},
-		"platform/docker-info.txt":    {"docker", "info"},
-		"platform/compose-config.txt": {"docker", "compose", "-f", "/deploy/docker-compose.yaml", "config"},
-		"platform/host.txt":           {"sh", "-c", "uname -a; df -h; free -m; date -u"},
-		"storage/docker-volumes.txt":  {"docker", "volume", "ls"},
-		"object-storage/config.txt":   {"sh", "-c", "env | sort | grep -Ei 'S3|MINIO|OBJECT|BUCKET|STORAGE' || true"},
-		"platform/container-logs.txt": {"sh", "-c", "for c in $(docker ps -a --format '{{.Names}}'); do echo \"===== $c =====\"; docker logs --since " + since + " \"$c\" 2>&1 || true; done"},
-		"database/status.txt":         {"sh", "-c", "docker exec hypercdr-postgres sh -c 'pg_isready; psql -U hypercdr -d hypercdr -c \"select id,type,status,progress,error_code,error_message,created_at,completed_at from tasks order by created_at desc limit 100\"' 2>&1"},
-		"network/connectivity.txt":    {"sh", "-c", "getent hosts registry-1.docker.io office.oneprocloud.com.cn 2>&1; (command -v ss >/dev/null && ss -tuna) || true"},
+		"platform/docker-ps.txt":         {"docker", "ps", "-a"},
+		"platform/compose-ps.txt":        {"docker", "compose", "-f", "/deploy/docker-compose.yaml", "ps"},
+		"platform/docker-info.txt":       {"docker", "info"},
+		"platform/container-inspect.txt": {"sh", "-c", "for c in $(docker ps -a --format '{{.Names}}'); do echo \"===== $c =====\"; docker inspect --format '{{json .State}} {{json .Config.Labels}}' \"$c\" 2>&1 || true; done"},
+		"platform/compose-config.txt":    {"docker", "compose", "-f", "/deploy/docker-compose.yaml", "config"},
+		"platform/host.txt":              {"sh", "-c", "uname -a; df -h; free -m; date -u"},
+		"storage/docker-volumes.txt":     {"docker", "volume", "ls"},
+		"object-storage/config.txt":      {"sh", "-c", "env | sort | grep -Ei 'S3|MINIO|OBJECT|BUCKET|STORAGE' || true"},
+		"platform/container-logs.txt":    {"sh", "-c", "for c in $(docker ps -a --format '{{.Names}}'); do echo \"===== $c =====\"; docker logs --since " + since + " \"$c\" 2>&1 || true; done"},
+		"database/status.txt":            {"sh", "-c", "docker exec hypercdr-postgres sh -c 'pg_isready; psql -U hypercdr -d hypercdr -c \"select id,type,status,progress,error_code,error_message,created_at,completed_at from tasks order by created_at desc limit 100\"' 2>&1"},
+		"network/connectivity.txt":       {"sh", "-c", "getent hosts registry-1.docker.io office.oneprocloud.com.cn 2>&1; (command -v ss >/dev/null && ss -tuna) || true"},
 	}
 	for name, args := range commands {
 		_ = writeText(root, name, runRedactedCommand(args...))
