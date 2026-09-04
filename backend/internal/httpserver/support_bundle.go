@@ -118,7 +118,6 @@ func (r *Router) collectSupportBundle(root string, hours int) {
 		}
 	}
 	if kubeconfig != "" {
-		var clusterWG sync.WaitGroup
 		for name, args := range map[string][]string{
 			"openshift/pods.txt":             {"get", "pods", "-A", "-o", "custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,PHASE:.status.phase,READY:.status.containerStatuses[*].ready,RESTARTS:.status.containerStatuses[*].restartCount,NODE:.spec.nodeName"},
 			"openshift/events.txt":           {"get", "events", "-A", "--field-selector", "type=Warning", "--sort-by=.lastTimestamp", "-o", "custom-columns=NAMESPACE:.metadata.namespace,REASON:.reason,MESSAGE:.message,LAST:.lastTimestamp"},
@@ -128,14 +127,8 @@ func (r *Router) collectSupportBundle(root string, hours int) {
 			"openshift/velero-resources.txt": {"get", "backupstoragelocation,volumesnapshotlocation,backup,restore", "-A", "-o", "custom-columns=KIND:.kind,NAMESPACE:.metadata.namespace,NAME:.metadata.name,PHASE:.status.phase,ERROR:.status.errors"},
 			"storage/storageclasses.txt":     {"get", "storageclass,pvc", "-A"},
 		} {
-			name, args := name, args
-			clusterWG.Add(1)
-			go func() {
-				defer clusterWG.Done()
-				_ = writeText(root, name, runRedactedCommandWithKubeconfig(kubeconfig, args...))
-			}()
+			_ = writeText(root, name, runRedactedCommandWithKubeconfig(kubeconfig, args...))
 		}
-		clusterWG.Wait()
 	} else {
 		_ = writeText(root, "openshift/collection-status.txt", "kubeconfig not configured; cluster-side collection skipped (kubeconfig contents are never collected).\n")
 	}
