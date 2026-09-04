@@ -120,12 +120,12 @@ func (r *Router) collectSupportBundle(root string, hours int) {
 	if kubeconfig != "" {
 		var clusterWG sync.WaitGroup
 		for name, args := range map[string][]string{
-			"openshift/pods.txt":             {"get", "pods", "-A", "-o", "wide"},
-			"openshift/events.txt":           {"get", "events", "-A", "--sort-by=.lastTimestamp"},
-			"openshift/oadp-dpa.txt":         {"get", "dpa", "-n", "openshift-adp", "-o", "yaml"},
+			"openshift/pods.txt":             {"get", "pods", "-A", "-o", "custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,PHASE:.status.phase,READY:.status.containerStatuses[*].ready,RESTARTS:.status.containerStatuses[*].restartCount,NODE:.spec.nodeName"},
+			"openshift/events.txt":           {"get", "events", "-A", "--field-selector", "type=Warning", "--sort-by=.lastTimestamp", "-o", "custom-columns=NAMESPACE:.metadata.namespace,REASON:.reason,MESSAGE:.message,LAST:.lastTimestamp"},
+			"openshift/oadp-dpa.txt":         {"get", "dpa", "-n", "openshift-adp", "-o", "custom-columns=NAME:.metadata.name,PHASE:.status.phase,CONDITIONS:.status.conditions[*].message"},
 			"openshift/oadp-operators.txt":   {"get", "csv,subscription", "-n", "openshift-adp"},
 			"openshift/oadp-workloads.txt":   {"get", "deployment,daemonset,pvc", "-n", "openshift-adp"},
-			"openshift/velero-resources.txt": {"get", "backupstoragelocation,volumesnapshotlocation,backup,restore", "-A", "-o", "yaml"},
+			"openshift/velero-resources.txt": {"get", "backupstoragelocation,volumesnapshotlocation,backup,restore", "-A", "-o", "custom-columns=KIND:.kind,NAMESPACE:.metadata.namespace,NAME:.metadata.name,PHASE:.status.phase,ERROR:.status.errors"},
 			"storage/storageclasses.txt":     {"get", "storageclass,pvc", "-A"},
 		} {
 			name, args := name, args
