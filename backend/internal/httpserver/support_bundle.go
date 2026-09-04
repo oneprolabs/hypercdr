@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"hypercdr-platform/platform/backend/internal/store"
@@ -101,9 +102,13 @@ func (r *Router) collectSupportBundle(root string, hours int) {
 		"database/status.txt":            {"sh", "-c", "docker exec hypercdr-postgres sh -c 'pg_isready; psql -U hypercdr -d hypercdr -c \"select id,type,status,progress,error_code,error_message,created_at,completed_at from tasks order by created_at desc limit 100\"' 2>&1"},
 		"network/connectivity.txt":       {"sh", "-c", "getent hosts registry-1.docker.io office.oneprocloud.com.cn 2>&1; (command -v ss >/dev/null && ss -tuna) || true"},
 	}
+	var wg sync.WaitGroup
 	for name, args := range commands {
-		_ = writeText(root, name, runRedactedCommand(args...))
+		name, args := name, args
+		wg.Add(1)
+		go func() { defer wg.Done(); _ = writeText(root, name, runRedactedCommand(args...)) }()
 	}
+	wg.Wait()
 	// Collect read-only cluster-side diagnostics when an operator has supplied a
 	// kubeconfig. Never copy the kubeconfig itself into the bundle.
 	kubeconfig := os.Getenv("HCDR_SUPPORT_KUBECONFIG")
@@ -113,6 +118,7 @@ func (r *Router) collectSupportBundle(root string, hours int) {
 		}
 	}
 	if kubeconfig != "" {
+		var clusterWG sync.WaitGroup
 		for name, args := range map[string][]string{
 			"openshift/pods.txt":             {"get", "pods", "-A", "-o", "wide"},
 			"openshift/events.txt":           {"get", "events", "-A", "--sort-by=.lastTimestamp"},
@@ -122,8 +128,14 @@ func (r *Router) collectSupportBundle(root string, hours int) {
 			"openshift/velero-resources.txt": {"get", "backupstoragelocation,volumesnapshotlocation,backup,restore", "-A", "-o", "yaml"},
 			"storage/storageclasses.txt":     {"get", "storageclass,pvc", "-A"},
 		} {
-			_ = writeText(root, name, runRedactedCommandWithKubeconfig(kubeconfig, args...))
+			name, args := name, args
+			clusterWG.Add(1)
+			go func() {
+				defer clusterWG.Done()
+				_ = writeText(root, name, runRedactedCommandWithKubeconfig(kubeconfig, args...))
+			}()
 		}
+		clusterWG.Wait()
 	} else {
 		_ = writeText(root, "openshift/collection-status.txt", "kubeconfig not configured; cluster-side collection skipped (kubeconfig contents are never collected).\n")
 	}
