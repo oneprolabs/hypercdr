@@ -124,11 +124,11 @@ func (r *Router) collectSupportBundle(root string, hours int) {
 	// Collect read-only cluster-side diagnostics when an operator has supplied a
 	// kubeconfig. Never copy the kubeconfig itself into the bundle.
 	kubeconfig := os.Getenv("HCDR_SUPPORT_KUBECONFIG")
-	if kubeconfig == "" {
-		if _, err := os.Stat("/data/openshift/kubeconfig"); err == nil {
-			kubeconfig = "/data/openshift/kubeconfig"
-		}
-	}
+	// Do not guess a kubeconfig from a host-wide default.  The runtime host
+	// contains several native Kubernetes kubeconfigs, and an old fallback
+	// path could silently make those credentials look like OpenShift
+	// credentials.  OpenShift collection must be explicitly configured with
+	// HCDR_SUPPORT_KUBECONFIG and validated by the operator before use.
 	if kubeconfig != "" {
 		clusterSem := make(chan struct{}, 2)
 		var clusterWG sync.WaitGroup
