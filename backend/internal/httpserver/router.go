@@ -2855,20 +2855,6 @@ func (r *Router) unregisterCluster(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "cluster_id_required"})
 		return
 	}
-	audit, err := r.auditClusterUnregister(clusterID)
-	if err != nil {
-		if err.Error() == "cluster not found" {
-			writeJSON(w, http.StatusNotFound, map[string]any{"error": "cluster_not_found"})
-			return
-		}
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "unregister_precheck_failed", "message": err.Error()})
-		return
-	}
-	if !audit.Allowed {
-		writeJSON(w, http.StatusConflict, map[string]any{"error": "unregister_precheck_blocked", "message": strings.Join(audit.Blockers, " "), "precheck": audit})
-		return
-	}
-
 	var body struct {
 		DeleteVelero     *bool  `json:"deleteVelero"`
 		DeleteNamespace  *bool  `json:"deleteNamespace"`
@@ -2880,6 +2866,22 @@ func (r *Router) unregisterCluster(w http.ResponseWriter, req *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
 			return
 		}
+	}
+	audit, err := r.auditClusterUnregister(clusterID)
+	if err != nil {
+		if err.Error() == "cluster not found" {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "cluster_not_found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "unregister_precheck_failed", "message": err.Error()})
+		return
+	}
+	// Checking "clean up data" is an explicit consent to remove the
+	// cluster's HyperCDR protection relationships as well. This keeps
+	// unregister simple while retaining a deliberate destructive action.
+	if !audit.Allowed && !(body.DeleteBackupData && audit.ActiveTaskCount == 0 && !audit.UnregisterActive) {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "unregister_precheck_blocked", "message": strings.Join(audit.Blockers, " "), "precheck": audit})
+		return
 	}
 	deleteVelero := true
 	if body.DeleteVelero != nil {
@@ -2898,6 +2900,25 @@ func (r *Router) unregisterCluster(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	cleanupObjectStorage := audit.ObjectStorageNeeded && (audit.RestorePointCount == 0 || body.DeleteBackupData)
+	if body.DeleteBackupData && (audit.SourcePlanCount > 0 || audit.TargetPlanCount > 0) {
+		plans, listErr := r.store.ListProtectionPlans("")
+		if listErr != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "unregister_dependency_cleanup_failed", "message": listErr.Error()})
+			return
+		}
+		for _, plan := range plans {
+			if plan.SourceClusterID != clusterID && plan.TargetClusterID != clusterID {
+				continue
+			}
+			if _, ok, deleteErr := r.store.DeleteProtectionPlan(plan.ID); deleteErr != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "unregister_dependency_cleanup_failed", "message": deleteErr.Error()})
+				return
+			} else if !ok {
+				writeJSON(w, http.StatusConflict, map[string]any{"error": "unregister_dependency_cleanup_failed", "message": "a protection relationship changed during unregister; refresh and retry"})
+				return
+			}
+		}
+	}
 	namespace := r.agentNamespaceForCluster(clusterID)
 	// OADP owns the Velero installation and cluster-scoped CRDs on OpenShift.
 	// Unregister the dedicated openshift-adp namespace, but never run the
