@@ -116,10 +116,10 @@ func (r *Router) collectSupportBundle(root string, hours int) {
 	since := fmt.Sprintf("%dh", hours)
 	commands := map[string][]string{
 		"platform/docker-ps.txt":         {"docker", "ps", "-a"},
-		"platform/compose-ps.txt":        {"docker", "compose", "-f", "/deploy/docker-compose.yaml", "ps"},
+		"platform/compose-ps.txt":        {"docker", "ps", "-a", "--filter", "label=com.docker.compose.project", "--format", "{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"},
 		"platform/docker-info.txt":       {"docker", "info"},
 		"platform/container-inspect.txt": {"sh", "-c", "for c in $(docker ps -a --format '{{.Names}}'); do echo \"===== $c =====\"; docker inspect --format '{{json .State}} {{json .Config.Labels}}' \"$c\" 2>&1 || true; done"},
-		"platform/compose-config.txt":    {"docker", "compose", "-f", "/deploy/docker-compose.yaml", "config"},
+		"platform/compose-config.txt":    {"sh", "-c", "sed -n '1,600p' /deploy/docker-compose.yaml 2>&1"},
 		"platform/host.txt":              {"sh", "-c", "uname -a; df -h; free -m; date -u"},
 		"storage/docker-volumes.txt":     {"docker", "volume", "ls"},
 		"object-storage/config.txt":      {"sh", "-c", "env | sort | grep -Ei 'S3|MINIO|OBJECT|BUCKET|STORAGE' || true"},
@@ -154,13 +154,16 @@ func (r *Router) collectSupportBundle(root string, hours int) {
 		clusterSem := make(chan struct{}, 2)
 		var clusterWG sync.WaitGroup
 		for name, args := range map[string][]string{
+			"openshift/cluster-version.txt":  {"get", "clusterversion,nodes", "-o", "wide"},
 			"openshift/pods.txt":             {"get", "pods", "-A", "-o", "custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,PHASE:.status.phase,READY:.status.containerStatuses[*].ready,RESTARTS:.status.containerStatuses[*].restartCount,NODE:.spec.nodeName"},
 			"openshift/events.txt":           {"get", "events", "-A", "--field-selector", "type=Warning", "--sort-by=.lastTimestamp", "-o", "custom-columns=NAMESPACE:.metadata.namespace,REASON:.reason,MESSAGE:.message,LAST:.lastTimestamp"},
 			"openshift/oadp-dpa.txt":         {"get", "dpa", "-n", "openshift-adp", "-o", "custom-columns=NAME:.metadata.name,PHASE:.status.phase,CONDITIONS:.status.conditions[*].message"},
 			"openshift/oadp-operators.txt":   {"get", "csv,subscription", "-n", "openshift-adp"},
 			"openshift/oadp-workloads.txt":   {"get", "deployment,daemonset,pvc", "-n", "openshift-adp"},
-			"openshift/velero-resources.txt": {"get", "backupstoragelocation,volumesnapshotlocation,backup,restore", "-A", "-o", "custom-columns=KIND:.kind,NAMESPACE:.metadata.namespace,NAME:.metadata.name,PHASE:.status.phase,ERROR:.status.errors"},
-			"storage/storageclasses.txt":     {"get", "storageclass,pvc", "-A"},
+			"openshift/velero-resources.txt": {"get", "backupstoragelocation,volumesnapshotlocation,backup,restore", "-A", "-o", "yaml"},
+			"openshift/data-movement.txt":    {"get", "dataupload,datadownload,podvolumebackup,podvolumerestore", "-A", "-o", "yaml"},
+			"openshift/api-resources.txt":    {"api-resources"},
+			"storage/storageclasses.txt":     {"get", "storageclass,pv,pvc", "-A", "-o", "wide"},
 		} {
 			name, args := name, args
 			clusterWG.Add(1)
@@ -180,11 +183,38 @@ func (r *Router) collectSupportBundle(root string, hours int) {
 	} else {
 		_ = writeText(root, "openshift/collection-status.txt", "kubeconfig not configured; cluster-side collection skipped (kubeconfig contents are never collected).\n")
 	}
-	if clusters, err := r.store.ListClusters(); err == nil {
+	clusters, clusterErr := r.store.ListClusters()
+	if clusterErr == nil {
 		_ = writeBundleJSON(root, "clusters.json", clusters)
+		r.collectSupportBundleAgentLogs(root, hours, clusters)
+	}
+	if applications, err := r.store.ListApplications(""); err == nil {
+		_ = writeBundleJSON(root, "applications.json", applications)
+	}
+	if plans, err := r.store.ListProtectionPlans(""); err == nil {
+		_ = writeBundleJSON(root, "protection-plans.json", plans)
+	}
+	if points, err := r.store.ListRestorePoints(store.RestorePointFilter{IncludeDeleted: true, Limit: 1000}); err == nil {
+		_ = writeBundleJSON(root, "restore-points.json", points)
+	}
+	if repositories, err := r.store.ListStorageRepositories(); err == nil {
+		_ = writeBundleJSON(root, "storage/repositories.json", repositories)
+	}
+	if policies, err := r.store.ListPolicies(); err == nil {
+		_ = writeBundleJSON(root, "policies.json", policies)
 	}
 	if tasks, err := r.store.ListTasks(""); err == nil {
 		_ = writeBundleJSON(root, "tasks.json", tasks)
+		events := map[string]any{}
+		for index, task := range tasks {
+			if index >= 100 {
+				break
+			}
+			if taskEvents, eventErr := r.store.ListTaskEvents(task.ID); eventErr == nil {
+				events[task.ID] = taskEvents
+			}
+		}
+		_ = writeBundleJSON(root, "task-events.json", events)
 	}
 	if logs, err := r.store.ListDiagnosticLogs(store.DiagnosticLogFilter{Limit: 5000, From: time.Now().Add(-time.Duration(hours) * time.Hour)}); err == nil {
 		_ = writeBundleJSON(root, "diagnostic-logs.json", logs)
@@ -193,6 +223,43 @@ func (r *Router) collectSupportBundle(root string, hours int) {
 	if r.logger != nil {
 		r.logger.Info("support bundle collection completed", "duration_ms", time.Since(started).Milliseconds())
 	}
+}
+
+func (r *Router) collectSupportBundleAgentLogs(root string, hours int, clusters []store.Cluster) {
+	type collectionResult struct {
+		ClusterID   string    `json:"clusterId"`
+		ClusterName string    `json:"clusterName"`
+		Component   string    `json:"component"`
+		Status      string    `json:"status"`
+		Count       int       `json:"count,omitempty"`
+		Truncated   bool      `json:"truncated,omitempty"`
+		Message     string    `json:"message,omitempty"`
+		CollectedAt time.Time `json:"collectedAt"`
+	}
+	results := make([]collectionResult, 0, len(clusters)*3)
+	since := time.Now().UTC().Add(-time.Duration(hours) * time.Hour)
+	for _, cluster := range clusters {
+		for _, component := range []string{"comm-agent", "velero", "node-agent"} {
+			result := collectionResult{ClusterID: cluster.ID, ClusterName: cluster.Name, Component: component, CollectedAt: time.Now().UTC()}
+			if !strings.EqualFold(cluster.ConnectionStatus, "healthy") && !strings.EqualFold(cluster.ConnectionStatus, "online") {
+				result.Status = "skipped"
+				result.Message = "cluster is not online"
+				results = append(results, result)
+				continue
+			}
+			report, _, _, _, err := r.collectClusterLogsRange(cluster.ID, component, since, clusterLogTailLines)
+			if err != nil {
+				result.Status = "failed"
+				result.Message = redactSensitive(err.Error())
+			} else {
+				result.Status = "collected"
+				result.Count = len(report.Entries)
+				result.Truncated = report.Truncated
+			}
+			results = append(results, result)
+		}
+	}
+	_ = writeBundleJSON(root, "cluster-logs/collection-status.json", results)
 }
 
 func runRedactedCommand(args ...string) string {
