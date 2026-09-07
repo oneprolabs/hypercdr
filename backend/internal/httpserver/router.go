@@ -2903,7 +2903,11 @@ func (r *Router) unregisterCluster(w http.ResponseWriter, req *http.Request) {
 		})
 		return
 	}
-	cleanupObjectStorage := audit.ObjectStorageNeeded && (audit.RestorePointCount == 0 || body.DeleteBackupData)
+	// A cluster that is only referenced as a DR target does not own the
+	// source backup namespace. Never delete object-storage data in that case;
+	// target unregister only clears the target reference.
+	clusterOwnsBackupData := audit.SourcePlanCount > 0 || audit.RestorePointCount > 0
+	cleanupObjectStorage := audit.ObjectStorageNeeded && clusterOwnsBackupData && (audit.RestorePointCount == 0 || body.DeleteBackupData)
 	cleanupProtectionRelationships := body.DeleteBackupData && (audit.SourcePlanCount > 0 || audit.TargetPlanCount > 0)
 	// When object storage is involved, preserve platform relationships until
 	// remote backup deletion succeeds. A failed storage cleanup must leave the
