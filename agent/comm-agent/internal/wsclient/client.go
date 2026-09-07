@@ -36,7 +36,6 @@ const (
 	backupStorageLocationCheckTimeout = 5 * time.Second
 	backupStorageLocationRetryCount   = 3
 	backupStorageLocationRetryDelay   = time.Second
-	veleroStatusReadRetryGrace        = 2 * time.Minute
 	veleroCRDBundleMaxBytes           = 10 << 20
 )
 
@@ -685,6 +684,24 @@ func (c *Client) recoverLedgerTasks() {
 			c.logger.Info("ledger task type is not recoverable by status polling", "task_id", task.TaskID, "type", task.Type)
 		}
 	}
+	for _, record := range c.ledger.cleanupPendingRecords() {
+		var task protocol.TaskDispatchPayload
+		if err := json.Unmarshal(record.Task, &task); err != nil {
+			c.logger.Warn("failed to decode pending Drill cleanup task", "task_id", record.TaskID, "error", err)
+			continue
+		}
+		if task.Type != "drill" {
+			continue
+		}
+		object := kube.AppliedObject{
+			APIVersion: record.Object.APIVersion,
+			Kind:       record.Object.Kind,
+			Namespace:  record.Object.Namespace,
+			Name:       record.Object.Name,
+		}
+		c.logger.Info("resuming persisted failed Drill cleanup", "task_id", task.TaskID, "restore", object.Name)
+		go c.finishFailedDrillCleanup(task, object)
+	}
 }
 
 func (c *Client) executeTask(task protocol.TaskDispatchPayload) {
@@ -1090,7 +1107,7 @@ func (c *Client) executeBackupTask(task protocol.TaskDispatchPayload) {
 		return
 	}
 	defer releasePlan()
-	if err := c.requireBackupStorageLocation(context.Background(), task.Backup.StorageRepo); err != nil {
+	if err := c.waitForBackupStorageLocation(context.Background(), task.Backup.StorageRepo, storagePreflightWait(task.Deadline)); err != nil {
 		_ = c.sendTaskFailedWithDetails(task, "BSL_NOT_READY", err.Error(), map[string]any{
 			"storageRepo": task.Backup.StorageRepo,
 		})
@@ -1401,7 +1418,7 @@ func (c *Client) executeRestoreTask(task protocol.TaskDispatchPayload) {
 			return
 		}
 	}
-	if err := c.requireBackupStorageLocation(context.Background(), task.Restore.StorageRepo); err != nil {
+	if err := c.waitForBackupStorageLocation(context.Background(), task.Restore.StorageRepo, storagePreflightWait(task.Deadline)); err != nil {
 		_ = c.sendTaskFailedWithDetails(task, "BSL_NOT_READY", err.Error(), map[string]any{
 			"storageRepo": task.Restore.StorageRepo,
 		})
@@ -2083,6 +2100,7 @@ func (c *Client) pollRestoreStatus(task protocol.TaskDispatchPayload, object kub
 
 func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, object kube.AppliedObject, basePayload map[string]any, decide veleroStatusDecision, onSuccess func(map[string]any, string)) {
 	const veleroStalledAfter = 5 * time.Minute
+	const restoreReconcileConflictGrace = 10 * time.Minute
 	interval := veleroPollInterval(object)
 	deadline := task.Deadline
 	if deadline.IsZero() {
@@ -2092,6 +2110,7 @@ func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, 
 	progress := 0
 	samples := make([]volumeProgressSample, 0, 12)
 	var statusReadErrorSince time.Time
+	var restoreReconcileConflictSince time.Time
 	lastVolumeProgressAt := started
 	var lastVolumeBytes int64
 	for {
@@ -2115,6 +2134,29 @@ func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, 
 		}
 		statusReadErrorSince = time.Time{}
 		terminal, success, nextProgress, message, code := decide(status, time.Since(started))
+		if object.Kind == "Restore" && isTransientRestoreReconcileConflict(status) {
+			if restoreReconcileConflictSince.IsZero() {
+				restoreReconcileConflictSince = time.Now().UTC()
+			}
+			if time.Since(restoreReconcileConflictSince) < restoreReconcileConflictGrace && time.Now().UTC().Before(deadline) {
+				// Velero can publish this Failed phase when an API outage causes a
+				// second reconciliation while the original restore worker is still
+				// active. Treating it as terminal would cancel that valid worker and
+				// delete its destination. Keep observing until the original worker
+				// converges or the bounded grace period expires.
+				terminal = false
+				success = false
+				code = ""
+				message = "Velero restore reconciliation is resuming after a Kubernetes API interruption."
+				if c.logger != nil {
+					c.logger.Warn("Velero restore reports another reconciliation still active; continuing to observe",
+						"task_id", task.TaskID, "restore", object.Name, "phase", status.Phase,
+						"grace_elapsed", time.Since(restoreReconcileConflictSince))
+				}
+			}
+		} else {
+			restoreReconcileConflictSince = time.Time{}
+		}
 		if !usesVolumeProgress(object) && nextProgress > progress {
 			progress = nextProgress
 		}
@@ -2213,25 +2255,90 @@ func (c *Client) failRestoreTask(task protocol.TaskDispatchPayload, object kube.
 	} else {
 		cleanup["cancelWarning"] = "restore volume cancellation is not supported by this agent"
 	}
-	// Once node-agent work has stopped, deleting the Restore CR prevents stale
-	// Restore/PVR objects from being mistaken for the next attempt. Kubernetes
-	// garbage collection removes owner-linked volume-operation objects.
+	// Only remove Restore-owned objects after node-agent writes have stopped.
+	// OADP 1.3 PodVolumeRestore has no cancellation field, so a timeout here
+	// means cleanup must be deferred rather than deleting a live destination.
 	if cleanup["cancelConfirmed"] == true {
-		if deleter, ok := c.applier.(kube.ObjectDeleter); ok {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			err := deleter.DeleteObject(ctx, object)
-			cancel()
-			if err != nil {
-				cleanup["restoreDeleteWarning"] = err.Error()
-			} else {
-				cleanup["restoreDeleted"] = true
+		if !c.deleteFailedDrillResources(task, object, cleanup) {
+			cleanup["deferredCleanup"] = true
+			if err := c.ledger.markCleanupPending(task.TaskID, true); err != nil {
+				cleanup["cleanupLedgerWarning"] = err.Error()
 			}
+			go c.finishFailedDrillCleanup(task, object)
 		}
+	} else {
+		cleanup["deferredCleanup"] = true
+		if err := c.ledger.markCleanupPending(task.TaskID, true); err != nil {
+			cleanup["cleanupLedgerWarning"] = err.Error()
+		}
+		go c.finishFailedDrillCleanup(task, object)
 	}
 
 	// Restore/takeover may intentionally target the source namespace. Automatic
 	// namespace deletion is therefore restricted to Drill and to a distinct,
 	// non-agent namespace, even if malformed input reaches an older platform.
+	target := strings.TrimSpace(restoreTargetNamespace(task))
+	source := ""
+	if task.Restore != nil {
+		source = strings.TrimSpace(task.Restore.SourceNamespace)
+	}
+	if cleanup["cancelConfirmed"] == true && task.Type == "drill" && target != "" && target != source && target != c.cfg.Namespace {
+		if waiter, ok := c.applier.(interface {
+			DeleteNamespaceAndWait(context.Context, string) error
+		}); ok {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			err := waiter.DeleteNamespaceAndWait(ctx, target)
+			cancel()
+			if err != nil {
+				cleanup["cleanupWarning"] = err.Error()
+				cleanup["deferredCleanup"] = true
+				if ledgerErr := c.ledger.markCleanupPending(task.TaskID, true); ledgerErr != nil {
+					cleanup["cleanupLedgerWarning"] = ledgerErr.Error()
+				}
+				go c.finishFailedDrillCleanup(task, object)
+			} else {
+				cleanup["namespaceDeleted"] = true
+			}
+		}
+	}
+	details["restoreCleanup"] = cleanup
+	_ = c.sendTaskFailedWithDetails(task, code, message, details)
+}
+
+func (c *Client) deleteFailedDrillResources(task protocol.TaskDispatchPayload, object kube.AppliedObject, cleanup map[string]any) bool {
+	if deleter, ok := c.applier.(kube.ObjectDeleter); ok {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		err := deleter.DeleteObject(ctx, object)
+		cancel()
+		if err != nil {
+			cleanup["restoreDeleteWarning"] = err.Error()
+			return false
+		} else {
+			cleanup["restoreDeleted"] = true
+		}
+		return true
+	}
+	cleanup["restoreDeleteWarning"] = "restore deletion is not supported by this agent"
+	return false
+}
+
+func (c *Client) finishFailedDrillCleanup(task protocol.TaskDispatchPayload, object kube.AppliedObject) {
+	canceler, ok := c.applier.(kube.RestoreVolumeCanceler)
+	if !ok || canceler == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Hour)
+	err := canceler.CancelRestoreVolumeOperations(ctx, object.Namespace, object.Name)
+	cancel()
+	if err != nil {
+		c.logger.Warn("deferred Drill cleanup could not confirm volume operations stopped", "task_id", task.TaskID, "restore", object.Name, "error", err)
+		return
+	}
+	cleanup := map[string]any{"cancelConfirmed": true}
+	if !c.deleteFailedDrillResources(task, object, cleanup) {
+		c.logger.Warn("deferred Drill cleanup could not delete Restore; keeping cleanup pending", "task_id", task.TaskID, "restore", object.Name, "warning", cleanup["restoreDeleteWarning"])
+		return
+	}
 	target := strings.TrimSpace(restoreTargetNamespace(task))
 	source := ""
 	if task.Restore != nil {
@@ -2245,14 +2352,15 @@ func (c *Client) failRestoreTask(task protocol.TaskDispatchPayload, object kube.
 			err := waiter.DeleteNamespaceAndWait(ctx, target)
 			cancel()
 			if err != nil {
-				cleanup["cleanupWarning"] = err.Error()
-			} else {
-				cleanup["namespaceDeleted"] = true
+				c.logger.Warn("deferred Drill namespace cleanup failed", "task_id", task.TaskID, "namespace", target, "error", err)
+				return
 			}
 		}
 	}
-	details["restoreCleanup"] = cleanup
-	_ = c.sendTaskFailedWithDetails(task, code, message, details)
+	c.logger.Info("deferred Drill cleanup completed after volume operations stopped", "task_id", task.TaskID, "restore", object.Name, "namespace", target)
+	if err := c.ledger.markCleanupPending(task.TaskID, false); err != nil {
+		c.logger.Warn("failed to clear persisted Drill cleanup marker", "task_id", task.TaskID, "error", err)
+	}
 }
 
 func (c *Client) restoreDataPathFailure(task protocol.TaskDispatchPayload, object kube.AppliedObject, since time.Time) (kube.RestoreDataPathFailure, bool) {
@@ -2378,13 +2486,29 @@ func (c *Client) enrichVeleroFailure(ctx context.Context, object kube.AppliedObj
 			"warnings":     summary.Warnings,
 		}
 	}
-	if len(summary.Errors) > 0 {
+	if len(summary.Errors) > 0 && !restoreResultReadFailed(summary) {
 		return summarizeRestoreFailure(summary.Errors[0], summary.ErrorCount), payload
 	}
 	if status.Errors > 0 {
 		return fmt.Sprintf("velero restore failed with %d error(s); restore result details are not available yet", status.Errors), payload
 	}
 	return message, payload
+}
+
+func isTransientRestoreReconcileConflict(status kube.ManifestStatus) bool {
+	if !strings.EqualFold(strings.TrimSpace(status.Phase), "Failed") {
+		return false
+	}
+	text := strings.ToLower(strings.Join([]string{status.Message, status.Reason}, " "))
+	return strings.Contains(text, "restore from previous reconcile still in progress") ||
+		strings.Contains(text, "previous reconcile still in progress")
+}
+
+func restoreResultReadFailed(summary kube.RestoreResultSummary) bool {
+	if len(summary.Errors) != 1 {
+		return false
+	}
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(summary.Errors[0])), "failed to read velero restore results:")
 }
 
 func (c *Client) restoreResultSummary(ctx context.Context, object kube.AppliedObject, payload map[string]any) kube.RestoreResultSummary {
@@ -2501,8 +2625,11 @@ func isTransientKubernetesReadError(err error) bool {
 }
 
 func shouldRetryVeleroStatusRead(err error, now time.Time, firstErrorAt time.Time, taskDeadline time.Time) bool {
-	return isTransientKubernetesReadError(err) && now.Before(taskDeadline) &&
-		!firstErrorAt.IsZero() && now.Sub(firstErrorAt) < veleroStatusReadRetryGrace
+	// A transient Kubernetes API outage does not tell us whether Velero's
+	// operation failed. Keep observing until the task deadline so a completed
+	// backup/restore can still converge after the API recovers. Failing after a
+	// short, independent grace period can discard a perfectly valid operation.
+	return isTransientKubernetesReadError(err) && now.Before(taskDeadline) && !firstErrorAt.IsZero()
 }
 
 func (c *Client) waitForBackupStorageLocation(ctx context.Context, name string, timeout time.Duration) error {
@@ -2516,6 +2643,12 @@ func (c *Client) waitForBackupStorageLocation(ctx context.Context, name string, 
 		if lastErr == nil {
 			return nil
 		}
+		// A successful API read that proves the BSL is missing or unavailable is
+		// authoritative and should fail immediately. Only transport/API outages
+		// benefit from waiting; retrying configuration errors merely hides them.
+		if !isTransientKubernetesReadError(lastErr) {
+			return lastErr
+		}
 		if time.Now().After(deadline) {
 			return lastErr
 		}
@@ -2525,6 +2658,21 @@ func (c *Client) waitForBackupStorageLocation(ctx context.Context, name string, 
 		case <-time.After(3 * time.Second):
 		}
 	}
+}
+
+func storagePreflightWait(taskDeadline time.Time) time.Duration {
+	const maximum = 10 * time.Minute
+	if taskDeadline.IsZero() {
+		return maximum
+	}
+	remaining := time.Until(taskDeadline)
+	if remaining <= 0 {
+		return 0
+	}
+	if remaining < maximum {
+		return remaining
+	}
+	return maximum
 }
 
 func backupStatusResult(status kube.ManifestStatus, elapsed time.Duration) (bool, bool, int, string, string) {
@@ -3370,10 +3518,45 @@ func (c *Client) findConflictingActiveBackup(ctx context.Context, task protocol.
 			continue
 		}
 		if backup.Labels["hypercdr.io/plan-id"] == planID {
+			if c.cleanupTerminalBackupConflict(ctx, backup) {
+				continue
+			}
 			return backup, true, nil
 		}
 	}
 	return kube.VeleroBackupSummary{}, false, nil
+}
+
+// cleanupTerminalBackupConflict removes only a HyperCDR Backup whose original
+// task has already reached a platform-acknowledged terminal state. This closes
+// the failure window where an API outage lets the platform time out while
+// Velero leaves the Backup CR in InProgress forever, blocking every later sync.
+func (c *Client) cleanupTerminalBackupConflict(ctx context.Context, backup kube.VeleroBackupSummary) bool {
+	if !isHyperCDRBackup(backup.Labels) {
+		return false
+	}
+	taskID := strings.TrimSpace(backup.Labels["hypercdr.io/task-id"])
+	if taskID == "" || !c.ledger.isTerminalAcked(taskID) {
+		return false
+	}
+	deleter, ok := c.applier.(kube.ObjectDeleter)
+	if !ok || deleter == nil {
+		return false
+	}
+	cleanupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if canceler, ok := c.applier.(kube.BackupVolumeCanceler); ok && canceler != nil {
+		if err := canceler.CancelBackupVolumeOperations(cleanupCtx, backup.Namespace, backup.Name); err != nil {
+			c.logger.Warn("failed to cancel stale terminal backup volume operations", "backup", backup.Name, "task_id", taskID, "error", err)
+			return false
+		}
+	}
+	if err := deleter.DeleteObject(cleanupCtx, kube.AppliedObject{APIVersion: "velero.io/v1", Kind: "Backup", Namespace: backup.Namespace, Name: backup.Name}); err != nil {
+		c.logger.Warn("failed to delete stale terminal Backup CR", "backup", backup.Name, "task_id", taskID, "error", err)
+		return false
+	}
+	c.logger.Warn("removed stale Backup CR for platform-acknowledged terminal task", "backup", backup.Name, "task_id", taskID, "phase", backup.Phase)
+	return true
 }
 
 func (c *Client) findActiveBackupNameForCancel(ctx context.Context, planID string) (string, bool, error) {

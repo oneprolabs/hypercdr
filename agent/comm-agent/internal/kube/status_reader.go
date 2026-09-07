@@ -34,19 +34,58 @@ type RestoreVolumeCanceler interface {
 	CancelRestoreVolumeOperations(ctx context.Context, namespace, restoreName string) error
 }
 
-func (a *DynamicManifestApplier) CancelRestoreVolumeOperations(ctx context.Context, namespace, restoreName string) error {
-	resources := []schema.GroupVersionResource{
-		{Group: "velero.io", Version: "v1", Resource: "podvolumerestores"},
-		{Group: "velero.io", Version: "v2alpha1", Resource: "datadownloads"},
+type BackupVolumeCanceler interface {
+	CancelBackupVolumeOperations(ctx context.Context, namespace, backupName string) error
+}
+
+func (a *DynamicManifestApplier) CancelBackupVolumeOperations(ctx context.Context, namespace, backupName string) error {
+	// DataUpload supports spec.cancel. PodVolumeBackup in OADP 1.3 does not;
+	// attempting to patch it is silently pruned by the API server and gives a
+	// false impression that cancellation was requested.
+	gvr := schema.GroupVersionResource{Group: "velero.io", Version: "v2alpha1", Resource: "datauploads"}
+	items, err := a.client.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{LabelSelector: "velero.io/backup-name=" + backupName})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return err
 	}
-	for _, gvr := range resources {
-		items, err := a.client.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{LabelSelector: "velero.io/restore-name=" + restoreName})
-		if apierrors.IsNotFound(err) {
-			continue
+	if err == nil {
+		for _, item := range items.Items {
+			phase, _, _ := unstructured.NestedString(item.Object, "status", "phase")
+			if phase != "" && phase != "New" && phase != "InProgress" && phase != "Accepted" && phase != "Prepared" {
+				continue
+			}
+			if _, err := a.client.Resource(gvr).Namespace(namespace).Patch(ctx, item.GetName(), types.MergePatchType, []byte(`{"spec":{"cancel":true}}`), metav1.PatchOptions{}); err != nil && !apierrors.IsNotFound(err) {
+				return err
+			}
 		}
+	}
+
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		progress, err := a.GetBackupVolumeProgress(ctx, namespace, backupName)
 		if err != nil {
 			return err
 		}
+		if progress.RunningCount == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timed out confirming cancellation of backup %q: %w", backupName, ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+func (a *DynamicManifestApplier) CancelRestoreVolumeOperations(ctx context.Context, namespace, restoreName string) error {
+	// DataDownload supports spec.cancel. PodVolumeRestore in OADP 1.3 does
+	// not, so it is observed below but never patched with an invalid field.
+	gvr := schema.GroupVersionResource{Group: "velero.io", Version: "v2alpha1", Resource: "datadownloads"}
+	items, err := a.client.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{LabelSelector: "velero.io/restore-name=" + restoreName})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	if err == nil {
 		for _, item := range items.Items {
 			if _, err := a.client.Resource(gvr).Namespace(namespace).Patch(ctx, item.GetName(), types.MergePatchType, []byte(`{"spec":{"cancel":true}}`), metav1.PatchOptions{}); err != nil && !apierrors.IsNotFound(err) {
 				return err

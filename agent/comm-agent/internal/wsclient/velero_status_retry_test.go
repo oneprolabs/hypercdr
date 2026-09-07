@@ -14,11 +14,11 @@ func TestShouldRetryVeleroStatusReadDuringTransientAPIOutage(t *testing.T) {
 	}
 }
 
-func TestShouldRetryVeleroStatusReadStopsAfterGraceOrTaskDeadline(t *testing.T) {
+func TestShouldRetryVeleroStatusReadContinuesUntilTaskDeadline(t *testing.T) {
 	now := time.Date(2026, 8, 5, 5, 46, 9, 0, time.UTC)
 	err := errors.New("connect: connection refused")
-	if shouldRetryVeleroStatusRead(err, now, now.Add(-veleroStatusReadRetryGrace), now.Add(time.Minute)) {
-		t.Fatal("expected retry grace expiry to stop retries")
+	if !shouldRetryVeleroStatusRead(err, now, now.Add(-20*time.Minute), now.Add(time.Minute)) {
+		t.Fatal("expected transient error to keep retrying while the task deadline remains")
 	}
 	if shouldRetryVeleroStatusRead(err, now, now.Add(-time.Second), now) {
 		t.Fatal("expected task deadline to stop retries")

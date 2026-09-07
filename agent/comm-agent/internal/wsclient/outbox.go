@@ -24,15 +24,16 @@ type taskLedger struct {
 }
 
 type taskLedgerRecord struct {
-	TaskID        string           `json:"taskId"`
-	CommandID     string           `json:"commandId,omitempty"`
-	Type          string           `json:"type"`
-	PlanID        string           `json:"planId,omitempty"`
-	Task          json.RawMessage  `json:"task,omitempty"`
-	Object        taskLedgerObject `json:"object"`
-	TerminalAcked bool             `json:"terminalAcked,omitempty"`
-	CreatedAt     string           `json:"createdAt,omitempty"`
-	UpdatedAt     string           `json:"updatedAt,omitempty"`
+	TaskID         string           `json:"taskId"`
+	CommandID      string           `json:"commandId,omitempty"`
+	Type           string           `json:"type"`
+	PlanID         string           `json:"planId,omitempty"`
+	Task           json.RawMessage  `json:"task,omitempty"`
+	Object         taskLedgerObject `json:"object"`
+	TerminalAcked  bool             `json:"terminalAcked,omitempty"`
+	CleanupPending bool             `json:"cleanupPending,omitempty"`
+	CreatedAt      string           `json:"createdAt,omitempty"`
+	UpdatedAt      string           `json:"updatedAt,omitempty"`
 }
 
 type taskLedgerObject struct {
@@ -202,6 +203,50 @@ func (l *taskLedger) markTerminalAcked(taskID string) error {
 	return l.flushLocked()
 }
 
+func (l *taskLedger) isTerminalAcked(taskID string) bool {
+	if l == nil || taskID == "" {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.ensureMaps()
+	record, ok := l.Records[taskID]
+	return ok && record.TerminalAcked
+}
+
+func (l *taskLedger) markCleanupPending(taskID string, pending bool) error {
+	if l == nil || taskID == "" {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.ensureMaps()
+	record, ok := l.Records[taskID]
+	if !ok {
+		return nil
+	}
+	record.CleanupPending = pending
+	record.UpdatedAt = nowRFC3339()
+	l.Records[taskID] = record
+	return l.flushLocked()
+}
+
+func (l *taskLedger) cleanupPendingRecords() []taskLedgerRecord {
+	if l == nil {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.ensureMaps()
+	records := make([]taskLedgerRecord, 0)
+	for _, record := range l.Records {
+		if record.CleanupPending && len(record.Task) > 0 && record.Object.Kind == "Restore" && record.Object.Name != "" {
+			records = append(records, record)
+		}
+	}
+	return records
+}
+
 func (l *taskLedger) recoverableRecords() []taskLedgerRecord {
 	if l == nil {
 		return nil
@@ -211,7 +256,7 @@ func (l *taskLedger) recoverableRecords() []taskLedgerRecord {
 	l.ensureMaps()
 	records := make([]taskLedgerRecord, 0, len(l.Records))
 	for _, record := range l.Records {
-		if record.TerminalAcked || len(record.Task) == 0 || record.Object.Kind == "" || record.Object.Name == "" {
+		if record.TerminalAcked || record.CleanupPending || len(record.Task) == 0 || record.Object.Kind == "" || record.Object.Name == "" {
 			continue
 		}
 		records = append(records, record)

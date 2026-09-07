@@ -29,6 +29,8 @@ func main() {
 		"namespace", cfg.Namespace,
 		"backup_backend", cfg.BackupBackend,
 	)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 	if err := validateClusterBackupBackend(cfg.ClusterType, cfg.BackupBackend); err != nil {
 		logger.Error("invalid cluster backup backend", "error", err)
 		os.Exit(1)
@@ -66,10 +68,11 @@ func main() {
 			os.Exit(1)
 		}
 		handoverManager = handover
-		rolledBack, err := handoverManager.RollbackExpired(context.Background(), cfg.Namespace, time.Now().UTC())
+		rolledBack, err := handoverManager.RollbackExpired(ctx, cfg.Namespace, time.Now().UTC())
 		if err != nil {
-			logger.Error("failed to reconcile pending control-plane handover", "error", err)
-			os.Exit(1)
+			// A short Kubernetes API outage must not put the agent into a
+			// CrashLoop. The deadline watcher below retries this reconciliation.
+			logger.Warn("failed to reconcile pending control-plane handover; continuing and retrying in background", "error", err)
 		}
 		if rolledBack {
 			logger.Warn("expired control-plane handover was rolled back; waiting for deployment restart")
@@ -119,19 +122,25 @@ func main() {
 			os.Exit(1)
 		}
 		credentialStore = store
-		if saved, ok, err := credentialStore.Load(context.Background()); err != nil {
-			logger.Error("failed to load agent credential from secret", "error", err)
-			os.Exit(1)
-		} else if ok {
-			cfg.ClusterID = saved.ClusterID
-			cfg.AgentCredential = saved.Credential
-			cfg.InstallToken = ""
-			logger.Info("loaded agent credential from secret", "cluster_id", cfg.ClusterID)
+		for {
+			saved, ok, err := credentialStore.Load(ctx)
+			if err != nil {
+				logger.Warn("failed to load agent credential from secret; retrying", "error", err)
+				if !waitForRetry(ctx, logger) {
+					return
+				}
+				continue
+			}
+			if ok {
+				cfg.ClusterID = saved.ClusterID
+				cfg.AgentCredential = saved.Credential
+				cfg.InstallToken = ""
+				logger.Info("loaded agent credential from secret", "cluster_id", cfg.ClusterID)
+			}
+			break
 		}
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 	if handoverManager != nil {
 		go watchHandoverDeadline(ctx, logger, handoverManager, cfg.Namespace)
 	}
