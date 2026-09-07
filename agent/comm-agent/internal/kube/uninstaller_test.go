@@ -299,7 +299,10 @@ func TestKubernetesUninstallerDeletesVeleroCRsBeforeNamespace(t *testing.T) {
 }
 
 func TestOpenShiftUninstallDeletesOnlyHyperCDROADPCatalog(t *testing.T) {
-	client := fake.NewSimpleClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "openshift-adp"}})
+	client := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "openshift-adp"}},
+		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "openshift-adp-metrics-reader"}},
+	)
 	dynamicClient := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(),
 		&unstructured.Unstructured{Object: map[string]any{"apiVersion": "operators.coreos.com/v1alpha1", "kind": "CatalogSource", "metadata": map[string]any{"name": "hypercdr-oadp", "namespace": "openshift-marketplace"}}},
 		&unstructured.Unstructured{Object: map[string]any{"apiVersion": "operators.coreos.com/v1alpha1", "kind": "CatalogSource", "metadata": map[string]any{"name": "redhat-operators", "namespace": "openshift-marketplace"}}},
@@ -314,6 +317,9 @@ func TestOpenShiftUninstallDeletesOnlyHyperCDROADPCatalog(t *testing.T) {
 	}
 	if _, err := dynamicClient.Resource(gvr).Namespace("openshift-marketplace").Get(context.Background(), "redhat-operators", metav1.GetOptions{}); err != nil {
 		t.Fatalf("shared Red Hat catalog must remain: %v", err)
+	}
+	if _, err := client.RbacV1().ClusterRoles().Get(context.Background(), "openshift-adp-metrics-reader", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("OADP CSV metrics role must be removed: %v", err)
 	}
 }
 

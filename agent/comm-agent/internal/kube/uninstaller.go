@@ -378,7 +378,14 @@ func uninstallExternalClusterRBACNames(namespace string, deleteVelero bool) []st
 }
 
 func uninstallAgentClusterRBACNames(namespace string) []string {
-	return []string{scopedRBACName("hypercdr-agent", namespace)}
+	names := []string{scopedRBACName("hypercdr-agent", namespace)}
+	if namespace == "openshift-adp" {
+		// OLM creates this cluster-scoped role from the qualified OADP CSV but
+		// does not consistently garbage-collect it when the CSV namespace is
+		// removed. It belongs to HyperCDR's dedicated OADP installation.
+		names = append(names, "openshift-adp-metrics-reader")
+	}
+	return names
 }
 
 func scopedRBACName(baseName, namespace string) string {
