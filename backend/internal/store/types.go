@@ -115,6 +115,7 @@ type Store interface {
 	MarkProtectionPlanScheduleFired(input ProtectionPlanScheduleFiredInput) (ProtectionPlanSchedule, bool, error)
 	DisableProtectionPlanSchedule(planID string) error
 	DeleteProtectionPlan(id string) (ProtectionPlan, bool, error)
+	ClearProtectionPlanTargetCluster(planID string, targetClusterID string) (ProtectionPlan, bool, error)
 	CleanupProtectionPlanRecords(id string) (ProtectionPlan, bool, error)
 	GetApplication(id string) (Application, bool, error)
 	CreateRestorePoint(input RestorePointInput) (RestorePoint, error)

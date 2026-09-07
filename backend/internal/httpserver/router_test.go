@@ -1857,6 +1857,53 @@ func TestUnregisterRequiresExplicitBackupDeletion(t *testing.T) {
 	}
 }
 
+func TestTargetUnregisterPreservesSourcePlanRestorePointAndStorage(t *testing.T) {
+	repo := store.NewMemoryStore()
+	register := func(name string) store.Cluster {
+		token, err := repo.CreateAgentToken(store.DefaultTenantID, "", name, time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cluster, _, err := repo.RegisterCluster(store.RegisterClusterInput{Token: token.Token, ClusterName: name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cluster
+	}
+	source, target := register("source"), register("target")
+	storage, err := repo.CreateStorageRepository(store.StorageRepositoryInput{TenantID: store.DefaultTenantID, Name: "backup", Type: "S3", Endpoint: "http://minio", Bucket: "bucket"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{TenantID: store.DefaultTenantID, SourceClusterID: source.ID, TargetClusterID: target.ID, StorageRepoID: storage.ID, Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backup, err := repo.CreateTask(store.TaskInput{ClusterID: source.ID, ProtectionPlanID: plan.ID, Type: "backup", Status: "succeeded"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	point, err := repo.CreateRestorePoint(store.RestorePointInput{ProtectionPlanID: plan.ID, BackupTaskID: backup.ID, SourceClusterID: source.ID, StorageRepoID: storage.ID, VeleroBackupName: "source-backup", Status: "available"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := &Router{store: repo}
+	if err := router.cleanupUnregisterProtectionRelationships(target.ID, []store.ProtectionPlan{plan}); err != nil {
+		t.Fatal(err)
+	}
+	gotPlan, ok, err := repo.GetProtectionPlan(plan.ID)
+	if err != nil || !ok || gotPlan.TargetClusterID != "" || gotPlan.SourceClusterID != source.ID {
+		t.Fatalf("source plan was not preserved with an empty target: plan=%#v ok=%v err=%v", gotPlan, ok, err)
+	}
+	gotPoint, ok, err := repo.GetRestorePoint(point.ID)
+	if err != nil || !ok || gotPoint.SourceClusterID != source.ID || gotPoint.VeleroBackupName != "source-backup" {
+		t.Fatalf("source restore point was not preserved: point=%#v ok=%v err=%v", gotPoint, ok, err)
+	}
+	if _, ok, err := repo.GetStorageRepository(storage.ID); err != nil || !ok {
+		t.Fatalf("source storage repository was not preserved: ok=%v err=%v", ok, err)
+	}
+}
+
 func TestObjectStorageCleanupFailurePreventsAgentDispatch(t *testing.T) {
 	repo := store.NewMemoryStore()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))

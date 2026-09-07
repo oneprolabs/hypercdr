@@ -1883,6 +1883,19 @@ func (s *MemoryStore) DeleteProtectionPlan(id string) (ProtectionPlan, bool, err
 	return plan, true, nil
 }
 
+func (s *MemoryStore) ClearProtectionPlanTargetCluster(id string, targetClusterID string) (ProtectionPlan, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	plan, ok := s.plans[id]
+	if !ok || plan.TargetClusterID != targetClusterID {
+		return ProtectionPlan{}, false, nil
+	}
+	plan.TargetClusterID = ""
+	plan.UpdatedAt = time.Now().UTC()
+	s.plans[id] = plan
+	return plan, true, nil
+}
+
 func (s *MemoryStore) CleanupProtectionPlanRecords(id string) (ProtectionPlan, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

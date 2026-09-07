@@ -2906,17 +2906,9 @@ func (r *Router) unregisterCluster(w http.ResponseWriter, req *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "unregister_dependency_cleanup_failed", "message": listErr.Error()})
 			return
 		}
-		for _, plan := range plans {
-			if plan.SourceClusterID != clusterID && plan.TargetClusterID != clusterID {
-				continue
-			}
-			if _, ok, deleteErr := r.store.DeleteProtectionPlan(plan.ID); deleteErr != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "unregister_dependency_cleanup_failed", "message": deleteErr.Error()})
-				return
-			} else if !ok {
-				writeJSON(w, http.StatusConflict, map[string]any{"error": "unregister_dependency_cleanup_failed", "message": "a protection relationship changed during unregister; refresh and retry"})
-				return
-			}
+		if cleanupErr := r.cleanupUnregisterProtectionRelationships(clusterID, plans); cleanupErr != nil {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "unregister_dependency_cleanup_failed", "message": cleanupErr.Error()})
+			return
 		}
 	}
 	namespace := r.agentNamespaceForCluster(clusterID)
@@ -2999,6 +2991,31 @@ func (r *Router) unregisterCluster(w http.ResponseWriter, req *http.Request) {
 		Message: "unregister task dispatched to agent",
 	})
 	writeJSON(w, http.StatusAccepted, task)
+}
+
+func (r *Router) cleanupUnregisterProtectionRelationships(clusterID string, plans []store.ProtectionPlan) error {
+	for _, plan := range plans {
+		if plan.SourceClusterID != clusterID && plan.TargetClusterID != clusterID {
+			continue
+		}
+		var ok bool
+		var err error
+		if plan.SourceClusterID == clusterID {
+			_, ok, err = r.store.DeleteProtectionPlan(plan.ID)
+		} else {
+			// Target-only cleanup preserves the source plan, schedule, restore
+			// points, and object-storage data. A future drill must select a new
+			// target explicitly.
+			_, ok, err = r.store.ClearProtectionPlanTargetCluster(plan.ID, clusterID)
+		}
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New("a protection relationship changed during unregister; refresh and retry")
+		}
+	}
+	return nil
 }
 
 func (r *Router) cleanupAndDispatchUnregister(task store.Task, repositoryIDs []string) {

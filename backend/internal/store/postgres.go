@@ -2657,6 +2657,17 @@ func (s *PostgresStore) DeleteProtectionPlan(id string) (ProtectionPlan, bool, e
 	return item, true, nil
 }
 
+func (s *PostgresStore) ClearProtectionPlanTargetCluster(id string, targetClusterID string) (ProtectionPlan, bool, error) {
+	var item ProtectionPlan
+	result := s.db.QueryRow(`update protection_plans set target_cluster_id = null, updated_at = now() where id = $1 and target_cluster_id = $2 returning id`, id, targetClusterID)
+	if err := result.Scan(&item.ID); errors.Is(err, sql.ErrNoRows) {
+		return ProtectionPlan{}, false, nil
+	} else if err != nil {
+		return ProtectionPlan{}, false, err
+	}
+	return s.GetProtectionPlan(id)
+}
+
 func (s *PostgresStore) CleanupProtectionPlanRecords(id string) (ProtectionPlan, bool, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
