@@ -815,7 +815,7 @@ export default function ClusterPage(props: {
               <div className="cluster-card-head mb-2 flex items-start justify-between">
                 <div className="cluster-card-icon rounded-lg bg-slate-50 p-2 transition-colors group-hover:bg-blue-50"><Server className="text-blue-600" size={20} /></div>
                 <div className="cluster-card-state-stack flex flex-col items-end gap-1.5 pr-10">
-                  {cluster.id === defaultClusterId ? (
+                  {cluster.isDefault || cluster.id === defaultClusterId ? (
                     <span title="A registered environment always has one default cluster" className="cluster-default-button cluster-default-button-active inline-flex cursor-default items-center gap-1 rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
                       <Star size={10} className="fill-blue-500 text-blue-500" />Default
                     </span>
