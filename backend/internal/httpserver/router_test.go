@@ -2014,36 +2014,35 @@ func TestCleanupConsentDoesNotBypassOfflineAgent(t *testing.T) {
 	}
 }
 
-func TestTargetOnlyUnregisterDoesNotCleanObjectStorage(t *testing.T) {
+func TestTargetOnlyAuditDoesNotIncludeSourceObjectStorage(t *testing.T) {
 	repo := store.NewMemoryStore()
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	router := newUnregisterTestRouter(logger, repo)
-	server := httptest.NewServer(router.mux)
-	defer server.Close()
-	targetID := registerClusterViaWS(t, server.URL, "target-only")
+	register := func(name string) store.Cluster {
+		token, _ := repo.CreateAgentToken(store.DefaultTenantID, "", name, time.Hour)
+		cluster, _, err := repo.RegisterCluster(store.RegisterClusterInput{Token: token.Token, ClusterName: name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cluster
+	}
+	source, target := register("source-owner"), register("target-only")
 	storage, err := repo.CreateStorageRepository(store.StorageRepositoryInput{Name: "shared", Type: "S3", Endpoint: "http://minio", Bucket: "bucket"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.UpsertClusterStorageBinding(store.ClusterStorageBindingInput{ClusterID: targetID, StorageRepoID: storage.ID, SourceClusterID: "source-owner", BSLName: "source-bsl", ObjectPrefix: "tenant/source-owner"}); err != nil {
+	if _, err := repo.UpsertClusterStorageBinding(store.ClusterStorageBindingInput{ClusterID: target.ID, StorageRepoID: storage.ID, SourceClusterID: source.ID, BSLName: "source-bsl", ObjectPrefix: "tenant/source-owner"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: "source-owner", TargetClusterID: targetID, StorageRepoID: storage.ID, Status: "active"}); err != nil {
+	if _, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: source.ID, TargetClusterID: target.ID, StorageRepoID: storage.ID, Status: "active"}); err != nil {
 		t.Fatal(err)
 	}
-	previous := cleanObjectStoragePrefix
-	defer func() { cleanObjectStoragePrefix = previous }()
-	called := false
-	cleanObjectStoragePrefix = func(context.Context, store.StorageRepository, string) (objectStorageCleanupResult, error) {
-		called = true
-		return objectStorageCleanupResult{}, nil
+	router := &Router{store: repo, hub: newSessionHub()}
+	router.hub.set(target.ID, nil)
+	audit, err := router.auditClusterUnregister(target.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	// The test registration has no live hub session after the websocket closes;
-	// target-only cleanup must still be rejected before dispatch without touching storage.
-	resp := postJSON(t, server.URL+"/api/v1/clusters/"+targetID+"/unregister", map[string]any{"deleteBackupData": true})
-	defer resp.Body.Close()
-	if called {
-		t.Fatal("target-only unregister must not clean source object storage")
+	if audit.TargetPlanCount != 1 || audit.SourcePlanCount != 0 || audit.ObjectStorageNeeded || len(audit.StorageRepositoryIDs) != 0 {
+		t.Fatalf("target-only audit must not include source-owned object storage: %#v", audit)
 	}
 }
 
