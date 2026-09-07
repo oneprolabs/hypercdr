@@ -12901,6 +12901,11 @@ ${IMAGE_PULL_SECRETS_BLOCK}
           drop:
             - ALL
         runAsNonRoot: true
+        # Some qualified images declare a named non-root USER (for example
+        # "cnb"). Kubernetes cannot validate a non-numeric image user when
+        # runAsNonRoot is enabled, so pin the disposable preflight container
+        # to a numeric non-root UID.
+        runAsUser: 1000
 ${command_yaml}
 YAML
   local deadline=$((SECONDS + 90))
@@ -12913,6 +12918,14 @@ YAML
       ErrImagePull|ImagePullBackOff|InvalidImageName)
         log_error "Image pull preflight failed for ${image}: ${waiting}"
         log_error "Check image name, registry reachability, registry certificate trust, and image pull credentials."
+        kubectl -n "$target_namespace" describe pod "$name" >&2 || true
+        kubectl -n "$target_namespace" get events --sort-by=.lastTimestamp | tail -n 20 >&2 || true
+        kubectl -n "$target_namespace" delete pod "$name" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+        exit 1
+        ;;
+      CreateContainerConfigError|CreateContainerError)
+        log_error "Image preflight container could not start for ${image}: ${waiting}"
+        log_error "Check the image entrypoint and Kubernetes security-context compatibility. The image itself may already be present on the node."
         kubectl -n "$target_namespace" describe pod "$name" >&2 || true
         kubectl -n "$target_namespace" get events --sort-by=.lastTimestamp | tail -n 20 >&2 || true
         kubectl -n "$target_namespace" delete pod "$name" --ignore-not-found --wait=false >/dev/null 2>&1 || true

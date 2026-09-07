@@ -15,6 +15,7 @@ func TestImagePullPreflightUsesRestrictedPodSecurity(t *testing.T) {
 		"allowPrivilegeEscalation: false",
 		"drop:\n            - ALL",
 		"runAsNonRoot: true",
+		"runAsUser: 1000",
 	} {
 		if !strings.Contains(installScriptTemplate, required) {
 			t.Fatalf("image pull preflight is missing restricted security setting %q", required)
