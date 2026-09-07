@@ -31,6 +31,13 @@ const formatLastSeen=(value?:string)=>{if(!value)return'unknown';const timestamp
 const normalizeNodeStatus=(status?:string)=>{const value=(status||'').trim();return value||'Unknown'};
 const formatPercent=(value:number)=>Number.isFinite(value)?Math.max(0,Math.min(100,value)).toFixed(2):'0.00';
 const taskStatusLabel=(status?:string)=>status==='succeeded'?'Succeeded':status==='failed'?'Failed':['running','accepted','dispatched','queued'].includes(status||'')?'Running':status||'Unknown';
+const clusterTypePresentation=(clusterType?:string)=>{
+  switch(clusterType){
+    case'openshift':return{label:'OpenShift',className:'border-red-200 bg-red-50 text-red-700'};
+    case'huaweicloud-cce':return{label:'Huawei Cloud CCE',className:'border-cyan-200 bg-cyan-50 text-cyan-700'};
+    default:return{label:'Native Kubernetes',className:'border-slate-200 bg-slate-50 text-slate-600'};
+  }
+};
 const unregisterFailure=(task:ApiTask|null,events:ApiTaskEvent[])=>{
   const event=[...events].reverse().find(item=>item.level==='error'||item.reason?.includes('FAILED'));
   const raw=String(event?.payload?.error||event?.message||task?.errorMessage||'Cluster-side cleanup failed without a detailed agent response.');
@@ -860,14 +867,18 @@ export default function ClusterPage(props: {
                     <X size={14} />
                   </button>
                 </div>
-              ) : (
+              ) : (() => {
+                const typePresentation=clusterTypePresentation(cluster.clusterType);
+                return (
                 <div className="mb-1 flex min-w-0 items-center gap-2 pr-10">
                   <h4 className={`cluster-card-title min-w-0 truncate text-[1.08rem] font-extrabold tracking-tight transition-colors group-hover:text-blue-700 ${cluster.name === 'unknown-cluster' ? 'text-slate-500' : 'text-slate-950'}`}>{cluster.name === 'unknown-cluster' ? 'Unnamed cluster' : cluster.name}</h4>
+                  <span className={`inline-flex h-5 shrink-0 items-center rounded-full border px-2 text-[9px] font-bold leading-none ${typePresentation.className}`} aria-label={`Cluster type: ${typePresentation.label}`}>{typePresentation.label}</span>
                   <button type="button" onClick={(event) => openRename(cluster, event)} className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600" aria-label="Edit cluster name">
                     <Edit2 size={14} />
                   </button>
                 </div>
-              )}
+                );
+              })()}
               <p className="mb-2 break-all font-mono text-[10px] font-semibold leading-4 text-slate-500">{cluster.id.slice(0,8)}…</p>
               <p className="cluster-card-meta mb-2 text-[11px] font-medium text-slate-500">Kubernetes {cluster.version} · {cluster.connectionStatus === 'online' ? 'Online' : 'Offline'}</p>
               {cluster.connectionStatus !== 'online' && (
