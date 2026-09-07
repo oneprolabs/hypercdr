@@ -35,7 +35,7 @@ const clusterTypePresentation=(clusterType?:string)=>{
   switch(clusterType){
     case'openshift':return{label:'OpenShift',textClassName:'text-red-700'};
     case'huaweicloud-cce':return{label:'Huawei Cloud CCE',textClassName:'text-cyan-700'};
-    default:return{label:'Native Kubernetes',textClassName:'text-slate-600'};
+    default:return{label:'Native Kubernetes',textClassName:'text-blue-700'};
   }
 };
 const unregisterFailure=(task:ApiTask|null,events:ApiTaskEvent[])=>{
