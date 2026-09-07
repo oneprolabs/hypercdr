@@ -7,6 +7,7 @@ import { SearchBar } from '../../components/search-bar';
 import ListToolbarControls from '../../components/list-toolbar-controls';
 import { apiGet, apiPost } from '../../api/client';
 import { formatLocalDateTime } from '../../lib/date-time';
+import { clustersAreDRCompatible } from '../../lib/cluster-compatibility';
 import type { Cluster } from '../clusters/types';
 import type { ApiCluster, ApiStorageRepo } from '../recovery/platform-types';
 import type { ApiList, ApiProtectionPlan, ApiRestorePoint, ApiTask, ApiTaskCancelResponse, ApiTaskEvent, ApiTaskResponse } from '../recovery/types';
@@ -414,12 +415,15 @@ export default function RealRestorePointPage({
       return [...prev, id];
     });
   };
-  const clusterOptions = clusters.map((cluster, index) => ({
+  const compatibilitySourceCluster = clusters.find(cluster => cluster.id === restoreAction?.row.sourceClusterId) || workspaceCluster;
+  const clusterOptions = clusters.map(cluster => ({
     id: cluster.id,
     name: cluster.name,
     region: cluster.connectionStatus === 'online' ? 'connected' : 'disconnected',
     version: cluster.kubeVersion || 'unknown',
-    isCurrent: index === 0,
+    isCurrent: cluster.id === compatibilitySourceCluster?.id,
+    clusterType: cluster.clusterType,
+    compatible: clustersAreDRCompatible(compatibilitySourceCluster?.clusterType, cluster.clusterType),
     storageClasses: cluster.storageClasses,
   }));
   const repositoryOptions = storageRepos.map(repo => ({

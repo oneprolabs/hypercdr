@@ -3361,6 +3361,14 @@ func normalizedClusterTypeForRouting(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
+func clusterTypesDRCompatible(sourceType, targetType string) bool {
+	return (normalizedClusterTypeForRouting(sourceType) == "openshift") == (normalizedClusterTypeForRouting(targetType) == "openshift")
+}
+
+func (r *Router) clustersDRCompatible(sourceClusterID, targetClusterID string) bool {
+	return clusterTypesDRCompatible(r.clusterType(sourceClusterID), r.clusterType(targetClusterID))
+}
+
 func (r *Router) agentNamespaceForCluster(clusterID string) string {
 	if r.clusterType(clusterID) == "openshift" {
 		return "openshift-adp"
@@ -5715,6 +5723,14 @@ func (r *Router) createProtectionPlan(w http.ResponseWriter, req *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "source_cluster_id_and_apps_required"})
 		return
 	}
+	if input.TargetClusterID != "" && !r.clustersDRCompatible(input.SourceClusterID, input.TargetClusterID) {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":           "cluster_type_incompatible",
+			"message":         "The source and target cluster types are incompatible for disaster recovery. OpenShift requires an OpenShift target; Native Kubernetes and Huawei Cloud CCE can target each other.",
+			"sourceClusterId": input.SourceClusterID, "targetClusterId": input.TargetClusterID,
+		})
+		return
+	}
 	if input.StorageRepoID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "storage_repository_required"})
 		return
@@ -7580,6 +7596,18 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 	}
 	if len(body.SourceNamespaces) == 0 && body.SourceNamespace != "" {
 		body.SourceNamespaces = []string{body.SourceNamespace}
+	}
+	recoverySourceClusterID := recoveryPlan.SourceClusterID
+	if recoverySourceClusterID == "" {
+		recoverySourceClusterID = storageSourceClusterID
+	}
+	if recoverySourceClusterID != "" && !r.clustersDRCompatible(recoverySourceClusterID, body.ClusterID) {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":           "cluster_type_incompatible",
+			"message":         "The selected target cluster type is incompatible with the recovery point source cluster. OpenShift requires an OpenShift target; Native Kubernetes and Huawei Cloud CCE can target each other.",
+			"sourceClusterId": recoverySourceClusterID, "targetClusterId": body.ClusterID,
+		})
+		return
 	}
 	if body.VeleroBackupName == "" || body.SourceNamespace == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "velero_backup_name_and_source_namespace_required"})

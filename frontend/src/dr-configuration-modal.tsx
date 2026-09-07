@@ -85,6 +85,8 @@ type TargetClusterOption = {
   nodes: number;
   applications: number;
   isCurrent: boolean;
+  compatible: boolean;
+  incompatibilityReason?: string;
 };
 
 type ProtectConfig = {
@@ -361,7 +363,9 @@ export function DrConfigurationModal(props: Props) {
   }, [multiNamespaceFilterDisabled, protectConfig.resourceSelection.mode, setProtectConfig]);
 
   const resourceSelectionValid = true;
-  const canSave = Boolean(resourceSelectionValid && protectConfig.storageId && (protectConfig.targetCluster || targetClusterOptions.length === 0));
+  const selectedTargetCluster = targetClusterOptions.find(cluster => cluster.name === protectConfig.targetCluster);
+  const targetCompatible = !selectedTargetCluster || selectedTargetCluster.compatible;
+  const canSave = Boolean(resourceSelectionValid && protectConfig.storageId && targetCompatible && (protectConfig.targetCluster || targetClusterOptions.length === 0));
   void filteredPolicyOptions;
   void paginatedPolicyOptions;
   void wizardPolicySearchQuery;
@@ -777,10 +781,12 @@ export function DrConfigurationModal(props: Props) {
                       <div className="hbdr-config-select-action">
                         <select value={protectConfig.targetCluster} onChange={event => setProtectConfig(prev => ({ ...prev, targetCluster: event.target.value }))}>
                           <option value="">Select target cluster</option>
-                          {targetClusterOptions.map(cluster => <option key={cluster.id} value={cluster.name}>{cluster.name}{cluster.isCurrent ? ' (source)' : ''}</option>)}
+                          {targetClusterOptions.map(cluster => <option key={cluster.id} value={cluster.name} disabled={!cluster.compatible}>{cluster.name}{cluster.isCurrent ? ' (source)' : ''}{!cluster.compatible ? ' — Incompatible cluster type' : ''}</option>)}
                         </select>
                         <button type="button" aria-label="Register new cluster" onClick={() => navigateFromConfig(onRegisterCluster)}>+ New</button>
                       </div>
+                      {selectedTargetCluster && !selectedTargetCluster.compatible && <small className="mt-1 block text-xs font-semibold text-amber-700">{selectedTargetCluster.incompatibilityReason}</small>}
+                      {!selectedTargetCluster && targetClusterOptions.some(cluster => !cluster.compatible) && <small className="mt-1 block text-xs font-medium text-slate-500">Incompatible cluster types are disabled. {targetClusterOptions.find(cluster => !cluster.compatible)?.incompatibilityReason}</small>}
                     </label>
                     <label className="hbdr-config-setting-row">
                       <span>Backup policy</span>

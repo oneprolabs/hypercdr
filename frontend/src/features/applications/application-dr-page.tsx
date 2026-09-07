@@ -14,6 +14,7 @@ import ListToolbarControls from '../../components/list-toolbar-controls';
 import type { ScopedResourceOption } from '../../components/scoped-resource-selector';
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from '../../api/client';
 import { formatDateTime, formatLocalDateTime } from '../../lib/date-time';
+import { clusterCompatibilityMessage, clustersAreDRCompatible } from '../../lib/cluster-compatibility';
 import type { AppItem, Cluster, DRSupportSummary, ResourceCategory, ResourceCategoryKey } from '../clusters/types';
 import {
   listItems,
@@ -346,6 +347,9 @@ export default function ApplicationDrPage(props: {
     nodes: cluster.nodes,
     applications: cluster.applications,
     isCurrent: currentCluster?.id === cluster.id,
+    clusterType: cluster.clusterType,
+    compatible: clustersAreDRCompatible(currentCluster?.clusterType, cluster.clusterType),
+    incompatibilityReason: clusterCompatibilityMessage(currentCluster?.clusterType),
   }));
   const displayApps = apps.map(app => ({ ...app, ...(appUiOverrides[appOverrideKey(app)] || {}) }));
   const stageOf = (app: AppItem): ApplicationStage => app.stage || (app.isProtected ? 'run' : 'select');
@@ -1847,6 +1851,10 @@ export default function ApplicationDrPage(props: {
     if (!targetCluster) {
       throw new Error('Select a target cluster before starting recovery.');
     }
+    const sourceCluster = clusters.find(cluster => cluster.id === (livePoint.sourceClusterId || restoreAction.app.clusterId)) || currentCluster;
+    if (!clustersAreDRCompatible(sourceCluster?.clusterType, targetCluster.clusterType)) {
+      throw new Error(clusterCompatibilityMessage(sourceCluster?.clusterType));
+    }
     const action = restoreAction;
     const submittedMessage = `${action.mode === 'drill' ? 'Drill' : 'Takeover'} job submitted: ${action.config.targetCluster} / ${targetNamespace} / ${point?.time || 'selected recovery point'}`;
     setRecoverySubmitting(true);
@@ -2517,6 +2525,12 @@ export default function ApplicationDrPage(props: {
       return;
     }
     const targetCluster = clusters.find(cluster => cluster.name === protectConfig.targetCluster);
+    if (targetCluster && !clustersAreDRCompatible(currentCluster?.clusterType, targetCluster.clusterType)) {
+      toast(clusterCompatibilityMessage(currentCluster?.clusterType));
+      protectSubmittingRef.current = false;
+      setProtectSubmitting(false);
+      return;
+    }
     const policyId = policies.some(policy => policy.id === protectConfig.policy) ? protectConfig.policy : '';
     const scopeType = protectConfig.scope === 'filter' ? 'filtered' : 'all';
     const targetAppMeta = targetApps
@@ -3284,6 +3298,8 @@ export default function ApplicationDrPage(props: {
               region: cluster.region,
               version: cluster.version,
               isCurrent: currentCluster?.id === cluster.id,
+              clusterType: cluster.clusterType,
+              compatible: clustersAreDRCompatible(currentCluster?.clusterType, cluster.clusterType),
               storageClasses: cluster.storageClasses,
               apiResources: cluster.apiResources,
             }))}

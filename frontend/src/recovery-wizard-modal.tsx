@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { ScopedResourceSelector, type ScopedResourceSelection } from './components/scoped-resource-selector';
 import { ApiRequestError } from './api/client';
+import { clusterCompatibilityMessage } from './lib/cluster-compatibility';
 
 export type RecoveryWizardMode = 'drill' | 'takeover';
 
@@ -63,6 +64,8 @@ type ClusterOption = {
   region: string;
   version: string;
   isCurrent: boolean;
+  clusterType?: string;
+  compatible: boolean;
   storageClasses?: Array<{ name: string }>;
   apiResources?: Array<{ group?: string; version: string; resource: string; kind: string; namespaced: boolean }>;
 };
@@ -289,6 +292,8 @@ export function RecoveryWizardModal(props: Props) {
     ? 'Select a restore point before starting recovery.'
     : !config.targetCluster
       ? 'Select a target cluster before starting recovery.'
+      : targetClusterOption && !targetClusterOption.compatible
+        ? clusterCompatibilityMessage(currentClusterOption?.clusterType)
       : !targetNamespace.trim()
         ? 'Enter a target namespace before starting recovery.'
         : nodePortError
@@ -577,11 +582,12 @@ export function RecoveryWizardModal(props: Props) {
                           onChange={event => chooseTargetCluster(event.target.value)}
                         >
                           {clusterOptions.map(cluster => (
-                            <option key={cluster.id} value={cluster.name}>
-                              {cluster.name}{cluster.name === currentTargetClusterName ? ' / Current' : ''}{cluster.name === configuredTargetCluster ? ' / Configured target' : ''}
+                            <option key={cluster.id} value={cluster.name} disabled={!cluster.compatible}>
+                              {cluster.name}{cluster.name === currentTargetClusterName ? ' / Current' : ''}{cluster.name === configuredTargetCluster ? ' / Configured target' : ''}{!cluster.compatible ? ' / Incompatible cluster type' : ''}
                             </option>
                           ))}
                         </select>
+                        {clusterOptions.some(cluster => !cluster.compatible) && <small className="mt-1 block text-xs font-medium text-slate-500">Incompatible cluster types are disabled. {clusterCompatibilityMessage(currentClusterOption?.clusterType)}</small>}
                         </label>
                       </div>
 
