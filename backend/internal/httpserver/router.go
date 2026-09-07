@@ -7488,6 +7488,7 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 	protectionPlanID := body.ProtectionPlanID
 	var recoveryPlan store.ProtectionPlan
 	var recoveryAppID string
+	var recoveryStorageClasses []string
 	if protectionPlanID != "" {
 		plan, found, err := r.store.GetProtectionPlan(protectionPlanID)
 		if err != nil {
@@ -7570,6 +7571,7 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 			body.ReadinessExpectationsKnown = true
 			body.RuntimeWorkloadsExpected, body.ExpectedPVCs = readinessExpectationsFromCatalog(index.Resources, body.SourceNamespaces)
 			body.ContentCatalogLoaded = true
+			recoveryStorageClasses = storageClassesFromCatalog(index.Resources, body.SourceNamespaces)
 		}
 		if body.TargetNamespace == "" {
 			body.TargetNamespace = point.SourceNamespace
@@ -7643,10 +7645,10 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 	// CCE csi-disk). Refuse an ambiguous request before creating a task so the
 	// user can provide an explicit mapping in Advanced options instead of
 	// receiving a misleading 2% stall later.
-	if taskType == "drill" && recoveryPlan.SourceClusterID != "" && body.ClusterID != recoveryPlan.SourceClusterID && len(body.StorageClassMappings) == 0 {
+	if taskType == "drill" && recoveryPlan.SourceClusterID != "" && body.ClusterID != recoveryPlan.SourceClusterID && len(recoveryStorageClasses) > 0 && len(body.StorageClassMappings) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"error":   "storage_class_mapping_required",
-			"message": "Cross-cluster Drill requires a StorageClass mapping. Open Advanced options and map the source StorageClass to a StorageClass available on the target cluster.",
+			"message": fmt.Sprintf("Cross-cluster Drill requires a StorageClass mapping for %s. Open Advanced options and map it to a StorageClass available on the target cluster.", strings.Join(recoveryStorageClasses, ", ")),
 		})
 		return
 	}
@@ -11574,6 +11576,39 @@ func readinessExpectationsFromCatalog(resources []protocol.BackupResourceSummary
 	}
 	slices.Sort(pvcs)
 	return runtimeExpected, pvcs
+}
+
+func storageClassesFromCatalog(resources []protocol.BackupResourceSummary, sourceNamespaces []string) []string {
+	namespaces := map[string]struct{}{}
+	for _, namespace := range sourceNamespaces {
+		namespace = strings.TrimSpace(namespace)
+		if namespace != "" {
+			namespaces[namespace] = struct{}{}
+		}
+	}
+	classes := map[string]struct{}{}
+	for _, resource := range resources {
+		if resource.ClusterScoped {
+			continue
+		}
+		if len(namespaces) > 0 {
+			if _, included := namespaces[resource.Namespace]; !included {
+				continue
+			}
+		}
+		for _, storageClass := range resource.StorageClasses {
+			storageClass = strings.TrimSpace(storageClass)
+			if storageClass != "" {
+				classes[storageClass] = struct{}{}
+			}
+		}
+	}
+	result := make([]string, 0, len(classes))
+	for storageClass := range classes {
+		result = append(result, storageClass)
+	}
+	slices.Sort(result)
+	return result
 }
 
 // Version 4 guarantees that cached catalogs were generated after JSON numeric
