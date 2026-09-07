@@ -306,6 +306,20 @@ export function RecoveryWizardModal(props: Props) {
   };
   const sourcePoints = pointsBySource[config.sourceType];
 
+  useEffect(() => {
+    if (!config.contentCatalogLoaded || backupStorageClasses.length === 0) return;
+    const targetStorageClasses = new Set((targetClusterOption?.storageClasses || []).map(item => item.name));
+    const next = { ...(config.storageClassMappings || {}) };
+    let changed = false;
+    backupStorageClasses.forEach(source => {
+      if (!next[source] && targetStorageClasses.has(source)) {
+        next[source] = source;
+        changed = true;
+      }
+    });
+    if (changed) updateConfig({ storageClassMappings: next });
+  }, [backupStorageClasses.join('\u0000'), config.contentCatalogLoaded, config.targetCluster]);
+
   const updateConfig = (patch: Partial<RecoveryWizardConfig>) => {
     setConfig(prev => (prev ? { ...prev, ...patch } : prev));
   };

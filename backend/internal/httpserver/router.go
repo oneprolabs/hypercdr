@@ -7645,12 +7645,45 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 	// CCE csi-disk). Refuse an ambiguous request before creating a task so the
 	// user can provide an explicit mapping in Advanced options instead of
 	// receiving a misleading 2% stall later.
-	if taskType == "drill" && recoveryPlan.SourceClusterID != "" && body.ClusterID != recoveryPlan.SourceClusterID && len(recoveryStorageClasses) > 0 && len(body.StorageClassMappings) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{
-			"error":   "storage_class_mapping_required",
-			"message": fmt.Sprintf("Cross-cluster Drill requires a StorageClass mapping for %s. Open Advanced options and map it to a StorageClass available on the target cluster.", strings.Join(recoveryStorageClasses, ", ")),
-		})
-		return
+	if taskType == "drill" && recoveryPlan.SourceClusterID != "" && body.ClusterID != recoveryPlan.SourceClusterID && len(recoveryStorageClasses) > 0 {
+		targetStorageClasses := map[string]struct{}{}
+		if clusters, err := r.store.ListClusters(); err != nil {
+			r.logger.Error("failed to load target StorageClasses for drill", "cluster_id", body.ClusterID, "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_target_storage_classes_failed"})
+			return
+		} else {
+			for _, cluster := range clusters {
+				if cluster.ID != body.ClusterID {
+					continue
+				}
+				for _, storageClass := range cluster.StorageClasses {
+					targetStorageClasses[storageClass.Name] = struct{}{}
+				}
+				break
+			}
+		}
+		if body.StorageClassMappings == nil {
+			body.StorageClassMappings = map[string]string{}
+		}
+		missingMappings := []string{}
+		for _, sourceStorageClass := range recoveryStorageClasses {
+			if strings.TrimSpace(body.StorageClassMappings[sourceStorageClass]) != "" {
+				continue
+			}
+			if _, sameNameAvailable := targetStorageClasses[sourceStorageClass]; sameNameAvailable {
+				body.StorageClassMappings[sourceStorageClass] = sourceStorageClass
+				continue
+			}
+			missingMappings = append(missingMappings, sourceStorageClass)
+		}
+		if len(missingMappings) > 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"error":                 "storage_class_mapping_required",
+				"message":               fmt.Sprintf("No same-name target StorageClass exists for %s. Open Advanced options and select a target StorageClass.", strings.Join(missingMappings, ", ")),
+				"missingStorageClasses": missingMappings,
+			})
+			return
+		}
 	}
 	commandID := store.NewPublicID()
 	task, err := r.store.CreateTask(store.TaskInput{
