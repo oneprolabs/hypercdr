@@ -885,6 +885,11 @@ func (s *PostgresStore) RegisterCluster(input RegisterClusterInput) (Cluster, st
 	if now.After(token.ExpiresAt) {
 		return Cluster{}, "", ErrTokenExpired
 	}
+	// Serialize registrations for a tenant so two first registrations cannot both
+	// attempt to become the default cluster.
+	if _, err = tx.Exec(`select pg_advisory_xact_lock(hashtext($1))`, token.TenantID); err != nil {
+		return Cluster{}, "", err
+	}
 	if input.ClusterType != "" && normalizedClusterType(input.ClusterType) != normalizedClusterType(token.ClusterType) {
 		return Cluster{}, "", errors.New("registration cluster type does not match install token")
 	}
@@ -938,11 +943,10 @@ func (s *PostgresStore) RegisterCluster(input RegisterClusterInput) (Cluster, st
 		}
 	}
 
-	var clusterCount int
-	if err := tx.QueryRow(`select count(*) from clusters where tenant_id = $1`, token.TenantID).Scan(&clusterCount); err != nil {
+	var hasDefault bool
+	if err := tx.QueryRow(`select exists(select 1 from clusters where tenant_id = $1 and is_default)`, token.TenantID).Scan(&hasDefault); err != nil {
 		return Cluster{}, "", err
 	}
-	isFirstCluster := clusterCount == 0
 
 	cluster := Cluster{
 		ID:               clusterID,
@@ -960,7 +964,7 @@ func (s *PostgresStore) RegisterCluster(input RegisterClusterInput) (Cluster, st
 		VeleroStatus:     input.VeleroStatus,
 		NodeCount:        input.NodeCount,
 		Role:             "both",
-		IsDefault:        isFirstCluster,
+		IsDefault:        !hasDefault,
 		RegisteredAt:     now,
 		LastSeenAt:       now,
 	}
@@ -1082,6 +1086,9 @@ func (s *PostgresStore) UpdateCluster(input ClusterUpdateInput) (Cluster, bool, 
 		return Cluster{}, false, nil
 	} else if err != nil {
 		return Cluster{}, false, err
+	}
+	if input.IsDefault != nil && !*input.IsDefault {
+		return Cluster{}, false, ErrDefaultClusterRequired
 	}
 
 	if input.IsDefault != nil && *input.IsDefault {
@@ -1280,19 +1287,20 @@ func (s *PostgresStore) DeleteCluster(clusterID string) (bool, error) {
 	if affected == 0 {
 		return false, nil
 	}
-	if wasDefault {
-		if _, err := tx.Exec(`
+	// Repair both the normal default deletion path and any historical state in
+	// which remaining clusters have no default.
+	if _, err := tx.Exec(`
 			update clusters
 			set is_default = true, updated_at = now()
 			where id = (
 				select id from clusters
 				where tenant_id = $1
+				  and not exists (select 1 from clusters where tenant_id = $1 and is_default)
 				order by registered_at asc, id asc
 				limit 1
 			)
 		`, tenantID); err != nil {
-			return false, err
-		}
+		return false, err
 	}
 	if err := tx.Commit(); err != nil {
 		return false, err

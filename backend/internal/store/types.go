@@ -22,6 +22,7 @@ var (
 	ErrUserExists              = errors.New("user already exists")
 	ErrResetInvalid            = errors.New("password reset token is invalid or expired")
 	ErrEmailSettingsNameExists = errors.New("SMTP configuration name already exists")
+	ErrDefaultClusterRequired  = errors.New("a tenant with registered clusters must have a default cluster")
 )
 
 type ApplicationAlreadyProtectedError struct {

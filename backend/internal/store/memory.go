@@ -930,10 +930,10 @@ func (s *MemoryStore) RegisterCluster(input RegisterClusterInput) (Cluster, stri
 		}
 	}
 
-	isFirstCluster := true
+	hasDefault := false
 	for _, existing := range s.clusters {
-		if existing.TenantID == token.TenantID {
-			isFirstCluster = false
+		if existing.TenantID == token.TenantID && existing.IsDefault {
+			hasDefault = true
 			break
 		}
 	}
@@ -953,7 +953,7 @@ func (s *MemoryStore) RegisterCluster(input RegisterClusterInput) (Cluster, stri
 		VeleroStatus:     input.VeleroStatus,
 		NodeCount:        input.NodeCount,
 		Role:             "both",
-		IsDefault:        isFirstCluster,
+		IsDefault:        !hasDefault,
 		RegisteredAt:     now,
 		LastSeenAt:       now,
 	}
@@ -1016,6 +1016,9 @@ func (s *MemoryStore) UpdateCluster(input ClusterUpdateInput) (Cluster, bool, er
 		cluster.Role = "both"
 	}
 	if input.IsDefault != nil {
+		if !*input.IsDefault {
+			return Cluster{}, false, ErrDefaultClusterRequired
+		}
 		if *input.IsDefault {
 			for id, item := range s.clusters {
 				if item.TenantID == cluster.TenantID {
@@ -1061,7 +1064,14 @@ func (s *MemoryStore) DeleteCluster(clusterID string) (bool, error) {
 		return false, nil
 	}
 	delete(s.clusters, clusterID)
-	if removed.IsDefault {
+	hasDefault := false
+	for _, cluster := range s.clusters {
+		if cluster.TenantID == removed.TenantID && cluster.IsDefault {
+			hasDefault = true
+			break
+		}
+	}
+	if !hasDefault {
 		var nextID string
 		var nextRegisteredAt time.Time
 		for id, cluster := range s.clusters {

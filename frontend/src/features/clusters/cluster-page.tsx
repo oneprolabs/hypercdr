@@ -73,7 +73,6 @@ export default function ClusterPage(props: {
   setClusterMenuId: (id: string | null) => void;
   setSelectedCluster: (cluster: Cluster) => void;
   setDefaultCluster: (cluster: Cluster, event?: React.MouseEvent) => void;
-  clearDefaultCluster: (event?: React.MouseEvent) => void;
   unregisterCluster: (cluster: Cluster, event?: React.MouseEvent, deleteBackupData?: boolean) => Promise<ApiTask>;
   onRenameCluster: (clusterId: string, name: string) => void;
   onUpgradeCluster: (clusterId: string) => Promise<ApiTask>;
@@ -88,7 +87,7 @@ export default function ClusterPage(props: {
   openLicenseManagement?: () => void;
   toast: (msg: string) => void;
 }) {
-  const { clusters, loading, protectionPlans, onLoadTopology, canUpgrade, defaultClusterId, clusterMenuId, setClusterMenuId, setSelectedCluster, setDefaultCluster, clearDefaultCluster, unregisterCluster, onRenameCluster, onUpgradeCluster, onUpgradeVelero, onRegisterCluster, onRefreshRegistration, clusterTaskLogs, getAgentTokenForRegistration, prefetchAgentToken, openDashboard, registrationAllowed = true, openLicenseManagement, toast } = props;
+  const { clusters, loading, protectionPlans, onLoadTopology, canUpgrade, defaultClusterId, clusterMenuId, setClusterMenuId, setSelectedCluster, setDefaultCluster, unregisterCluster, onRenameCluster, onUpgradeCluster, onUpgradeVelero, onRegisterCluster, onRefreshRegistration, clusterTaskLogs, getAgentTokenForRegistration, prefetchAgentToken, openDashboard, registrationAllowed = true, openLicenseManagement, toast } = props;
   const [registerOpen, setRegisterOpen] = useState(false);
   const [licenseGuideOpen, setLicenseGuideOpen] = useState(false);
   const [openshiftKubeconfigGuideOpen, setOpenshiftKubeconfigGuideOpen] = useState(false);
@@ -817,9 +816,9 @@ export default function ClusterPage(props: {
                 <div className="cluster-card-icon rounded-lg bg-slate-50 p-2 transition-colors group-hover:bg-blue-50"><Server className="text-blue-600" size={20} /></div>
                 <div className="cluster-card-state-stack flex flex-col items-end gap-1.5 pr-10">
                   {cluster.id === defaultClusterId ? (
-                    <button type="button" onClick={(event) => clearDefaultCluster(event)} className="cluster-default-button cluster-default-button-active inline-flex items-center gap-1 rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700 transition-colors hover:border-blue-200 hover:bg-blue-100">
+                    <span title="A registered environment always has one default cluster" className="cluster-default-button cluster-default-button-active inline-flex cursor-default items-center gap-1 rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
                       <Star size={10} className="fill-blue-500 text-blue-500" />Default
-                    </button>
+                    </span>
                   ) : (
                     <button type="button" onClick={(event) => setDefaultCluster(cluster, event)} className="cluster-default-button inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700">
                       <Star size={10} />Default

@@ -1994,20 +1994,6 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     }
   };
 
-  const clearDefaultCluster = async (event?: React.MouseEvent) => {
-    event?.stopPropagation();
-    if (defaultClusterId) {
-      try {
-        await apiPatch<ApiCluster>(`/api/v1/clusters/${defaultClusterId}`, { isDefault: false });
-        await refreshPlatformData();
-      } catch {
-        setToast('Failed to clear default cluster from platform API');
-        return;
-      }
-    }
-    setDefaultClusterId(null);
-  };
-
   const unregisterCluster = async (cluster: Cluster, event?: React.MouseEvent, deleteBackupData = false): Promise<ApiTask> => {
     event?.stopPropagation();
     const result = await apiPost<ApiTaskResponse>(`/api/v1/clusters/${cluster.id}/unregister`, {
@@ -2483,7 +2469,6 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
                 setClusterMenuId={setClusterMenuId}
                 setSelectedCluster={setSelectedCluster}
                 setDefaultCluster={setDefaultCluster}
-                clearDefaultCluster={clearDefaultCluster}
                 unregisterCluster={unregisterCluster}
                 onRenameCluster={(clusterId, name) => {
                   const patchCluster = (cluster: Cluster) => cluster.id === clusterId ? { ...cluster, name } : cluster;

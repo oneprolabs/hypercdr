@@ -2411,6 +2411,10 @@ func (r *Router) updateCluster(w http.ResponseWriter, req *http.Request) {
 	input.ID = clusterID
 	cluster, ok, err := r.store.UpdateCluster(input)
 	if err != nil {
+		if errors.Is(err, store.ErrDefaultClusterRequired) {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "default_cluster_required", "message": err.Error()})
+			return
+		}
 		r.logger.Error("failed to update cluster", "cluster_id", clusterID, "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "update_cluster_failed"})
 		return
