@@ -2751,6 +2751,17 @@ func (s *PostgresStore) CleanupProtectionPlanRecords(id string) (ProtectionPlan,
 	if _, err := tx.Exec(`delete from restore_points where protection_plan_id = $1`, id); err != nil {
 		return ProtectionPlan{}, false, err
 	}
+	// The plan's latest-task pointers also use ON DELETE SET NULL plus a guard
+	// trigger. Clear them explicitly while the referenced tasks still exist;
+	// otherwise deleting either task invokes the guard after the task has gone.
+	if _, err := tx.Exec(`
+		update protection_plans
+		set latest_sync_task_id = null,
+		    latest_recovery_task_id = null
+		where id = $1
+	`, id); err != nil {
+		return ProtectionPlan{}, false, err
+	}
 	if _, err := tx.Exec(`delete from tasks where protection_plan_id = $1`, id); err != nil {
 		return ProtectionPlan{}, false, err
 	}
