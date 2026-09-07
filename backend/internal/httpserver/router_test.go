@@ -1891,6 +1891,9 @@ func TestTargetUnregisterPreservesSourcePlanRestorePointAndStorage(t *testing.T)
 	if err := router.cleanupUnregisterProtectionRelationships(target.ID, []store.ProtectionPlan{plan}); err != nil {
 		t.Fatal(err)
 	}
+	if deleted, err := repo.DeleteCluster(target.ID); err != nil || !deleted {
+		t.Fatalf("delete target cluster: deleted=%v err=%v", deleted, err)
+	}
 	gotPlan, ok, err := repo.GetProtectionPlan(plan.ID)
 	if err != nil || !ok || gotPlan.TargetClusterID != "" || gotPlan.SourceClusterID != source.ID {
 		t.Fatalf("source plan was not preserved with an empty target: plan=%#v ok=%v err=%v", gotPlan, ok, err)
@@ -1901,6 +1904,32 @@ func TestTargetUnregisterPreservesSourcePlanRestorePointAndStorage(t *testing.T)
 	}
 	if _, ok, err := repo.GetStorageRepository(storage.ID); err != nil || !ok {
 		t.Fatalf("source storage repository was not preserved: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestSourceUnregisterDeletesOnlyItsOwnPlans(t *testing.T) {
+	repo := store.NewMemoryStore()
+	register := func(name string) store.Cluster {
+		token, _ := repo.CreateAgentToken(store.DefaultTenantID, "", name, time.Hour)
+		cluster, _, err := repo.RegisterCluster(store.RegisterClusterInput{Token: token.Token, ClusterName: name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cluster
+	}
+	a, b, c := register("a"), register("b"), register("c")
+	aPlan, _ := repo.CreateProtectionPlan(store.ProtectionPlanInput{TenantID: store.DefaultTenantID, SourceClusterID: a.ID, TargetClusterID: b.ID, Status: "active"})
+	cPlan, _ := repo.CreateProtectionPlan(store.ProtectionPlanInput{TenantID: store.DefaultTenantID, SourceClusterID: c.ID, TargetClusterID: a.ID, Status: "active"})
+	router := &Router{store: repo}
+	if err := router.cleanupUnregisterProtectionRelationships(a.ID, []store.ProtectionPlan{aPlan, cPlan}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := repo.GetProtectionPlan(aPlan.ID); ok {
+		t.Fatal("plan owned by the unregistered source was retained")
+	}
+	got, ok, err := repo.GetProtectionPlan(cPlan.ID)
+	if err != nil || !ok || got.TargetClusterID != "" || got.SourceClusterID != c.ID {
+		t.Fatalf("other source plan was not preserved with target cleared: plan=%#v ok=%v err=%v", got, ok, err)
 	}
 }
 
@@ -1961,6 +1990,27 @@ func TestObjectStorageCleanupFailurePreventsAgentDispatch(t *testing.T) {
 	}
 	if !clusterExistsInStore(t, repo, clusterID) {
 		t.Fatal("cleanup failure must preserve platform cluster records")
+	}
+	if _, ok, err := repo.GetProtectionPlan(plan.ID); err != nil || !ok {
+		t.Fatalf("cleanup failure must preserve the source protection plan: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestCleanupConsentDoesNotBypassOfflineAgent(t *testing.T) {
+	repo := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	router := newUnregisterTestRouter(logger, repo)
+	server := httptest.NewServer(router.mux)
+	defer server.Close()
+	clusterID := registerClusterViaWS(t, server.URL, "offline-target")
+	if _, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: "other-source", TargetClusterID: clusterID, Status: "active"}); err != nil {
+		t.Fatal(err)
+	}
+	// No hub session is retained by registerClusterViaWS, so this cluster is offline.
+	resp := postJSON(t, server.URL+"/api/v1/clusters/"+clusterID+"/unregister", map[string]any{"deleteBackupData": true})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("cleanup consent must not bypass an offline agent: got HTTP %d", resp.StatusCode)
 	}
 }
 

@@ -1760,8 +1760,8 @@ export default function ApplicationDrPage(props: {
     const selectedPoint = restorePointsForApp(app).find(point => point.id === pointId);
     const sourceType = selectedPoint?.type.toLowerCase().includes('local') ? 'snapshot' : 'export';
     const currentClusterName = currentCluster?.name || clusters[0]?.name || '';
-    const targetCluster = app.targetCluster || clusters.find(cluster => cluster.id !== currentCluster?.id)?.name || currentClusterName;
-    const targetMode = targetCluster === currentClusterName
+    const targetCluster = app.targetCluster || '';
+    const targetMode = targetCluster && targetCluster === currentClusterName
       ? mode === 'drill' ? 'sandbox' : 'inPlace'
       : 'crossCluster';
     const primaryNamespace = unitNamespaces(app)[0] || app.name;
@@ -1843,9 +1843,7 @@ export default function ApplicationDrPage(props: {
     const targetNamespace = restoreAction.config.namespaceMode === 'original'
       ? sourceNamespaces[0] || restoreAction.app.name
       : restoreAction.app.isMergedPlan ? targetNamespaces[sourceNamespaces[0]] || restoreAction.config.targetNamespace : restoreAction.config.targetNamespace;
-    const targetCluster = clusters.find(cluster => cluster.name === restoreAction.config.targetCluster)
-      || clusters.find(cluster => cluster.name === restoreAction.app.targetCluster)
-      || clusters.find(cluster => cluster.id !== currentCluster?.id);
+    const targetCluster = clusters.find(cluster => cluster.name === restoreAction.config.targetCluster);
     if (!targetCluster) {
       throw new Error('Select a target cluster before starting recovery.');
     }

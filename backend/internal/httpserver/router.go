@@ -2879,7 +2879,11 @@ func (r *Router) unregisterCluster(w http.ResponseWriter, req *http.Request) {
 	// Checking "clean up data" is an explicit consent to remove the
 	// cluster's HyperCDR protection relationships as well. This keeps
 	// unregister simple while retaining a deliberate destructive action.
-	if !audit.Allowed && !(body.DeleteBackupData && audit.ActiveTaskCount == 0 && !audit.UnregisterActive) {
+	// Explicit cleanup consent may resolve protection-data and target-reference
+	// blockers. It must never bypass operational blockers that make a normal
+	// cluster-side uninstall unsafe or impossible.
+	cleanupConsentResolvesBlockers := body.DeleteBackupData && audit.AgentOnline && audit.ActiveTaskCount == 0 && !audit.UnregisterActive
+	if !audit.Allowed && !cleanupConsentResolvesBlockers {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "unregister_precheck_blocked", "message": strings.Join(audit.Blockers, " "), "precheck": audit})
 		return
 	}
@@ -2900,7 +2904,11 @@ func (r *Router) unregisterCluster(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	cleanupObjectStorage := audit.ObjectStorageNeeded && (audit.RestorePointCount == 0 || body.DeleteBackupData)
-	if body.DeleteBackupData && (audit.SourcePlanCount > 0 || audit.TargetPlanCount > 0) {
+	cleanupProtectionRelationships := body.DeleteBackupData && (audit.SourcePlanCount > 0 || audit.TargetPlanCount > 0)
+	// When object storage is involved, preserve platform relationships until
+	// remote backup deletion succeeds. A failed storage cleanup must leave the
+	// source plan and restore-point metadata usable for a retry.
+	if cleanupProtectionRelationships && !cleanupObjectStorage {
 		plans, listErr := r.store.ListProtectionPlans("")
 		if listErr != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "unregister_dependency_cleanup_failed", "message": listErr.Error()})
@@ -2943,7 +2951,7 @@ func (r *Router) unregisterCluster(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if cleanupObjectStorage {
-		go r.cleanupAndDispatchUnregister(task, audit.StorageRepositoryIDs)
+		go r.cleanupAndDispatchUnregister(task, audit.StorageRepositoryIDs, cleanupProtectionRelationships)
 		writeJSON(w, http.StatusAccepted, task)
 		return
 	}
@@ -3018,7 +3026,7 @@ func (r *Router) cleanupUnregisterProtectionRelationships(clusterID string, plan
 	return nil
 }
 
-func (r *Router) cleanupAndDispatchUnregister(task store.Task, repositoryIDs []string) {
+func (r *Router) cleanupAndDispatchUnregister(task store.Task, repositoryIDs []string, cleanupProtectionRelationships bool) {
 	_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "running", Progress: 10})
 	_ = r.store.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "info", Reason: "cleaning_object_storage", Message: "cleaning backup data before cluster-side uninstall"})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -3030,6 +3038,17 @@ func (r *Router) cleanupAndDispatchUnregister(task store.Task, repositoryIDs []s
 		return
 	}
 	_ = r.store.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "info", Reason: "object_storage_cleaned", Message: "backup data cleanup completed", Payload: map[string]any{"cleanupResult": cleanupResults}})
+	if cleanupProtectionRelationships {
+		plans, err := r.store.ListProtectionPlans("")
+		if err == nil {
+			err = r.cleanupUnregisterProtectionRelationships(task.ClusterID, plans)
+		}
+		if err != nil {
+			_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "failed", Progress: 10, ErrorCode: "UNREGISTER_DEPENDENCY_CLEANUP_FAILED", ErrorMessage: err.Error(), MarkDone: true})
+			_ = r.store.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "error", Reason: "UNREGISTER_DEPENDENCY_CLEANUP_FAILED", Message: err.Error()})
+			return
+		}
+	}
 	conn, ok := r.hub.get(task.ClusterID)
 	if !ok || conn == nil {
 		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "queued", Progress: 10, ErrorCode: "AGENT_OFFLINE", ErrorMessage: "agent disconnected after precheck; unregister will be dispatched after reconnect"})
