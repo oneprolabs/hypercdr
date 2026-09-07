@@ -575,6 +575,7 @@ func (r *Router) routes() {
 		r.mux.HandleFunc("GET /api/v1/diagnostic-log-sources", r.diagnosticLogSources)
 		r.mux.HandleFunc("POST /api/v1/support-bundles", r.createSupportBundle)
 		r.mux.HandleFunc("GET /api/v1/support-bundles/{name}/download", r.downloadSupportBundle)
+		r.mux.HandleFunc("DELETE /api/v1/support-bundles/{name}", r.deleteSupportBundle)
 	}
 	r.mux.HandleFunc("POST /api/v1/clusters/{id}/logs/collect", r.tenantGuard("cluster-log", r.collectClusterLogs))
 	r.mux.HandleFunc("POST /api/v1/clusters/{id}/logs/search", r.tenantGuard("cluster-log", r.searchClusterLogs))

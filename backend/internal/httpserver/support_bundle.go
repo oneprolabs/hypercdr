@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -72,13 +73,25 @@ func (r *Router) createSupportBundle(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 	name := "hcdr-support-bundle-" + generatedAt.In(location).Format("20060102-150405") + "-" + store.NewPublicID()[:8] + ".tar.gz"
-	path := filepath.Join(os.TempDir(), name)
+	bundleDir := supportBundleDir()
+	if err := os.MkdirAll(bundleDir, 0700); err != nil {
+		writeJSON(w, 500, map[string]any{"error": "bundle_create_failed"})
+		return
+	}
+	path := filepath.Join(bundleDir, name)
 	if err := tarGzipDir(path, root); err != nil {
 		writeJSON(w, 500, map[string]any{"error": "bundle_archive_failed"})
 		return
 	}
 	stat, _ := os.Stat(path)
-	writeJSON(w, http.StatusCreated, map[string]any{"name": name, "downloadUrl": "/api/v1/support-bundles/" + name + "/download", "size": stat.Size(), "generatedAt": generatedAt, "timeZone": location.String(), "expiresAt": generatedAt.Add(48 * time.Hour)})
+	writeJSON(w, http.StatusCreated, map[string]any{"name": name, "downloadUrl": "/api/v1/support-bundles/" + name + "/download", "size": stat.Size(), "generatedAt": generatedAt, "timeZone": location.String()})
+}
+
+func supportBundleDir() string {
+	if configured := strings.TrimSpace(os.Getenv("HCDR_SUPPORT_BUNDLE_DIR")); configured != "" {
+		return configured
+	}
+	return "/deploy/support-bundles"
 }
 
 func validImageBytes(b []byte, name string) bool {
@@ -267,13 +280,25 @@ func (r *Router) downloadSupportBundle(w http.ResponseWriter, req *http.Request)
 		http.NotFound(w, req)
 		return
 	}
-	p := filepath.Join(os.TempDir(), name)
+	p := filepath.Join(supportBundleDir(), name)
 	if _, e := os.Stat(p); e != nil {
 		http.NotFound(w, req)
 		return
 	}
-	defer os.Remove(p)
 	w.Header().Set("Content-Type", "application/gzip")
 	w.Header().Set("Content-Disposition", "attachment; filename="+name)
 	http.ServeFile(w, req, p)
+}
+
+func (r *Router) deleteSupportBundle(w http.ResponseWriter, req *http.Request) {
+	name := filepath.Base(req.PathValue("name"))
+	if name == "." || !strings.HasPrefix(name, "hcdr-support-bundle-") || !strings.HasSuffix(name, ".tar.gz") {
+		http.NotFound(w, req)
+		return
+	}
+	if err := os.Remove(filepath.Join(supportBundleDir(), name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "bundle_delete_failed"})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
