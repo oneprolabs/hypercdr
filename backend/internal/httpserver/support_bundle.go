@@ -26,6 +26,7 @@ type supportBundleRequest struct {
 	Reproducible     string `json:"reproducible"`
 	ScreenshotName   string `json:"screenshotName"`
 	ScreenshotBase64 string `json:"screenshotBase64"`
+	TimeZone         string `json:"timeZone"`
 }
 
 func (r *Router) createSupportBundle(w http.ResponseWriter, req *http.Request) {
@@ -46,7 +47,14 @@ func (r *Router) createSupportBundle(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	defer os.RemoveAll(root)
-	manifest := map[string]any{"generatedAt": time.Now().UTC().Format(time.RFC3339), "sinceHours": input.SinceHours, "redaction": "credentials, tokens, kubeconfig and Secret data are excluded"}
+	generatedAt := time.Now().UTC()
+	location := time.UTC
+	if requested := strings.TrimSpace(input.TimeZone); requested != "" {
+		if loaded, loadErr := time.LoadLocation(requested); loadErr == nil {
+			location = loaded
+		}
+	}
+	manifest := map[string]any{"generatedAt": generatedAt.Format(time.RFC3339), "timeZone": location.String(), "sinceHours": input.SinceHours, "redaction": "credentials, tokens, kubeconfig and Secret data are excluded"}
 	_ = writeBundleJSON(root, "manifest.json", manifest)
 	r.collectSupportBundle(root, input.SinceHours)
 	_ = writeBundleJSON(root, "incident/description.json", map[string]any{"description": redactSensitive(input.Description), "reproducible": redactSensitive(input.Reproducible), "screenshot": "included only when explicitly uploaded"})
@@ -63,14 +71,14 @@ func (r *Router) createSupportBundle(w http.ResponseWriter, req *http.Request) {
 			}
 		}
 	}
-	name := "hcdr-support-bundle-" + time.Now().UTC().Format("20060102-150405") + ".tar.gz"
+	name := "hcdr-support-bundle-" + generatedAt.In(location).Format("20060102-150405") + "-" + store.NewPublicID()[:8] + ".tar.gz"
 	path := filepath.Join(os.TempDir(), name)
 	if err := tarGzipDir(path, root); err != nil {
 		writeJSON(w, 500, map[string]any{"error": "bundle_archive_failed"})
 		return
 	}
 	stat, _ := os.Stat(path)
-	writeJSON(w, http.StatusCreated, map[string]any{"name": name, "downloadUrl": "/api/v1/support-bundles/" + name + "/download", "size": stat.Size(), "expiresAt": time.Now().Add(48 * time.Hour).UTC()})
+	writeJSON(w, http.StatusCreated, map[string]any{"name": name, "downloadUrl": "/api/v1/support-bundles/" + name + "/download", "size": stat.Size(), "generatedAt": generatedAt, "timeZone": location.String(), "expiresAt": generatedAt.Add(48 * time.Hour)})
 }
 
 func validImageBytes(b []byte, name string) bool {
