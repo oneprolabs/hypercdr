@@ -49,25 +49,15 @@ export function ConfirmDialog({
   return (
     <AnimatePresence>
       {open && (
-        <div className="fixed inset-0 z-[240] flex items-center justify-center p-4">
-          <motion.button
-            type="button"
-            aria-label="Close confirmation"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="absolute inset-0 cursor-default bg-slate-950/35 backdrop-blur-[1px]"
-            disabled={busy}
-            onClick={onClose}
-          />
+        <div className="pointer-events-none fixed inset-0 z-[240] flex items-center justify-center p-4">
           <motion.section
             initial={{ opacity: 0, scale: 0.97, y: 6 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.97, y: 6 }}
             transition={{ duration: 0.16, ease: 'easeOut' }}
-            className="relative w-full max-w-md rounded-xl border border-slate-200 bg-white shadow-2xl"
+            className="pointer-events-auto relative w-full max-w-md rounded-xl border border-slate-200 bg-white shadow-2xl ring-1 ring-slate-900/5"
             role="alertdialog"
-            aria-modal="true"
+            aria-modal="false"
             aria-labelledby={titleId}
           >
             <header className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
