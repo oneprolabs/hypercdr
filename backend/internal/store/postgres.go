@@ -2735,16 +2735,23 @@ func (s *PostgresStore) CleanupProtectionPlanRecords(id string) (ProtectionPlan,
 		item.AppIDs = []string{item.AppID}
 	}
 
+	// restore_points.backup_task_id points back to the backup task with ON
+	// DELETE SET NULL, while the restore-point integrity trigger rejects a null
+	// backup task. Break the task -> restore point edge first, delete restore
+	// points while their backup tasks still exist, and only then delete tasks.
 	if _, err := tx.Exec(`
-		delete from tasks
-		where protection_plan_id = $1
-		   or restore_point_id in (
-		     select id from restore_points where protection_plan_id = $1
-		   )
+		update tasks
+		set restore_point_id = null
+		where restore_point_id in (
+			select id from restore_points where protection_plan_id = $1
+		)
 	`, id); err != nil {
 		return ProtectionPlan{}, false, err
 	}
 	if _, err := tx.Exec(`delete from restore_points where protection_plan_id = $1`, id); err != nil {
+		return ProtectionPlan{}, false, err
+	}
+	if _, err := tx.Exec(`delete from tasks where protection_plan_id = $1`, id); err != nil {
 		return ProtectionPlan{}, false, err
 	}
 	if _, err := tx.Exec(`delete from protection_plan_apps where plan_id = $1`, id); err != nil {
