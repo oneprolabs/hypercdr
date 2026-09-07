@@ -13057,7 +13057,6 @@ provider_prepare_platform_trust
 log_section "Isolated installation preflight"
 PREFLIGHT_NAMESPACE="${NAMESPACE}-preflight-$(date +%s)-${RANDOM}"
 kubectl create namespace "$PREFLIGHT_NAMESPACE" --dry-run=client -o yaml | kubectl_apply_retry
-kubectl -n "$PREFLIGHT_NAMESPACE" create serviceaccount default --dry-run=client -o yaml | kubectl_apply_retry
 provider_prepare_preflight
 if [[ -n "$REGISTRY_SERVER" || -n "$REGISTRY_USERNAME" || -n "$REGISTRY_PASSWORD" ]]; then
   if [[ -z "$REGISTRY_SERVER" || -z "$REGISTRY_USERNAME" || -z "$REGISTRY_PASSWORD" ]]; then
@@ -13091,9 +13090,6 @@ else
   rm -f "$uninstaller_file"
   fail "Unable to install the offline Agent uninstaller" 1
 fi
-log_info "Ensuring the namespace default service account is ready"
-kubectl -n "$NAMESPACE" create serviceaccount default --dry-run=client -o yaml | kubectl_apply_retry
-log_ok "Namespace service account is ready"
 if [[ -n "$REGISTRY_SERVER" || -n "$REGISTRY_USERNAME" || -n "$REGISTRY_PASSWORD" ]]; then
   if [[ -z "$REGISTRY_SERVER" || -z "$REGISTRY_USERNAME" || -z "$REGISTRY_PASSWORD" ]]; then
     fail "--registry-server, --registry-username, and --registry-password must be provided together" 2

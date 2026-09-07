@@ -914,7 +914,6 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 		"Checking whether this cluster is already managed by HyperCDR",
 		"Community and Enterprise use the same Agent and cannot coexist in one cluster.",
 		"Use Community Migration for a normal edition upgrade",
-		`create serviceaccount default --dry-run=client -o yaml`,
 		`serviceAccountName: default`,
 		`automountServiceAccountToken: false`,
 		`rollout status "${workload_kind}/${workload_name}" --timeout=2s`,

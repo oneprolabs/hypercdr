@@ -146,7 +146,7 @@ provider_openshift_install_backup_backend() {
       --docker-server="$REGISTRY_SERVER" --docker-username="$REGISTRY_USERNAME" \
       --docker-password="$REGISTRY_PASSWORD" --docker-email="$REGISTRY_EMAIL" \
       --dry-run=client -o yaml | kubectl_apply_retry
-    kubectl -n openshift-adp create serviceaccount default --dry-run=client -o yaml | kubectl_apply_retry
+    kubectl_retry kubectl -n openshift-adp get serviceaccount default >/dev/null
     kubectl -n openshift-adp patch serviceaccount default --type merge \
       -p '{"imagePullSecrets":[{"name":"'"$IMAGE_PULL_SECRET"'"}]}' >/dev/null
     kubectl -n openshift-marketplace create secret docker-registry "$IMAGE_PULL_SECRET" \
