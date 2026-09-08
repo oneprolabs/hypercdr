@@ -6894,6 +6894,10 @@ func (r *Router) cleanupDrillTask(w http.ResponseWriter, req *http.Request) {
 			"drillTaskId":      drill.ID,
 			"namespace":        r.dataProtectionNamespaceForCluster(drill.ClusterID),
 			"sourceNamespaces": sourceNamespaces,
+			"restoreNames": uniqueNonEmptyStrings([]string{
+				stringPayload(drill.Payload, "veleroRestoreName"),
+				stringPayload(drill.Payload, "veleroBackupName"),
+			}),
 			"drillNamespaces":  targetNamespaces,
 		},
 	})

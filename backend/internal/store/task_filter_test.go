@@ -33,10 +33,13 @@ func TestMemoryStoreTaskSummaryKeepsListFieldsAndGetTaskKeepsFullPayload(t *test
 		TenantID: "tenant-a",
 		Type:     "drill",
 		Payload: map[string]any{
-			"namespace":        "demo",
-			"stage":            "restoring",
-			"recoveryStages":   []any{map[string]any{"id": "waiting_for_workloads", "status": "running"}},
-			"technicalDetails": map[string]any{"large": true},
+			"namespace":         "demo",
+			"targetNamespace":   "demo-drill",
+			"targetNamespaces":  map[string]any{"demo": "demo-drill"},
+			"targetClusterName": "cluster-b",
+			"stage":             "restoring",
+			"recoveryStages":    []any{map[string]any{"id": "waiting_for_workloads", "status": "running"}},
+			"technicalDetails":  map[string]any{"large": true},
 		},
 	}
 	repo.mu.Unlock()
@@ -47,6 +50,12 @@ func TestMemoryStoreTaskSummaryKeepsListFieldsAndGetTaskKeepsFullPayload(t *test
 	}
 	if len(items) != 1 || items[0].Payload["namespace"] != "demo" || items[0].Payload["stage"] != "restoring" {
 		t.Fatalf("summary payload=%v, want list fields", items)
+	}
+	if items[0].Payload["targetNamespace"] != "demo-drill" || items[0].Payload["targetClusterName"] != "cluster-b" {
+		t.Fatalf("summary payload=%v, drill cleanup boundary fields must be retained", items[0].Payload)
+	}
+	if targets, ok := items[0].Payload["targetNamespaces"].(map[string]any); !ok || targets["demo"] != "demo-drill" {
+		t.Fatalf("summary payload=%v, target namespace mapping must be retained", items[0].Payload)
 	}
 	if _, ok := items[0].Payload["recoveryStages"]; !ok {
 		t.Fatalf("summary payload=%v, authoritative recovery stage snapshot must be retained", items[0].Payload)

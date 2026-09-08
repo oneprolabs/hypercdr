@@ -84,6 +84,52 @@ func TestBuildRestoreResourceModifierConfigMapClearsPVCVolumeName(t *testing.T) 
 	}
 }
 
+func TestBuildRestoreResourceModifierConfigMapClearsOpenShiftPodNetworkAnnotations(t *testing.T) {
+	manifest, err := BuildRestoreManifest(RestoreBuildInput{
+		TaskID:         "task-network",
+		CommandID:      "cmd-network",
+		TaskType:       "drill",
+		AgentNamespace: "openshift-adp",
+		Command: protocol.RestoreCommand{
+			VeleroBackupName: "backup-1",
+			SourceNamespace:  "shop",
+			TargetNamespace:  "shop-drill",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	yaml := BuildRestoreResourceModifierConfigMap(manifest).Data["resource-modifiers.yaml"]
+	for _, want := range []string{
+		"groupResource: pods",
+		`"k8s.ovn.org/pod-networks":null`,
+		`"k8s.v1.cni.cncf.io/network-status":null`,
+	} {
+		if !strings.Contains(yaml, want) {
+			t.Fatalf("resource modifier missing %q:\n%s", want, yaml)
+		}
+	}
+}
+
+func TestBuildRestoreResourceModifierConfigMapPreservesPodNetworkForInPlaceRestore(t *testing.T) {
+	manifest, err := BuildRestoreManifest(RestoreBuildInput{
+		TaskID:   "task-in-place",
+		TaskType: "restore",
+		Command: protocol.RestoreCommand{
+			VeleroBackupName: "backup-1",
+			SourceNamespace:  "shop",
+			TargetNamespace:  "shop",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	yaml := BuildRestoreResourceModifierConfigMap(manifest).Data["resource-modifiers.yaml"]
+	if strings.Contains(yaml, "k8s.ovn.org/pod-networks") {
+		t.Fatalf("in-place restore must preserve live Pod networking:\n%s", yaml)
+	}
+}
+
 func TestBuildRestoreResourceModifierConfigMapIncludesEnvironmentMappings(t *testing.T) {
 	manifest, err := BuildRestoreManifest(RestoreBuildInput{TaskID: "task-map", CommandID: "cmd-map", TaskType: "drill", AgentNamespace: "hypercdr-agent", Command: protocol.RestoreCommand{VeleroBackupName: "backup-1", SourceNamespace: "demo", TargetNamespace: "demo-drill", StorageClassMappings: map[string]string{"source-sc": "target-sc"}, ImageMappings: map[string]string{"docker.io/library/nginx:latest": "registry.local/nginx:v1"}}})
 	if err != nil {

@@ -45,14 +45,51 @@ func TestRestoreVolumeProgressReportsStartTimeoutAfterGracePeriod(t *testing.T) 
 	}
 }
 
+func TestRestoreVolumeProgressUsesBackupSnapshotTotalWhileQueued(t *testing.T) {
+	pvrGVR := schema.GroupVersionResource{Group: "velero.io", Version: "v1", Resource: "podvolumerestores"}
+	pvbGVR := schema.GroupVersionResource{Group: "velero.io", Version: "v1", Resource: "podvolumebackups"}
+	dataDownloadGVR := schema.GroupVersionResource{Group: "velero.io", Version: "v2alpha1", Resource: "datadownloads"}
+	listKinds := map[schema.GroupVersionResource]string{
+		pvrGVR:          "PodVolumeRestoreList",
+		pvbGVR:          "PodVolumeBackupList",
+		dataDownloadGVR: "DataDownloadList",
+	}
+	pvr := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "velero.io/v1", "kind": "PodVolumeRestore",
+		"metadata": map[string]any{
+			"name": "restore-a-pvr", "namespace": "hypercdr-agent",
+			"creationTimestamp": metav1.Now().Format(time.RFC3339),
+			"labels":            map[string]any{"velero.io/restore-name": "restore-a"},
+		},
+		"spec": map[string]any{"snapshotID": "snapshot-a"},
+	}}
+	pvb := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "velero.io/v1", "kind": "PodVolumeBackup",
+		"metadata": map[string]any{"name": "backup-a-pvb", "namespace": "hypercdr-agent"},
+		"status": map[string]any{
+			"snapshotID": "snapshot-a",
+			"progress":   map[string]any{"bytesDone": int64(4096), "totalBytes": int64(4096)},
+		},
+	}}
+	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, pvr, pvb)
+	progress, err := NewDynamicManifestApplierWithClient(client).GetRestoreVolumeProgress(context.Background(), "hypercdr-agent", "restore-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !progress.AllTotalsKnown || progress.TotalBytes != 4096 || !progress.Items[0].KnownTotal {
+		t.Fatalf("progress = %#v, want queued restore total from matching backup snapshot", progress)
+	}
+}
+
 func restoreVolumeProgressForAge(t *testing.T, age time.Duration, missingPVC bool) VolumeProgress {
 	t.Helper()
 	pvrGVR := schema.GroupVersionResource{Group: "velero.io", Version: "v1", Resource: "podvolumerestores"}
 	dataDownloadGVR := schema.GroupVersionResource{Group: "velero.io", Version: "v2alpha1", Resource: "datadownloads"}
 	listKinds := map[schema.GroupVersionResource]string{
-		pvrGVR:                            "PodVolumeRestoreList",
-		dataDownloadGVR:                   "DataDownloadList",
-		{Version: "v1", Resource: "pods"}: "PodList",
+		pvrGVR: "PodVolumeRestoreList",
+		{Group: "velero.io", Version: "v1", Resource: "podvolumebackups"}: "PodVolumeBackupList",
+		dataDownloadGVR:                                     "DataDownloadList",
+		{Version: "v1", Resource: "pods"}:                   "PodList",
 		{Version: "v1", Resource: "persistentvolumeclaims"}: "PersistentVolumeClaimList",
 	}
 	pvr := &unstructured.Unstructured{Object: map[string]any{

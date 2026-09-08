@@ -1680,6 +1680,19 @@ func (c *Client) executeProtectionCleanupTask(task protocol.TaskDispatchPayload)
 			_ = c.sendTaskFailed(task, "DRILL_CLEANUP_TARGET_REQUIRED", "at least one drill namespace is required")
 			return
 		}
+		deletedRestores := []string{}
+		for _, restoreName := range uniqueStrings(task.ProtectionCleanup.RestoreNames) {
+			if err := deleter.DeleteObject(context.Background(), kube.AppliedObject{
+				APIVersion: "velero.io/v1",
+				Kind:       "Restore",
+				Namespace:  namespace,
+				Name:       restoreName,
+			}); err != nil {
+				_ = c.sendTaskFailedWithDetails(task, "DRILL_RESTORE_DELETE_FAILED", err.Error(), map[string]any{"restoreName": restoreName})
+				return
+			}
+			deletedRestores = append(deletedRestores, restoreName)
+		}
 		deletedNamespaces := []string{}
 		for _, targetNamespace := range task.ProtectionCleanup.DrillNamespaces {
 			targetNamespace = strings.TrimSpace(targetNamespace)
@@ -1694,7 +1707,7 @@ func (c *Client) executeProtectionCleanupTask(task protocol.TaskDispatchPayload)
 			deletedNamespaces = append(deletedNamespaces, targetNamespace)
 			_ = c.sendTaskProgress(task, map[string]any{"kind": "DrillCleanup", "deletedNamespaces": deletedNamespaces}, 90, "drill namespace deleted")
 		}
-		if err := c.sendTaskCompleted(task, map[string]any{"kind": "DrillCleanup", "deletedNamespaces": deletedNamespaces}, "drill resources cleaned"); err != nil {
+		if err := c.sendTaskCompleted(task, map[string]any{"kind": "DrillCleanup", "deletedNamespaces": deletedNamespaces, "deletedRestores": deletedRestores}, "drill resources cleaned"); err != nil {
 			c.logger.Error("failed to send drill cleanup completed", "task_id", task.TaskID, "error", err)
 		}
 		return

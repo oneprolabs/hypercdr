@@ -398,6 +398,8 @@ func (a *DynamicManifestApplier) getVolumeProgress(ctx context.Context, namespac
 		return VolumeProgress{}, nil
 	}
 	result := VolumeProgress{}
+	var restoreBackupTotals map[string]int64
+	restoreBackupTotalsLoaded := false
 	for _, resource := range resources {
 		items, err := a.client.Resource(resource.GVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
@@ -408,6 +410,24 @@ func (a *DynamicManifestApplier) getVolumeProgress(ctx context.Context, namespac
 				continue
 			}
 			progress := volumeProgressFromItem(resource.Kind, item)
+			// OADP creates all PodVolumeRestore objects up front, but a queued
+			// object does not expose status.progress.totalBytes until Kopia starts
+			// it. With serial restore concurrency this used to leave the aggregate
+			// total unknown and the platform apparently stuck at its initial 2%
+			// while the first volume was actively restoring. The matching
+			// PodVolumeBackup already contains the immutable snapshot size, so use
+			// it as the total for a queued restore of that snapshot.
+			if resource.Kind == "PodVolumeRestore" && !progress.KnownTotal {
+				if !restoreBackupTotalsLoaded {
+					restoreBackupTotals = a.podVolumeBackupTotalsBySnapshot(ctx, namespace)
+					restoreBackupTotalsLoaded = true
+				}
+				snapshotID, _, _ := unstructured.NestedString(item.Object, "spec", "snapshotID")
+				if totalBytes := restoreBackupTotals[snapshotID]; totalBytes > 0 {
+					progress.TotalBytes = totalBytes
+					progress.KnownTotal = true
+				}
+			}
 			age := time.Since(item.GetCreationTimestamp().Time)
 			progress.CreatedAt = item.GetCreationTimestamp().Time
 			if age > 0 {
@@ -450,6 +470,24 @@ func (a *DynamicManifestApplier) getVolumeProgress(ctx context.Context, namespac
 	}
 	result.AllTotalsKnown = len(result.Items) > 0 && result.UnknownTotalCount == 0
 	return result, nil
+}
+
+func (a *DynamicManifestApplier) podVolumeBackupTotalsBySnapshot(ctx context.Context, namespace string) map[string]int64 {
+	totals := map[string]int64{}
+	items, err := a.client.Resource(schema.GroupVersionResource{
+		Group: "velero.io", Version: "v1", Resource: "podvolumebackups",
+	}).Namespace(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return totals
+	}
+	for _, item := range items.Items {
+		snapshotID, _, _ := unstructured.NestedString(item.Object, "status", "snapshotID")
+		totalBytes, ok, _ := unstructured.NestedInt64(item.Object, "status", "progress", "totalBytes")
+		if snapshotID != "" && ok && totalBytes > 0 {
+			totals[snapshotID] = totalBytes
+		}
+	}
+	return totals
 }
 
 func (a *DynamicManifestApplier) podVolumeRestoreDependencyFailure(ctx context.Context, item unstructured.Unstructured) string {

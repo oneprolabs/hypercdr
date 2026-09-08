@@ -574,22 +574,24 @@ export function RecoveryWizardModal(props: Props) {
 
                   <div className="hbdr-recovery-target-layout">
                     <div className="hbdr-recovery-target-main">
-                      <div className="hbdr-recovery-target-section">
-                        <label className="hbdr-recovery-plain-field">
-                          <span>Target cluster</span>
-                        <select
-                          aria-describedby="hbdr-recovery-target-compatibility"
-                          value={config.targetCluster}
-                          onChange={event => chooseTargetCluster(event.target.value)}
-                        >
-                          {clusterOptions.map(cluster => (
-                            <option key={cluster.id} value={cluster.name} disabled={!cluster.compatible}>
-                              {!cluster.compatible ? 'Unavailable — ' : ''}{cluster.name}{cluster.name === currentTargetClusterName ? ' / Current' : ''}{cluster.name === configuredTargetCluster ? ' / Configured target' : ''}{!cluster.compatible ? ' · incompatible type' : ''}
-                            </option>
-                          ))}
-                        </select>
-                        {clusterOptions.some(cluster => !cluster.compatible) && <span id="hbdr-recovery-target-compatibility" className="hbdr-recovery-compatibility-note"><i aria-hidden="true">!</i><span><strong>Some targets are unavailable.</strong> {clusterCompatibilityMessage(currentClusterOption?.clusterType)}</span></span>}
-                        </label>
+                      <div className="hbdr-recovery-cluster-field">
+                        <div className="hbdr-recovery-target-section">
+                          <label className="hbdr-recovery-plain-field">
+                            <span>Target cluster</span>
+                            <select
+                              aria-describedby="hbdr-recovery-target-compatibility"
+                              value={config.targetCluster}
+                              onChange={event => chooseTargetCluster(event.target.value)}
+                            >
+                              {clusterOptions.map(cluster => (
+                                <option key={cluster.id} value={cluster.name} disabled={!cluster.compatible}>
+                                  {!cluster.compatible ? 'Unavailable — ' : ''}{cluster.name}{cluster.name === currentTargetClusterName ? ' / Current' : ''}{cluster.name === configuredTargetCluster ? ' / Configured target' : ''}{!cluster.compatible ? ' · incompatible type' : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+                        {clusterOptions.some(cluster => !cluster.compatible) && <p id="hbdr-recovery-target-compatibility" className="hbdr-config-compatibility-note"><span aria-hidden="true">!</span><span><strong>Some targets are unavailable.</strong> {clusterCompatibilityMessage(currentClusterOption?.clusterType)}</span></p>}
                       </div>
 
                       <div className="hbdr-recovery-target-section">

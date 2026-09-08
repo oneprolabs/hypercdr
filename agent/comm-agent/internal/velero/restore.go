@@ -114,6 +114,13 @@ func BuildRestoreResourceModifierConfigMap(manifest RestoreManifest) ResourceMod
 		namespaces = []string{"*"}
 	}
 	preserveNodePorts := manifest.Spec.PreserveNodePorts != nil && *manifest.Spec.PreserveNodePorts
+	resetPodNetwork := false
+	for source, target := range manifest.Spec.NamespaceMapping {
+		if source != "" && target != "" && source != target {
+			resetPodNetwork = true
+			break
+		}
+	}
 	return ResourceModifierConfigMap{
 		APIVersion: "v1",
 		Kind:       "ConfigMap",
@@ -123,7 +130,7 @@ func BuildRestoreResourceModifierConfigMap(manifest RestoreManifest) ResourceMod
 			Labels:    manifest.Metadata.Labels,
 		},
 		Data: map[string]string{
-			"resource-modifiers.yaml": restoreResourceModifierYAML(namespaces, preserveNodePorts, manifest.StorageClassMappings, manifest.ImageMappings),
+			"resource-modifiers.yaml": restoreResourceModifierYAML(namespaces, preserveNodePorts, resetPodNetwork, manifest.StorageClassMappings, manifest.ImageMappings),
 		},
 	}
 }
@@ -145,12 +152,26 @@ func resourceModifierName(restoreName string) string {
 	return restoreName[:63-len(suffix)] + suffix
 }
 
-func restoreResourceModifierYAML(namespaces []string, preserveNodePorts bool, storageMappings map[string]string, imageMappings map[string]string) string {
+func restoreResourceModifierYAML(namespaces []string, preserveNodePorts bool, resetPodNetwork bool, storageMappings map[string]string, imageMappings map[string]string) string {
 	yaml := "version: v1\nresourceModifierRules:\n- conditions:\n    groupResource: persistentvolumeclaims\n    namespaces:\n"
 	for _, namespace := range namespaces {
 		yaml += "    - " + namespace + "\n"
 	}
 	yaml += "  mergePatches:\n  - patchData: |\n      {\"spec\":{\"volumeName\":null}}\n"
+	if resetPodNetwork {
+		// Namespace-clone restores on OpenShift must not reuse the source Pod's
+		// OVN/CNI allocation. These runtime annotations are present in Velero's Pod
+		// object and, when restored unchanged into another namespace on the same
+		// cluster, cause the source and Drill Pods to receive identical IP and MAC
+		// addresses. A merge patch is intentionally used so Pods without either
+		// annotation remain valid. In-place recovery keeps the annotations because
+		// updating a live source Pod's network identity would be unsafe.
+		yaml += "- conditions:\n    groupResource: pods\n    namespaces:\n"
+		for _, namespace := range namespaces {
+			yaml += "    - " + namespace + "\n"
+		}
+		yaml += "  mergePatches:\n  - patchData: |\n      {\"metadata\":{\"annotations\":{\"k8s.ovn.org/pod-networks\":null,\"k8s.v1.cni.cncf.io/network-status\":null}}}\n"
+	}
 	if !preserveNodePorts {
 		yaml += "- conditions:\n    groupResource: services\n    namespaces:\n"
 		for _, namespace := range namespaces {
