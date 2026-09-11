@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 RUNTIME_ROOT="${HCDR_RUNTIME_ROOT:-$(cd "${ROOT_DIR}/.." && pwd)/hypercdr-runtime}"
 SOURCE_DIR="${HCDR_BOOTSTRAP_PORTAL_SOURCE_DIR:-${RUNTIME_ROOT}/services/bootstrap-portal/source}"
-DATA_DIR="${HCDR_BOOTSTRAP_DATA_DIR:-${RUNTIME_ROOT}/services/bootstrap-portal/data}"
+INSTALL_DIR="${HCDR_BOOTSTRAP_INSTALL_DIR:-${RUNTIME_ROOT}/services/bootstrap-portal/data}"
 PORT="${HCDR_BOOTSTRAP_PORT:-8080}"
 TLS_HOST="${HCDR_BOOTSTRAP_TLS_HOST:-}"
 TLS_CERT_FILE="${HCDR_BOOTSTRAP_TLS_CERT_FILE:-}"
@@ -22,7 +22,7 @@ Usage:
 
 Options:
   --source-dir PATH  Generated portal source.
-  --data-dir PATH    Portal runtime data directory.
+  --install-dir PATH    Portal runtime installation directory.
   --port PORT        HTTP port, default: 8080.
   --tls-host HOST    IP address or DNS name included in an auto-generated certificate.
   --tls-cert-file    Existing PEM certificate. Must be used with --tls-key-file.
@@ -39,7 +39,7 @@ USAGE
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --source-dir) SOURCE_DIR="${2:?missing value for --source-dir}"; shift 2 ;;
-    --data-dir) DATA_DIR="${2:?missing value for --data-dir}"; shift 2 ;;
+    --install-dir) INSTALL_DIR="${2:?missing value for --install-dir}"; shift 2 ;;
     --port) PORT="${2:?missing value for --port}"; shift 2 ;;
     --tls-host) TLS_HOST="${2:?missing value for --tls-host}"; shift 2 ;;
     --tls-cert-file) TLS_CERT_FILE="${2:?missing value for --tls-cert-file}"; shift 2 ;;
@@ -51,7 +51,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-args=(--source-dir "${SOURCE_DIR}" --data-dir "${DATA_DIR}" --port "${PORT}" --mode "${MODE}")
+args=(--source-dir "${SOURCE_DIR}" --install-dir "${INSTALL_DIR}" --port "${PORT}" --mode "${MODE}")
 [[ -n "${TLS_HOST}" ]] && args+=(--tls-host "${TLS_HOST}")
 [[ -n "${TLS_CERT_FILE}" ]] && args+=(--tls-cert-file "${TLS_CERT_FILE}")
 [[ -n "${TLS_KEY_FILE}" ]] && args+=(--tls-key-file "${TLS_KEY_FILE}")

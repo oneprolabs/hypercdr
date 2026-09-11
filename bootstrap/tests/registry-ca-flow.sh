@@ -22,7 +22,7 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
   -out "${PRIVATE_CA}" >/dev/null 2>&1
 PATH="${TEST_ROOT}/bin:${PATH}" "${SCRIPT_DIR}/install-platform.sh" docker \
   --public-base-url https://platform.example.test:3002 \
-  --data-dir "${PRIVATE_DATA}" \
+  --install-dir "${PRIVATE_DATA}" \
   --registry registry.example.test/hypercdr \
   --registry-trust private-ca \
   --registry-ca-file "${PRIVATE_CA}" \
@@ -54,7 +54,7 @@ grep -q '/var/run/docker.sock:/var/run/docker.sock' "${PRIVATE_DATA}/docker-comp
 # Re-running the installer must retain the initialized database password.
 PATH="${TEST_ROOT}/bin:${PATH}" "${SCRIPT_DIR}/install-platform.sh" docker \
   --public-base-url https://platform.example.test:3002 \
-  --data-dir "${PRIVATE_DATA}" \
+  --install-dir "${PRIVATE_DATA}" \
   --registry registry.example.test/hypercdr \
   --registry-trust private-ca \
   --registry-ca-file "${PRIVATE_CA}" \
@@ -65,7 +65,7 @@ grep -qx "HCDR_POSTGRES_PASSWORD=${PRIVATE_DB_PASSWORD}" "${PRIVATE_DATA}/.env"
 PUBLIC_DATA="${TEST_ROOT}/public"
 PATH="${TEST_ROOT}/bin:${PATH}" "${SCRIPT_DIR}/install-platform.sh" docker \
   --public-base-url https://platform.example.test:3002 \
-  --data-dir "${PUBLIC_DATA}" \
+  --install-dir "${PUBLIC_DATA}" \
   --registry registry.example.test/hypercdr \
   --registry-trust system \
   --confirm-prerequisites \

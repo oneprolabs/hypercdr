@@ -30,8 +30,8 @@ function updateCommands() {
     'mkdir -p hypercdr-bootstrap && tar -xzf hypercdr-bootstrap.tar.gz -C hypercdr-bootstrap',
     'cd hypercdr-bootstrap',
     './install-platform.sh docker \\',
-    `  --public-base-url ${shellQuote(value('host-public-url') || `https://${portalHost}:3002`)} \\`,
-    ...(communityPublicFallback ? [`  --agent-public-url ${shellQuote(communityPublicFallback)} \\`] : []),
+    `  --base-url ${shellQuote(value('host-public-url') || `https://${portalHost}:3002`)} \\`,
+    ...(communityPublicFallback ? [`  --public-base-url ${shellQuote(communityPublicFallback)} \\`] : []),
     `  --image-tag ${shellQuote(communityVersion)} --confirm-prerequisites --execute`,
   ].join('\n');
 
@@ -41,8 +41,8 @@ function updateCommands() {
     'cd hypercdr-bootstrap',
     './install-platform.sh k8s \\',
     '  --namespace hypercdr-system \\',
-    `  --public-base-url https://${nodeIP}:${nodePort} \\`,
-    ...(k8sPublicFallback ? [`  --agent-public-url ${shellQuote(k8sPublicFallback)} \\`] : []),
+    `  --base-url https://${nodeIP}:${nodePort} \\`,
+    ...(k8sPublicFallback ? [`  --public-base-url ${shellQuote(k8sPublicFallback)} \\`] : []),
     `  --image-tag ${shellQuote(communityVersion)} \\`,
     `  --storage-class ${shellQuote(value('k8s-storage-class') || 'longhorn')} --node-port ${shellQuote(nodePort)} --database-mode bundled --confirm-prerequisites --execute`,
   ].join('\n');

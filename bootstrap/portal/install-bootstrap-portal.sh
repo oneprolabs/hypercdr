@@ -2,11 +2,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DATA_DIR="${HCDR_BOOTSTRAP_DATA_DIR:-/opt/hypercdr-bootstrap}"
+INSTALL_DIR="${HCDR_BOOTSTRAP_INSTALL_DIR:-/opt/hypercdr-bootstrap}"
 PORT="${HCDR_BOOTSTRAP_PORT:-8080}"
 NGINX_IMAGE="${HCDR_BOOTSTRAP_NGINX_IMAGE:-nginx:1.27-alpine}"
 SOURCE_DIR="${HCDR_BOOTSTRAP_PORTAL_SOURCE_DIR:-}"
-PORTAL_DIR="${HCDR_BOOTSTRAP_PORTAL_DIR:-${DATA_DIR}/portal}"
+PORTAL_DIR="${HCDR_BOOTSTRAP_PORTAL_DIR:-${INSTALL_DIR}/portal}"
 MODE="${HCDR_BOOTSTRAP_PORTAL_MODE:-docker}"
 TLS_HOST="${HCDR_BOOTSTRAP_TLS_HOST:-localhost}"
 TLS_CERT_FILE="${HCDR_BOOTSTRAP_TLS_CERT_FILE:-}"
@@ -22,7 +22,7 @@ Usage:
 
 Options:
   --source-dir PATH   Generated portal directory. Defaults to current package root when index.html exists.
-  --data-dir PATH     Bootstrap persistent data directory, default: /opt/hypercdr-bootstrap.
+  --install-dir PATH     Bootstrap persistent installation directory, default: /opt/hypercdr-bootstrap.
   --port PORT         Portal HTTPS port, default: 8080.
   --tls-host HOST     IP address or DNS name for an auto-generated certificate.
   --tls-cert-file     Existing PEM certificate. Must be used with --tls-key-file.
@@ -39,7 +39,7 @@ USAGE
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --source-dir) SOURCE_DIR="${2:?missing value for --source-dir}"; shift 2 ;;
-    --data-dir) DATA_DIR="${2:?missing value for --data-dir}"; PORTAL_DIR="${DATA_DIR}/portal"; shift 2 ;;
+    --install-dir) INSTALL_DIR="${2:?missing value for --install-dir}"; PORTAL_DIR="${INSTALL_DIR}/portal"; shift 2 ;;
     --port) PORT="${2:?missing value for --port}"; shift 2 ;;
     --tls-host) TLS_HOST="${2:?missing value for --tls-host}"; shift 2 ;;
     --tls-cert-file) TLS_CERT_FILE="${2:?missing value for --tls-cert-file}"; shift 2 ;;
@@ -80,6 +80,19 @@ require_command() {
   fi
 }
 
+preflight_portal() {
+
+  require_command docker
+  require_command openssl
+  docker info >/dev/null 2>&1 || { echo "Docker daemon is not available" >&2; return 1; }
+  docker compose version >/dev/null 2>&1 || { echo "Docker Compose V2 is required" >&2; return 1; }
+  [[ -r "${SOURCE_DIR}/index.html" ]] || { echo "portal source is not readable: ${SOURCE_DIR}" >&2; return 1; }
+  if command -v ss >/dev/null 2>&1 && ss -ltn "sport = :${PORT}" | tail -n +2 | grep -q .; then
+    echo "portal port ${PORT} is already in use" >&2
+    return 1
+  fi
+}
+
 cat <<EOF
 HyperCDR bootstrap portal plan
 
@@ -100,6 +113,8 @@ EOF
   exit 0
 fi
 
+preflight_portal
+
 mkdir -p "${PORTAL_DIR}"
 rm -rf "${PORTAL_DIR:?}/"*
 cp -R "${SOURCE_DIR}/." "${PORTAL_DIR}/"
@@ -108,7 +123,7 @@ cp -R "${SOURCE_DIR}/." "${PORTAL_DIR}/"
 find "${PORTAL_DIR}" -type d -exec chmod 0755 {} +
 find "${PORTAL_DIR}" -type f -exec chmod 0644 {} +
 
-TLS_DIR="${DATA_DIR}/tls"
+TLS_DIR="${INSTALL_DIR}/tls"
 if [[ "${MODE}" == "docker" ]]; then
   mkdir -p "${TLS_DIR}"
   if [[ -n "${TLS_CERT_FILE}" ]]; then

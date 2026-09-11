@@ -87,13 +87,13 @@ cd /data/hypercdr/scripts/release
 For Docker Compose deployments, remove the control plane containers:
 
 ```bash
-./uninstall-platform.sh --data-dir /var/lib/hypercdr --execute
+./uninstall-platform.sh --install-dir /var/lib/hypercdr --execute
 ```
 
 For a full reinstall test, remove containers and local PostgreSQL data:
 
 ```bash
-./uninstall-platform.sh --data-dir /var/lib/hypercdr --purge-data --execute
+./uninstall-platform.sh --install-dir /var/lib/hypercdr --purge-data --execute
 ```
 
 The uninstaller does not uninstall Harbor and does not stop the bootstrap portal.
@@ -142,7 +142,7 @@ Start or refresh the bootstrap portal:
 ```bash
 ./portal/install-bootstrap-portal.sh \
   --source-dir /data/hypercdr-runtime/services/bootstrap-portal/source \
-  --data-dir /data/hypercdr-runtime/services/bootstrap-portal/data \
+  --install-dir /data/hypercdr-runtime/services/bootstrap-portal/data \
   --port 8080 \
   --execute
 ```

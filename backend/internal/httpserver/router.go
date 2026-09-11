@@ -6584,6 +6584,19 @@ func (r *Router) latestPlanTask(taskType string) http.HandlerFunc {
 		}
 		if !found || task.ProtectionPlanID != plan.ID || task.Type != taskType {
 			r.logger.Warn("protection plan latest task pointer is invalid", "plan_id", plan.ID, "task_id", taskID, "expected_type", taskType)
+			// Recover from a stale pointer by selecting the newest task that is
+			// still explicitly associated with this plan and operation type.
+			items, listErr := r.store.ListTasksFiltered(store.TaskFilter{TenantID: plan.TenantID, ProtectionPlanID: plan.ID, Types: []string{taskType}, Limit: 200})
+			if listErr == nil && len(items) > 0 {
+				latest := items[0]
+				for _, candidate := range items[1:] {
+					if candidate.CreatedAt.After(latest.CreatedAt) {
+						latest = candidate
+					}
+				}
+				writeJSON(w, http.StatusOK, map[string]any{"task": latest, "recovered": true})
+				return
+			}
 			writeJSON(w, http.StatusOK, map[string]any{"task": nil})
 			return
 		}
@@ -6613,6 +6626,17 @@ func (r *Router) latestPlanRecoveryTask(w http.ResponseWriter, req *http.Request
 	}
 	if !found || task.ProtectionPlanID != plan.ID || !slices.Contains([]string{"drill", "restore", "takeover"}, task.Type) {
 		r.logger.Warn("protection plan latest recovery task pointer is invalid", "plan_id", plan.ID, "task_id", plan.LatestRecoveryTaskID)
+		items, listErr := r.store.ListTasksFiltered(store.TaskFilter{TenantID: plan.TenantID, ProtectionPlanID: plan.ID, Types: []string{"drill", "restore", "takeover"}, Limit: 200})
+		if listErr == nil && len(items) > 0 {
+			latest := items[0]
+			for _, candidate := range items[1:] {
+				if candidate.CreatedAt.After(latest.CreatedAt) {
+					latest = candidate
+				}
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"task": latest, "recovered": true})
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"task": nil})
 		return
 	}
@@ -8524,6 +8548,15 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 				r.logger.Warn("failed to decode task accepted", "cluster_id", clusterID, "error", err)
 				return
 			}
+			if strings.TrimSpace(accepted.Payload.TaskID) == "" {
+				r.logger.Warn("ignored task accepted without task id", "cluster_id", clusterID, "command_id", accepted.Payload.CommandID)
+				continue
+			}
+			existing, found, lookupErr := r.findTaskByID(clusterID, accepted.Payload.TaskID)
+			if lookupErr != nil || !found || (accepted.Payload.CommandID != "" && existing.CommandID != "" && accepted.Payload.CommandID != existing.CommandID) {
+				r.logger.Warn("ignored task accepted with invalid task identity", "cluster_id", clusterID, "task_id", accepted.Payload.TaskID, "command_id", accepted.Payload.CommandID)
+				continue
+			}
 			_, _, err := r.store.UpdateTaskStatus(store.TaskStatusInput{
 				TaskID:       accepted.Payload.TaskID,
 				Status:       "accepted",
@@ -8607,6 +8640,10 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 			if err := json.Unmarshal(data, &completed); err != nil {
 				r.logger.Warn("failed to decode task completed", "cluster_id", clusterID, "error", err)
 				return
+			}
+			if strings.TrimSpace(completed.Payload.TaskID) == "" {
+				r.logger.Warn("ignored task completion without task id", "cluster_id", clusterID, "command_id", completed.Payload.CommandID)
+				continue
 			}
 			existingTask, ok, err := r.findTaskByID(clusterID, completed.Payload.TaskID)
 			if err != nil {
@@ -8792,6 +8829,10 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 			if err := json.Unmarshal(data, &failed); err != nil {
 				r.logger.Warn("failed to decode task failed", "cluster_id", clusterID, "error", err)
 				return
+			}
+			if strings.TrimSpace(failed.Payload.TaskID) == "" {
+				r.logger.Warn("ignored task failure without task id", "cluster_id", clusterID, "command_id", failed.Payload.CommandID)
+				continue
 			}
 			errorMessage := detailedTaskFailureMessage(failed.Payload.Message, failed.Payload.Details)
 			payloadPatch := taskFailurePayloadPatch(failed.Payload.Details)
@@ -9809,6 +9850,16 @@ func (r *Router) handleVeleroBackupEvent(clusterID string, event protocol.Velero
 	if plan.SourceClusterID != clusterID {
 		return store.Task{}, nil
 	}
+	// HyperCDR-created operations must be correlated by task ID.  A Plan ID
+	// and Velero name alone are insufficient and can attach an event to the
+	// wrong operation (or create a duplicate task).
+	if strings.TrimSpace(event.TaskID) == "" {
+		if event.Labels == nil || strings.TrimSpace(event.Labels["hypercdr.io/task-id"]) == "" {
+			r.logger.Warn("orphan velero event without task id", "cluster_id", clusterID, "plan_id", planID, "backup", event.BackupName, "event_type", event.EventType)
+			return store.Task{}, fmt.Errorf("velero event missing task id")
+		}
+		event.TaskID = strings.TrimSpace(event.Labels["hypercdr.io/task-id"])
+	}
 	if strings.EqualFold(event.Phase, "Deleting") || strings.EqualFold(event.EventType, "backup_deleting") {
 		return store.Task{}, nil
 	}
@@ -10288,38 +10339,26 @@ func isTerminalVeleroPhase(phase string) bool {
 }
 
 func (r *Router) findOrCreateVeleroBackupTask(clusterID string, plan store.ProtectionPlan, event protocol.VeleroEventPayload) (store.Task, error) {
-	if event.TaskID != "" {
-		tasks, err := r.store.ListTasks(clusterID)
-		if err != nil {
-			return store.Task{}, err
-		}
-		for _, task := range tasks {
-			if task.ID == event.TaskID && task.Type == "backup" {
-				return task, nil
-			}
-		}
+	if strings.TrimSpace(event.TaskID) == "" {
+		return store.Task{}, errors.New("velero event missing task id")
 	}
-	if task, ok, err := r.findVeleroBackupTask(clusterID, event.BackupName); err != nil || ok {
-		return task, err
+	task, found, err := r.store.GetTask(event.TaskID)
+	if err != nil {
+		return store.Task{}, err
 	}
-	sourceNamespace := firstNonEmptyString(event.Labels["hypercdr.io/source-namespace"], firstStringFromStrings(event.IncludedNamespaces))
-	commandID := store.NewPublicID()
-	return r.store.CreateTask(store.TaskInput{
-		ClusterID:        clusterID,
-		AppID:            plan.AppID,
-		ProtectionPlanID: plan.ID,
-		Type:             "backup",
-		Status:           "running",
-		CommandID:        commandID,
-		Payload: map[string]any{
-			"scheduled":          true,
-			"sourceNamespace":    sourceNamespace,
-			"includedNamespaces": event.IncludedNamespaces,
-			"storageRepo":        event.StorageLocation,
-			"veleroBackupName":   event.BackupName,
-			"phase":              event.Phase,
-		},
-	})
+	if !found || task.ClusterID != clusterID || task.ProtectionPlanID != plan.ID || task.Type != "backup" {
+		return store.Task{}, errors.New("velero event task does not belong to this cluster and protection plan")
+	}
+	if event.CommandID != "" && event.CommandID != task.CommandID {
+		return store.Task{}, errors.New("velero event command id does not match task")
+	}
+	if label := event.Labels["hypercdr.io/task-id"]; label != "" && label != task.ID {
+		return store.Task{}, errors.New("velero event task id conflicts with resource label")
+	}
+	if name := taskPayloadString(task.Payload, "veleroBackupName"); name != "" && name != event.BackupName {
+		return store.Task{}, errors.New("velero event backup name does not match task")
+	}
+	return task, nil
 }
 
 func (r *Router) findVeleroBackupTask(clusterID string, backupName string) (store.Task, bool, error) {
@@ -11966,6 +12005,9 @@ func (r *Router) publicBaseURL(req *http.Request) string {
 	host := req.Header.Get("X-Forwarded-Host")
 	if host == "" {
 		host = req.Host
+	}
+	if proto == "https" && !strings.Contains(host, ":") {
+		host += ":3002"
 	}
 	return strings.TrimRight(proto+"://"+host, "/")
 }

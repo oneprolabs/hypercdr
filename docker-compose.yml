@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: hypercdr
       POSTGRES_PASSWORD: ${HCDR_POSTGRES_PASSWORD:?HCDR_POSTGRES_PASSWORD is required}
     volumes:
-      - ${HCDR_DATA_DIR:-/var/lib/hypercdr}/data/postgres:/var/lib/postgresql/data
+      - ${HCDR_INSTALL_DIR:-/var/lib/hypercdr}/data/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hypercdr -d hypercdr"]
       interval: 10s
@@ -26,7 +26,7 @@ services:
         condition: service_healthy
     environment:
       HCDR_HTTP_ADDR: 0.0.0.0:18080
-      HCDR_PUBLIC_BASE_URL: ${HCDR_PUBLIC_BASE_URL}
+      HCDR_BASE_URL: ${HCDR_BASE_URL}
       HCDR_AGENT_WS_ENDPOINT: ${HCDR_AGENT_WS_ENDPOINT}
       HCDR_AGENT_PRIVATE_WS_ENDPOINT: ${HCDR_AGENT_PRIVATE_WS_ENDPOINT:-}
       HCDR_AGENT_PUBLIC_WS_ENDPOINT: ${HCDR_AGENT_PUBLIC_WS_ENDPOINT:-}
@@ -47,7 +47,7 @@ services:
     volumes:
       - ${HCDR_TLS_DIR:-/var/lib/hypercdr/tls}:/etc/hypercdr/tls:ro
       - ${HCDR_REGISTRY_CA_FILE:-/dev/null}:/etc/hypercdr/registry/ca.crt:ro
-      - ${HCDR_DATA_DIR:-/var/lib/hypercdr}:/deploy
+      - ${HCDR_INSTALL_DIR:-/var/lib/hypercdr}:/deploy
       - hypercdr-registration-sessions:/var/lib/hypercdr/registration-sessions
     command: ["/bin/sh", "-c", "/usr/local/bin/platform-migrate && exec /usr/local/bin/platform-api"]
     ports:
@@ -80,12 +80,12 @@ services:
     environment:
       HCDR_DATABASE_URL: ${HCDR_DATABASE_URL:?HCDR_DATABASE_URL is required}
       HCDR_DEPLOY_DIR: /deploy
-      HCDR_HOST_DEPLOY_DIR: ${HCDR_DATA_DIR:-/var/lib/hypercdr}
+      HCDR_HOST_DEPLOY_DIR: ${HCDR_INSTALL_DIR:-/var/lib/hypercdr}
       HCDR_PLATFORM_HEALTH_URL: http://hypercdr-platform-api:18080/healthz
       HCDR_COMPOSE_PROJECT_NAME: hypercdr
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ${HCDR_DATA_DIR:-/var/lib/hypercdr}:/deploy
+      - ${HCDR_INSTALL_DIR:-/var/lib/hypercdr}:/deploy
     restart: unless-stopped
     logging:
       driver: local

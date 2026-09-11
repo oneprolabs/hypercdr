@@ -705,6 +705,11 @@ func (c *Client) recoverLedgerTasks() {
 }
 
 func (c *Client) executeTask(task protocol.TaskDispatchPayload) {
+	if strings.TrimSpace(task.TaskID) == "" {
+		c.logger.Error("rejected task dispatch without task id", "type", task.Type, "command_id", task.CommandID)
+		_ = c.sendTaskFailed(task, "TASK_ID_REQUIRED", "platform task dispatch is missing task id")
+		return
+	}
 	c.logger.Info("task received", "task_id", task.TaskID, "type", task.Type, "command_id", task.CommandID)
 	switch task.Type {
 	case "backup":
