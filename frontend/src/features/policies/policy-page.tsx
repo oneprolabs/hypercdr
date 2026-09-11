@@ -17,7 +17,7 @@ const formatTime=(hour:number,minute:number)=>`${String(hour).padStart(2,'0')}:$
 const formatPolicyComposition=(value:PolicyComposition)=>value==='manual'?'Manual':value==='schedule'?'Schedule Only':value==='retention'?'Retention Only':'Schedule + Retention';
 const formatPolicyType=(value:PolicyScheduleType)=>value==='interval'?'Interval':value==='daily'?'Daily Backup':value==='weekly'?'Weekly Backup':'Monthly Backup';
 const formatPolicyRetention=(policy:Pick<PolicyItem,'composition'|'retention'>)=>policy.composition==='manual'?'Not defined':policy.composition==='schedule'?'Platform default':`${policy.retention??0} copies`;
-const formatPolicySchedule=(policy:Pick<PolicyItem,'composition'|'type'|'intervalValue'|'intervalUnit'|'hour'|'minute'|'weekDay'|'monthDay'>)=>policy.composition==='manual'?'Manual trigger':policy.composition==='retention'?'Not scheduled':policy.type==='interval'?`Every ${policy.intervalValue} ${policy.intervalUnit==='minutes'?(policy.intervalValue===1?'minute':'minutes'):(policy.intervalValue===1?'hour':'hours')}`:policy.type==='daily'?`Every day ${formatTime(policy.hour,policy.minute)}`:policy.type==='weekly'?`Every week ${weekdays[policy.weekDay]} ${formatTime(policy.hour,policy.minute)}`:`Every month ${policy.monthDay} Day ${formatTime(policy.hour,policy.minute)}`;
+const formatPolicySchedule=(policy:Pick<PolicyItem,'composition'|'type'|'intervalValue'|'intervalUnit'|'hour'|'minute'|'weekDay'|'monthDay'>)=>policy.composition==='manual'?'Manual trigger':policy.composition==='retention'?'Not scheduled':policy.type==='interval'?`Every ${policy.intervalValue} ${policy.intervalUnit==='minutes'?(policy.intervalValue===1?'minute':'minutes'):(policy.intervalValue===1?'hour':'hours')}`:policy.type==='daily'?`Every day at ${formatTime(policy.hour,policy.minute)}`:policy.type==='weekly'?`Every ${weekdays[policy.weekDay]} at ${formatTime(policy.hour,policy.minute)}`:`Every month on day ${policy.monthDay} at ${formatTime(policy.hour,policy.minute)}`;
 const datePartsInTimeZone=(date:Date,timeZone:string)=>{const parts=new Intl.DateTimeFormat('en-US',{timeZone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).formatToParts(date);const value=(type:string)=>Number(parts.find(part=>part.type===type)?.value||0);return{year:value('year'),month:value('month'),day:value('day'),hour:value('hour')%24,minute:value('minute'),second:value('second')}};
 const zonedWallTimeToUTC=(year:number,month:number,day:number,hour:number,minute:number,timeZone:string)=>{const desired=Date.UTC(year,month-1,day,hour,minute,0);let result=new Date(desired);for(let attempt=0;attempt<3;attempt++){const actual=datePartsInTimeZone(result,timeZone);const correction=desired-Date.UTC(actual.year,actual.month-1,actual.day,actual.hour,actual.minute,0);if(correction===0)break;result=new Date(result.getTime()+correction)}return result};
 const scheduleDisplayToUTC=(policy:Pick<PolicyItem,'type'|'hour'|'minute'|'weekDay'|'monthDay'>,now=new Date()):ScheduleParts=>{if(policy.type==='interval')return{hour:policy.hour,minute:policy.minute,weekDay:policy.weekDay,monthDay:policy.monthDay};const timeZone=getUserTimeZone();const local=datePartsInTimeZone(now,timeZone);let{year,month,day}=local;if(policy.type==='weekly'){const current=new Date(Date.UTC(year,month-1,day)).getUTCDay();day+=(policy.weekDay-current+7)%7}else if(policy.type==='monthly')day=Math.min(policy.monthDay,new Date(Date.UTC(year,month,0)).getUTCDate());const utc=zonedWallTimeToUTC(year,month,day,policy.hour,policy.minute,timeZone);let monthDay=utc.getUTCDate();if(policy.type==='monthly'&&(utc.getUTCFullYear()*12+utc.getUTCMonth()+1)<year*12+month)monthDay=31;return{hour:utc.getUTCHours(),minute:utc.getUTCMinutes(),weekDay:utc.getUTCDay(),monthDay}};
@@ -527,26 +527,27 @@ export default function PolicyPage({ policies, setPolicies }: { policies: Policy
                       )}
                       {policyForm.type === 'daily' && (
                         <div className="flex flex-wrap items-center gap-4">
-                          <span className="text-sm font-bold text-slate-700">Run every:</span>
+                          <span className="text-sm font-bold text-slate-700">Every day at</span>
                           <TimeSelector hour={policyForm.hour} minute={policyForm.minute} onChange={(hour, minute) => setPolicyForm({ ...policyForm, hour, minute })} />
                         </div>
                       )}
                       {policyForm.type === 'weekly' && (
                         <div className="flex flex-wrap items-center gap-4">
-                          <span className="text-sm font-bold text-slate-700">Daily execution time:</span>
+                          <span className="text-sm font-bold text-slate-700">Every</span>
                           <select value={policyForm.weekDay} onChange={event => setPolicyForm({ ...policyForm, weekDay: Number(event.target.value) })} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold outline-none">
                             {weekdays.map((day, index) => <option key={day} value={index}>{day}</option>)}
                           </select>
+                          <span className="text-sm font-bold text-slate-700">at</span>
                           <TimeSelector hour={policyForm.hour} minute={policyForm.minute} onChange={(hour, minute) => setPolicyForm({ ...policyForm, hour, minute })} />
                         </div>
                       )}
                       {policyForm.type === 'monthly' && (
                         <div className="flex flex-wrap items-center gap-4">
-                          <span className="text-sm font-bold text-slate-700">Every month</span>
+                          <span className="text-sm font-bold text-slate-700">Every month on day</span>
                           <select value={policyForm.monthDay} onChange={event => setPolicyForm({ ...policyForm, monthDay: Number(event.target.value) })} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold outline-none">
                             {Array.from({ length: 31 }).map((_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}
                           </select>
-                          <span className="text-sm font-bold text-slate-700">Day</span>
+                          <span className="text-sm font-bold text-slate-700">at</span>
                           <TimeSelector hour={policyForm.hour} minute={policyForm.minute} onChange={(hour, minute) => setPolicyForm({ ...policyForm, hour, minute })} />
                         </div>
                       )}

@@ -2684,9 +2684,16 @@ func (r *Router) forceCleanupCluster(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "force_remove_precheck_failed", "message": err.Error()})
 		return
 	}
-	if audit.TargetPlanCount > 0 {
-		writeJSON(w, http.StatusConflict, map[string]any{"error": "cluster_is_dr_target", "message": "This cluster is still used as a DR target. Change or remove those DR configurations before Force Remove.", "precheck": audit})
-		return
+	if audit.SourcePlanCount > 0 || audit.TargetPlanCount > 0 {
+		plans, listErr := r.store.ListProtectionPlans("")
+		if listErr != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "force_remove_dependency_cleanup_failed", "message": listErr.Error()})
+			return
+		}
+		if cleanupErr := r.cleanupUnregisterProtectionRelationships(clusterID, plans); cleanupErr != nil {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "force_remove_dependency_cleanup_failed", "message": cleanupErr.Error(), "precheck": audit})
+			return
+		}
 	}
 	r.hub.close(clusterID)
 	ok, err := r.store.DeleteCluster(clusterID)
@@ -2702,7 +2709,7 @@ func (r *Router) forceCleanupCluster(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":    "cleaned",
 		"clusterId": clusterID,
-		"warning":   "Platform records were removed. Cluster-side resources and backup objects were not deleted and may require manual cleanup.",
+		"warning":   "Platform records and HyperCDR relationships were removed. Source backup objects and cluster-side resources were not deleted and may require manual cleanup.",
 	})
 }
 
@@ -6898,7 +6905,7 @@ func (r *Router) cleanupDrillTask(w http.ResponseWriter, req *http.Request) {
 				stringPayload(drill.Payload, "veleroRestoreName"),
 				stringPayload(drill.Payload, "veleroBackupName"),
 			}),
-			"drillNamespaces":  targetNamespaces,
+			"drillNamespaces": targetNamespaces,
 		},
 	})
 	if err != nil {
@@ -12189,6 +12196,18 @@ NODE_SSH_PORT="22"
 INTERACTIVE="true"
 SCENARIO="fresh-install"
 STORAGE_CLASS=""
+AGENT_CPU_REQUEST="${HCDR_AGENT_CPU_REQUEST:-50m}"
+AGENT_MEMORY_REQUEST="${HCDR_AGENT_MEMORY_REQUEST:-128Mi}"
+AGENT_CPU_LIMIT="${HCDR_AGENT_CPU_LIMIT:-500m}"
+AGENT_MEMORY_LIMIT="${HCDR_AGENT_MEMORY_LIMIT:-512Mi}"
+VELERO_CPU_REQUEST="${HCDR_VELERO_CPU_REQUEST:-100m}"
+VELERO_MEMORY_REQUEST="${HCDR_VELERO_MEMORY_REQUEST:-128Mi}"
+VELERO_CPU_LIMIT="${HCDR_VELERO_CPU_LIMIT:-500m}"
+VELERO_MEMORY_LIMIT="${HCDR_VELERO_MEMORY_LIMIT:-512Mi}"
+NODE_AGENT_CPU_REQUEST="${HCDR_NODE_AGENT_CPU_REQUEST:-50m}"
+NODE_AGENT_MEMORY_REQUEST="${HCDR_NODE_AGENT_MEMORY_REQUEST:-128Mi}"
+NODE_AGENT_CPU_LIMIT="${HCDR_NODE_AGENT_CPU_LIMIT:-750m}"
+NODE_AGENT_MEMORY_LIMIT="${HCDR_NODE_AGENT_MEMORY_LIMIT:-1Gi}"
 KUBECTL_BIN="kubectl"
 DETECTED_CLUSTER_NAME=""
 DETECTED_CLOUD_REGION=""
@@ -13014,19 +13033,26 @@ ${IMAGE_PULL_SECRETS_BLOCK}
 ${command_yaml}
 YAML
   local deadline=$((SECONDS + 90))
+  local pull_retry_logged="false"
   while [[ $SECONDS -lt $deadline ]]; do
     local phase waiting terminated
     phase="$(kubectl -n "$target_namespace" get pod "$name" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
     waiting="$(kubectl -n "$target_namespace" get pod "$name" -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}' 2>/dev/null || true)"
     terminated="$(kubectl -n "$target_namespace" get pod "$name" -o jsonpath='{.status.containerStatuses[0].state.terminated.reason}' 2>/dev/null || true)"
     case "$waiting" in
-      ErrImagePull|ImagePullBackOff|InvalidImageName)
+      ErrImagePull|ImagePullBackOff)
+        if [[ "$pull_retry_logged" != "true" ]]; then
+          log_warn "Image pull was interrupted (${waiting}); Kubernetes will retry until the 90s preflight deadline."
+          pull_retry_logged="true"
+        fi
+        ;;
+      InvalidImageName)
         log_error "Image pull preflight failed for ${image}: ${waiting}"
-        log_error "Check image name, registry reachability, registry certificate trust, and image pull credentials."
+        log_error "The image reference is invalid. Check the managed release manifest."
         kubectl -n "$target_namespace" describe pod "$name" >&2 || true
         kubectl -n "$target_namespace" get events --sort-by=.lastTimestamp | tail -n 20 >&2 || true
         kubectl -n "$target_namespace" delete pod "$name" --ignore-not-found --wait=false >/dev/null 2>&1 || true
-        exit 1
+        return 1
         ;;
       CreateContainerConfigError|CreateContainerError)
         log_error "Image preflight container could not start for ${image}: ${waiting}"
@@ -13034,7 +13060,7 @@ YAML
         kubectl -n "$target_namespace" describe pod "$name" >&2 || true
         kubectl -n "$target_namespace" get events --sort-by=.lastTimestamp | tail -n 20 >&2 || true
         kubectl -n "$target_namespace" delete pod "$name" --ignore-not-found --wait=false >/dev/null 2>&1 || true
-        exit 1
+        return 1
         ;;
     esac
     if [[ "$phase" == "Running" || "$phase" == "Succeeded" || "$terminated" != "" ]]; then
@@ -13049,7 +13075,7 @@ YAML
   kubectl -n "$target_namespace" describe pod "$name" >&2 || true
   kubectl -n "$target_namespace" get events --sort-by=.lastTimestamp | tail -n 20 >&2 || true
   kubectl -n "$target_namespace" delete pod "$name" --ignore-not-found --wait=false >/dev/null 2>&1 || true
-  exit 1
+  return 1
 }
 
 check_existing_velero_installation() {
@@ -13162,6 +13188,9 @@ provider_prepare_platform_trust
 log_section "Isolated installation preflight"
 PREFLIGHT_NAMESPACE="${NAMESPACE}-preflight-$(date +%s)-${RANDOM}"
 kubectl create namespace "$PREFLIGHT_NAMESPACE" --dry-run=client -o yaml | kubectl_apply_retry
+# OpenShift may admit the namespace before its service-account controller has
+# created the default account. Ensure it exists before creating the probe Pod.
+kubectl -n "$PREFLIGHT_NAMESPACE" create serviceaccount default --dry-run=client -o yaml | kubectl_apply_retry
 provider_prepare_preflight
 if [[ -n "$REGISTRY_SERVER" || -n "$REGISTRY_USERNAME" || -n "$REGISTRY_PASSWORD" ]]; then
   if [[ -z "$REGISTRY_SERVER" || -z "$REGISTRY_USERNAME" || -z "$REGISTRY_PASSWORD" ]]; then
@@ -13589,6 +13618,13 @@ ${IMAGE_PULL_SECRETS_BLOCK}
 ${AGENT_CONTAINER_SECURITY_CONTEXT_BLOCK}
           image: ${AGENT_IMAGE}
           imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: ${AGENT_CPU_REQUEST}
+              memory: ${AGENT_MEMORY_REQUEST}
+            limits:
+              cpu: ${AGENT_CPU_LIMIT}
+              memory: ${AGENT_MEMORY_LIMIT}
           envFrom:
             - secretRef:
                 name: hypercdr-agent-bootstrap

@@ -1634,6 +1634,38 @@ func TestForceCleanupRemovesPlatformRecordsWithoutObjectStorage(t *testing.T) {
 	}
 }
 
+func TestForceCleanupClearsTargetReferenceAndPreservesSourcePlan(t *testing.T) {
+	repo := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	server := httptest.NewServer(NewRouter(config.Config{}, logger, repo))
+	defer server.Close()
+	sourceID := registerClusterViaWS(t, server.URL, "source-cluster")
+	targetID := registerClusterViaWS(t, server.URL, "offline-target")
+	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: sourceID, TargetClusterID: targetID, Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp := postJSON(t, server.URL+"/api/v1/clusters/"+targetID+"/force-cleanup", map[string]any{"reason": "test"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected force cleanup status 200, got %d", resp.StatusCode)
+	}
+	plans, err := repo.ListProtectionPlans("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range plans {
+		if item.ID == plan.ID {
+			if item.TargetClusterID != "" {
+				t.Fatalf("expected target reference to be cleared, got %q", item.TargetClusterID)
+			}
+			return
+		}
+	}
+	t.Fatal("source protection plan must be preserved when only its target is force removed")
+}
+
 func TestCleanupClusterObjectStorageSkipsClusterWithoutDRData(t *testing.T) {
 	repo := store.NewMemoryStore()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -1706,25 +1738,6 @@ func TestUnregisterPrecheckBlocksExistingUnregisterTask(t *testing.T) {
 	}
 	if !audit.UnregisterActive || audit.Allowed {
 		t.Fatalf("expected active unregister task to block a second request: %#v", audit)
-	}
-}
-
-func TestForceCleanupBlocksTargetReferencedCluster(t *testing.T) {
-	repo := store.NewMemoryStore()
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	server := httptest.NewServer(NewRouter(config.Config{}, logger, repo))
-	defer server.Close()
-	clusterID := registerClusterViaWS(t, server.URL, "target-cluster")
-	if _, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: "source-cluster", TargetClusterID: clusterID, AppID: "app-1", Status: "active"}); err != nil {
-		t.Fatal(err)
-	}
-	resp := postJSON(t, server.URL+"/api/v1/clusters/"+clusterID+"/force-cleanup", map[string]any{"reason": "test"})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusConflict {
-		t.Fatalf("expected force cleanup status 409, got %d", resp.StatusCode)
-	}
-	if !clusterExistsInStore(t, repo, clusterID) {
-		t.Fatal("target-referenced cluster must remain registered")
 	}
 }
 

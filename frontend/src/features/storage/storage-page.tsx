@@ -811,7 +811,7 @@ export default function StoragePage({ storage, clusters, onStorageCreated }: { s
               {editingRepo && (
                 <div className="hbdr-storage-drawer-footer">
                   <div className="hbdr-filter-drawer-actions hbdr-storage-drawer-actions">
-                    <button type="button" onClick={saveStorage} disabled={!storageReady(editingRepo) || savingStorage}>{savingStorage ? "Saving..." : "Create Storage"}</button>
+                    <button type="button" onClick={saveStorage} disabled={!storageReady(editingRepo) || savingStorage}>{savingStorage ? "Saving..." : "Save Storage"}</button>
                     <button type="button" onClick={closeStorageWizard}>Cancel</button>
                   </div>
                 </div>

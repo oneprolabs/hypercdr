@@ -1367,9 +1367,12 @@ export default function ApplicationDrPage(props: {
     id: 'name',
     header: 'Namespace',
     accessorFn: app => unitNamespaces(app).join(' '),
-    size: 240,
-    minSize: 150,
-    maxSize: 520,
+    // Keep the namespace column readable across the three workflow stages.
+    // The first two stages have spare horizontal space; the run stage gets a
+    // moderate increase without crowding progress/status columns.
+    size: stage === 'run' ? 280 : 320,
+    minSize: 180,
+    maxSize: 560,
     cell: info => {
       const app = info.row.original;
       const namespaces = unitNamespaces(app);

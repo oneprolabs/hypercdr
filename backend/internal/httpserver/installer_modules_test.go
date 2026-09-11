@@ -33,7 +33,7 @@ func TestInstallerProviderModulesExposeContractWithoutNativeCCELeakage(t *testin
 		}
 	}
 	openShift := modules[openshiftStart:]
-	for _, required := range []string{"DataProtectionApplication", "noDefaultBackupLocation: true", "backupImages: false", "defaultVolumesToFSBackup: true", "uploaderType: kopia", "oadp-comm-agent", `NAMESPACE="openshift-adp"`, "CatalogSource readiness", "existing OADP installation"} {
+	for _, required := range []string{"DataProtectionApplication", "noDefaultBackupLocation: true", "backupImages: false", "defaultVolumesToFSBackup: true", "uploaderType: kopia", "oadp-comm-agent", `NAMESPACE="openshift-adp"`, "formal installation", "existing OADP installation"} {
 		if !strings.Contains(openShift, required) {
 			t.Fatalf("OpenShift provider is missing %q", required)
 		}

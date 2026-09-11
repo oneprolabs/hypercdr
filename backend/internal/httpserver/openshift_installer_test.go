@@ -201,16 +201,15 @@ func TestOpenShiftProviderUsesRestrictedSCCCompatibleAgentContext(t *testing.T) 
 	}
 }
 
-func TestOpenShiftProviderPreflightsRuntimeImagesInBoundedBatches(t *testing.T) {
+func TestOpenShiftProviderDoesNotPrePullRuntimeImages(t *testing.T) {
 	module, err := installerModuleFS.ReadFile("installers/openshift.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	result := filepath.Join(dir, "result")
 	script := `set -euo pipefail
-preflight_image_pull() { printf '%s|%s|%s\n' "$1" "$2" "$3" >>"$RESULT"; }
-log_info() { :; }
+preflight_image_pull() { echo "unexpected runtime image preflight" >&2; exit 1; }
+log_info() { printf '%s\n' "$1"; }
 OADP_CATALOG_IMAGE=registry.cn-hangzhou.aliyuncs.com/hypercdr/oadp-catalog:stable-1.3
 OADP_RUNTIME_IMAGES="registry/oadp-bundle:v1 registry/two:v1 registry/three:v1 registry/four:v1 registry/five:v1 registry/six:v1"
 ` + string(module) + `
@@ -221,26 +220,11 @@ provider_openshift_run_preflight
 		t.Fatal(err)
 	}
 	cmd := exec.Command("bash", path)
-	cmd.Env = append(os.Environ(), "RESULT="+result)
-	if output, runErr := cmd.CombinedOutput(); runErr != nil {
+	output, runErr := cmd.CombinedOutput()
+	if runErr != nil {
 		t.Fatalf("preflight failed: %v\n%s", runErr, output)
 	}
-	got, err := os.ReadFile(result)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(got), "oadp-catalog") {
-		t.Fatalf("catalog must be validated through OLM rather than an ordinary pod: %s", got)
-	}
-	if strings.Contains(string(got), "oadp-bundle") {
-		t.Fatalf("OLM metadata bundle must not be started as a workload: %s", got)
-	}
-	if lines := strings.Count(strings.TrimSpace(string(got)), "\n") + 1; lines != 5 {
-		t.Fatalf("expected five runtime image checks, got %d: %s", lines, got)
-	}
-	for _, required := range []string{"jobs+=(\"$!\")", "${#jobs[@]} >= 3", "flush_openshift_image_preflights"} {
-		if !strings.Contains(string(module), required) {
-			t.Fatalf("bounded OpenShift image preflight is missing %q", required)
-		}
+	if !strings.Contains(string(output), "pulled once during formal installation") {
+		t.Fatalf("missing concise formal-installation message: %s", output)
 	}
 }

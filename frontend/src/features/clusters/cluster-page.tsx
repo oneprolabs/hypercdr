@@ -1503,7 +1503,7 @@ export default function ClusterPage(props: {
               <div className="hbdr-filter-drawer-actions hbdr-unregister-drawer-actions">
                   <button onClick={closeUnregister} disabled={unregistering} className="rounded-xl px-5 py-2 font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60">Cancel</button>
                   <button
-                    disabled={unregistering || unregisterPrecheckLoading || (!forceRemoveEnabled && ((!unregisterPrecheck?.agentOnline || Boolean(unregisterPrecheck?.activeTaskCount) || Boolean(unregisterPrecheck?.unregisterActive)) || ((!unregisterPrecheck?.allowed || Boolean(unregisterPrecheck?.restorePointCount)) && !deleteBackupData))) || (forceRemoveEnabled && (Boolean(unregisterPrecheck?.targetPlanCount) || forceRemoveConfirmation !== (unregisterTarget.name === 'unknown-cluster' ? unregisterTarget.id : unregisterTarget.name)))}
+                    disabled={unregistering || unregisterPrecheckLoading || (!forceRemoveEnabled && ((!unregisterPrecheck?.agentOnline || Boolean(unregisterPrecheck?.activeTaskCount) || Boolean(unregisterPrecheck?.unregisterActive)) || ((!unregisterPrecheck?.allowed || Boolean(unregisterPrecheck?.restorePointCount)) && !deleteBackupData))) || (forceRemoveEnabled && forceRemoveConfirmation !== (unregisterTarget.name === 'unknown-cluster' ? unregisterTarget.id : unregisterTarget.name))}
                     onClick={finishUnregisterCluster}
                     className="rounded-xl bg-rose-600 px-6 py-2 font-bold text-white shadow-lg shadow-rose-200 transition-all hover:bg-rose-700 active:scale-95 disabled:cursor-not-allowed disabled:bg-rose-300 disabled:shadow-none"
                   >

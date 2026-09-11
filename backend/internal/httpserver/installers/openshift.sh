@@ -80,46 +80,42 @@ provider_openshift_prepare_platform_trust() {
 }
 provider_openshift_prepare_preflight() { :; }
 provider_openshift_run_preflight() {
-  # CatalogSource is the authoritative catalog pull/readiness check. Starting
-  # the catalog as an ordinary Pod duplicates that work and does not exercise
-  # the OLM gRPC path. Runtime images are independent, so validate them in
-  # bounded batches to shorten registration without overloading a small
-  # OpenShift cluster or the registry.
-  log_info "The OADP catalog image will be validated by OLM during CatalogSource readiness"
-  local image index=0 status=0 job log_file
-  local work_dir
-  local -a jobs=() logs=()
-  work_dir="$(mktemp -d)"
-  flush_openshift_image_preflights() {
-    local batch_status=0 item
-    for item in "${!jobs[@]}"; do
-      if ! wait "${jobs[$item]}"; then batch_status=1; fi
-      cat "${logs[$item]}"
-    done
-    jobs=(); logs=()
-    (( batch_status == 0 )) || status=1
-  }
-  for image in $OADP_RUNTIME_IMAGES; do
-    index=$((index + 1))
-    case "$image" in
-      */oadp-bundle@*|*/oadp-bundle:*)
-        # An OLM bundle is declarative metadata and intentionally has no
-        # executable command. The CatalogSource/Subscription path below is
-        # the authoritative pull and validation mechanism for this image.
-        log_info "OADP bundle is validated by OLM during Subscription resolution"
-        continue
-        ;;
-    esac
-    log_file="${work_dir}/oadp-${index}.log"
-    (preflight_image_pull "hypercdr-image-check-oadp-${index}" "$image" "") >"$log_file" 2>&1 &
-    jobs+=("$!"); logs+=("$log_file")
-    if (( ${#jobs[@]} >= 3 )); then flush_openshift_image_preflights; fi
-  done
-  if (( ${#jobs[@]} > 0 )); then flush_openshift_image_preflights; fi
-  rm -rf "$work_dir"
-  (( status == 0 )) || fail "One or more OADP runtime image preflight checks failed. No Agent resources were installed."
+  log_info "OADP component images will be pulled once during formal installation"
 }
 provider_openshift_install_platform_trust() { :; }
+
+diagnose_oadp_install_failure() {
+  log_error "OADP installation diagnostics follow (image, node, pod state, and recent events)."
+  kubectl -n openshift-marketplace get catalogsource hypercdr-oadp -o wide >&2 2>/dev/null || true
+  kubectl -n openshift-adp get subscription,installplan,csv,dpa,pods -o wide >&2 2>/dev/null || true
+  kubectl -n openshift-adp get events --sort-by=.lastTimestamp 2>/dev/null | tail -n 30 >&2 || true
+  kubectl -n openshift-marketplace get events --sort-by=.lastTimestamp 2>/dev/null | tail -n 20 >&2 || true
+}
+
+fail_oadp_install() {
+  diagnose_oadp_install_failure
+  fail "$1"
+}
+
+pause_default_operator_catalogs() {
+  OADP_DEFAULT_CATALOGS_PAUSED="false"
+  local disabled
+  disabled="$(kubectl get operatorhub cluster -o jsonpath='{.spec.disableAllDefaultSources}' 2>/dev/null || true)"
+  [[ "$disabled" == "true" ]] && return 0
+  log_info "Temporarily pausing default OperatorHub catalogs while resolving the dedicated OADP catalog"
+  kubectl patch operatorhub cluster --type=merge -p '{"spec":{"disableAllDefaultSources":true}}' >/dev/null || fail "Failed to pause default OperatorHub catalogs."
+  OADP_DEFAULT_CATALOGS_PAUSED="true"
+}
+
+restore_default_operator_catalogs() {
+  [[ "${OADP_DEFAULT_CATALOGS_PAUSED:-false}" == "true" ]] || return 0
+  log_info "Restoring default OperatorHub catalogs"
+  kubectl patch operatorhub cluster --type=merge -p '{"spec":{"disableAllDefaultSources":false}}' >/dev/null || {
+    log_warn "Default OperatorHub catalogs could not be restored automatically; set spec.disableAllDefaultSources=false on operatorhub/cluster."
+    return 0
+  }
+  OADP_DEFAULT_CATALOGS_PAUSED="false"
+}
 
 provider_openshift_install_backup_backend() {
   local version channel catalog_image oadp_timeout_seconds
@@ -136,6 +132,7 @@ provider_openshift_install_backup_backend() {
   [[ "$oadp_timeout_seconds" =~ ^[0-9]+$ ]] && (( oadp_timeout_seconds >= 60 )) || fail "HCDR_OADP_INSTALL_TIMEOUT_SECONDS must be an integer of at least 60 seconds."
   log_section "OADP backend"
   log_info "Installing OADP ${channel} from the HyperCDR Alibaba registry"
+  pause_default_operator_catalogs
   kubectl create namespace openshift-adp --dry-run=client -o yaml | kubectl_apply_retry
 	OADP_BACKEND_CREATED="true"
   if [[ -n "$REGISTRY_SERVER" ]]; then
@@ -210,9 +207,10 @@ YAML
       csv_phase="$(kubectl -n openshift-adp get clusterserviceversion "$installed_csv" -o jsonpath='{.status.phase}' 2>/dev/null || true)" &&
       [[ "$csv_phase" == "Succeeded" ]]
   do
-    (( SECONDS < deadline )) || fail "OADP Operator CSV did not reach Succeeded within ${oadp_timeout_seconds} seconds (CSV: ${installed_csv:-pending}, phase: ${csv_phase:-pending})."
+    (( SECONDS < deadline )) || fail_oadp_install "OADP Operator CSV did not reach Succeeded within ${oadp_timeout_seconds} seconds (CSV: ${installed_csv:-pending}, phase: ${csv_phase:-pending})."
     sleep 5
   done
+  restore_default_operator_catalogs
   kubectl get crd dataprotectionapplications.oadp.openshift.io >/dev/null 2>&1 || fail "OADP Operator CSV succeeded but the DPA API is unavailable."
   cat <<YAML | kubectl_apply_retry
 apiVersion: oadp.openshift.io/v1alpha1
@@ -226,12 +224,28 @@ spec:
     velero:
       noDefaultBackupLocation: true
       defaultVolumesToFSBackup: true
+      podConfig:
+        resourceAllocations:
+          requests:
+            cpu: ${VELERO_CPU_REQUEST:-100m}
+            memory: ${VELERO_MEMORY_REQUEST:-128Mi}
+          limits:
+            cpu: ${VELERO_CPU_LIMIT:-500m}
+            memory: ${VELERO_MEMORY_LIMIT:-512Mi}
       defaultPlugins:
         - openshift
         - aws
     nodeAgent:
       enable: true
       uploaderType: kopia
+      podConfig:
+        resourceAllocations:
+          requests:
+            cpu: ${NODE_AGENT_CPU_REQUEST:-50m}
+            memory: ${NODE_AGENT_MEMORY_REQUEST:-128Mi}
+          limits:
+            cpu: ${NODE_AGENT_CPU_LIMIT:-750m}
+            memory: ${NODE_AGENT_MEMORY_LIMIT:-1Gi}
 YAML
   if [[ -n "$REGISTRY_SERVER" ]]; then
     local velero_sa_deadline=$((SECONDS + 120))
@@ -247,20 +261,21 @@ YAML
   # Velero Deployment and node-agent DaemonSet.
   local workload_deadline=$((SECONDS + oadp_timeout_seconds))
   until kubectl -n openshift-adp get deployment velero >/dev/null 2>&1; do
-    (( SECONDS < workload_deadline )) || fail "OADP did not create the Velero deployment within ${oadp_timeout_seconds} seconds."
+    (( SECONDS < workload_deadline )) || fail_oadp_install "OADP did not create the Velero deployment within ${oadp_timeout_seconds} seconds."
     sleep 2
   done
-  kubectl -n openshift-adp rollout status deployment/velero --timeout="${oadp_timeout_seconds}s" || fail "OADP Velero deployment did not become ready."
+  kubectl -n openshift-adp rollout status deployment/velero --timeout="${oadp_timeout_seconds}s" || fail_oadp_install "OADP Velero deployment did not become ready."
   workload_deadline=$((SECONDS + oadp_timeout_seconds))
   until kubectl -n openshift-adp get daemonset node-agent >/dev/null 2>&1; do
-    (( SECONDS < workload_deadline )) || fail "OADP did not create the node-agent daemonset within ${oadp_timeout_seconds} seconds."
+    (( SECONDS < workload_deadline )) || fail_oadp_install "OADP did not create the node-agent daemonset within ${oadp_timeout_seconds} seconds."
     sleep 2
   done
-  kubectl -n openshift-adp rollout status daemonset/node-agent --timeout="${oadp_timeout_seconds}s" || fail "OADP node-agent did not become ready on all eligible workers."
+  kubectl -n openshift-adp rollout status daemonset/node-agent --timeout="${oadp_timeout_seconds}s" || fail_oadp_install "OADP node-agent did not become ready on all eligible workers."
   log_ok "OADP and Kopia node-agent are ready"
 }
 
 provider_openshift_rollback_backup_backend() {
+  restore_default_operator_catalogs
   [[ "${OADP_BACKEND_CREATED:-false}" == "true" ]] || return 0
   kubectl -n openshift-adp delete dataprotectionapplication hypercdr-oadp --ignore-not-found --wait=false >/dev/null 2>&1 || true
   kubectl -n openshift-adp delete subscription hypercdr-oadp-operator --ignore-not-found --wait=false >/dev/null 2>&1 || true
