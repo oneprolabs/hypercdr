@@ -40,10 +40,12 @@ class Handler(BaseHTTPRequestHandler):
         version=str(body.get("version", "")).strip()
         if not version: return self._json(400,{"error":"version_required"})
         target=ROOT/"releases"/version; target.mkdir(parents=True,exist_ok=True)
-        f=target/"release-manifest.json"
-        if f.exists() and f.read_bytes()!=json.dumps(body,indent=2).encode()+b"\n": return self._json(409,{"error":"release_is_immutable"})
-        f.write_text(json.dumps(body,indent=2)+"\n")
         archive = body.get("installerPath") or body.get("installer", {}).get("path")
+        manifest = dict(body); manifest.pop("installerPath", None)
+        f=target/"release-manifest.json"
+        encoded=json.dumps(manifest,indent=2)+"\n"
+        if f.exists() and f.read_text()!=encoded: return self._json(409,{"error":"release_is_immutable"})
+        f.write_text(encoded)
         if archive and pathlib.Path(archive).is_file():
             (target/"installer.tar.gz").write_bytes(pathlib.Path(archive).read_bytes())
         return self._json(201,{"version":version,"status":"published"})

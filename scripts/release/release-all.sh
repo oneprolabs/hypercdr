@@ -302,13 +302,18 @@ if [[ -z "${RELEASE_CENTER_URL}" ]]; then
 else
   [[ -r "${RELEASE_CENTER_TOKEN_FILE:-}" ]] || die "Release Center token file is not readable: ${RELEASE_CENTER_TOKEN_FILE}"
   RELEASE_CENTER_TOKEN="$(tr -d '\r\n' < "${RELEASE_CENTER_TOKEN_FILE}")"
+  INSTALLER_ARCHIVE="${HCDR_RELEASE_ROOT:-${RUNTIME_ROOT}/releases/community}/${VERSION}/hypercdr-installer-${VERSION}.tar.gz"
+  [[ -r "${INSTALLER_ARCHIVE}" ]] || die "release installer archive is missing: ${INSTALLER_ARCHIVE}"
+  publish_payload="$(mktemp)"
+  trap 'rm -f "${publish_payload}"' EXIT
+  jq --arg path "${INSTALLER_ARCHIVE}" '. + {installerPath:$path}' "${RELEASE_MANIFEST}" >"${publish_payload}"
   curl_args=(-fsS --max-time 30 -X POST "${RELEASE_CENTER_URL%/}/api/v1/releases" -H "Content-Type: application/json" -H "Authorization: Bearer ${RELEASE_CENTER_TOKEN}")
   if [[ -n "${HCDR_PLATFORM_CA_FILE:-}" ]]; then
     curl_args+=(--cacert "${HCDR_PLATFORM_CA_FILE}")
   else
     curl_args+=(--insecure)
   fi
-  curl "${curl_args[@]}" --data-binary "@${RELEASE_MANIFEST}" >/dev/null
+  curl "${curl_args[@]}" --data-binary "@${publish_payload}" >/dev/null
   log "Release registered with Release Center: ${VERSION}"
 fi
 
