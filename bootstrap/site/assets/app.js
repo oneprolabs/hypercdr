@@ -81,7 +81,8 @@ function updatePrerequisiteState() {
 
 async function loadManifest(edition) {
   try {
-    let response = await fetch(`${releases[edition].path}/index.json`, { cache: 'no-store' });
+    let response = await fetch('/api/release-catalog', { cache: 'no-store' });
+    if (!response.ok) response = await fetch(`${releases[edition].path}/index.json`, { cache: 'no-store' });
     let versioned = true;
     if (response.status === 404) {
       response = await fetch(`${releases[edition].path}/manifest.json`, { cache: 'no-store' });

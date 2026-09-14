@@ -11,6 +11,8 @@ MODE="${HCDR_BOOTSTRAP_PORTAL_MODE:-docker}"
 TLS_HOST="${HCDR_BOOTSTRAP_TLS_HOST:-localhost}"
 TLS_CERT_FILE="${HCDR_BOOTSTRAP_TLS_CERT_FILE:-}"
 TLS_KEY_FILE="${HCDR_BOOTSTRAP_TLS_KEY_FILE:-}"
+RELEASE_CENTER_URL="${HCDR_RELEASE_CENTER_URL:-http://host.docker.internal:8090}"
+RELEASE_CENTER_TOKEN_FILE="${HCDR_RELEASE_CENTER_TOKEN_FILE:-}"
 EXECUTE="false"
 
 usage() {
@@ -28,6 +30,8 @@ Options:
   --tls-cert-file     Existing PEM certificate. Must be used with --tls-key-file.
   --tls-key-file      Existing PEM private key. Must be used with --tls-cert-file.
   --mode MODE         docker or python, default: docker.
+  --release-center-url URL  Release Center URL for the server-side catalog proxy.
+  --release-center-token-file PATH  Token file used only by the proxy.
   --execute           Install/start portal. Without this flag, prints the plan only.
   -h, --help          Show help.
 
@@ -45,6 +49,8 @@ while [[ $# -gt 0 ]]; do
     --tls-cert-file) TLS_CERT_FILE="${2:?missing value for --tls-cert-file}"; shift 2 ;;
     --tls-key-file) TLS_KEY_FILE="${2:?missing value for --tls-key-file}"; shift 2 ;;
     --mode) MODE="${2:?missing value for --mode}"; shift 2 ;;
+    --release-center-url) RELEASE_CENTER_URL="${2:?missing value for --release-center-url}"; shift 2 ;;
+    --release-center-token-file) RELEASE_CENTER_TOKEN_FILE="${2:?missing value for --release-center-token-file}"; shift 2 ;;
     --execute) EXECUTE="true"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; usage; exit 2 ;;
@@ -126,6 +132,10 @@ find "${PORTAL_DIR}" -type f -exec chmod 0644 {} +
 TLS_DIR="${INSTALL_DIR}/tls"
 if [[ "${MODE}" == "docker" ]]; then
   mkdir -p "${TLS_DIR}"
+  [[ -z "${RELEASE_CENTER_TOKEN_FILE}" || -r "${RELEASE_CENTER_TOKEN_FILE}" ]] || { echo "Release Center token file is not readable" >&2; exit 1; }
+  token=""; [[ -z "${RELEASE_CENTER_TOKEN_FILE}" ]] || token="$(tr -d '\r\n' < "${RELEASE_CENTER_TOKEN_FILE}")"
+  config_file="${INSTALL_DIR}/nginx-tls.conf"
+  sed "s|__RELEASE_CENTER_URL__|${RELEASE_CENTER_URL}|; s|__RELEASE_CENTER_TOKEN__|${token}|" "${SCRIPT_DIR}/nginx-tls.conf" > "${config_file}"
   if [[ -n "${TLS_CERT_FILE}" ]]; then
     cp "${TLS_CERT_FILE}" "${TLS_DIR}/portal.crt"
     cp "${TLS_KEY_FILE}" "${TLS_DIR}/portal.key"
@@ -149,6 +159,7 @@ case "${MODE}" in
     HCDR_BOOTSTRAP_NGINX_IMAGE="${NGINX_IMAGE}" \
     HCDR_BOOTSTRAP_PORTAL_DIR="${PORTAL_DIR}" \
     HCDR_BOOTSTRAP_TLS_DIR="${TLS_DIR}" \
+    HCDR_BOOTSTRAP_NGINX_CONFIG="${config_file}" \
     docker compose -f "${SCRIPT_DIR}/portal-compose.yaml" up -d
     ;;
   python)
