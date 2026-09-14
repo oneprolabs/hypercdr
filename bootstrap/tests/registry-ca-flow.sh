@@ -4,11 +4,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_ROOT="$(mktemp -d)"
 trap 'rm -rf "${TEST_ROOT}"' EXIT
-# The installer consumes the manifest shipped beside an installer package.
-# Provide a minimal fixture for this isolated lifecycle test.
-MANIFEST_FIXTURE="${SCRIPT_DIR}/../scripts/release/release-manifest.json"
+# Stage a package without writing fixtures into the source tree or host units.
+cp -a "${SCRIPT_DIR}/../scripts/release" "${TEST_ROOT}/package"
+cp "${SCRIPT_DIR}/../docker-compose.yml" "${TEST_ROOT}/package/compose.yaml"
+SCRIPT_DIR="${TEST_ROOT}/package"
+export HCDR_SYSTEMD_UNIT_DIR="${TEST_ROOT}/systemd"
+MANIFEST_FIXTURE="${SCRIPT_DIR}/release-manifest.json"
 printf '{"version":"v20260714.5","componentManifest":{}}\n' >"${MANIFEST_FIXTURE}"
-trap 'rm -rf "${TEST_ROOT}"; rm -f "${MANIFEST_FIXTURE}"' EXIT
 
 mkdir -p "${TEST_ROOT}/bin"
 cp /bin/true "${TEST_ROOT}/bin/docker"

@@ -740,7 +740,9 @@ EOF
       [[ -f "${unit_template}" ]] || unit_template="${SCRIPT_DIR}/../templates/hypercdr.service"
       local escaped_install_dir
       escaped_install_dir="$(printf '%s' "${install_dir}" | sed 's/[\\&|]/\\&/g')"
-      sed "s|__INSTALL_DIR__|${escaped_install_dir}|g" "${unit_template}" > /etc/systemd/system/hypercdr.service
+      local systemd_unit_dir="${HCDR_SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
+      mkdir -p "${systemd_unit_dir}"
+      sed "s|__INSTALL_DIR__|${escaped_install_dir}|g" "${unit_template}" > "${systemd_unit_dir}/hypercdr.service"
       systemctl daemon-reload
       systemctl enable docker.service hypercdr.service >/dev/null
       systemctl restart hypercdr.service
