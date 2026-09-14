@@ -102,7 +102,15 @@ fi
 SECRET_KEY="$(cat "${SECRET_KEY_FILE}")"
 POSTGRES_PASSWORD_FILE="${DEPLOY_DIR}/postgres_password"
 if [[ ! -s "${POSTGRES_PASSWORD_FILE}" ]]; then
-  openssl rand -hex 24 > "${POSTGRES_PASSWORD_FILE}"
+  existing_password=""
+  if [[ -s "${DEPLOY_DIR}/.env" ]]; then
+    existing_password="$(sed -n 's/^HCDR_POSTGRES_PASSWORD=//p' "${DEPLOY_DIR}/.env" | head -1)"
+  fi
+  if [[ -n "${existing_password}" ]]; then
+    printf '%s\n' "${existing_password}" > "${POSTGRES_PASSWORD_FILE}"
+  else
+    openssl rand -hex 24 > "${POSTGRES_PASSWORD_FILE}"
+  fi
   chmod 600 "${POSTGRES_PASSWORD_FILE}"
 fi
 POSTGRES_PASSWORD="$(cat "${POSTGRES_PASSWORD_FILE}")"
