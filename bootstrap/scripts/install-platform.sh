@@ -733,14 +733,14 @@ EOF
     install -m 0755 "${SCRIPT_DIR}/stop-platform.sh" "${install_dir}/stop-platform.sh"
     install -m 0755 "${SCRIPT_DIR}/restart-platform.sh" "${install_dir}/restart-platform.sh"
     if command -v systemctl >/dev/null 2>&1; then
-      local unit_template="${SCRIPT_DIR}/templates/hypercdr-platform.service"
-      [[ -f "${unit_template}" ]] || unit_template="${SCRIPT_DIR}/../templates/hypercdr-platform.service"
+      local unit_template="${SCRIPT_DIR}/templates/hypercdr.service"
+      [[ -f "${unit_template}" ]] || unit_template="${SCRIPT_DIR}/../templates/hypercdr.service"
       local escaped_install_dir
       escaped_install_dir="$(printf '%s' "${install_dir}" | sed 's/[\\&|]/\\&/g')"
-      sed "s|__INSTALL_DIR__|${escaped_install_dir}|g" "${unit_template}" > /etc/systemd/system/hypercdr-platform.service
+      sed "s|__INSTALL_DIR__|${escaped_install_dir}|g" "${unit_template}" > /etc/systemd/system/hypercdr.service
       systemctl daemon-reload
-      systemctl enable docker.service hypercdr-platform.service >/dev/null
-      systemctl restart hypercdr-platform.service
+      systemctl enable docker.service hypercdr.service >/dev/null
+      systemctl restart hypercdr.service
       install_ok "Lifecycle scripts installed and boot recovery enabled"
     else
       echo "[WARNING] systemd unavailable; boot recovery was not enabled" >&2
