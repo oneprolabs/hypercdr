@@ -1,113 +1,98 @@
-# Standard Release Scripts
+# HyperCDR 构建与发布说明
 
-This directory contains the standard HyperCDR platform release scripts.
+本目录集中管理中控平台的构建、镜像发布、安装包生成和平台运维脚本。Bootstrap 只负责 Portal 页面及资源分发，不参与中控平台镜像或安装包的核心构建。
 
-## One-command release
-
-Registry endpoints live in `../../config/registries.conf`. Select the default
-with `HCDR_ACTIVE_REGISTRY`, then copy the non-secret release settings once:
+## 推荐入口
 
 ```bash
+cd /data/hypercdr-main/scripts/release
 cp release.conf.example release.conf
+# 按需编辑 release.conf
+./release-all.sh 1.0.23.20260914 --config ./release.conf
 ```
 
-Edit `release.conf`, then build and push a release:
+`release-all.sh` 是完整发布入口，依次完成：
 
-```bash
-./release-all.sh v20260727.1 --config ./release.conf
-```
+1. 构建中控平台 API、前端、升级器、注册执行器、comm-agent 和 oadp-comm-agent 镜像；
+2. 推送平台镜像；
+3. 构建/发布 Velero 及对象存储插件；
+4. 同步并构建 OADP/OpenShift 相关镜像和资源；
+5. 生成包含组件版本、镜像地址和 digest 的完整 `release-manifest.json`；
+6. 根据该 manifest 生成中控平台安装包和 SHA256 校验文件；
+7. 向已运行的中控平台登记候选版本（初次发布可使用 `--skip-register`）。
 
-After tests pass, the release script builds and pushes the images, mirrors the
-three Velero object-storage plugins, verifies Registry pulls, resolves the
-remote digest of every platform and cluster component, and writes one complete
-immutable `release-manifest.json`. It registers that whole version as a
-platform candidate. It never starts an upgrade. Control plane upgrades remain
-an explicit administrator action in the platform UI.
+## 脚本职责
 
-The active platform release manifest is the sole runtime source for new Agent
-installations and existing Agent/Velero upgrade targets. Components are not
-published or activated independently. A platform upgrade activates its
-manifest only after the upgrade succeeds; a failure or rollback leaves the
-previous manifest active.
+| 文件 | 作用 |
+|---|---|
+| `release-all.sh` | 完整发布入口 |
+| `build-release.sh` | 构建平台镜像和二进制 |
+| `push-release.sh` | 推送平台镜像 |
+| `publish-runtime-images.sh` | 发布 Velero 等运行时镜像 |
+| `sync-velero-plugins.sh` | 同步对象存储插件 |
+| `mirror-community-oadp-images.sh` | 同步 OADP/OpenShift 镜像 |
+| `build-community-oadp-bundle.sh` | 构建 OADP 部署资源 |
+| `build-community-oadp-catalog.sh` | 构建 OADP Catalog 镜像 |
+| `package-release.sh` | 根据已有 manifest 生成中控平台安装包，不构建镜像 |
+| `publish-package.sh` | 将已有平台安装包发布到 Bootstrap Portal |
+| `install-platform.sh` | 安装中控平台并配置 systemd 自启动 |
+| `deploy-platform.sh` | 渲染或部署 Compose 配置 |
+| `start-platform.sh` / `stop-platform.sh` | 启动或停止平台，不删除数据 |
+| `restart-platform.sh` | 重启平台并等待健康检查 |
+| `uninstall.sh` / `uninstall-platform.sh` | 一键入口和实际卸载逻辑 |
+| `verify-platform.sh` | 验证已部署平台 |
+| `verify-oadp-catalog.sh` | 验证 OADP Catalog |
+| `common.sh` | 公共函数 |
+| `templates/hypercdr.service` | systemd 服务模板 |
 
-For the initial seed release, when no platform exists yet, use
-`--skip-register`. Normal releases require the installer-generated token at
-`/var/lib/hypercdr/release-token`.
-
-## Lower-level flow
-
-The one-command script calls these lower-level scripts:
-
-```bash
-./build-release.sh v20260727.1 --registry registry.example.com/namespace
-./push-release.sh v20260727.1 --registry registry.example.com/namespace
-```
-
-These scripts build and push:
-
-- `platform-api`
-- `platform-frontend`
-- `platform-upgrader`
-- `cluster-registration-executor`
-- `comm-agent`
-
-The registration executor embeds a checksum-verified `kubectl`. Normal builds
-download it from the Kubernetes release service within a bounded total time.
-For an air-gapped or slow build host, provide a previously trusted binary and
-its pinned digest instead:
-
-```bash
-HCDR_REGISTRATION_KUBECTL_VERSION=v1.35.7 \
-HCDR_REGISTRATION_KUBECTL_BINARY=/secure/cache/kubectl-v1.35.7 \
-HCDR_REGISTRATION_KUBECTL_SHA256=<64-character-sha256> \
-./release-all.sh v20260901.1 --config ./release.conf
-```
-
-The build rejects a local binary unless the supplied digest matches exactly.
-
-## Unified package and Bootstrap flow
-
-`release-all.sh` is the only recommended full-release entry point. It builds
-all control-plane/runtime images, pushes them, writes the complete
-`release-manifest.json`, and invokes `package-release.sh` to produce
-`hypercdr-installer-<version>.tar.gz`. It does not depend on Bootstrap.
-
-`bootstrap/scripts/package-release.sh` is a compatibility entry point only.
-Bootstrap consumes an already-created and checksum-verified platform installer;
-it never builds platform images or creates a second platform installer.
-
-The scripts in this directory are grouped as follows:
-
-* Build/publish: `build-release.sh`, `push-release.sh`, `release-all.sh`.
-* Runtime/OADP: `publish-runtime-images.sh`, `sync-velero-plugins.sh`,
-  `mirror-community-oadp-images.sh`, `build-community-oadp-*.sh`.
-* Package/distribution: `package-release.sh`, `publish-package.sh`.
-* Platform operations: `install-platform.sh`, `deploy-platform.sh`,
-  `start-platform.sh`, `stop-platform.sh`, `restart-platform.sh`,
-  `uninstall*.sh`.
-* Validation/common: `verify-*.sh`, `common.sh`.
-
-Typical output is written to:
+## 调用关系
 
 ```text
-/data/hypercdr-runtime/build/platform/<version>/
-/data/hypercdr-runtime/releases/community/<version>/
+release-all.sh
+├── build-release.sh
+├── push-release.sh
+├── publish-runtime-images.sh
+├── sync-velero-plugins.sh
+├── mirror-community-oadp-images.sh
+├── build-community-oadp-bundle.sh
+├── build-community-oadp-catalog.sh
+└── package-release.sh
+    └── hypercdr-installer-<版本>.tar.gz
+
+publish-package.sh
+└── 校验并发布 release-all.sh 已生成的平台安装包
 ```
 
-The latter contains the installer archive, SHA256 file, `release-manifest.json`
-and `manifest.json`. Bootstrap publishing only copies this directory to its
-download source.
+Bootstrap 下的 `scripts/package-release.sh` 仅作为历史兼容入口，不能替代 `release-all.sh`。
 
-Build work is written to `/data/hypercdr-runtime/build/platform/<version>` and shared
-Go/npm caches are written to `/data/hypercdr-runtime/cache` by default. Override them
-with `HCDR_BUILD_ROOT` and `HCDR_CACHE_ROOT`. The source tree is not used for
-dependencies, compiled binaries, or frontend output.
+## 产物位置
 
-`deploy-platform.sh` and `verify-platform.sh` are retained as local maintenance
-tools, but they are not part of the standard release path.
+```text
+/data/hypercdr-runtime/build/platform/<版本>/
+/data/hypercdr-runtime/releases/community/<版本>/
+├── hypercdr-installer-<版本>.tar.gz
+├── hypercdr-installer-<版本>.sha256
+├── release-manifest.json
+└── manifest.json
+```
 
-Velero is intentionally not built here. Build Velero from the Velero source tree:
+## 安装和运维
 
 ```bash
-/data/hypercdr/third_party/velero/deployments/build-velero-image.sh --push
+./install-platform.sh docker --base-url https://HOST:3002 \
+  --install-dir /var/lib/hypercdr --execute --confirm-prerequisites
+systemctl status hypercdr.service
+systemctl restart hypercdr.service
+curl -k -o /dev/null -w 'ready=%{http_code}\n' https://HOST:3002/readyz
 ```
+
+安装目录会生成生命周期脚本、`PLATFORM-LIFECYCLE.md` 和 `hypercdr.service`。默认卸载保留数据；只有显式使用 `--purge-data --execute` 才删除安装目录。
+
+## 验证
+
+```bash
+bash -n scripts/release/*.sh
+make verify
+```
+
+只有 systemd 为 `enabled/active`、5 个 Compose 服务运行且 `/readyz` 返回 HTTP 200，才表示部署成功。
