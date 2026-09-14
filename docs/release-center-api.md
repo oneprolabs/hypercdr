@@ -6,25 +6,36 @@ instance.
 
 ## Endpoints
 
-`POST /api/v1/releases` registers an immutable release. The request contains
-the complete `release-manifest.json`, installer URL, checksum, and optional
-compatibility metadata. The endpoint is idempotent by version and rejects a
-changed digest for an existing version.
+`POST /api/v1/releases` stages the complete, immutable `release-manifest.json`.
+The response status is `awaiting_installer`. The endpoint is idempotent for an
+identical JSON document regardless of key ordering. Modified releases return
+HTTP 409. Local server file paths are not accepted.
+
+`POST /api/v1/releases/{version}/installer` uploads a gzip tar archive as its
+binary request body. The embedded manifest must exactly match the registered
+manifest. Invalid archives, unsafe paths, and mismatched manifests are rejected.
+An identical upload is idempotent; replacing an existing archive returns 409.
+The maximum archive size is 64 MiB; the maximum manifest size is 1 MiB.
 
 `GET /api/v1/catalog` returns published releases and compatibility metadata.
-The response includes a catalog version, generation time, and release entries.
+The response is `{ "items": [...] }`. Only releases with a verified installer
+are listed. Each item includes `installer.sha256`, `installer.size`, and a
+relative `installer.url`. Uploading metadata alone does not publish a release.
 
 `GET /api/v1/releases/{version}` returns one immutable release manifest.
 
-`GET /api/v1/releases/{version}/installer` downloads the platform installer.
+`GET /api/v1/releases/{version}/installer` downloads the verified installer.
+Clients must compare its SHA256 with the catalog before using the archive.
+All API endpoints require Bearer authentication; `/healthz` is unauthenticated.
 
 ## Platform synchronization
 
 Each control plane configures `HCDR_RELEASE_CENTER_URL` and periodically pulls
-`/api/v1/catalog`. It validates TLS, the manifest schema, image digests, and
-the catalog signature before storing a local snapshot. Synchronization is
-idempotent and failure is recorded without removing the last successful
-snapshot.
+`/api/v1/catalog` and upserts the releases into its local release table. Network
+or HTTP failures are logged and do not delete existing records. HTTPS uses
+system trust or the configured private CA. Catalog signatures are not currently
+implemented; deploy the service behind a trusted TLS reverse proxy. The upgrade
+page continues to read the control plane's local `/api/v1/platform/releases` API.
 
 ## Configuration
 

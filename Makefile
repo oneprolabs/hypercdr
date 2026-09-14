@@ -29,6 +29,7 @@ test-frontend:
 	./scripts/build-frontend.sh
 
 test-bootstrap:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s bootstrap/release-center -p 'test_*.py' -v
 	bash bootstrap/tests/registry-ca-flow.sh
 	bash scripts/tests/registry-config.sh
 
