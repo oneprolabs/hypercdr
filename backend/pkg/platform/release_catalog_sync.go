@@ -2,11 +2,14 @@ package platform
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"hypercdr-platform/platform/backend/internal/config"
 	"hypercdr-platform/platform/backend/internal/store"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -28,12 +31,29 @@ func startReleaseCatalogSync(ctx context.Context, cfg config.Config, repo store.
 	if err != nil || interval < time.Minute {
 		interval = time.Hour
 	}
+	client := http.DefaultClient
+	if cfg.ReleaseCenterCAFile != "" {
+		pem, err := os.ReadFile(cfg.ReleaseCenterCAFile)
+		if err != nil {
+			logger.Warn("release catalog CA file could not be read", "error", err)
+			return
+		}
+		pool, err := x509.SystemCertPool()
+		if err != nil {
+			pool = x509.NewCertPool()
+		}
+		if !pool.AppendCertsFromPEM(pem) {
+			logger.Warn("release catalog CA file contains no certificates")
+			return
+		}
+		client = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}}
+	}
 	sync := func() {
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, cfg.ReleaseCenterURL+"/api/v1/catalog", nil)
 		if cfg.ReleaseCenterToken != "" {
 			req.Header.Set("Authorization", "Bearer "+cfg.ReleaseCenterToken)
 		}
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			logger.Warn("release catalog synchronization failed", "error", err)
 			return

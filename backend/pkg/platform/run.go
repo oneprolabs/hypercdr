@@ -33,9 +33,6 @@ func Run(options Options) error {
 		return err
 	}
 	defer postgresStore.Close()
-	ctx, cancelSync := context.WithCancel(context.Background())
-	defer cancelSync()
-	startReleaseCatalogSync(ctx, cfg, postgresStore, logger)
 	secretCtx, secretCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	if err := postgresStore.ConfigureSecretKey(secretCtx, cfg.SecretKey); err != nil {
 		secretCancel()
@@ -47,6 +44,9 @@ func Run(options Options) error {
 	if err := postgresStore.ApplyEditionMigrations(migrationCtx, editionMigrations(options.Migrations)); err != nil {
 		return err
 	}
+	ctx, cancelSync := context.WithCancel(context.Background())
+	defer cancelSync()
+	startReleaseCatalogSync(ctx, cfg, postgresStore, logger)
 	if options.DiagnosticSink != nil {
 		postgresStore.SetDiagnosticLogWriter(diagnosticWriterAdapter{sink: options.DiagnosticSink})
 	}
