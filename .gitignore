@@ -67,3 +67,5 @@ Thumbs.db
 .vscode/
 *.swp
 *~
+
+bootstrap/release-center/__pycache__/
