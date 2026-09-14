@@ -1,7 +1,0 @@
-apiVersion: music.example.io/v2
-kind: RockBand
-metadata:
-  name: beatles
-spec:
-  genre: "60s rock"
-  numberComponents: 4
