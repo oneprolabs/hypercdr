@@ -132,29 +132,11 @@ function updateCommands() {
 
 async function loadManifest() {
   try {
-<<<<<<< HEAD
     const response = await fetch(`${releasePath}/manifest.json`, { cache: 'no-store' });
     const manifest = await response.json();
     document.getElementById('release-version').textContent = manifest.version;
   } catch (error) {
     document.getElementById('release-version').textContent = 'dev';
-=======
-    const response = await fetch(`${releases[edition].path}/index.json`, { cache: 'no-store' });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const catalog = await response.json();
-    const entries = Array.isArray(catalog.items) ? catalog.items : [catalog];
-    const manifest = entries[0];
-    releases[edition].entries = entries;
-    const picker = element(`${edition}-release`);
-    if (picker) { picker.replaceChildren(...entries.map(item => { const option = document.createElement('option'); option.value = item.version; option.textContent = item.version; return option; })); picker.addEventListener('change', () => { releases[edition].version = picker.value; element(`${edition}-version`).textContent = picker.value; updateCommands(); }); }
-    const history = element(`${edition}-history`);
-    if (history) history.addEventListener('click', () => window.alert(entries.map(item => `${item.version}${item.releaseNotes ? ` — ${item.releaseNotes}` : ''}`).join('\n')));
-    releases[edition].available = true;
-    element(`${edition}-version`).textContent = manifest.version;
-  } catch (_) {
-    element(`${edition}-version`).textContent = 'Not published';
-    if (edition === 'enterprise') element('enterprise-unavailable').classList.remove('hidden');
->>>>>>> 3e2b3c6 (add bootstrap release version selection and history)
   }
 }
 
