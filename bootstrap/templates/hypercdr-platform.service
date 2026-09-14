@@ -1,0 +1,18 @@
+[Unit]
+Description=HyperCDR Control Plane
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory="__INSTALL_DIR__"
+ExecStart="__INSTALL_DIR__/start-platform.sh"
+ExecStop="__INSTALL_DIR__/stop-platform.sh"
+ExecReload="__INSTALL_DIR__/restart-platform.sh"
+Restart=on-failure
+RestartSec=15
+TimeoutStartSec=600
+TimeoutStopSec=120
+[Install]
+WantedBy=multi-user.target

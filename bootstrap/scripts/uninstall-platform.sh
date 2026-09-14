@@ -94,6 +94,13 @@ fi
 
 require_command docker
 
+# Disable boot recovery before removing containers so uninstall is permanent.
+if command -v systemctl >/dev/null 2>&1 && [[ -f /etc/systemd/system/hypercdr-platform.service ]]; then
+  systemctl disable --now hypercdr-platform.service
+  rm /etc/systemd/system/hypercdr-platform.service
+  systemctl daemon-reload
+fi
+
 images=()
 for name in hypercdr-platform-frontend hypercdr-platform-api hypercdr-platform-upgrader hypercdr-cluster-registration-executor hypercdr-postgres; do
   image="$(container_image "${name}")"

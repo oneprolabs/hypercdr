@@ -728,6 +728,24 @@ EOF
     fi
     install_ok "Control plane is ready"
 
+    # Install lifecycle helpers and host boot recovery unit.
+    install -m 0755 "${SCRIPT_DIR}/start-platform.sh" "${install_dir}/start-platform.sh"
+    install -m 0755 "${SCRIPT_DIR}/stop-platform.sh" "${install_dir}/stop-platform.sh"
+    install -m 0755 "${SCRIPT_DIR}/restart-platform.sh" "${install_dir}/restart-platform.sh"
+    if command -v systemctl >/dev/null 2>&1; then
+      local unit_template="${SCRIPT_DIR}/templates/hypercdr-platform.service"
+      [[ -f "${unit_template}" ]] || unit_template="${SCRIPT_DIR}/../templates/hypercdr-platform.service"
+      local escaped_install_dir
+      escaped_install_dir="$(printf '%s' "${install_dir}" | sed 's/[\\&|]/\\&/g')"
+      sed "s|__INSTALL_DIR__|${escaped_install_dir}|g" "${unit_template}" > /etc/systemd/system/hypercdr-platform.service
+      systemctl daemon-reload
+      systemctl enable docker.service hypercdr-platform.service >/dev/null
+      systemctl restart hypercdr-platform.service
+      install_ok "Lifecycle scripts installed and boot recovery enabled"
+    else
+      echo "[WARNING] systemd unavailable; boot recovery was not enabled" >&2
+    fi
+
     install_step 7 7 "Initialize and verify release catalog"
     local release_manifest_file="${SCRIPT_DIR}/release-manifest.json"
     [[ -s "${release_manifest_file}" ]] || install_fail "Release package is missing release-manifest.json"
