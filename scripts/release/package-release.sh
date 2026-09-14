@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 RUNTIME_ROOT="${HCDR_RUNTIME_ROOT:-$(cd "${ROOT_DIR}/.." && pwd)/hypercdr-runtime}"
-SITE_SOURCE_DIR="${ROOT_DIR}/bootstrap/site"
 VERSION="${1:-}"
-BUILD_ROOT="${HCDR_BOOTSTRAP_BUILD_ROOT:-${RUNTIME_ROOT}/build/bootstrap/community}"
+BUILD_ROOT="${HCDR_PACKAGE_BUILD_ROOT:-${RUNTIME_ROOT}/build/installer/community}"
 RELEASE_ROOT="${HCDR_RELEASE_ROOT:-${RUNTIME_ROOT}/releases/community}"
 PUBLISH_DIR="${HCDR_BOOTSTRAP_PUBLISH_DIR:-${RUNTIME_ROOT}/services/bootstrap-portal/source}"
 if [[ -n "${HCDR_RELEASE_MANIFEST:-}" ]]; then
@@ -66,8 +65,8 @@ mkdir -p "${WORK_DIR}/hypercdr-bootstrap" "${RELEASE_DIR}"
 package_dir="${WORK_DIR}/hypercdr-bootstrap"
 RELEASE_SCRIPTS_DIR="${ROOT_DIR}/scripts/release"
 cp "${RELEASE_SCRIPTS_DIR}/install-platform.sh" "${package_dir}/install-platform.sh"
-cp "${ROOT_DIR}/bootstrap/install.sh" "${package_dir}/install.sh"
-cp "${ROOT_DIR}/bootstrap/templates/install-config.sh" "${package_dir}/install-config.sh"
+cp "${SCRIPT_DIR}/install.sh" "${package_dir}/install.sh"
+cp "${SCRIPT_DIR}/install-config.sh" "${package_dir}/install-config.sh"
 cp "${RELEASE_SCRIPTS_DIR}/uninstall-platform.sh" "${package_dir}/uninstall-platform.sh"
 cp "${SCRIPT_DIR}/prepare-docker-registry.sh" "${package_dir}/prepare-docker-registry.sh"
 cp "${SCRIPT_DIR}/check-harbor.sh" "${package_dir}/check-harbor.sh"
@@ -143,7 +142,6 @@ Release directory:
 Portal source:
   ${PUBLISH_DIR}
 
-Deploy the portal with:
-  bash ${SCRIPT_DIR}/scripts/publish-release.sh --version ${VERSION}
-  ${SCRIPT_DIR}/deploy-bootstrap.sh --source-dir ${PUBLISH_DIR} --execute
+Install from the extracted package:
+  bash install.sh --base-url https://HOST:3002
 EOF

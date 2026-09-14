@@ -319,7 +319,7 @@ SUCCESS: HyperCDR release ${VERSION} completed.
 Registry:
   ${REGISTRY}
 Installer:
-  ${HCDR_BOOTSTRAP_PUBLISH_DIR:-${RUNTIME_ROOT}/services/bootstrap-portal/source}/releases/dev/hypercdr-installer-${VERSION}.tar.gz
+  ${HCDR_RELEASE_ROOT:-${RUNTIME_ROOT}/releases/community}/${VERSION}/hypercdr-installer-${VERSION}.tar.gz
 
 Next:
   Install or upgrade the control plane from the bootstrap page or platform UI.
