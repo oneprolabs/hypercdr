@@ -1,4 +1,5 @@
 FROM python:3.12-alpine
 COPY server.py /opt/release-center/server.py
-USER 65532:65532
+# The data directory may be a host-mounted path; the operator should restrict
+# access to the host and provide filesystem permissions appropriate to policy.
 ENTRYPOINT ["python", "/opt/release-center/server.py"]
