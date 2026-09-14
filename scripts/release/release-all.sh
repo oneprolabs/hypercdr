@@ -294,7 +294,7 @@ EOF
 log "Complete release manifest generated: ${RELEASE_MANIFEST}"
 
 log "Generating versioned installer package"
-HCDR_RELEASE_MANIFEST="${RELEASE_MANIFEST}" "${ROOT_DIR}/bootstrap/release-bootstrap.sh" "${VERSION}"
+HCDR_RELEASE_MANIFEST="${RELEASE_MANIFEST}" "${ROOT_DIR}/scripts/release/package-release.sh" "${VERSION}"
 
 if [[ "${SKIP_REGISTER}" == "true" ]]; then
   log "Skipping platform release registration"
