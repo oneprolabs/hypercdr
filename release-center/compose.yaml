@@ -1,7 +1,7 @@
 services:
   release-center:
     build: .
-    image: hypercdr/release-center:dev
+    image: ${RELEASE_CENTER_IMAGE:-hypercdr/release-center:latest}
     environment:
       RELEASE_CENTER_BIND: 0.0.0.0
       RELEASE_CENTER_PORT: 8090
