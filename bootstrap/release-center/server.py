@@ -23,6 +23,10 @@ class Handler(BaseHTTPRequestHandler):
                 items.append(json.loads(f.read_text()))
             return self._json(200, {"items":items})
         parts=p.split("/")
+        if len(parts)==6 and parts[:4]==["","api","v1","releases"] and parts[5]=="installer":
+            f=ROOT/"releases"/parts[4]/"installer.tar.gz"
+            if not f.is_file(): return self._json(404,{"error":"installer_not_found"})
+            data=f.read_bytes(); self.send_response(200); self.send_header("Content-Type","application/gzip"); self.send_header("Content-Length",str(len(data))); self.end_headers(); self.wfile.write(data); return
         if len(parts)==5 and parts[:4]==["","api","v1","releases"]:
             f=ROOT/"releases"/parts[4]/"release-manifest.json"
             if not f.is_file(): return self._json(404,{"error":"release_not_found"})
@@ -39,6 +43,9 @@ class Handler(BaseHTTPRequestHandler):
         f=target/"release-manifest.json"
         if f.exists() and f.read_bytes()!=json.dumps(body,indent=2).encode()+b"\n": return self._json(409,{"error":"release_is_immutable"})
         f.write_text(json.dumps(body,indent=2)+"\n")
+        archive = body.get("installerPath") or body.get("installer", {}).get("path")
+        if archive and pathlib.Path(archive).is_file():
+            (target/"installer.tar.gz").write_bytes(pathlib.Path(archive).read_bytes())
         return self._json(201,{"version":version,"status":"published"})
     def log_message(self,*args): pass
 
