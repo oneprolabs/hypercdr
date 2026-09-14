@@ -10,10 +10,10 @@ Build servers and Release Center do not need shared filesystem access. Releases
 appear in the catalog only after the archive and embedded manifest are validated.
 Use HTTPS termination in front of this service outside an isolated test network.
 
-See [API contract](../../docs/release-center-api.md) for requests and configuration.
+See [API contract](../docs/release-center-api.md) for requests and configuration.
 
 Run isolated HTTP integration tests from the repository root:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s bootstrap/release-center -p 'test_*.py' -v
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s release-center -p 'test_*.py' -v
 ```
