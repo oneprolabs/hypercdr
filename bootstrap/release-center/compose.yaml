@@ -12,3 +12,9 @@ services:
     volumes:
       - ${RELEASE_CENTER_DATA:-./data}:/var/lib/release-center
     restart: unless-stopped
+
+# Use the same stable network as the control plane so the API can resolve
+# release-center regardless of which Compose project starts first.
+networks:
+  default:
+    name: hypercdr_default
