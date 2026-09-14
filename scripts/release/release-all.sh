@@ -18,7 +18,6 @@ DRY_RUN="false"
 RESUME="false"
 RELEASE_CENTER_URL="${HCDR_RELEASE_CENTER_URL:-}"
 RELEASE_CENTER_TOKEN_FILE="${HCDR_RELEASE_CENTER_TOKEN_FILE:-}"
-RELEASE_TOKEN_FILE="${HCDR_RELEASE_TOKEN_FILE:-/var/lib/hypercdr/release-token}"
 
 usage() {
   cat <<'USAGE'
@@ -37,9 +36,9 @@ Options:
   --skip-tests        Skip Go tests during build.
   --no-login          Skip docker login.
   --release-center-url URL  Release Center URL used to publish metadata.
-  --release-token-file PATH
-                      Release token file, default /var/lib/hypercdr/release-token.
-  --skip-register     Build/push only when no platform exists yet.
+  --release-center-token-file PATH
+                      File containing the Release Center publishing token.
+  --skip-register     Build and package without registering a release.
   --dry-run           Resolve configuration and print the plan without changes.
   --resume            Continue a failed release after verifying all core images exist remotely.
   -h, --help          Show help.
@@ -67,7 +66,7 @@ while [[ $# -gt 0 ]]; do
     --skip-tests) CLI_SKIP_TESTS="true"; shift ;;
     --no-login) LOGIN="false"; shift ;;
     --release-center-url) RELEASE_CENTER_URL="${2:?missing value for --release-center-url}"; shift 2 ;;
-    --release-token-file) RELEASE_TOKEN_FILE="${2:?missing value for --release-token-file}"; shift 2 ;;
+    --release-center-token-file) RELEASE_CENTER_TOKEN_FILE="${2:?missing value for --release-center-token-file}"; shift 2 ;;
     --skip-register) SKIP_REGISTER="true"; shift ;;
     --dry-run) DRY_RUN="true"; shift ;;
     --resume) RESUME="true"; shift ;;
@@ -86,6 +85,8 @@ elif [[ "${CONFIG_FILE}" != "${SCRIPT_DIR}/release.conf" ]]; then
 fi
 
 # shellcheck source=../lib/registry-config.sh
+RELEASE_CENTER_URL="${RELEASE_CENTER_URL:-${HCDR_RELEASE_CENTER_URL:-}}"
+RELEASE_CENTER_TOKEN_FILE="${RELEASE_CENTER_TOKEN_FILE:-${HCDR_RELEASE_CENTER_TOKEN_FILE:-}}"
 source "${ROOT_DIR}/scripts/lib/registry-config.sh"
 load_registry_profile "${REGISTRY_CONFIG_FILE}" "${REGISTRY_PROFILE}"
 
@@ -297,7 +298,7 @@ log "Complete release manifest generated: ${RELEASE_MANIFEST}"
 log "Generating versioned installer package"
 HCDR_RELEASE_MANIFEST="${RELEASE_MANIFEST}" "${ROOT_DIR}/scripts/release/package-release.sh" "${VERSION}"
 
-if [[ -z "${RELEASE_CENTER_URL}" ]]; then
+if [[ "${SKIP_REGISTER}" == "true" || -z "${RELEASE_CENTER_URL}" ]]; then
   log "Release Center registration disabled (no URL configured)"
 else
   [[ -r "${RELEASE_CENTER_TOKEN_FILE:-}" ]] || die "Release Center token file is not readable: ${RELEASE_CENTER_TOKEN_FILE}"
@@ -306,16 +307,14 @@ else
   [[ -r "${INSTALLER_ARCHIVE}" ]] || die "release installer archive is missing: ${INSTALLER_ARCHIVE}"
   publish_payload="$(mktemp)"
   trap 'rm -f "${publish_payload}"' EXIT
-  jq --arg path "${INSTALLER_ARCHIVE}" '. + {installerPath:$path}' "${RELEASE_MANIFEST}" >"${publish_payload}"
+  jq '.' "${RELEASE_MANIFEST}" >"${publish_payload}"
   curl_args=(-fsS --max-time 30 -X POST "${RELEASE_CENTER_URL%/}/api/v1/releases" -H "Content-Type: application/json" -H "Authorization: Bearer ${RELEASE_CENTER_TOKEN}")
-  if [[ -n "${HCDR_PLATFORM_CA_FILE:-}" ]]; then
-    curl_args+=(--cacert "${HCDR_PLATFORM_CA_FILE}")
-  else
-    curl_args+=(--insecure)
+  if [[ -n "${HCDR_RELEASE_CENTER_CA_FILE:-}" ]]; then
+    curl_args+=(--cacert "${HCDR_RELEASE_CENTER_CA_FILE}")
   fi
   curl "${curl_args[@]}" --data-binary "@${publish_payload}" >/dev/null
   curl_args=(-fsS --max-time 120 -X POST "${RELEASE_CENTER_URL%/}/api/v1/releases/${VERSION}/installer" -H "Content-Type: application/gzip" -H "Authorization: Bearer ${RELEASE_CENTER_TOKEN}")
-  [[ -n "${HCDR_PLATFORM_CA_FILE:-}" ]] && curl_args+=(--cacert "${HCDR_PLATFORM_CA_FILE}") || curl_args+=(--insecure)
+  if [[ -n "${HCDR_RELEASE_CENTER_CA_FILE:-}" ]]; then curl_args+=(--cacert "${HCDR_RELEASE_CENTER_CA_FILE}"); fi
   curl "${curl_args[@]}" --data-binary "@${INSTALLER_ARCHIVE}" >/dev/null
   log "Release registered with Release Center: ${VERSION}"
 fi

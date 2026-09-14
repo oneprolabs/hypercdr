@@ -29,7 +29,7 @@ mkdir -p "$catalog_dir/configs"
 chmod a+rwx "$catalog_dir" "$catalog_dir/configs"
 
 opm() {
-  docker run --rm \
+  docker run --rm --network host \
     -v "$POLICY_FILE:/etc/containers/policy.json:ro" \
     -v /root/.docker/config.json:/root/.docker/config.json:ro \
     -v "$catalog_dir:/workspace" -w /workspace "$OPM_IMAGE" "$@"
