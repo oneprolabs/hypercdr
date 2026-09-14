@@ -16,7 +16,8 @@ CLI_SKIP_TESTS=""
 SKIP_REGISTER="false"
 DRY_RUN="false"
 RESUME="false"
-PLATFORM_URL="${HCDR_PLATFORM_URL:-https://${DEFAULT_HOST}:3002}"
+RELEASE_CENTER_URL="${HCDR_RELEASE_CENTER_URL:-}"
+RELEASE_CENTER_TOKEN_FILE="${HCDR_RELEASE_CENTER_TOKEN_FILE:-}"
 RELEASE_TOKEN_FILE="${HCDR_RELEASE_TOKEN_FILE:-/var/lib/hypercdr/release-token}"
 
 usage() {
@@ -35,7 +36,7 @@ Options:
   --registry PREFIX   Override HCDR_IMAGE_REGISTRY.
   --skip-tests        Skip Go tests during build.
   --no-login          Skip docker login.
-  --platform-url URL  Platform API URL, default https://192.168.8.149:3002.
+  --release-center-url URL  Release Center URL used to publish metadata.
   --release-token-file PATH
                       Release token file, default /var/lib/hypercdr/release-token.
   --skip-register     Build/push only when no platform exists yet.
@@ -65,7 +66,7 @@ while [[ $# -gt 0 ]]; do
     --registry) CLI_REGISTRY="${2:?missing value for --registry}"; shift 2 ;;
     --skip-tests) CLI_SKIP_TESTS="true"; shift ;;
     --no-login) LOGIN="false"; shift ;;
-    --platform-url) PLATFORM_URL="${2:?missing value for --platform-url}"; shift 2 ;;
+    --release-center-url) RELEASE_CENTER_URL="${2:?missing value for --release-center-url}"; shift 2 ;;
     --release-token-file) RELEASE_TOKEN_FILE="${2:?missing value for --release-token-file}"; shift 2 ;;
     --skip-register) SKIP_REGISTER="true"; shift ;;
     --dry-run) DRY_RUN="true"; shift ;;
@@ -296,21 +297,19 @@ log "Complete release manifest generated: ${RELEASE_MANIFEST}"
 log "Generating versioned installer package"
 HCDR_RELEASE_MANIFEST="${RELEASE_MANIFEST}" "${ROOT_DIR}/scripts/release/package-release.sh" "${VERSION}"
 
-if [[ "${SKIP_REGISTER}" == "true" ]]; then
-  log "Skipping platform release registration"
+if [[ -z "${RELEASE_CENTER_URL}" ]]; then
+  log "Release Center registration disabled (no URL configured)"
 else
-  [[ -r "${RELEASE_TOKEN_FILE}" ]] || die "release token file is not readable: ${RELEASE_TOKEN_FILE}; use --skip-register only for the initial seed release"
-  RELEASE_TOKEN="$(tr -d '\r\n' < "${RELEASE_TOKEN_FILE}")"
-  [[ -n "${RELEASE_TOKEN}" ]] || die "release token file is empty: ${RELEASE_TOKEN_FILE}"
-  log "Registering candidate release ${VERSION} with ${PLATFORM_URL}"
-  curl_args=(-fsS --max-time 30 -X POST "${PLATFORM_URL%/}/api/v1/platform/releases" -H "Content-Type: application/json" -H "X-HyperCDR-Release-Token: ${RELEASE_TOKEN}")
+  [[ -r "${RELEASE_CENTER_TOKEN_FILE:-}" ]] || die "Release Center token file is not readable: ${RELEASE_CENTER_TOKEN_FILE}"
+  RELEASE_CENTER_TOKEN="$(tr -d '\r\n' < "${RELEASE_CENTER_TOKEN_FILE}")"
+  curl_args=(-fsS --max-time 30 -X POST "${RELEASE_CENTER_URL%/}/api/v1/releases" -H "Content-Type: application/json" -H "Authorization: Bearer ${RELEASE_CENTER_TOKEN}")
   if [[ -n "${HCDR_PLATFORM_CA_FILE:-}" ]]; then
     curl_args+=(--cacert "${HCDR_PLATFORM_CA_FILE}")
   else
     curl_args+=(--insecure)
   fi
   curl "${curl_args[@]}" --data-binary "@${RELEASE_MANIFEST}" >/dev/null
-  log "Candidate release registered: ${VERSION}"
+  log "Release registered with Release Center: ${VERSION}"
 fi
 
 cat <<EOF
