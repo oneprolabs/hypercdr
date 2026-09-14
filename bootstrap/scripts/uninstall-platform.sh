@@ -100,6 +100,11 @@ if command -v systemctl >/dev/null 2>&1 && [[ -f /etc/systemd/system/hypercdr.se
   rm /etc/systemd/system/hypercdr.service
   systemctl daemon-reload
 fi
+if command -v systemctl >/dev/null 2>&1 && [[ -f /etc/systemd/system/hypercdr-platform.service ]]; then
+  systemctl disable --now hypercdr-platform.service >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/hypercdr-platform.service
+  systemctl daemon-reload
+fi
 
 images=()
 for name in hypercdr-platform-frontend hypercdr-platform-api hypercdr-platform-upgrader hypercdr-cluster-registration-executor hypercdr-postgres; do
