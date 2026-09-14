@@ -11,7 +11,9 @@ function shellQuote(input) {
   return `'${input.replace(/'/g, "'\\''")}'`;
 }
 function releaseURL(edition) {
-  return new URL(releases[edition].path.replace(/^\.\//, ''), window.location.href).toString().replace(/\/$/, '');
+  const release = releases[edition];
+  const path = release.versioned ? `${release.path}/${encodeURIComponent(release.version)}` : release.path;
+  return new URL(path.replace(/^\.\//, ''), window.location.href).toString().replace(/\/$/, '');
 }
 
 function updateCommands() {
@@ -71,18 +73,29 @@ function updatePrerequisiteState() {
     const target = button.dataset.copyTarget;
     const key = target.startsWith('community-docker') ? 'community-docker' : target.startsWith('community-k8s') ? 'community-k8s' : 'enterprise';
     const checkbox = document.querySelector(`[data-prerequisite-confirm="${key}"]`);
-    button.disabled = !checkbox?.checked;
+    const edition = key === 'enterprise' ? 'enterprise' : 'community';
+    button.disabled = !checkbox?.checked || !releases[edition].available;
     button.title = checkbox?.checked ? '' : 'Confirm the required software is installed before copying the installation command.';
   }
 }
 
 async function loadManifest(edition) {
   try {
-    const response = await fetch(`${releases[edition].path}/index.json`, { cache: 'no-store' });
+    let response = await fetch(`${releases[edition].path}/index.json`, { cache: 'no-store' });
+    let versioned = true;
+    if (response.status === 404) {
+      response = await fetch(`${releases[edition].path}/manifest.json`, { cache: 'no-store' });
+      versioned = false;
+    }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const catalog = await response.json();
-    const entries = Array.isArray(catalog.items) ? catalog.items : [catalog];
+    const entries = (Array.isArray(catalog.items) ? catalog.items : [catalog])
+      .filter(item => typeof item.version === 'string' && /^(?:\d+\.\d+\.\d+\.\d{8}|v\d{8}\.\d+)$/.test(item.version))
+      .sort((a, b) => b.version.localeCompare(a.version, 'en', { numeric: true }));
+    if (!entries.length) throw new Error('No published releases');
     const manifest = entries[0];
+    releases[edition].version = manifest.version;
+    releases[edition].versioned = versioned;
     releases[edition].entries = entries;
     const picker = element(`${edition}-release`);
     if (picker) { picker.replaceChildren(...entries.map(item => { const option = document.createElement('option'); option.value = item.version; option.textContent = item.version; return option; })); picker.addEventListener('change', () => { releases[edition].version = picker.value; element(`${edition}-version`).textContent = picker.value; updateCommands(); }); }
@@ -95,6 +108,7 @@ async function loadManifest(edition) {
     if (edition === 'enterprise') element('enterprise-unavailable').classList.remove('hidden');
   }
   updateCommands();
+  updatePrerequisiteState();
 }
 
 async function copyText(text) {
