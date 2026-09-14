@@ -8,6 +8,10 @@
     <link rel="stylesheet" href="./assets/styles.css" />
   </head>
   <body>
+    <div id="release-history-dialog" class="history-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="history-title">
+      <div class="history-backdrop" data-history-close></div>
+      <section class="history-panel"><header><div><p class="eyebrow">Release Center</p><h2 id="history-title">Release history</h2></div><button type="button" class="history-close" data-history-close aria-label="Close release history">×</button></header><div id="history-list" class="history-list"></div></section>
+    </div>
     <main class="shell">
       <header class="topbar">
         <div class="brand">

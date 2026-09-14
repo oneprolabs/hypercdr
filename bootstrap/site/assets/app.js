@@ -90,7 +90,11 @@ async function loadManifest(edition) {
     const picker = element(`${edition}-release`);
     if (picker) { picker.replaceChildren(...entries.map(item => { const option = document.createElement('option'); option.value = item.version; option.textContent = item.version; return option; })); picker.addEventListener('change', () => { releases[edition].version = picker.value; element(`${edition}-version`).textContent = picker.value; updateCommands(); }); }
     const history = element(`${edition}-history`);
-    if (history) history.addEventListener('click', () => window.alert(entries.map(item => `${item.version}${item.releaseNotes ? ` — ${item.releaseNotes}` : ''}`).join('\n')));
+    if (history) history.onclick = () => {
+      const list = element('history-list');
+      list.replaceChildren(...entries.map(item => { const row = document.createElement('article'); row.className = 'history-entry'; row.innerHTML = `<div><strong>${item.version}</strong><small>${item.publishedAt || item.buildTime || 'Release date unavailable'}</small></div><p>${item.releaseNotes || 'No release notes provided.'}</p><span>${item.installer?.size ? `${Math.round(item.installer.size / 1024)} KB installer` : 'Installer available'}</span>`; return row; }));
+      element('release-history-dialog').classList.remove('hidden');
+    };
     releases[edition].available = true;
     element(`${edition}-version`).textContent = manifest.version;
   } catch (_) {
@@ -100,6 +104,8 @@ async function loadManifest(edition) {
   updateCommands();
   updatePrerequisiteState();
 }
+
+document.querySelectorAll('[data-history-close]').forEach(button => button.addEventListener('click', () => element('release-history-dialog').classList.add('hidden')));
 
 async function copyText(text) {
   if (window.isSecureContext && navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);

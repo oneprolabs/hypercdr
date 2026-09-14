@@ -735,3 +735,17 @@ button:hover,
   .edition-card { grid-template-columns: auto minmax(0, 1fr); }
   .edition-version { grid-column: 2; justify-self: start; }
 }
+/* Release history drawer */
+.history-dialog { position: fixed; inset: 0; z-index: 20; display: flex; justify-content: flex-end; }
+.history-dialog.hidden { display: none; }
+.history-backdrop { position: absolute; inset: 0; background: rgba(8, 18, 32, .42); }
+.history-panel { position: relative; width: min(560px, 92vw); height: 100%; overflow: auto; padding: 30px; background: #fff; box-shadow: -12px 0 36px rgba(8,18,32,.2); }
+.history-panel header { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1px solid #e5eaf0; padding-bottom:18px; }
+.history-panel h2 { margin: 4px 0 0; }
+.history-close { border:0; background:transparent; font-size:30px; line-height:1; color:#657387; cursor:pointer; }
+.history-list { display:grid; gap:12px; padding-top:20px; }
+.history-entry { border:1px solid #e1e7ee; border-radius:12px; padding:16px; background:#fbfcfe; }
+.history-entry > div { display:flex; justify-content:space-between; gap:16px; align-items:baseline; }
+.history-entry strong { color:#172b4d; font-size:16px; }
+.history-entry small, .history-entry span { color:#718096; font-size:12px; }
+.history-entry p { margin:10px 0 8px; color:#405066; }
