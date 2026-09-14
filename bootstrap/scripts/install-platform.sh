@@ -732,6 +732,8 @@ EOF
     install -m 0755 "${SCRIPT_DIR}/start-platform.sh" "${install_dir}/start-platform.sh"
     install -m 0755 "${SCRIPT_DIR}/stop-platform.sh" "${install_dir}/stop-platform.sh"
     install -m 0755 "${SCRIPT_DIR}/restart-platform.sh" "${install_dir}/restart-platform.sh"
+    install -m 0755 "${SCRIPT_DIR}/uninstall-platform.sh" "${install_dir}/uninstall-platform.sh"
+    install -m 0755 "${SCRIPT_DIR}/uninstall.sh" "${install_dir}/uninstall.sh"
     if command -v systemctl >/dev/null 2>&1; then
       local unit_template="${SCRIPT_DIR}/templates/hypercdr.service"
       [[ -f "${unit_template}" ]] || unit_template="${SCRIPT_DIR}/../templates/hypercdr.service"
