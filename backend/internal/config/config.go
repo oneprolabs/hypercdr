@@ -51,6 +51,10 @@ type Config struct {
 	RegistrationServiceTokenPath  string
 	RegistrationServiceCAPath     string
 	RegistrationPlatformInstance  string
+	ReleaseCenterURL               string
+	ReleaseCenterToken             string
+	ReleaseCenterCAFile            string
+	ReleaseCenterSyncInterval      string
 }
 
 func Load() Config {
@@ -100,6 +104,10 @@ func Load() Config {
 		RegistrationServiceTokenPath:  getEnv("HCDR_REGISTRATION_SERVICE_TOKEN_PATH", "/var/run/secrets/kubernetes.io/serviceaccount/token"),
 		RegistrationServiceCAPath:     getEnv("HCDR_REGISTRATION_SERVICE_CA_PATH", "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"),
 		RegistrationPlatformInstance:  strings.TrimSpace(os.Getenv("HCDR_REGISTRATION_PLATFORM_INSTANCE")),
+		ReleaseCenterURL:              strings.TrimRight(os.Getenv("HCDR_RELEASE_CENTER_URL"), "/"),
+		ReleaseCenterToken:            strings.TrimSpace(os.Getenv("HCDR_RELEASE_CENTER_TOKEN")),
+		ReleaseCenterCAFile:           os.Getenv("HCDR_RELEASE_CENTER_CA_FILE"),
+		ReleaseCenterSyncInterval:     getEnv("HCDR_RELEASE_CENTER_SYNC_INTERVAL", "3600"),
 	}
 }
 
