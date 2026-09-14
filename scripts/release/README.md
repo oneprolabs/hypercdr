@@ -1,51 +1,41 @@
-# HyperCDR 构建与发布说明
+# HyperCDR Build and Release Guide
 
-本目录集中管理中控平台的构建、镜像发布、安装包生成和平台运维脚本。Bootstrap 只负责 Portal 页面及资源分发，不参与中控平台镜像或安装包的核心构建。
+This directory contains the control-plane build, image publishing, installer packaging, installation, and operations scripts. Bootstrap only provides the Portal UI and distribution assets; it does not build platform images or the platform installer.
 
-## 推荐入口
+## Recommended command
 
 ```bash
 cd /data/hypercdr-main/scripts/release
 cp release.conf.example release.conf
-# 按需编辑 release.conf
+# Edit release.conf as needed.
 ./release-all.sh 1.0.23.20260914 --config ./release.conf
 ```
 
-`release-all.sh` 是完整发布入口，依次完成：
+`release-all.sh` is the complete release entry point. It builds all control-plane and runtime images, pushes them, mirrors Velero/OADP assets, generates the complete `release-manifest.json`, creates the platform installer archive and SHA256 checksum, and registers the candidate release. Use `--skip-register` for the initial seed release.
 
-1. 构建中控平台 API、前端、升级器、注册执行器、comm-agent 和 oadp-comm-agent 镜像；
-2. 推送平台镜像；
-3. 构建/发布 Velero 及对象存储插件；
-4. 同步并构建 OADP/OpenShift 相关镜像和资源；
-5. 生成包含组件版本、镜像地址和 digest 的完整 `release-manifest.json`；
-6. 根据该 manifest 生成中控平台安装包和 SHA256 校验文件；
-7. 向已运行的中控平台登记候选版本（初次发布可使用 `--skip-register`）。
+## Script responsibilities
 
-## 脚本职责
-
-| 文件 | 作用 |
+| File | Purpose |
 |---|---|
-| `release-all.sh` | 完整发布入口 |
-| `build-release.sh` | 构建平台镜像和二进制 |
-| `push-release.sh` | 推送平台镜像 |
-| `publish-runtime-images.sh` | 发布 Velero 等运行时镜像 |
-| `sync-velero-plugins.sh` | 同步对象存储插件 |
-| `mirror-community-oadp-images.sh` | 同步 OADP/OpenShift 镜像 |
-| `build-community-oadp-bundle.sh` | 构建 OADP 部署资源 |
-| `build-community-oadp-catalog.sh` | 构建 OADP Catalog 镜像 |
-| `package-release.sh` | 根据已有 manifest 生成中控平台安装包，不构建镜像 |
-| `publish-package.sh` | 将已有平台安装包发布到 Bootstrap Portal |
-| `install-platform.sh` | 安装中控平台并配置 systemd 自启动 |
-| `deploy-platform.sh` | 渲染或部署 Compose 配置 |
-| `start-platform.sh` / `stop-platform.sh` | 启动或停止平台，不删除数据 |
-| `restart-platform.sh` | 重启平台并等待健康检查 |
-| `uninstall.sh` / `uninstall-platform.sh` | 一键入口和实际卸载逻辑 |
-| `verify-platform.sh` | 验证已部署平台 |
-| `verify-oadp-catalog.sh` | 验证 OADP Catalog |
-| `common.sh` | 公共函数 |
-| `templates/hypercdr.service` | systemd 服务模板 |
+| `release-all.sh` | Complete release pipeline |
+| `build-release.sh` | Build platform binaries and images |
+| `push-release.sh` | Push built platform images |
+| `publish-runtime-images.sh` | Publish Velero/runtime images |
+| `sync-velero-plugins.sh` | Mirror object-storage plugins |
+| `mirror-community-oadp-images.sh` | Mirror OADP/OpenShift images |
+| `build-community-oadp-bundle.sh` | Build OADP deployment resources |
+| `build-community-oadp-catalog.sh` | Build the OADP Catalog image |
+| `package-release.sh` | Package an installer from an existing manifest; does not build images |
+| `publish-package.sh` | Publish an existing platform installer to Bootstrap |
+| `install-platform.sh` | Install the platform and configure systemd recovery |
+| `deploy-platform.sh` | Render or deploy Compose configuration |
+| `start-platform.sh`, `stop-platform.sh`, `restart-platform.sh` | Platform lifecycle operations |
+| `uninstall.sh`, `uninstall-platform.sh` | Uninstall entry point and implementation |
+| `verify-platform.sh`, `verify-oadp-catalog.sh` | Release/deployment validation |
+| `common.sh` | Shared release functions |
+| `templates/hypercdr.service` | systemd service template |
 
-## 调用关系
+## Call graph
 
 ```text
 release-all.sh
@@ -57,26 +47,26 @@ release-all.sh
 ├── build-community-oadp-bundle.sh
 ├── build-community-oadp-catalog.sh
 └── package-release.sh
-    └── hypercdr-installer-<版本>.tar.gz
+    └── hypercdr-installer-<version>.tar.gz
 
 publish-package.sh
-└── 校验并发布 release-all.sh 已生成的平台安装包
+└── verifies and distributes the installer already produced by release-all.sh
 ```
 
-Bootstrap 下的 `scripts/package-release.sh` 仅作为历史兼容入口，不能替代 `release-all.sh`。
+The legacy `bootstrap/scripts/package-release.sh` entry point is retained only for compatibility and must not replace `release-all.sh`.
 
-## 产物位置
+## Output
 
 ```text
-/data/hypercdr-runtime/build/platform/<版本>/
-/data/hypercdr-runtime/releases/community/<版本>/
-├── hypercdr-installer-<版本>.tar.gz
-├── hypercdr-installer-<版本>.sha256
+/data/hypercdr-runtime/build/platform/<version>/
+/data/hypercdr-runtime/releases/community/<version>/
+├── hypercdr-installer-<version>.tar.gz
+├── hypercdr-installer-<version>.sha256
 ├── release-manifest.json
 └── manifest.json
 ```
 
-## 安装和运维
+## Installation and validation
 
 ```bash
 ./install-platform.sh docker --base-url https://HOST:3002 \
@@ -86,13 +76,5 @@ systemctl restart hypercdr.service
 curl -k -o /dev/null -w 'ready=%{http_code}\n' https://HOST:3002/readyz
 ```
 
-安装目录会生成生命周期脚本、`PLATFORM-LIFECYCLE.md` 和 `hypercdr.service`。默认卸载保留数据；只有显式使用 `--purge-data --execute` 才删除安装目录。
+An installation is healthy only when `hypercdr.service` is enabled and active, all five Compose services are running, and `/readyz` returns HTTP 200.
 
-## 验证
-
-```bash
-bash -n scripts/release/*.sh
-make verify
-```
-
-只有 systemd 为 `enabled/active`、5 个 Compose 服务运行且 `/readyz` 返回 HTTP 200，才表示部署成功。
