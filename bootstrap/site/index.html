@@ -25,6 +25,7 @@
         <p class="summary">Enter your environment details, then copy and run the generated command.</p>
       </section>
 
+<<<<<<< HEAD
       <section id="deploy" class="deploy-layout">
         <article id="k8s-panel" class="panel panel-primary deployment-mode-panel">
           <div class="panel-heading">
@@ -34,6 +35,36 @@
               <p class="panel-copy">Install on an existing Kubernetes cluster with kubectl and Helm access.</p>
             </div>
             <span class="badge muted">Kubernetes</span>
+=======
+      <section class="edition-grid" aria-label="HyperCDR editions">
+        <button id="community-card" class="edition-card is-selected" type="button" data-edition="community" aria-pressed="true">
+          <span class="edition-icon">C</span>
+          <span class="edition-content"><strong>HyperCDR Community</strong><small>Open source control plane</small></span>
+          <span id="community-version" class="edition-version">Loading</span>
+        </button>
+        <button id="enterprise-card" class="edition-card" type="button" data-edition="enterprise" aria-pressed="false">
+          <span class="edition-icon enterprise">E</span>
+          <span class="edition-content"><strong>HyperCDR Enterprise</strong><small>Enterprise governance and support</small></span>
+          <span id="enterprise-version" class="edition-version">Loading</span>
+        </button>
+      </section>
+
+      <section id="community-panel" class="edition-panel" aria-labelledby="community-card">
+        <div class="panel-heading">
+          <div><p class="eyebrow">Community</p><h2>Install the Community edition</h2><p class="panel-copy">Use Docker Compose on a dedicated host or Helm in an existing Kubernetes cluster.</p></div>
+          <span class="badge">Available release</span>
+        </div>
+        <div class="release-picker"><label for="community-release">Version</label><select id="community-release"></select><button id="community-history" type="button">View release history</button></div>
+        <div class="mode-tabs" role="tablist" aria-label="Community deployment mode">
+          <button class="mode-tab is-active" type="button" data-mode="docker" role="tab" aria-selected="true">Docker Compose</button>
+          <button class="mode-tab" type="button" data-mode="k8s" role="tab" aria-selected="false">Kubernetes</button>
+        </div>
+        <div id="community-docker" class="mode-panel">
+          <div class="prerequisite-confirm"><strong>Required software</strong><p>Install Docker Engine, Docker Compose V2, bash, curl, and openssl on the target host.</p><label><input type="checkbox" data-prerequisite-confirm="community-docker" /> I confirm that the required software is installed</label></div>
+          <div class="form-grid">
+            <label><span class="field-label">Private network address</span><input id="host-public-url" placeholder="https://192.168.8.149:3002" /><small>Used by users and cluster agents that access the control plane through the private network.</small></label>
+            <label><span class="field-label">Public network address <span class="optional">Optional</span></span><input id="host-agent-public-url" placeholder="https://hypercdr.example.com:3002" /><small>Used when cluster agents access the control plane through the public network.</small></label>
+>>>>>>> 3e2b3c6 (add bootstrap release version selection and history)
           </div>
 
           <div class="configuration-sections">
