@@ -39,8 +39,9 @@
       <section id="community-panel" class="edition-panel" aria-labelledby="community-card">
         <div class="panel-heading">
           <div><p class="eyebrow">Community</p><h2>Install the Community edition</h2><p class="panel-copy">Use Docker Compose on a dedicated host or Helm in an existing Kubernetes cluster.</p></div>
-          <span class="badge">Current release</span>
+          <span class="badge">Available release</span>
         </div>
+        <div class="release-picker"><label for="community-release">Version</label><select id="community-release"></select><button id="community-history" type="button">View release history</button></div>
         <div class="mode-tabs" role="tablist" aria-label="Community deployment mode">
           <button class="mode-tab is-active" type="button" data-mode="docker" role="tab" aria-selected="true">Docker Compose</button>
           <button class="mode-tab" type="button" data-mode="k8s" role="tab" aria-selected="false">Kubernetes</button>

@@ -14,4 +14,12 @@ cp -R "$release/." "$portal/releases/community/$version/"
 # Compatibility aliases reference the same bytes as the versioned package.
 cp -R "$release/." "$portal/releases/community/"
 cp -R "$release/." "$portal/releases/dev/"
+python3 - "$portal/releases/community/index.json" "$portal/releases/community" "$version" <<'PY'
+import json, pathlib, sys
+output, root, version = map(pathlib.Path, sys.argv[1:])
+items=[]
+for manifest in sorted(root.glob('*/release-manifest.json'), reverse=True):
+    items.append(json.loads(manifest.read_text()))
+output.write_text(json.dumps({'items': items}, indent=2) + '\n')
+PY
 printf 'Published Community %s to %s\n' "$version" "$portal"

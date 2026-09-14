@@ -78,10 +78,16 @@ function updatePrerequisiteState() {
 
 async function loadManifest(edition) {
   try {
-    const response = await fetch(`${releases[edition].path}/manifest.json`, { cache: 'no-store' });
+    const response = await fetch(`${releases[edition].path}/index.json`, { cache: 'no-store' });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const manifest = await response.json();
-    releases[edition].version = manifest.version;
+    const catalog = await response.json();
+    const entries = Array.isArray(catalog.items) ? catalog.items : [catalog];
+    const manifest = entries[0];
+    releases[edition].entries = entries;
+    const picker = element(`${edition}-release`);
+    if (picker) { picker.replaceChildren(...entries.map(item => { const option = document.createElement('option'); option.value = item.version; option.textContent = item.version; return option; })); picker.addEventListener('change', () => { releases[edition].version = picker.value; element(`${edition}-version`).textContent = picker.value; updateCommands(); }); }
+    const history = element(`${edition}-history`);
+    if (history) history.addEventListener('click', () => window.alert(entries.map(item => `${item.version}${item.releaseNotes ? ` — ${item.releaseNotes}` : ''}`).join('\n')));
     releases[edition].available = true;
     element(`${edition}-version`).textContent = manifest.version;
   } catch (_) {
