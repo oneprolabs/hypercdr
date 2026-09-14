@@ -65,6 +65,39 @@ HCDR_REGISTRATION_KUBECTL_SHA256=<64-character-sha256> \
 
 The build rejects a local binary unless the supplied digest matches exactly.
 
+## Unified package and Bootstrap flow
+
+`release-all.sh` is the only recommended full-release entry point. It builds
+all control-plane/runtime images, pushes them, writes the complete
+`release-manifest.json`, and invokes `package-release.sh` to produce
+`hypercdr-installer-<version>.tar.gz`. It does not depend on Bootstrap.
+
+`bootstrap/scripts/package-release.sh` is a compatibility entry point only.
+Bootstrap consumes an already-created and checksum-verified platform installer;
+it never builds platform images or creates a second platform installer.
+
+The scripts in this directory are grouped as follows:
+
+* Build/publish: `build-release.sh`, `push-release.sh`, `release-all.sh`.
+* Runtime/OADP: `publish-runtime-images.sh`, `sync-velero-plugins.sh`,
+  `mirror-community-oadp-images.sh`, `build-community-oadp-*.sh`.
+* Package/distribution: `package-release.sh`, `publish-package.sh`.
+* Platform operations: `install-platform.sh`, `deploy-platform.sh`,
+  `start-platform.sh`, `stop-platform.sh`, `restart-platform.sh`,
+  `uninstall*.sh`.
+* Validation/common: `verify-*.sh`, `common.sh`.
+
+Typical output is written to:
+
+```text
+/data/hypercdr-runtime/build/platform/<version>/
+/data/hypercdr-runtime/releases/community/<version>/
+```
+
+The latter contains the installer archive, SHA256 file, `release-manifest.json`
+and `manifest.json`. Bootstrap publishing only copies this directory to its
+download source.
+
 Build work is written to `/data/hypercdr-runtime/build/platform/<version>` and shared
 Go/npm caches are written to `/data/hypercdr-runtime/cache` by default. Override them
 with `HCDR_BUILD_ROOT` and `HCDR_CACHE_ROOT`. The source tree is not used for
