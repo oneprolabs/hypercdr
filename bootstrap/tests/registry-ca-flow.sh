@@ -4,10 +4,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_ROOT="$(mktemp -d)"
 trap 'rm -rf "${TEST_ROOT}"' EXIT
+# The installer consumes the manifest shipped beside an installer package.
+# Provide a minimal fixture for this isolated lifecycle test.
+MANIFEST_FIXTURE="${SCRIPT_DIR}/../scripts/release/release-manifest.json"
+printf '{"version":"v20260714.5","componentManifest":{}}\n' >"${MANIFEST_FIXTURE}"
+trap 'rm -rf "${TEST_ROOT}"; rm -f "${MANIFEST_FIXTURE}"' EXIT
 
 mkdir -p "${TEST_ROOT}/bin"
 cp /bin/true "${TEST_ROOT}/bin/docker"
 cp /bin/true "${TEST_ROOT}/bin/ss"
+cp /bin/true "${TEST_ROOT}/bin/systemctl"
 cat > "${TEST_ROOT}/bin/curl" <<'EOF'
 #!/usr/bin/env bash
 printf '200'
@@ -21,6 +27,7 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
   -keyout "${TEST_ROOT}/customer-registry-ca.key" \
   -out "${PRIVATE_CA}" >/dev/null 2>&1
 PATH="${TEST_ROOT}/bin:${PATH}" "${SCRIPT_DIR}/install-platform.sh" docker \
+  --base-url https://platform.example.test:3002 \
   --public-base-url https://platform.example.test:3002 \
   --install-dir "${PRIVATE_DATA}" \
   --registry registry.example.test/hypercdr \
@@ -53,6 +60,7 @@ grep -q '/var/run/docker.sock:/var/run/docker.sock' "${PRIVATE_DATA}/docker-comp
 
 # Re-running the installer must retain the initialized database password.
 PATH="${TEST_ROOT}/bin:${PATH}" "${SCRIPT_DIR}/install-platform.sh" docker \
+  --base-url https://platform.example.test:3002 \
   --public-base-url https://platform.example.test:3002 \
   --install-dir "${PRIVATE_DATA}" \
   --registry registry.example.test/hypercdr \
@@ -64,6 +72,7 @@ grep -qx "HCDR_POSTGRES_PASSWORD=${PRIVATE_DB_PASSWORD}" "${PRIVATE_DATA}/.env"
 
 PUBLIC_DATA="${TEST_ROOT}/public"
 PATH="${TEST_ROOT}/bin:${PATH}" "${SCRIPT_DIR}/install-platform.sh" docker \
+  --base-url https://platform.example.test:3002 \
   --public-base-url https://platform.example.test:3002 \
   --install-dir "${PUBLIC_DATA}" \
   --registry registry.example.test/hypercdr \
