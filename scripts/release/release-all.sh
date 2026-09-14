@@ -314,6 +314,9 @@ else
     curl_args+=(--insecure)
   fi
   curl "${curl_args[@]}" --data-binary "@${publish_payload}" >/dev/null
+  curl_args=(-fsS --max-time 120 -X POST "${RELEASE_CENTER_URL%/}/api/v1/releases/${VERSION}/installer" -H "Content-Type: application/gzip" -H "Authorization: Bearer ${RELEASE_CENTER_TOKEN}")
+  [[ -n "${HCDR_PLATFORM_CA_FILE:-}" ]] && curl_args+=(--cacert "${HCDR_PLATFORM_CA_FILE}") || curl_args+=(--insecure)
+  curl "${curl_args[@]}" --data-binary "@${INSTALLER_ARCHIVE}" >/dev/null
   log "Release registered with Release Center: ${VERSION}"
 fi
 
