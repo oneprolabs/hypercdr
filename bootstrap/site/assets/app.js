@@ -81,18 +81,7 @@ function updatePrerequisiteState() {
 
 async function loadManifest(edition) {
   try {
-    let response = await fetch('/api/release-catalog', { cache: 'no-store' });
-    if (!response.ok) response = await fetch(`${releases[edition].path}/index.json`, { cache: 'no-store' });
-    let versioned = true;
-    if (response.status === 404) {
-      response = await fetch(`${releases[edition].path}/manifest.json`, { cache: 'no-store' });
-      versioned = false;
-    }
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const catalog = await response.json();
-    const entries = (Array.isArray(catalog.items) ? catalog.items : [catalog])
-      .filter(item => typeof item.version === 'string' && /^(?:\d+\.\d+\.\d+\.\d{8}|v\d{8}\.\d+)$/.test(item.version))
-      .sort((a, b) => b.version.localeCompare(a.version, 'en', { numeric: true }));
+    const { entries, versioned } = await HyperCDRCatalog.load(edition, releases[edition].path);
     if (!entries.length) throw new Error('No published releases');
     const manifest = entries[0];
     releases[edition].version = manifest.version;
