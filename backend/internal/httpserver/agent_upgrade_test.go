@@ -352,17 +352,17 @@ func TestVeleroUpgradeRemainsAvailableWhenTargetDigestIsNotFullyReady(t *testing
 
 func TestOADPDigestPinnedRuntimeDoesNotOfferImmediateUpgrade(t *testing.T) {
 	target := store.ComponentRelease{
-		Version: "1.3.10-hcdr.1",
-		Image: "registry.example/hypercdr/oadp-velero:1.3.10-hcdr.1",
+		Version:     "1.3.10-hcdr.1",
+		Image:       "registry.example/hypercdr/oadp-velero:1.3.10-hcdr.1",
 		ImageDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	}
 	cluster := store.Cluster{
-		VeleroImage: immutableImageReference(target.Image, target.ImageDigest),
-		VeleroImageDigest: "sha256:platform-specific-runtime-digest",
+		VeleroImage:                immutableImageReference(target.Image, target.ImageDigest),
+		VeleroImageDigest:          "sha256:platform-specific-runtime-digest",
 		VeleroNodeAgentImageDigest: "sha256:platform-specific-runtime-digest",
-		VeleroServerReady: true,
-		VeleroNodeAgentDesired: 1,
-		VeleroNodeAgentReady: 1,
+		VeleroServerReady:          true,
+		VeleroNodeAgentDesired:     1,
+		VeleroNodeAgentReady:       1,
 	}
 	if veleroUpgradeIsAvailable(cluster, target) {
 		t.Fatal("a healthy OADP deployment pinned to the qualified manifest digest must not offer an immediate upgrade")
