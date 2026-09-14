@@ -34,7 +34,17 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(404,{"error":"not_found"})
     def do_POST(self):
         if not self._auth(): return self._json(401,{"error":"unauthorized"})
-        if urlparse(self.path).path != "/api/v1/releases": return self._json(404,{"error":"not_found"})
+        path = urlparse(self.path).path
+        parts = path.split("/")
+        if len(parts) == 6 and parts[:4] == ["", "api", "v1", "releases"] and parts[5] == "installer":
+            version = parts[4].strip()
+            if not version: return self._json(400, {"error":"version_required"})
+            data = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            if not data or not data.startswith(b"\x1f\x8b"): return self._json(400, {"error":"installer_must_be_gzip"})
+            target = ROOT / "releases" / version; target.mkdir(parents=True, exist_ok=True)
+            (target / "installer.tar.gz").write_bytes(data)
+            return self._json(201, {"version": version, "status":"installer_uploaded"})
+        if path != "/api/v1/releases": return self._json(404,{"error":"not_found"})
         try: body=json.loads(self.rfile.read(int(self.headers.get("Content-Length","0"))))
         except Exception: return self._json(400,{"error":"invalid_json"})
         version=str(body.get("version", "")).strip()
