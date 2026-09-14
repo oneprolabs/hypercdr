@@ -69,6 +69,12 @@ The legacy `bootstrap/scripts/package-release.sh` entry point is retained only f
 
 ## Installation and validation
 
+For detailed local-package prerequisites, installation, upgrade commands,
+configuration-preservation limitations, backup examples, and verification, read
+[Local Package Installation and Upgrade](LOCAL-INSTALLATION.md). The packaging
+script includes this guide as `README.md` at the root of every newly generated
+installer package. Previously generated archives are not modified.
+
 ```bash
 ./install-platform.sh docker --base-url https://HOST:3002 \
   --install-dir /var/lib/hypercdr --execute --confirm-prerequisites
