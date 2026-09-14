@@ -1,0 +1,14 @@
+services:
+  release-center:
+    build: .
+    image: hypercdr/release-center:dev
+    environment:
+      RELEASE_CENTER_BIND: 0.0.0.0
+      RELEASE_CENTER_PORT: 8090
+      RELEASE_CENTER_DATA: /var/lib/release-center
+      RELEASE_CENTER_TOKEN: ${RELEASE_CENTER_TOKEN:?RELEASE_CENTER_TOKEN is required}
+    ports:
+      - "${RELEASE_CENTER_PORT:-8090}:8090"
+    volumes:
+      - ${RELEASE_CENTER_DATA:-./data}:/var/lib/release-center
+    restart: unless-stopped
