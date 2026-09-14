@@ -68,6 +68,7 @@ cp "${RELEASE_SCRIPTS_DIR}/install-platform.sh" "${package_dir}/install-platform
 cp "${SCRIPT_DIR}/install.sh" "${package_dir}/install.sh"
 cp "${SCRIPT_DIR}/install-config.sh" "${package_dir}/install-config.sh"
 cp "${RELEASE_SCRIPTS_DIR}/uninstall-platform.sh" "${package_dir}/uninstall-platform.sh"
+cp "${RELEASE_SCRIPTS_DIR}/upgrade-local.sh" "${package_dir}/upgrade-local.sh"
 cp "${SCRIPT_DIR}/prepare-docker-registry.sh" "${package_dir}/prepare-docker-registry.sh"
 cp "${SCRIPT_DIR}/check-harbor.sh" "${package_dir}/check-harbor.sh"
 cp "${RELEASE_SCRIPTS_DIR}/start-platform.sh" "${package_dir}/start-platform.sh"

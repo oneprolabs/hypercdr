@@ -26,6 +26,7 @@ cp release.conf.example release.conf
 | `build-community-oadp-bundle.sh` | Build OADP deployment resources |
 | `build-community-oadp-catalog.sh` | Build the OADP Catalog image |
 | `package-release.sh` | Package an installer from an existing manifest; does not build images |
+| `upgrade-local.sh` | Upgrade an existing Docker installation from an extracted local package |
 | `publish-package.sh` | Publish an existing platform installer to Bootstrap |
 | `install-platform.sh` | Install the platform and configure systemd recovery |
 | `deploy-platform.sh` | Render or deploy Compose configuration |
@@ -77,4 +78,3 @@ curl -k -o /dev/null -w 'ready=%{http_code}\n' https://HOST:3002/readyz
 ```
 
 An installation is healthy only when `hypercdr.service` is enabled and active, all five Compose services are running, and `/readyz` returns HTTP 200.
-
