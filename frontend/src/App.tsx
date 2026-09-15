@@ -1122,7 +1122,14 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
 
   useEffect(() => {
     let cancelled = false;
-    void apiGet<ApiAuthConfig>('/api/v1/auth/config').then(config => { if (!cancelled) setAuthConfig(config); }).catch(() => undefined);
+    void Promise.all([
+      apiGet<ApiAuthConfig>('/api/v1/auth/config'),
+      apiGet<{ data?: { enabled?: boolean; configured?: boolean; site_key?: string } }>('/api/v1/auth/turnstile/config'),
+    ]).then(([config, turnstile]) => {
+      if (cancelled) return;
+      const t = turnstile.data;
+      setAuthConfig({ ...config, challengeMode: t?.enabled && t?.configured ? 'turnstile' : 'image', turnstileSiteKey: t?.site_key || '' });
+    }).catch(() => undefined);
     return () => { cancelled = true; };
   }, []);
 

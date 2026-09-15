@@ -10,7 +10,7 @@ import (
 func (r *Router) withPlatformAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		path := req.URL.Path
-		publicAuth := path == "/api/v1/product-info" || path == "/api/v1/auth/captcha" || path == "/api/v1/auth/login" || path == "/api/v1/auth/forgot-password" || path == "/api/v1/auth/reset-password" || path == "/api/v1/auth/config" || path == "/api/v1/disaster-handovers/validate" || strings.HasPrefix(path, "/api/v1/community-migrations/source/")
+		publicAuth := path == "/api/v1/product-info" || path == "/api/v1/auth/captcha" || path == "/api/v1/auth/login" || path == "/api/v1/auth/forgot-password" || path == "/api/v1/auth/reset-password" || path == "/api/v1/auth/config" || path == "/api/v1/auth/turnstile/config" || path == "/api/v1/disaster-handovers/validate" || strings.HasPrefix(path, "/api/v1/community-migrations/source/")
 		if _, isMemory := r.store.(*store.MemoryStore); isMemory || !strings.HasPrefix(path, "/api/v1/") || publicAuth || path == "/api/v1/agent-tokens/validate" {
 			next.ServeHTTP(w, req)
 			return

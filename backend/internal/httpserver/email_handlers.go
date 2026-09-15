@@ -314,8 +314,25 @@ func (r *Router) authConfig(w http.ResponseWriter, req *http.Request) {
 		"googleEnabled":    strings.TrimSpace(r.cfg.GoogleClientID) != "" && strings.TrimSpace(r.cfg.GoogleClientSecret) != "",
 		"challengeMode":    r.authChallengeMode(),
 		"turnstileSiteKey": strings.TrimSpace(r.cfg.TurnstileSiteKey),
+		"turnstileEnabled": r.turnstileEnabled(),
 		"timeZone":         serverTimeZone(),
 	})
+}
+
+// authTurnstileConfig exposes only public challenge metadata. The secret is
+// never serialized; clients must treat configured=false as a blocked state.
+func (r *Router) authTurnstileConfig(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	enabled := r.turnstileEnabled()
+	site := strings.TrimSpace(r.cfg.TurnstileSiteKey)
+	configured := site != "" && strings.TrimSpace(r.cfg.TurnstileSecretKey) != ""
+	writeJSON(w, http.StatusOK, map[string]any{"code": "0000", "data": map[string]any{
+		"enabled": enabled, "configured": configured, "site_key": site,
+	}})
+}
+
+func (r *Router) turnstileEnabled() bool {
+	return strings.EqualFold(strings.TrimSpace(r.cfg.AuthChallengeMode), "turnstile")
 }
 
 func (r *Router) authChallengeMode() string {
