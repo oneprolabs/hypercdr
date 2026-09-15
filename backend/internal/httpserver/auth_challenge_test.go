@@ -34,3 +34,14 @@ func TestVerifyTurnstile(t *testing.T) {
 		t.Fatal("expected valid Turnstile response")
 	}
 }
+
+func TestVerifyTurnstileRejectsUnsuccessfulResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		io.WriteString(w, `{"success":false}`)
+	}))
+	defer server.Close()
+	r := &Router{cfg: config.Config{TurnstileSecretKey: "secret", TurnstileVerifyURL: server.URL}}
+	if r.verifyTurnstile(httptest.NewRequest(http.MethodPost, "/", nil), "token") {
+		t.Fatal("expected unsuccessful Turnstile response to be rejected")
+	}
+}
