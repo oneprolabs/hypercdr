@@ -76,6 +76,14 @@ cd "hypercdr-installer-${VERSION}"
 ./upgrade-local.sh --help
 ```
 
+For a standalone Docker host, use `install.sh` as the package entry point; it
+selects the Docker deployment automatically. The lower-level
+`install-platform.sh` script requires the explicit `docker` mode:
+
+```bash
+./install-platform.sh docker --base-url https://192.0.2.10:3002
+```
+
 Stop if checksum verification fails. Do not mix scripts or manifests from
 different releases or edit the package to refer to an unrelated image version.
 
