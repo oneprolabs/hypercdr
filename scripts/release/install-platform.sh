@@ -183,7 +183,7 @@ done
 # generated image references and RELEASE_VERSION stay aligned.  This also
 # keeps direct low-level invocation consistent with the package entrypoint.
 if [[ "${image_tag_explicit}" != "true" && -s "${SCRIPT_DIR}/release-manifest.json" ]]; then
-  manifest_tag="$(sed -nE 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "${SCRIPT_DIR}/release-manifest.json" | head -1)"
+  manifest_tag="$(sed -nE 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "${SCRIPT_DIR}/release-manifest.json" | head -1)"
   if [[ -n "${manifest_tag}" ]]; then
     image_tag="${manifest_tag}"
   fi
