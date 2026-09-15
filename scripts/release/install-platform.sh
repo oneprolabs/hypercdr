@@ -138,6 +138,7 @@ install_dir="/var/lib/hypercdr"
 http_port=""
 api_port="18080"
 image_tag="${HCDR_IMAGE_TAG:-1.0.23.20260915}"
+image_tag_explicit="false"
 velero_image=""
 velero_aws_plugin_image=""
 input_tls_cert_file=""
@@ -159,7 +160,7 @@ while [[ $# -gt 0 ]]; do
     --registry-config) registry_config="${2:?missing value for --registry-config}"; shift 2 ;;
     --registry-trust) registry_trust="${2:?missing value for --registry-trust}"; shift 2 ;;
     --registry-ca-file) registry_ca_file="${2:?missing value for --registry-ca-file}"; shift 2 ;;
-    --image-tag) image_tag="${2:?missing value for --image-tag}"; shift 2 ;;
+    --image-tag) image_tag="${2:?missing value for --image-tag}"; image_tag_explicit="true"; shift 2 ;;
     --storage-class) storage_class="${2:?missing value for --storage-class}"; shift 2 ;;
     --database-mode) database_mode="${2:?missing value for --database-mode}"; shift 2 ;;
     --node-port) node_port="${2:?missing value for --node-port}"; shift 2 ;;
@@ -176,6 +177,17 @@ while [[ $# -gt 0 ]]; do
     *) echo "unknown argument: $1" >&2; usage; exit 2 ;;
   esac
 done
+
+# A versioned package carries its authoritative release manifest next to this
+# script.  When callers do not override --image-tag, use that manifest so
+# generated image references and RELEASE_VERSION stay aligned.  This also
+# keeps direct low-level invocation consistent with the package entrypoint.
+if [[ "${image_tag_explicit}" != "true" && -s "${SCRIPT_DIR}/release-manifest.json" ]]; then
+  manifest_tag="$(sed -nE 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "${SCRIPT_DIR}/release-manifest.json" | head -1)"
+  if [[ -n "${manifest_tag}" ]]; then
+    image_tag="${manifest_tag}"
+  fi
+fi
 
 if [[ "${execute}" == "true" && "${prerequisites_confirmed}" != "true" ]]; then
   if [[ "${mode}" == "docker" ]]; then
