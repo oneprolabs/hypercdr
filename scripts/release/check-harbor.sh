@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REGISTRY="${HCDR_IMAGE_REGISTRY:-}"
-IMAGE_TAG="${HCDR_IMAGE_TAG:-v20260714.5}"
+IMAGE_TAG="${HCDR_IMAGE_TAG:-1.0.23.20260915}"
 
 usage() {
   cat <<'USAGE'
@@ -13,7 +13,7 @@ Usage:
 
 Options:
   --registry PREFIX   Harbor project prefix, for example 192.168.7.128/hypercdr.
-  --image-tag TAG     Platform image tag to verify, default v20260714.5.
+  --image-tag TAG     Platform image tag to verify, default 1.0.23.20260915.
   -h, --help          Show help.
 USAGE
 }

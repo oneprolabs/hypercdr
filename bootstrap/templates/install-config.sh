@@ -10,7 +10,7 @@ HCDR_BASE_URL="https://192.0.2.10:3002"
 HCDR_REGISTRY="crpi-tne0uo16mzanbvpi.cn-zhangjiakou.personal.cr.aliyuncs.com/hypercdr"
 
 # Released HyperCDR version. It is updated automatically when the package is built.
-HCDR_IMAGE_TAG="v20260714.5"
+HCDR_IMAGE_TAG="1.0.23.20260915"
 
 # Persistent data and listening ports on the target host.
 HCDR_INSTALL_DIR="/var/lib/hypercdr"

@@ -68,7 +68,7 @@ Obtain the archive and matching checksum from a trusted release source. Replace
 the example version with the version actually delivered to you.
 
 ```bash
-VERSION=1.0.22.20260914
+VERSION=1.0.23.20260915
 sha256sum -c "hypercdr-installer-${VERSION}.sha256"
 tar -xzf "hypercdr-installer-${VERSION}.tar.gz"
 cd "hypercdr-installer-${VERSION}"
@@ -180,7 +180,7 @@ Run this from the **newly extracted package**, not an old installation directory
 ```bash
 ./upgrade-local.sh \
   --base-url https://192.0.2.10:3002 \
-  --image-tag 1.0.22.20260914 \
+  --image-tag 1.0.23.20260915 \
   --install-dir /var/lib/hypercdr \
   --registry crpi-tne0uo16mzanbvpi.cn-zhangjiakou.personal.cr.aliyuncs.com/hypercdr
 ```

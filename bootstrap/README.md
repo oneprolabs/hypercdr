@@ -79,7 +79,7 @@ Build and push platform and agent images with the standard release script:
 
 ```bash
 cd /data/hypercdr/scripts/release
-./release-all.sh v20260714.5 --config ./release.conf
+./release-all.sh 1.0.23.20260915 --config ./release.conf
 ```
 
 ## Uninstall Standalone Host Deployment
@@ -104,7 +104,7 @@ The uninstaller does not uninstall Harbor and does not stop the bootstrap portal
 
 ```bash
 cd /data/hypercdr/scripts/release
-./release-all.sh v20260714.5 --config ./release.conf
+./release-all.sh 1.0.23.20260915 --config ./release.conf
 ```
 
 ### 2. Prepare Harbor
@@ -129,7 +129,7 @@ Generate the downloadable installer package first:
 
 ```bash
 cd /data/hypercdr/bootstrap
-./release-bootstrap.sh v20260714.5
+./release-bootstrap.sh 1.0.23.20260915
 ```
 
 This creates an external portal source at `/data/hypercdr-runtime/services/bootstrap-portal/source`

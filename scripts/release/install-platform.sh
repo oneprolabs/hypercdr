@@ -78,7 +78,7 @@ Kubernetes options:
   --registry-config PATH       Registry profiles file.
   --registry-trust MODE        system (default) or private-ca
   --registry-ca-file PATH      PEM CA certificate, required for private-ca
-  --image-tag TAG              Platform/agent image tag, default v20260714.5.
+  --image-tag TAG              Platform/agent image tag, default 1.0.23.20260915.
   --storage-class NAME         StorageClass for bundled PostgreSQL PVC, default: longhorn
   --database-mode MODE         bundled or external, default: bundled
   --node-port PORT             NodePort for platform Service. Defaults to URL port when present.
@@ -97,7 +97,7 @@ Docker options:
   --registry-config PATH       Registry profiles file.
   --registry-trust MODE        system (default) or private-ca
   --registry-ca-file PATH      PEM CA certificate, required for private-ca
-  --image-tag TAG              Platform/agent image tag, default v20260714.5.
+  --image-tag TAG              Platform/agent image tag, default 1.0.23.20260915.
   --http-port PORT             Frontend host port. Defaults to the port in --base-url, or 3002.
   --api-port PORT              API host port, default 18080.
   --tls-cert-file PATH         Existing platform certificate to use. Optional.
@@ -137,7 +137,7 @@ secret_key="dev-secret-change-me"
 install_dir="/var/lib/hypercdr"
 http_port=""
 api_port="18080"
-image_tag="${HCDR_IMAGE_TAG:-v20260714.5}"
+image_tag="${HCDR_IMAGE_TAG:-1.0.23.20260915}"
 velero_image=""
 velero_aws_plugin_image=""
 input_tls_cert_file=""
