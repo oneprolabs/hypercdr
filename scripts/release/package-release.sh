@@ -68,6 +68,7 @@ cp "${RELEASE_SCRIPTS_DIR}/install-platform.sh" "${package_dir}/install-platform
 cp "${SCRIPT_DIR}/install.sh" "${package_dir}/install.sh"
 cp "${SCRIPT_DIR}/install-config.sh" "${package_dir}/install-config.sh"
 cp "${RELEASE_SCRIPTS_DIR}/uninstall-platform.sh" "${package_dir}/uninstall-platform.sh"
+cp "${RELEASE_SCRIPTS_DIR}/uninstall.sh" "${package_dir}/uninstall.sh"
 cp "${RELEASE_SCRIPTS_DIR}/upgrade-local.sh" "${package_dir}/upgrade-local.sh"
 cp "${SCRIPT_DIR}/prepare-docker-registry.sh" "${package_dir}/prepare-docker-registry.sh"
 cp "${SCRIPT_DIR}/check-harbor.sh" "${package_dir}/check-harbor.sh"
@@ -97,6 +98,7 @@ sed -i -E "s/(v[0-9]{8}\.[0-9]+|[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8})/${VERSION}/g" 
   "${package_dir}/install-platform.sh" \
   "${package_dir}/install-config.sh" \
   "${package_dir}/check-harbor.sh" \
+  "${package_dir}/README.md" \
   "${package_dir}/compose.yaml" \
   "${package_dir}/charts/hypercdr-platform/values.yaml"
 
@@ -108,8 +110,9 @@ tar -C "${WORK_DIR}" --transform="s,^hypercdr-bootstrap,hypercdr-installer-${VER
 cp "${RELEASE_MANIFEST}" "${RELEASE_DIR}/release-manifest.json"
 cp "${package_dir}/install-platform.sh" "${RELEASE_DIR}/install-platform.sh"
 cp "${package_dir}/uninstall-platform.sh" "${RELEASE_DIR}/uninstall-platform.sh"
+cp "${package_dir}/uninstall.sh" "${RELEASE_DIR}/uninstall.sh"
 cp "${package_dir}/compose.yaml" "${RELEASE_DIR}/compose.yaml"
-chmod +x "${RELEASE_DIR}/install-platform.sh" "${RELEASE_DIR}/uninstall-platform.sh"
+chmod +x "${RELEASE_DIR}/install-platform.sh" "${RELEASE_DIR}/uninstall-platform.sh" "${RELEASE_DIR}/uninstall.sh"
 (
   cd "${RELEASE_DIR}"
   sha256sum "hypercdr-installer-${VERSION}.tar.gz" > "hypercdr-installer-${VERSION}.sha256"
