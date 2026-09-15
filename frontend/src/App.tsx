@@ -366,7 +366,7 @@ type ApiCaptcha = {
   expiresAt: string;
 };
 type ApiAuthConfig = { challengeMode?: 'image' | 'turnstile'; turnstileSiteKey?: string };
-declare global { interface Window { turnstile?: { render: (element: HTMLElement, options: { sitekey: string; callback: (token: string) => void; 'expired-callback'?: () => void; 'error-callback'?: () => void }) => string; reset: (id?: string) => void }; } }
+declare global { interface Window { turnstile?: { render: (element: HTMLElement, options: { sitekey: string; language?: string; size?: 'flexible'; theme?: 'dark'; callback: (token: string) => void; 'expired-callback'?: () => void; 'error-callback'?: () => void }) => string; reset: (id?: string) => void }; } }
 type AuthFlow = 'login' | 'forgot' | 'reset';
 
 type ClusterTaskLog = {
@@ -1108,9 +1108,12 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     const render = () => {
       if (!turnstileRef.current || !window.turnstile || turnstileWidget.current) return;
       turnstileWidget.current = window.turnstile.render(turnstileRef.current, {
+        language: 'en', size: 'flexible', theme: 'dark',
         sitekey: authConfig.turnstileSiteKey!, callback: token => { setTurnstileRendered(true); setTurnstileToken(token); },
         'expired-callback': () => setTurnstileToken(''), 'error-callback': () => setTurnstileToken(''),
       });
+      // The embedded widget owns its loading UI after rendering begins.
+      setTurnstileRendered(true);
     };
     if (!window.turnstile) {
       const script = document.createElement('script'); script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js'; script.async = true; script.defer = true;
