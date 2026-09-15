@@ -1068,6 +1068,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   const [loginCaptcha, setLoginCaptcha] = useState<ApiCaptcha | null>(null);
   const [authConfig, setAuthConfig] = useState<ApiAuthConfig>({ challengeMode: 'image' });
   const [turnstileToken, setTurnstileToken] = useState('');
+  const [turnstileRendered, setTurnstileRendered] = useState(false);
   const turnstileRef = useRef<HTMLDivElement | null>(null);
   const turnstileWidget = useRef<string | null>(null);
   const [loginError, setLoginError] = useState('');
@@ -1107,7 +1108,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     const render = () => {
       if (!turnstileRef.current || !window.turnstile || turnstileWidget.current) return;
       turnstileWidget.current = window.turnstile.render(turnstileRef.current, {
-        sitekey: authConfig.turnstileSiteKey!, callback: setTurnstileToken,
+        sitekey: authConfig.turnstileSiteKey!, callback: token => { setTurnstileRendered(true); setTurnstileToken(token); },
         'expired-callback': () => setTurnstileToken(''), 'error-callback': () => setTurnstileToken(''),
       });
     };
@@ -1117,7 +1118,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       return () => script.removeEventListener('load', render);
     }
     render();
-    return () => { turnstileWidget.current = null; setTurnstileToken(''); };
+    return () => { turnstileWidget.current = null; setTurnstileToken(''); setTurnstileRendered(false); };
   }, [authConfig.challengeMode, authConfig.turnstileSiteKey, authFlow]);
 
   useEffect(() => {
@@ -2200,7 +2201,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
               </div>
               {authFlow === 'reset' && !resetToken && <div className="hbdr-login-error">This password reset link is incomplete. Request a new link and try again.</div>}
               {authFlow === 'login' && authConfig.challengeMode === 'turnstile' && <div className="hbdr-login-turnstile" aria-label="Cloudflare human verification">
-                <div className="hbdr-login-turnstile-status">Verifying you are human…</div><div ref={turnstileRef} />
+                {!turnstileRendered && <div className="hbdr-login-turnstile-status">Verifying you are human…</div>}<div ref={turnstileRef} />
               </div>}
               {authFlow === 'login' && authConfig.challengeMode !== 'turnstile' && <div className="hbdr-login-captcha-code" aria-label="Verification code">
                 <label className="hbdr-login-field">
