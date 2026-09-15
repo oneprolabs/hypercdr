@@ -8,6 +8,7 @@ REGISTRY="${HCDR_IMAGE_REGISTRY:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    -h|--help) echo "Usage: $0 --registry HOST/NAMESPACE [--lock FILE] [--work-dir DIR]"; exit 0 ;;
     --registry) REGISTRY="${2:?missing value for --registry}"; shift 2 ;;
     --lock) RESOLVED_LOCK="${2:?missing value for --lock}"; shift 2 ;;
     --work-dir) WORK_DIR="${2:?missing value for --work-dir}"; shift 2 ;;

@@ -3,6 +3,11 @@ set -euo pipefail
 
 IMAGE="${1:-}"
 ALLOWED_REGISTRY="${2:-}"
+if [[ "${IMAGE}" == "-h" || "${IMAGE}" == "--help" ]]; then
+  echo "Usage: verify-oadp-catalog.sh IMAGE ALLOWED_REGISTRY"
+  echo "Verifies that the catalog is self-contained and digest-pinned."
+  exit 0
+fi
 [[ -n "$IMAGE" && -n "$ALLOWED_REGISTRY" ]] || { echo "usage: verify-oadp-catalog.sh IMAGE ALLOWED_REGISTRY" >&2; exit 2; }
 ALLOWED_REGISTRY="${ALLOWED_REGISTRY%/}"
 case "$IMAGE" in

@@ -2,6 +2,10 @@
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 runtime="${HCDR_RUNTIME_ROOT:-$(dirname "$root")/hypercdr-runtime}"
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  echo 'Usage: publish-package.sh --version VERSION'
+  exit 0
+fi
 [[ $# == 2 && $1 == --version && $2 =~ ^([0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}|v[0-9]{8}\.[0-9]+)$ ]] || { echo 'Usage: publish-release.sh --version VERSION' >&2; exit 2; }
 version="$2"
 release="${HCDR_RELEASE_ROOT:-$runtime/releases/community}/$version"

@@ -4,6 +4,12 @@ set -euo pipefail
 VERSION="${1:-}"
 DEPLOY_DIR="${HCDR_DEPLOY_DIR:-/var/lib/hypercdr}"
 
+if [[ "${VERSION}" == "-h" || "${VERSION}" == "--help" ]]; then
+  echo "Usage: stage-upgrade-ui.sh VERSION"
+  echo "Stages the frontend and upgrader images in an existing deployment."
+  exit 0
+fi
+
 if [[ -z "${VERSION}" || ( ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ && ! "${VERSION}" =~ ^v[0-9]{8}\.[0-9]+$ ) ]]; then
   echo "Usage: stage-upgrade-ui.sh <version>" >&2
   exit 2

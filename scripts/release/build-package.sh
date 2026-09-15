@@ -5,6 +5,7 @@ edition=community
 version=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    -h|--help) echo "Usage: $0 --edition community --version VERSION"; exit 0 ;;
     --edition) edition="${2:?missing edition}"; shift 2 ;;
     --version) version="${2:?missing version}"; shift 2 ;;
     *) echo "Usage: $0 --edition community --version VERSION" >&2; exit 2 ;;
