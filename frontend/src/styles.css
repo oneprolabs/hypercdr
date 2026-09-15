@@ -14654,6 +14654,10 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   align-items: center;
 }
 
+.hbdr-login-turnstile { width: 100%; min-height: 68px; margin-top: 16px; position: relative; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(220,228,238,.5); border-radius: 6px; overflow: hidden; }
+.hbdr-login-turnstile > div:not(.hbdr-login-turnstile-status) { width: 100%; min-height: 68px; }
+.hbdr-login-turnstile-status { position: absolute; color: #94a3b8; font-size: 12px; pointer-events: none; }
+
 .hbdr-login-captcha-image {
   position: relative;
   display: flex;
