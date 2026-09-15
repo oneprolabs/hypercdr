@@ -717,6 +717,10 @@ HCDR_REGISTRY_CA_FILE=$([[ "${registry_trust}" == "private-ca" ]] && echo "${ins
 HCDR_SECRET_KEY=${secret_key}
 HCDR_RELEASE_TOKEN=${release_token}
 HCDR_REGISTRATION_EXECUTOR_TOKEN=${registration_executor_token}
+HCDR_AUTH_CHALLENGE_MODE=${HCDR_AUTH_CHALLENGE_MODE:-image}
+HCDR_TURNSTILE_SITE_KEY=${HCDR_TURNSTILE_SITE_KEY:-}
+HCDR_TURNSTILE_SECRET_KEY=${HCDR_TURNSTILE_SECRET_KEY:-}
+HCDR_TURNSTILE_VERIFY_URL=${HCDR_TURNSTILE_VERIFY_URL:-https://challenges.cloudflare.com/turnstile/v0/siteverify}
 EOF
     chmod 600 "${install_dir}/.env"
     install_ok "Runtime settings saved"

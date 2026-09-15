@@ -1,11 +1,44 @@
 package httpserver
 
 import (
+	"context"
+	"encoding/json"
 	"hypercdr-platform/platform/backend/internal/store"
+	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
+
+func (r *Router) verifyTurnstile(req *http.Request, token string) bool {
+	form := url.Values{"secret": {r.cfg.TurnstileSecretKey}, "response": {token}}
+	if ip := strings.TrimSpace(strings.Split(req.Header.Get("X-Forwarded-For"), ",")[0]); ip != "" {
+		form.Set("remoteip", ip)
+	}
+	ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, r.cfg.TurnstileVerifyURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return false
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return false
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return false
+	}
+	var result struct {
+		Success bool `json:"success"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&result); err != nil {
+		return false
+	}
+	return result.Success
+}
 
 func (r *Router) listCommunityUsers(w http.ResponseWriter, req *http.Request) {
 	items, err := r.store.ListUsers()
@@ -52,21 +85,31 @@ func (r *Router) createCaptcha(w http.ResponseWriter, req *http.Request) {
 
 func (r *Router) login(w http.ResponseWriter, req *http.Request) {
 	var body struct {
-		Email       string `json:"email"`
-		Password    string `json:"password"`
-		CaptchaID   string `json:"captchaId"`
-		CaptchaCode string `json:"captchaCode"`
+		Email          string `json:"email"`
+		Password       string `json:"password"`
+		CaptchaID      string `json:"captchaId"`
+		CaptchaCode    string `json:"captchaCode"`
+		TurnstileToken string `json:"turnstileToken"`
 	}
 	if err := decodeJSON(req, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
 		return
 	}
-	if strings.TrimSpace(body.CaptchaID) == "" || strings.TrimSpace(body.CaptchaCode) == "" {
+	if r.authChallengeMode() == "turnstile" {
+		if strings.TrimSpace(body.TurnstileToken) == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "challenge_required", "message": "Human verification is required"})
+			return
+		}
+		if !r.verifyTurnstile(req, strings.TrimSpace(body.TurnstileToken)) {
+			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "challenge_invalid", "message": "Human verification failed"})
+			return
+		}
+	} else if strings.TrimSpace(body.CaptchaID) == "" || strings.TrimSpace(body.CaptchaCode) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "captcha_required", "message": "Verification code is required"})
 		return
 	}
 
-	if !r.consumeCaptcha(body.CaptchaID, body.CaptchaCode) {
+	if r.authChallengeMode() == "image" && !r.consumeCaptcha(body.CaptchaID, body.CaptchaCode) {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "captcha_invalid", "message": "Verification code is incorrect"})
 		return
 	}

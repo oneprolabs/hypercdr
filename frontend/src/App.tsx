@@ -365,6 +365,8 @@ type ApiCaptcha = {
   image: string;
   expiresAt: string;
 };
+type ApiAuthConfig = { challengeMode?: 'image' | 'turnstile'; turnstileSiteKey?: string };
+declare global { interface Window { turnstile?: { render: (element: HTMLElement, options: { sitekey: string; callback: (token: string) => void; 'expired-callback'?: () => void; 'error-callback'?: () => void }) => string; reset: (id?: string) => void }; } }
 type AuthFlow = 'login' | 'forgot' | 'reset';
 
 type ClusterTaskLog = {
@@ -1064,6 +1066,10 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   const [loginPasswordVisible, setLoginPasswordVisible] = useState(false);
   const [loginCaptchaCode, setLoginCaptchaCode] = useState('');
   const [loginCaptcha, setLoginCaptcha] = useState<ApiCaptcha | null>(null);
+  const [authConfig, setAuthConfig] = useState<ApiAuthConfig>({ challengeMode: 'image' });
+  const [turnstileToken, setTurnstileToken] = useState('');
+  const turnstileRef = useRef<HTMLDivElement | null>(null);
+  const turnstileWidget = useRef<string | null>(null);
   const [loginError, setLoginError] = useState('');
   const [loginSubmitting, setLoginSubmitting] = useState(false);
   const [authFlow, setAuthFlow] = useState<AuthFlow>('login');
@@ -1093,6 +1099,30 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
           setProductCapabilities({});
         }
       });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (authConfig.challengeMode !== 'turnstile' || !authConfig.turnstileSiteKey || authFlow !== 'login') return;
+    const render = () => {
+      if (!turnstileRef.current || !window.turnstile || turnstileWidget.current) return;
+      turnstileWidget.current = window.turnstile.render(turnstileRef.current, {
+        sitekey: authConfig.turnstileSiteKey!, callback: setTurnstileToken,
+        'expired-callback': () => setTurnstileToken(''), 'error-callback': () => setTurnstileToken(''),
+      });
+    };
+    if (!window.turnstile) {
+      const script = document.createElement('script'); script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js'; script.async = true; script.defer = true;
+      script.addEventListener('load', render); document.head.appendChild(script);
+      return () => script.removeEventListener('load', render);
+    }
+    render();
+    return () => { turnstileWidget.current = null; setTurnstileToken(''); };
+  }, [authConfig.challengeMode, authConfig.turnstileSiteKey, authFlow]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void apiGet<ApiAuthConfig>('/api/v1/auth/config').then(config => { if (!cancelled) setAuthConfig(config); }).catch(() => undefined);
     return () => { cancelled = true; };
   }, []);
 
@@ -1367,11 +1397,12 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
 
   const submitLogin = useCallback(async () => {
     if (loginSubmitting) return;
-    if (!loginEmail.trim() || !loginPassword || !loginCaptchaCode.trim()) {
+    const turnstile = authConfig.challengeMode === 'turnstile';
+    if (!loginEmail.trim() || !loginPassword || (turnstile ? !turnstileToken : !loginCaptchaCode.trim())) {
       setLoginError('Email, password, and verification code are required');
       return;
     }
-    if (!loginCaptcha?.id) {
+    if (authConfig.challengeMode !== 'turnstile' && !loginCaptcha?.id) {
       setLoginError('Verification code failed to load');
       return;
     }
@@ -1381,8 +1412,9 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       const response = await apiPost<ApiLoginResponse>('/api/v1/auth/login', {
         email: loginEmail.trim(),
         password: loginPassword,
-        captchaId: loginCaptcha.id,
+        captchaId: loginCaptcha?.id,
         captchaCode: loginCaptchaCode.trim(),
+        turnstileToken: turnstileToken,
       });
       const nextSession: AuthSession = {
         ...response,
@@ -1401,7 +1433,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     } finally {
       setLoginSubmitting(false);
     }
-  }, [loginCaptcha?.id, loginCaptchaCode, loginEmail, loginPassword, loginSubmitting, refreshLoginCaptcha]);
+  }, [authConfig.challengeMode, loginCaptcha?.id, loginCaptchaCode, loginEmail, loginPassword, loginSubmitting, refreshLoginCaptcha, turnstileToken]);
 
   const applyAuthFlow = useCallback((next: AuthFlow) => {
     setAuthFlow(next); setLoginError(''); setAuthMessage(''); setPasswordResetCompleted(false); setLoginPassword(''); setConfirmPassword(''); setLoginCaptchaCode('');
@@ -2160,7 +2192,10 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
                 </label>}
               </div>
               {authFlow === 'reset' && !resetToken && <div className="hbdr-login-error">This password reset link is incomplete. Request a new link and try again.</div>}
-              {authFlow === 'login' && <div className="hbdr-login-captcha-code" aria-label="Verification code">
+              {authFlow === 'login' && authConfig.challengeMode === 'turnstile' && <div className="hbdr-login-captcha-code" aria-label="Cloudflare human verification">
+                <div ref={turnstileRef} />
+              </div>}
+              {authFlow === 'login' && authConfig.challengeMode !== 'turnstile' && <div className="hbdr-login-captcha-code" aria-label="Verification code">
                 <label className="hbdr-login-field">
                   <CheckCircle2 size={15} />
                   <input

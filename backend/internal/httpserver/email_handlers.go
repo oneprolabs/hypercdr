@@ -311,9 +311,19 @@ func validUserEmail(value string) bool {
 func (r *Router) authConfig(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, map[string]any{
-		"googleEnabled": strings.TrimSpace(r.cfg.GoogleClientID) != "" && strings.TrimSpace(r.cfg.GoogleClientSecret) != "",
-		"timeZone":      serverTimeZone(),
+		"googleEnabled":    strings.TrimSpace(r.cfg.GoogleClientID) != "" && strings.TrimSpace(r.cfg.GoogleClientSecret) != "",
+		"challengeMode":    r.authChallengeMode(),
+		"turnstileSiteKey": strings.TrimSpace(r.cfg.TurnstileSiteKey),
+		"timeZone":         serverTimeZone(),
 	})
+}
+
+func (r *Router) authChallengeMode() string {
+	mode := strings.ToLower(strings.TrimSpace(r.cfg.AuthChallengeMode))
+	if mode == "turnstile" && strings.TrimSpace(r.cfg.TurnstileSiteKey) != "" && strings.TrimSpace(r.cfg.TurnstileSecretKey) != "" {
+		return "turnstile"
+	}
+	return "image"
 }
 
 func serverTimeZone() string {
