@@ -6,6 +6,8 @@ set -euo pipefail
 usage() {
   printf '%s\n' \
     'Usage: ./install.sh --base-url HTTPS_URL [--public-base-url URL] [--install-dir PATH] [--check]' \
+    'Deployment mode: install.sh installs the control plane on this host using Docker Compose.' \
+    'The underlying install-platform.sh command uses the explicit mode: ./install-platform.sh docker ...' \
     'Command-line values override install-config.sh; other settings use that file.' \
     'Example: ./install.sh --base-url https://192.168.8.149:3002 --install-dir /data/hypercdr/deploy' \
     'Add --check to validate prerequisites without installing. Installation requires interactive YES confirmation.'
