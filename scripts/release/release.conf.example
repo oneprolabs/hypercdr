@@ -5,24 +5,44 @@
 # Credentials are not stored here. Prefer `docker login`; CI may inject
 # HCDR_REGISTRY_USERNAME and HCDR_REGISTRY_PASSWORD as secrets.
 
+# Active image registry profile. The selected profile supplies the image
+# registry prefix and server used by release-all.sh.
+# Path to the registry profile file. Change this when using another checkout.
+HCDR_REGISTRY_CONFIG=/data/hypercdr-main/config/registries.conf
+# Name of the profile in HCDR_REGISTRY_CONFIG to use for this release.
+HCDR_ACTIVE_REGISTRY=aliyun_acr
+# Complete image namespace prefix. It is resolved from the active profile.
+HCDR_IMAGE_REGISTRY=crpi-tne0uo16mzanbvpi.cn-zhangjiakou.personal.cr.aliyuncs.com/hypercdr
+# Registry host used by docker login (host[:port], without repository path).
+HCDR_REGISTRY_SERVER=crpi-tne0uo16mzanbvpi.cn-zhangjiakou.personal.cr.aliyuncs.com
+# Optional registry username; leave empty when Docker credentials are preconfigured.
+HCDR_REGISTRY_USERNAME=
+# Optional file containing the registry password; never commit this file.
+HCDR_REGISTRY_PASSWORD_FILE=
+
 # Release Center URL used to publish release metadata. Leave empty to skip registration.
 HCDR_RELEASE_CENTER_URL=
-# Release Center authentication token file.
+# File containing the token used to authenticate release publication requests.
 HCDR_RELEASE_CENTER_TOKEN_FILE=
 # Optional private CA for Release Center HTTPS. System trust is used otherwise.
 # HCDR_RELEASE_CENTER_CA_FILE=/path/to/release-center-ca.crt
 
 # Build dependency mirrors.
 HCDR_BUILD_GOPROXY=https://goproxy.cn,direct
+# npm registry used while building the frontend.
 HCDR_BUILD_NPM_REGISTRY=https://registry.npmmirror.com
+# Upstream registry used to mirror official Velero plugin images.
 HCDR_VELERO_PLUGIN_SOURCE_REGISTRY=docker.m.daocloud.io/velero
 
 # External work and dependency caches. Builds do not write generated files into source.
 HCDR_RUNTIME_ROOT=/data/hypercdr-runtime
+# Directory for generated binaries, images metadata, and build intermediates.
 HCDR_BUILD_ROOT=/data/hypercdr-runtime/build/platform
+# Directory for Go, npm, and other dependency caches.
 HCDR_CACHE_ROOT=/data/hypercdr-runtime/cache
 
 # Optional runtime image overrides. Defaults derive from the selected Registry.
 
 # Optional behavior defaults. CLI flags override these.
+# Set true only for an explicitly approved faster build without test execution.
 HCDR_RELEASE_SKIP_TESTS=false

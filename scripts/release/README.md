@@ -7,8 +7,14 @@ This directory contains the control-plane build, image publishing, installer pac
 ```bash
 cd /data/hypercdr-main/scripts/release
 cp release.conf.example release.conf
-# Edit release.conf as needed.
+# Edit release.conf as needed. It contains the complete registry and build configuration.
 ./release-all.sh 1.0.23.20260914 --config ./release.conf
+
+The configuration file is optional only when all settings are supplied through
+environment variables or command-line flags. `release.conf.example` is never
+loaded automatically; copy it to `release.conf` (or pass another path with
+`--config`). Registry passwords and Release Center tokens must be stored in
+separate local files and must not be committed.
 ```
 
 `release-all.sh` is the complete release entry point. It builds all control-plane and runtime images, pushes them, mirrors Velero/OADP assets, generates the complete `release-manifest.json`, creates the platform installer archive and SHA256 checksum, and registers the candidate release. Use `--skip-register` for the initial seed release.
