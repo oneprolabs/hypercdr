@@ -59,7 +59,6 @@ import {
   Sun,
   Terminal,
   Trash2,
-  Upload,
   User,
   X,
   Zap,
@@ -162,7 +161,6 @@ const LazyOperationsCenterPage = lazyWithUpgradeRecovery(() => import('./feature
 const LazyActivityLogPage = lazyWithUpgradeRecovery(() => import('./features/operations/activity-log-page'));
 const LazyDiagnosticLogsPage = lazyWithUpgradeRecovery(() => import('./features/operations/diagnostic-logs-page'));
 const LazySupportBundlePage = lazyWithUpgradeRecovery(() => import('./features/operations/support-bundle-page'));
-const LazyUpgradeManagementPage = lazyWithUpgradeRecovery(() => import('./features/upgrades/upgrade-management-page'));
 const LazyProfilePage = lazyWithUpgradeRecovery(() => import('./features/profile/profile-page'));
 const LazyTagManagementPage = lazyWithUpgradeRecovery(() => import('./features/tags/tag-management-page'));
 const LazyPolicyPage = lazyWithUpgradeRecovery(() => import('./features/policies/policy-page'));
@@ -192,7 +190,6 @@ type View =
   | 'tenants'
   | 'email_settings'
   | 'profile'
-  | 'upgrades'
   | ExtensionViewId;
 
 type TopModule = 'overview' | 'dr' | 'config' | 'ops' | 'monitor' | 'settings';
@@ -290,7 +287,6 @@ const locales: Record<LocaleCode, {
       tenants: ['Tenant Management', 'Create and maintain isolated tenants'],
       email_settings: ['Email Settings', 'Configure password recovery email delivery'],
       profile: ['Basic Information', 'View and update your account'],
-      upgrades: ['Upgrade', 'Check and upgrade platform and cluster components'],
       login: ['', ''],
       dashboard: ['', ''],
     },
@@ -397,7 +393,6 @@ const RESTORABLE_VIEWS = new Set<View>([
   'activity',
   'logs',
   'support_bundle',
-  'upgrades',
 ]);
 
 const PLATFORM_DATA_VIEWS = new Set<View>([
@@ -410,7 +405,6 @@ const PLATFORM_DATA_VIEWS = new Set<View>([
   'policies',
   'restore_points',
   'tags',
-  'upgrades',
 ]);
 
 function isRestorableView(view: View) {
@@ -1692,7 +1686,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     }
     refreshLastStartedAtRef.current = now;
     const request = (async () => {
-      if (targetView === 'clusters' || targetView === 'upgrades' || targetView === 'dr_tasks' || targetView === 'restore_points' || targetView === 'failback') {
+      if (targetView === 'clusters' || targetView === 'dr_tasks' || targetView === 'restore_points' || targetView === 'failback') {
         const clusterRes = await apiGet<ApiList<ApiCluster>>('/api/v1/clusters');
         if (resourceSessionOwnerRef.current !== owner) return [];
         const apiClusters = listItems(clusterRes);
@@ -2003,13 +1997,11 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
         ? [
             ...visibleExtensionModules.filter(module => module.navigation.group === 'settings').map(module => ({ label: module.navigation.label, desc: module.navigation.description, view: module.view as View, icon: module.navigation.icon })),
             ...(authSession?.user.systemAdmin ? [{ label: 'Email Settings', desc: 'Configure password recovery email delivery', view: 'email_settings' as View, icon: Settings2 }] : []),
-            ...(authSession?.user.systemAdmin ? [{ label: 'Upgrade', desc: 'Check and upgrade platform and cluster components', view: 'upgrades' as View, icon: Upload }] : []),
           ]
         : [
             ...(authSession?.user.systemAdmin ? [{ label: 'User Management', desc: 'Manage the built-in Community administrator', view: 'users' as View, icon: User }] : []),
             ...visibleExtensionModules.filter(module => module.navigation.group === 'settings').map(module => ({ label: module.navigation.label, desc: module.navigation.description, view: module.view as View, icon: module.navigation.icon })),
             ...(authSession?.user.systemAdmin ? [{ label: 'Email Settings', desc: 'Configure password recovery email delivery', view: 'email_settings' as View, icon: Settings2 }] : []),
-            ...(authSession?.user.systemAdmin ? [{ label: 'Upgrade', desc: 'Check and upgrade platform and cluster components', view: 'upgrades' as View, icon: Upload }] : []),
           ],
     };
   }, [activeModule, authSession?.user.systemAdmin, hasEnterpriseAuditModule, productCapabilities.advancedAudit?.enabled, productCapabilities.advancedIdentity?.enabled, visibleExtensionModules, view]);
@@ -2631,7 +2623,6 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
             {view === 'email_settings' && authSession?.user.systemAdmin && <React.Suspense fallback={<PageLoadFallback />}><LazyEmailSettingsPage currentUser={authSession.user} toast={setToast} /></React.Suspense>}
             {view === 'users' && authSession?.user.systemAdmin && !productCapabilities.advancedIdentity?.enabled && <React.Suspense fallback={<PageLoadFallback />}><LazyCommunityUserManagementPage currentUser={authSession.user} toast={setToast} /></React.Suspense>}
             {view === 'profile' && authSession && <React.Suspense fallback={<PageLoadFallback />}><LazyProfilePage session={authSession} setSession={next => { setAuthSession(next); writeStoredAuthSession(next); }} toast={setToast} /></React.Suspense>}
-            {view === 'upgrades' && authSession?.user.systemAdmin && <React.Suspense fallback={<PageLoadFallback />}><LazyUpgradeManagementPage isAdmin toast={setToast} refreshPlatformData={refreshPlatformData} /></React.Suspense>}
             {authSession && visibleExtensionModules.map(module => view === module.view ? <React.Suspense key={module.id} fallback={<PageLoadFallback />}><module.component currentUser={authSession.user} clusters={liveApiClusters} toast={setToast} /></React.Suspense> : null)}
           </AnimatePresence>
         </section>

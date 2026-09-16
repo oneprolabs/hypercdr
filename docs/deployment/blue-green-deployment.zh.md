@@ -119,5 +119,5 @@ systemctl restart hypercdr
 
 - `/ws/agent` 是长连接；HTTP 切换无停机，但 Agent 可能在旧颜色停止时重连。
 - API 迁移必须遵循 expand/contract，不能在旧版本仍运行时删除字段。
-- 第一阶段不运行 `platform-upgrader`，避免它和 GitHub Actions 同时修改部署。
+- 第一阶段不运行 `platform-upgrader`，也不提供旧的平台 Upgrade 创建入口；平台版本统一通过 GitHub Actions 发布 Tag 进行蓝绿部署。集群组件升级仍按现有流程执行。
 - 不要把 `.env`、数据库密码、证书私钥或 ACR 密码提交到 Git。

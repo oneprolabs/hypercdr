@@ -434,7 +434,7 @@ Velero 构建脚本放在 Velero 源码自己的 `deployments` 目录：
 - 前端单独做 `platform-frontend` 镜像，使用 nginx 托管。
 - bootstrap 页面输入的镜像仓库地址是安装部署唯一 registry 参数来源，支持 `host/hypercdr` 和 `host:port/hypercdr`。
 - 源码构建和推送通过 `release-all.sh` 统一入口执行，镜像仓库地址来自 `release.conf` 或 `--registry`，不使用硬编码默认值。
-- 中控平台全新安装仍通过 bootstrap 页面完成；中控平台升级后续通过平台 UI 手动触发，不由 release 脚本直接修改运行态。
+- 中控平台全新安装仍通过 bootstrap 页面完成；蓝绿部署模式下，中控平台升级通过 GitHub Actions 发布 Tag 触发，不由平台 UI 直接修改运行态。
 - 镜像 tag 采用 `vYYYYMMDD.N`。
 - Velero 只在源码变化、版本变化或安全需求时重新编译打包。
 - agent 升级由中控平台集群卡片展示当前版本和最新版本，用户手动触发升级。
