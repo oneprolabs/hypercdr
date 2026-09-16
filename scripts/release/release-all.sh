@@ -191,7 +191,7 @@ log "Building the pinned OADP bundle"
 "${SCRIPT_DIR}/build-community-oadp-bundle.sh" --registry "${REGISTRY}"
 log "Building the self-contained OADP catalog"
 "${SCRIPT_DIR}/build-community-oadp-catalog.sh" --registry "${REGISTRY}"
-OADP_RESOLVED_LOCK="${HCDR_OADP_RESOLVED_LOCK:-/data/hypercdr-runtime/oadp-mirror/resolved-image-lock.json}"
+OADP_RESOLVED_LOCK="${HCDR_OADP_RESOLVED_LOCK:-${HCDR_RUNTIME_ROOT:-/data/hypercdr-runtime}/oadp-mirror/resolved-image-lock.json}"
 
 log "Verifying pushed image pulls"
 release_images=( \

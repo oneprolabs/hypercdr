@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT_DIR/scripts/lib/registry-config.sh"
-RESOLVED_LOCK="${HCDR_OADP_RESOLVED_LOCK:-/data/hypercdr-runtime/oadp-mirror/resolved-image-lock.json}"
-WORK_DIR="${HCDR_OADP_BUILD_DIR:-/data/hypercdr-runtime/build/oadp}"
+RESOLVED_LOCK="${HCDR_OADP_RESOLVED_LOCK:-${HCDR_RUNTIME_ROOT:-/data/hypercdr-runtime}/oadp-mirror/resolved-image-lock.json}"
+WORK_DIR="${HCDR_OADP_BUILD_DIR:-${HCDR_RUNTIME_ROOT:-/data/hypercdr-runtime}/build/oadp}"
 REGISTRY="${HCDR_IMAGE_REGISTRY:-}"
 
 while [[ $# -gt 0 ]]; do

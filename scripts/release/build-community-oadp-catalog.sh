@@ -2,11 +2,11 @@
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/registry-config.sh"
 
-RESOLVED_LOCK="${HCDR_OADP_RESOLVED_LOCK:-/data/hypercdr-runtime/oadp-mirror/resolved-image-lock.json}"
-WORK_DIR="${HCDR_OADP_BUILD_DIR:-/data/hypercdr-runtime/build/oadp}"
+RESOLVED_LOCK="${HCDR_OADP_RESOLVED_LOCK:-${HCDR_RUNTIME_ROOT:-/data/hypercdr-runtime}/oadp-mirror/resolved-image-lock.json}"
+WORK_DIR="${HCDR_OADP_BUILD_DIR:-${HCDR_RUNTIME_ROOT:-/data/hypercdr-runtime}/build/oadp}"
 REGISTRY="${HCDR_IMAGE_REGISTRY:-}"
 OPM_IMAGE="${HCDR_OPM_IMAGE:-quay.io/operator-framework/opm@sha256:b32d3891616662620da08d7f0ec42c2e69fa2de43427dc975d35b12f7a969a0f}"
-POLICY_FILE="${HCDR_CONTAINER_POLICY:-/data/hypercdr-runtime/containers-policy.json}"
+POLICY_FILE="${HCDR_CONTAINER_POLICY:-${HCDR_RUNTIME_ROOT:-/data/hypercdr-runtime}/containers-policy.json}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
