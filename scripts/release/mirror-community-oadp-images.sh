@@ -43,7 +43,7 @@ while IFS=$'\t' read -r component source source_digest required; do
   docker tag "${source%@*}@${source_digest}" "$target"
   timeout 300 docker push "$target"
   timeout 300 docker pull --platform "$platform" "$target" >/dev/null
-  target_digest="$(docker image inspect "$target" --format '{{join .RepoDigests "\n"}}' | awk -F@ -v repo="${target%:*}" '$1==repo && $2 ~ /^sha256:[0-9a-f]{64}$/ {print $2; exit}')"
+  target_digest="$(image_digest "$target")"
   [[ "$target_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "target digest unavailable: $target" >&2; exit 1; }
   docker manifest inspect "${target%@*}@${target_digest}" >/dev/null
 

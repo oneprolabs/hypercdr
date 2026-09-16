@@ -57,7 +57,7 @@ catalog_image="$(image_ref "${REGISTRY}" "oadp-catalog" "${release}")"
 docker build --platform linux/amd64 -f "$catalog_dir/configs.Dockerfile" -t "$catalog_image" "$catalog_dir"
 docker push "$catalog_image"
 docker pull --platform linux/amd64 "$catalog_image" >/dev/null
-catalog_digest="$(docker image inspect "$catalog_image" --format '{{join .RepoDigests "\n"}}' | awk -F@ -v repo="${catalog_image%:*}" '$1==repo && $2 ~ /^sha256:[0-9a-f]{64}$/ {print $2; exit}')"
+catalog_digest="$(image_digest "$catalog_image")"
 [[ "$catalog_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "catalog digest is unavailable" >&2; exit 1; }
 docker manifest inspect "${catalog_image%@*}@${catalog_digest}" >/dev/null
 

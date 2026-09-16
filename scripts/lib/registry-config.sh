@@ -11,6 +11,15 @@ image_ref() {
   esac
 }
 
+image_digest() {
+  local image="$1" repo="${1%:*}"
+  docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$image" 2>/dev/null |
+    awk -F@ -v repo="$repo" '
+      BEGIN { sub(/^docker[.]io\//, "", repo) }
+      { actual=$1; sub(/^docker[.]io\//, "", actual); if (actual == repo && $2 ~ /^sha256:[0-9a-f]{64}$/) { print $2; exit } }
+    '
+}
+
 load_registry_profile() {
   local config_file="$1" requested_profile="${2:-}" profile upper field variable value
   local postgres_source_override="${HCDR_POSTGRES_SOURCE_IMAGE_OVERRIDE-}"

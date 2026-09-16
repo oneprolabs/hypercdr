@@ -212,10 +212,8 @@ for image in "${release_images[@]}"; do
 done
 
 remote_digest() {
-  local image="$1" repository digest
-  repository="${image%:*}"
-  digest="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "${image}" 2>/dev/null | \
-    awk -F@ -v repository="${repository}" '$1 == repository && $2 ~ /^sha256:[0-9a-f]{64}$/ {print $2; exit}')"
+  local image="$1" digest
+  digest="$(image_digest "${image}")"
   [[ -n "${digest}" ]] || die "remote digest is unavailable after pulling ${image}"
   printf '%s' "${digest}"
 }

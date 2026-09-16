@@ -89,7 +89,7 @@ bundle_image="$(image_ref "${REGISTRY}" "oadp-bundle" "${release}")"
 docker build --platform linux/amd64 -t "$bundle_image" "$bundle_dir"
 docker push "$bundle_image"
 docker pull --platform linux/amd64 "$bundle_image" >/dev/null
-bundle_digest="$(docker image inspect "$bundle_image" --format '{{join .RepoDigests "\n"}}' | awk -F@ -v repo="${bundle_image%:*}" '$1==repo && $2 ~ /^sha256:[0-9a-f]{64}$/ {print $2; exit}')"
+bundle_digest="$(image_digest "$bundle_image")"
 [[ "$bundle_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "bundle digest is unavailable" >&2; exit 1; }
 docker manifest inspect "${bundle_image%@*}@${bundle_digest}" >/dev/null
 jq '.bundle={component:"oadp-bundle",version:$version,image:$image,imageDigest:$digest}' \
