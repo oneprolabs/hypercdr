@@ -56,9 +56,9 @@ jobs:
         run: |
           cat > "${RUNNER_TEMP}/release.conf" <<EOF
           RELEASE_VERSION=${{ steps.release.outputs.version }}
-          HCDR_REGISTRY_CONFIG=${GITHUB_WORKSPACE}/config/registries.conf
-          HCDR_ACTIVE_REGISTRY=${{ steps.release.outputs.profile }}
           EOF
+          export HCDR_REGISTRY_CONFIG="${GITHUB_WORKSPACE}/config/registries.conf"
+          export HCDR_REGISTRY_PROFILE="${{ steps.release.outputs.profile }}"
           ./scripts/release/release-all.sh --config "${RUNNER_TEMP}/release.conf"
       - uses: actions/upload-artifact@v4
         with:
