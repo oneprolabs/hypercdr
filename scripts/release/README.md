@@ -91,6 +91,11 @@ Without `--execute`, it only previews the plan. Data is preserved unless
 extracted package or source tree. The installation command still accepts
 `--install-dir` to select where these files are installed.
 
+For the production blue/green Compose topology used by GitHub Actions, read
+[Blue/Green Deployment](../../docs/deployment/blue-green-deployment.zh.md).
+That topology uses GitHub Actions as the sole platform deployment controller
+and is separate from the development Compose stack.
+
 For detailed local-package prerequisites, installation, upgrade commands,
 configuration-preservation limitations, backup examples, and verification, read
 [Local Package Installation and Upgrade](LOCAL-INSTALLATION.md). The packaging

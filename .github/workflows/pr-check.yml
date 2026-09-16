@@ -46,6 +46,11 @@ jobs:
         run: bash bootstrap/tests/registry-ca-flow.sh
       - name: Test registry profile selection
         run: bash scripts/tests/registry-config.sh
+      - name: Test blue/green deployment contracts
+        run: |
+          bash scripts/tests/blue-green-deploy.sh
+          bash scripts/tests/blue-green-compose.sh
+          bash scripts/tests/release-workflow.sh
       - name: Reject generated artifacts
         run: bash scripts/tests/repository-hygiene.sh
       - name: Reject tracked secrets and logs

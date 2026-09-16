@@ -117,9 +117,11 @@ replacement of the upstream file followed by `nginx -t` and `nginx -s reload`.
 The active color is persisted in `/var/lib/hypercdr/.active_color` only after a
 successful reload.
 
-The color frontend serves static files over internal HTTP. Public TLS and all
-backend routing move to the edge so a frontend color cannot accidentally proxy
-to the other color's API.
+The color frontend keeps the existing internal HTTPS listener and static/API
+proxy behavior so the bootstrap release remains compatible with already
+published ACR images. Public TLS terminates at the edge; the edge proxies the
+frontend upstream with certificate verification disabled on the private Compose
+network and routes API/asset paths directly to the active API upstream.
 
 ## Server State Layout
 
@@ -296,4 +298,3 @@ true:
 - ACR push credentials are configured in GitHub.
 - The first manual install passes.
 - One upgrade switch and one rollback pass under supervision.
-

@@ -28,12 +28,11 @@
 ## File Structure
 
 - Modify `docker-compose.yml`: define shared services plus blue and green profiles.
-- Modify `docker/platform-frontend.Dockerfile`: include an internal static-only Nginx configuration without changing the legacy default.
-- Create `docker/nginx/edge-internal.conf`: static frontend configuration used only by blue/green frontend containers.
+- Keep `docker/platform-frontend.Dockerfile` unchanged so existing ACR frontend images remain compatible.
 - Create `docker/nginx/edge.conf`: stable public TLS proxy configuration.
 - Create `docker/nginx/upstream.conf.default`: initial blue API/frontend upstreams.
 - Create `scripts/release/deploy-blue-green.sh`: deployment and rollback state machine.
-- Modify `scripts/release/install-platform.sh`: install blue/green assets and call the deployment state machine.
+- Create `scripts/release/install-blue-green.sh`: initialize a production runtime without changing the legacy installer.
 - Modify `scripts/release/start-platform.sh`: start shared services and the persisted active color after reboot.
 - Modify `scripts/release/stop-platform.sh`: stop both profiles plus shared services while preserving data.
 - Modify `scripts/release/templates/hypercdr.service`: keep systemd lifecycle pointed at the blue/green-aware helpers.
@@ -254,8 +253,6 @@ git commit -m "feat: add health gated blue green deployer"
 
 **Files:**
 - Modify: `docker-compose.yml`
-- Modify: `docker/platform-frontend.Dockerfile`
-- Create: `docker/nginx/edge-internal.conf`
 - Create: `docker/nginx/edge.conf`
 - Create: `docker/nginx/upstream.conf.default`
 - Create: `scripts/tests/blue-green-compose.sh`
@@ -323,18 +320,13 @@ healthcheck:
   retries: 24
 ```
 
-For each colored frontend, override the image command to install the bundled
-internal config and start Nginx:
-
-```yaml
-command: ["/bin/sh", "-c", "cp /etc/nginx/edge-internal.conf /etc/nginx/conf.d/default.conf && exec nginx -g 'daemon off;'" ]
-```
-
-Its health check is:
+For each colored frontend, mount the existing platform certificate and key at
+`/etc/hypercdr/tls/platform.crt` and `/etc/hypercdr/tls/platform.key` so the
+published frontend images remain compatible. Its health check is:
 
 ```yaml
 healthcheck:
-  test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3002/"]
+  test: ["CMD", "wget", "--no-check-certificate", "-q", "-O", "/dev/null", "https://127.0.0.1:3002/"]
 ```
 
 The edge publishes 80/443, mounts `${HCDR_TLS_CERT_FILE}` and
@@ -344,9 +336,9 @@ installed Nginx configuration directory read-only.
 - [ ] **Step 4: Implement stable and internal Nginx configurations**
 
 Keep `docker/nginx/default.conf` unchanged for legacy installer compatibility.
-Add `edge-internal.conf` that listens on internal port 3002 and only serves the
-SPA static directory. Copy it in `docker/platform-frontend.Dockerfile` to
-`/etc/nginx/edge-internal.conf`.
+The blue/green frontend containers use the existing internal HTTPS listener and
+proxy behavior; the edge proxy disables certificate verification only on the
+private Compose network.
 
 Add `edge.conf` with:
 
@@ -399,7 +391,7 @@ production configuration. Expected: exit 0.
 - [ ] **Step 6: Commit Task 2**
 
 ```bash
-git add docker-compose.yml docker/platform-frontend.Dockerfile docker/nginx scripts/tests/blue-green-compose.sh
+git add docker-compose.yml docker/nginx scripts/tests/blue-green-compose.sh
 git commit -m "feat: define blue green production topology"
 ```
 
@@ -408,7 +400,7 @@ git commit -m "feat: define blue green production topology"
 ### Task 3: Integrate First Install and Host Lifecycle
 
 **Files:**
-- Modify: `scripts/release/install-platform.sh`
+- Create: `scripts/release/install-blue-green.sh`
 - Modify: `scripts/release/start-platform.sh`
 - Modify: `scripts/release/stop-platform.sh`
 - Modify: `scripts/release/restart-platform.sh`
@@ -421,8 +413,8 @@ git commit -m "feat: define blue green production topology"
 
 - [ ] **Step 1: Add failing installer rendering tests**
 
-Extend `scripts/tests/blue-green-deploy.sh` to invoke the installer with a fake
-Docker binary and a temporary `HCDR_SYSTEMD_UNIT_DIR`. Assert the rendered env
+Extend `scripts/tests/blue-green-deploy.sh` to invoke the new installer in dry
+run mode and a temporary runtime directory. Assert the rendered env
 contains:
 
 ```text
@@ -452,18 +444,18 @@ Run `bash scripts/tests/blue-green-deploy.sh`.
 
 Expected: failure on the first missing blue/green variable or asset.
 
-- [ ] **Step 3: Adapt the installer**
+- [ ] **Step 3: Implement the blue/green installer**
 
-Add `--domain`, `--tls-cert-file`, and `--tls-key-file` validation. Require the
-certificate and key to be readable in execute mode. Copy the Compose file,
-edge config, upstream default, and deploy script into the install directory.
-Initialize `.active_color` only when absent.
-
-Replace the direct `docker compose up -d` in installation step 6 with:
+Implement `scripts/release/install-blue-green.sh` with `VERSION`, `--base-url`,
+`--domain`, `--registry`, `--install-dir`, `--tls-cert-file`,
+`--tls-key-file`, and `--execute`. Require the certificate and key to be
+readable, preserve existing generated secrets, copy the Compose, edge config,
+upstream default, deploy script, and lifecycle helpers into the install
+directory, and initialize `.active_color` only when absent. Execute:
 
 ```bash
 HCDR_INSTALL_DIR="${install_dir}" \
-  "${install_dir}/deploy-blue-green.sh" "${image_tag#v}"
+  "${install_dir}/deploy-blue-green.sh" "${VERSION}"
 ```
 
 Do not overwrite existing secret files, `.env` secret values, or
@@ -488,7 +480,7 @@ Run:
 
 ```bash
 bash scripts/tests/blue-green-deploy.sh
-bash -n scripts/release/install-platform.sh \
+bash -n scripts/release/install-blue-green.sh \
   scripts/release/start-platform.sh \
   scripts/release/stop-platform.sh \
   scripts/release/restart-platform.sh
@@ -709,4 +701,3 @@ generated frontend output, or ACR credential is tracked.
 git add docs/deployment/blue-green-deployment.zh.md scripts/release/README.md
 git commit -m "docs: add blue green deployment runbook"
 ```
-

@@ -15,6 +15,11 @@ done
 compose_file="${compose_file:-${install_dir}/docker-compose.yaml}"
 command -v docker >/dev/null || { echo "Docker is required" >&2; exit 1; }
 [[ -f "$compose_file" ]] || { echo "Compose file not found: $compose_file" >&2; exit 1; }
+if [[ -x "${install_dir}/deploy-blue-green.sh" ]]; then
+  HCDR_INSTALL_DIR="${install_dir}" HCDR_COMPOSE_FILE="${compose_file}" \
+    "${install_dir}/deploy-blue-green.sh" --start-current
+  exit $?
+fi
 cd "$(dirname "$compose_file")"
 docker compose --env-file "${install_dir}/.env" -f "$compose_file" --project-name hypercdr up -d
 # Resolve API DNS again after Docker/network recovery, even if Docker already

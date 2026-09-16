@@ -1,0 +1,7 @@
+upstream hypercdr_api {
+    server hypercdr-platform-api-blue:18080;
+}
+
+upstream hypercdr_frontend {
+    server hypercdr-platform-frontend-blue:3002;
+}
