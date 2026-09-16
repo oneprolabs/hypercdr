@@ -32,6 +32,7 @@ jobs:
           test -n "${LLM_BASE_URL}" || { echo "::error::LLM_BASE_URL is required"; exit 1; }
 
       - name: Review and describe pull request
+        id: pr_agent
         uses: The-PR-Agent/pr-agent@8e4d32e5497defd43c023a404f73560c62728961
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -49,3 +50,65 @@ jobs:
           GITHUB_ACTION_CONFIG.HANDLE_PUSH_TRIGGER: "true"
           GITHUB_ACTION_CONFIG.PUSH_COMMANDS: '["/describe", "/review"]'
           GITHUB_ACTION_CONFIG.PR_ACTIONS: '["opened", "reopened", "ready_for_review"]'
+
+      - name: Notify Feishu
+        if: always()
+        env:
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_AGENT_OUTCOME: ${{ steps.pr_agent.outcome }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+          PR_ADDITIONS: ${{ github.event.pull_request.additions }}
+          PR_DELETIONS: ${{ github.event.pull_request.deletions }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FEISHU_WEBHOOK}" ]; then
+            echo "::warning::FEISHU_WEBHOOK is not configured; skipping notification."
+            exit 0
+          fi
+
+          case "${PR_AGENT_OUTCOME}" in
+            success) STATUS="✅ AI PR review completed"; TEMPLATE="green" ;;
+            *) STATUS="❌ AI PR review failed"; TEMPLATE="red" ;;
+          esac
+
+          PAYLOAD="$(jq -n \
+            --arg status "${STATUS}" \
+            --arg template "${TEMPLATE}" \
+            --arg number "${PR_NUMBER}" \
+            --arg title "${PR_TITLE}" \
+            --arg author "${PR_AUTHOR}" \
+            --arg repository "${GITHUB_REPOSITORY}" \
+            --arg head "${PR_HEAD_REF}" \
+            --arg base "${PR_BASE_REF}" \
+            --arg files "${PR_CHANGED_FILES}" \
+            --arg additions "${PR_ADDITIONS}" \
+            --arg deletions "${PR_DELETIONS}" \
+            --arg url "${PR_URL}" \
+            '{
+              msg_type: "interactive",
+              card: {
+                schema: "2.0",
+                config: {wide_screen_mode: true},
+                header: {
+                  title: {tag: "plain_text", content: ("HyperCDR AI PR Review #" + $number)},
+                  template: $template
+                },
+                body: {elements: [
+                  {tag: "markdown", content: ("**" + $status + "**\n\n" + $title)},
+                  {tag: "markdown", content: ("仓库：" + $repository + "\n作者：" + $author + "\n分支：" + $head + " → " + $base + "\n变更：" + $files + " files | +" + $additions + " / -" + $deletions)},
+                  {tag: "hr"},
+                  {tag: "button", text: {tag: "plain_text", content: "查看 PR"}, type: "primary", behaviors: [{type: "open_url", default_url: {url: $url}}]}
+                ]}
+              }
+            }')"
+
+          curl --fail --silent --show-error --retry 3 --max-time 20 \
+            -H "Content-Type: application/json" \
+            -d "${PAYLOAD}" "${FEISHU_WEBHOOK}"
