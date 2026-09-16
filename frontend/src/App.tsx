@@ -366,7 +366,7 @@ type ApiCaptcha = {
   expiresAt: string;
 };
 type ApiAuthConfig = { challengeMode?: 'image' | 'turnstile'; turnstileSiteKey?: string };
-declare global { interface Window { turnstile?: { render: (element: HTMLElement, options: { sitekey: string; language?: string; size?: 'flexible'; theme?: 'dark'; callback: (token: string) => void; 'expired-callback'?: () => void; 'error-callback'?: () => void }) => string; reset: (id?: string) => void }; } }
+declare global { interface Window { turnstile?: { ready?: (callback: () => void) => void; render: (element: HTMLElement, options: { sitekey: string; language?: string; size?: 'flexible'; theme?: 'dark'; callback: (token: string) => void; 'expired-callback'?: () => void; 'error-callback'?: () => void }) => string; reset: (id?: string) => void }; } }
 type AuthFlow = 'login' | 'forgot' | 'reset';
 
 type ClusterTaskLog = {
@@ -1107,6 +1107,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     if (authConfig.challengeMode !== 'turnstile' || !authConfig.turnstileSiteKey || authFlow !== 'login') return;
     const render = () => {
       if (!turnstileRef.current || !window.turnstile || turnstileWidget.current) return;
+      const mount = () => { if (!turnstileRef.current || !window.turnstile || turnstileWidget.current) return;
       turnstileWidget.current = window.turnstile.render(turnstileRef.current, {
         language: 'en', size: 'flexible', theme: 'dark',
         sitekey: authConfig.turnstileSiteKey!, callback: token => { setTurnstileRendered(true); setTurnstileToken(token); },
@@ -1114,9 +1115,11 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       });
       // The embedded widget owns its loading UI after rendering begins.
       setTurnstileRendered(true);
+      };
+      window.turnstile.ready ? window.turnstile.ready(mount) : mount();
     };
     if (!window.turnstile) {
-      const script = document.createElement('script'); script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js'; script.async = true; script.defer = true;
+      const script = document.createElement('script'); script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'; script.async = false; script.defer = false;
       script.addEventListener('load', render); document.head.appendChild(script);
       return () => script.removeEventListener('load', render);
     }
