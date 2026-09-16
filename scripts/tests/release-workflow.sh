@@ -10,6 +10,7 @@ grep -Fq 'vars.HCDR_DEPLOY_PATH' "$workflow"
 grep -Fq 'deploy-blue-green.sh' "$workflow"
 grep -Fq 'command_timeout: 3600s' "$workflow"
 grep -Fq 'release-all.sh --config "${RUNNER_TEMP}/release.conf"' "$workflow"
+grep -Fq 'HCDR_ACTIVE_REGISTRY=${{ steps.release.outputs.profile }}' "$workflow"
 ! grep -Fq 'release-all.sh "${{ steps.release.outputs.version }}"' "$workflow"
 
 echo "release workflow contract passed"
