@@ -98,9 +98,14 @@ jobs:
             fetch_asset docker/nginx/edge.conf
             fetch_asset docker/nginx/upstream.conf.default
             fetch_asset scripts/release/deploy-blue-green.sh
+            fetch_asset scripts/lib/registry-config.sh
             chmod +x "${source_path}/scripts/release/deploy-blue-green.sh"
             if [ ! -f "${deploy_path}/.env" ]; then
               fetch_asset scripts/release/install-blue-green.sh
+              fetch_asset scripts/release/start-platform.sh
+              fetch_asset scripts/release/stop-platform.sh
+              fetch_asset scripts/release/restart-platform.sh
+              fetch_asset scripts/release/templates/hypercdr.service
               chmod +x "${source_path}/scripts/release/install-blue-green.sh"
               "${source_path}/scripts/release/install-blue-green.sh" \
                 '${{ needs.publish.outputs.image_version }}' \
@@ -113,5 +118,6 @@ jobs:
               install -m 0644 "${source_path}/docker-compose.yml" "${deploy_path}/docker-compose.yaml"
               install -m 0644 "${source_path}/docker/nginx/edge.conf" "${deploy_path}/nginx/conf.d/default.conf"
               install -m 0755 "${source_path}/scripts/release/deploy-blue-green.sh" "${deploy_path}/deploy-blue-green.sh"
+              install -m 0644 "${source_path}/scripts/lib/registry-config.sh" "${deploy_path}/registry-config.sh"
               HCDR_INSTALL_DIR="${deploy_path}" "${deploy_path}/deploy-blue-green.sh" '${{ needs.publish.outputs.image_version }}'
             fi

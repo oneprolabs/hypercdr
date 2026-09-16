@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$ROOT_DIR/scripts/lib/registry-config.sh"
 RESOLVED_LOCK="${HCDR_OADP_RESOLVED_LOCK:-/data/hypercdr-runtime/oadp-mirror/resolved-image-lock.json}"
 WORK_DIR="${HCDR_OADP_BUILD_DIR:-/data/hypercdr-runtime/build/oadp}"
 REGISTRY="${HCDR_IMAGE_REGISTRY:-}"
@@ -84,7 +85,7 @@ if grep -R -E 'quay\.io/konveyor|registry\.redhat\.io' "$bundle_dir/manifests" "
 fi
 grep -q 'version: 1.3.10' "$csv" || { echo "CSV is not OADP 1.3.10" >&2; exit 1; }
 
-bundle_image="${REGISTRY}/oadp-bundle:${release}"
+bundle_image="$(image_ref "${REGISTRY}" "oadp-bundle" "${release}")"
 docker build --platform linux/amd64 -t "$bundle_image" "$bundle_dir"
 docker push "$bundle_image"
 docker pull --platform linux/amd64 "$bundle_image" >/dev/null

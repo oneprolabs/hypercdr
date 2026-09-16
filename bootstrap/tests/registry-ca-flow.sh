@@ -7,6 +7,9 @@ trap 'rm -rf "${TEST_ROOT}"' EXIT
 REAL_DOCKER="$(type -P docker || true)"
 # Stage a package without writing fixtures into the source tree or host units.
 cp -a "${SCRIPT_DIR}/../scripts/release" "${TEST_ROOT}/package"
+mkdir -p "${TEST_ROOT}/package/scripts/lib"
+cp "${SCRIPT_DIR}/../scripts/lib/registry-config.sh" "${TEST_ROOT}/package/scripts/lib/registry-config.sh"
+cp "${SCRIPT_DIR}/../scripts/lib/registry-config.sh" "${TEST_ROOT}/package/registry-config.sh"
 cp "${SCRIPT_DIR}/../docker-compose.yml" "${TEST_ROOT}/package/compose.yaml"
 mkdir -p "${TEST_ROOT}/package/nginx"
 cp "${SCRIPT_DIR}/../docker/nginx/edge.conf" "${TEST_ROOT}/package/nginx/edge.conf"

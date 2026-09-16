@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/registry-config.sh"
 
 RESOLVED_LOCK="${HCDR_OADP_RESOLVED_LOCK:-/data/hypercdr-runtime/oadp-mirror/resolved-image-lock.json}"
 WORK_DIR="${HCDR_OADP_BUILD_DIR:-/data/hypercdr-runtime/build/oadp}"
@@ -52,7 +53,7 @@ YAML
 opm validate /workspace/configs
 [[ ! -e "$catalog_dir/configs.Dockerfile" ]] || unlink "$catalog_dir/configs.Dockerfile"
 opm generate dockerfile /workspace/configs --builder-image "$OPM_IMAGE" --base-image "$OPM_IMAGE"
-catalog_image="${REGISTRY}/oadp-catalog:${release}"
+catalog_image="$(image_ref "${REGISTRY}" "oadp-catalog" "${release}")"
 docker build --platform linux/amd64 -f "$catalog_dir/configs.Dockerfile" -t "$catalog_image" "$catalog_dir"
 docker push "$catalog_image"
 docker pull --platform linux/amd64 "$catalog_image" >/dev/null

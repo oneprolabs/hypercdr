@@ -23,6 +23,7 @@ else
   COMPOSE_TEMPLATE="${SOURCE_ROOT}/docker-compose.yml"
 fi
 RELEASE_NAME="${RELEASE_NAME:-hypercdr}"
+source "$REGISTRY_HELPER"
 
 install_header() {
   printf '\n============================================================\n'
@@ -227,6 +228,8 @@ case "${registry_trust}" in
   *) echo "--registry-trust must be system or private-ca" >&2; exit 2 ;;
 esac
 
+postgres_image="$(image_ref "$registry" postgres 16)"
+
 agent_ws_endpoint="${base_url/https:/wss:}"
 agent_ws_endpoint="${agent_ws_endpoint/http:/ws:}/ws/agent"
 if [[ -n "${public_base_url}" ]]; then
@@ -367,10 +370,10 @@ run_k8s() {
     http_port="3002"
   fi
   if [[ -z "${velero_image}" ]]; then
-    velero_image="${registry}/velero:v1.18.2-hcdr.4"
+    velero_image="$(image_ref "${registry}" "velero" "v1.18.2-hcdr.4")"
   fi
   if [[ -z "${velero_aws_plugin_image}" ]]; then
-    velero_aws_plugin_image="${registry}/velero-plugin-for-aws:v1.13.0"
+    velero_aws_plugin_image="$(image_ref "${registry}" "velero-plugin-for-aws" "v1.13.0")"
   fi
   if [[ "${secret_key}" == "dev-secret-change-me" ]] && command -v openssl >/dev/null 2>&1; then
     secret_key="$(openssl rand -hex 32)"
@@ -410,7 +413,7 @@ NodePort:             ${node_port}
 HTTPS enabled:        ${tls_enabled}
 TLS cert file:        $([[ "${tls_enabled}" == "true" ]] && echo "${tls_cert_file}" || echo "(disabled)")
 Image tag:            ${image_tag}
-Agent image:          ${registry}/comm-agent:${image_tag}
+Agent image:          $(image_ref "${registry}" "comm-agent" "${image_tag}")
 Velero image:         ${velero_image}
 Velero AWS plugin:    ${velero_aws_plugin_image}
 
@@ -436,7 +439,8 @@ helm ${helm_args[*]} upgrade --install ${RELEASE_NAME} ${CHART_DIR} \\
   --set platform.service.nodePort=${node_port} \\
   --set-string postgresql.mode=${database_mode} \\
   --set-string postgresql.storageClass=${storage_class} \\
-  --set-string postgresql.image.repository=${registry}/postgres \\
+  --set-string postgresql.image.repository=${postgres_image%:*} \\
+  --set-string postgresql.image.tag=${postgres_image##*:} \\
   --set-string registrationExecutor.sessionStorage.storageClass=${storage_class} \\
   --set-string secrets.secretKey=<redacted> \\
   --set-string secrets.registrationExecutorToken=<redacted>
@@ -497,7 +501,8 @@ EOF
     --set "platform.service.nodePort=${node_port}" \
     --set-string "postgresql.mode=${database_mode}" \
     --set-string "postgresql.storageClass=${storage_class}" \
-    --set-string "postgresql.image.repository=${registry}/postgres" \
+    --set-string "postgresql.image.repository=${postgres_image%:*}" \
+    --set-string "postgresql.image.tag=${postgres_image##*:}" \
     --set-string "registrationExecutor.sessionStorage.storageClass=${storage_class}" \
     --set-string "secrets.secretKey=${secret_key}" \
     --set-string "secrets.registrationExecutorToken=${registration_executor_token}"
@@ -570,10 +575,10 @@ run_docker() {
     http_port="3002"
   fi
   if [[ -z "${velero_image}" ]]; then
-    velero_image="${registry}/velero:v1.18.2-hcdr.4"
+    velero_image="$(image_ref "${registry}" "velero" "v1.18.2-hcdr.4")"
   fi
   if [[ -z "${velero_aws_plugin_image}" ]]; then
-    velero_aws_plugin_image="${registry}/velero-plugin-for-aws:v1.13.0"
+    velero_aws_plugin_image="$(image_ref "${registry}" "velero-plugin-for-aws" "v1.13.0")"
   fi
   if [[ "${secret_key}" == "dev-secret-change-me" ]] && command -v openssl >/dev/null 2>&1; then
     secret_key="$(openssl rand -hex 32)"
@@ -636,10 +641,10 @@ EOF
 
     install_step 2 7 "Verify required images"
     for required_image in \
-      "${registry}/platform-api:${image_tag}" \
-      "${registry}/platform-frontend:${image_tag}" \
-      "${registry}/cluster-registration-executor:${image_tag}" \
-      "${registry}/postgres:16"; do
+      "$(image_ref "${registry}" "platform-api" "${image_tag}")" \
+      "$(image_ref "${registry}" "platform-frontend" "${image_tag}")" \
+      "$(image_ref "${registry}" "cluster-registration-executor" "${image_tag}")" \
+      "$(image_ref "${registry}" "postgres" "16")"; do
       docker manifest inspect "${required_image}" >/dev/null 2>&1 || {
         install_fail "Required image is unavailable: ${required_image}"
         exit 1
@@ -655,6 +660,7 @@ EOF
     chmod 600 "${install_dir}/registration-executor-token"
     cp "${COMPOSE_TEMPLATE}" "${target_compose_file}"
     install -m 0755 "${SCRIPT_DIR}/deploy-blue-green.sh" "${install_dir}/deploy-blue-green.sh"
+    install -m 0644 "$REGISTRY_HELPER" "${install_dir}/registry-config.sh"
     mkdir -p "${install_dir}/nginx/conf.d" "${install_dir}/nginx/acme"
     nginx_source_dir="${SOURCE_ROOT}/docker/nginx"
     [[ -d "${nginx_source_dir}" ]] || nginx_source_dir="${SCRIPT_DIR}/nginx"
@@ -706,14 +712,14 @@ HCDR_IMAGE_REGISTRY=${registry}
 HCDR_REGISTRY_PROFILE=${HCDR_SELECTED_REGISTRY:-custom}
 HCDR_IMAGE_TAG=${image_tag}
 RELEASE_VERSION=${image_tag}
-PLATFORM_API_IMAGE=${registry}/platform-api:${image_tag}
-PLATFORM_FRONTEND_IMAGE=${registry}/platform-frontend:${image_tag}
-PLATFORM_API_BLUE_IMAGE=${registry}/platform-api:${image_tag}
-PLATFORM_FRONTEND_BLUE_IMAGE=${registry}/platform-frontend:${image_tag}
-PLATFORM_API_GREEN_IMAGE=${registry}/platform-api:${image_tag}
-PLATFORM_FRONTEND_GREEN_IMAGE=${registry}/platform-frontend:${image_tag}
-REGISTRATION_EXECUTOR_IMAGE=${registry}/cluster-registration-executor:${image_tag}
-POSTGRES_IMAGE=${registry}/postgres:16
+PLATFORM_API_IMAGE=$(image_ref "${registry}" "platform-api" "${image_tag}")
+PLATFORM_FRONTEND_IMAGE=$(image_ref "${registry}" "platform-frontend" "${image_tag}")
+PLATFORM_API_BLUE_IMAGE=$(image_ref "${registry}" "platform-api" "${image_tag}")
+PLATFORM_FRONTEND_BLUE_IMAGE=$(image_ref "${registry}" "platform-frontend" "${image_tag}")
+PLATFORM_API_GREEN_IMAGE=$(image_ref "${registry}" "platform-api" "${image_tag}")
+PLATFORM_FRONTEND_GREEN_IMAGE=$(image_ref "${registry}" "platform-frontend" "${image_tag}")
+REGISTRATION_EXECUTOR_IMAGE=$(image_ref "${registry}" "cluster-registration-executor" "${image_tag}")
+POSTGRES_IMAGE=$(image_ref "${registry}" "postgres" "16")
 HCDR_POSTGRES_PASSWORD=${postgres_password}
 HCDR_DATABASE_URL=postgres://hypercdr:${postgres_password}@hypercdr-postgres:5432/hypercdr?sslmode=disable
 HCDR_INSTALL_DIR=${install_dir}

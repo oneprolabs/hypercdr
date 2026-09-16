@@ -2,6 +2,11 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -r "$SCRIPT_DIR/registry-config.sh" ]]; then
+  source "$SCRIPT_DIR/registry-config.sh"
+else
+  source "$SCRIPT_DIR/../lib/registry-config.sh"
+fi
 INSTALL_DIR="${HCDR_INSTALL_DIR:-/var/lib/hypercdr}"
 COMPOSE_FILE="${HCDR_COMPOSE_FILE:-${INSTALL_DIR}/docker-compose.yaml}"
 ENV_FILE="${INSTALL_DIR}/.env"
@@ -55,7 +60,8 @@ read_active_color() {
 read_color_version() {
   local color="$1" key="PLATFORM_API_${1^^}_IMAGE" image
   image="$(sed -n "s/^${key}=//p" "$ENV_FILE" | tail -1)"
-  printf '%s\n' "${image##*:}"
+  local tag="${image##*:}"
+  printf '%s\n' "${tag#platform-api-}"
 }
 
 render_upstream() {
@@ -162,8 +168,8 @@ rollback_color() {
   rollback_version="$(sed -n 's/^ *//p' "${INSTALL_DIR}/.rollback_version" 2>/dev/null | head -1 || true)"
   registry="${HCDR_IMAGE_REGISTRY%/}"
   if [[ "${rollback_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ ]]; then
-    set_env_value "$ENV_FILE" "PLATFORM_API_${target^^}_IMAGE" "${registry}/platform-api:${rollback_version}"
-    set_env_value "$ENV_FILE" "PLATFORM_FRONTEND_${target^^}_IMAGE" "${registry}/platform-frontend:${rollback_version}"
+    set_env_value "$ENV_FILE" "PLATFORM_API_${target^^}_IMAGE" "$(image_ref "${registry}" "platform-api" "${rollback_version}")"
+    set_env_value "$ENV_FILE" "PLATFORM_FRONTEND_${target^^}_IMAGE" "$(image_ref "${registry}" "platform-frontend" "${rollback_version}")"
     load_runtime_env
   fi
   log "rolling back from $current to $target"
@@ -205,8 +211,8 @@ deploy_version() {
   log "deploying version $version to $candidate (current=$current, first_install=$first_install)"
 
   local registry="${HCDR_IMAGE_REGISTRY%/}"
-  set_env_value "$ENV_FILE" "PLATFORM_API_${candidate^^}_IMAGE" "${registry}/platform-api:${version}"
-  set_env_value "$ENV_FILE" "PLATFORM_FRONTEND_${candidate^^}_IMAGE" "${registry}/platform-frontend:${version}"
+  set_env_value "$ENV_FILE" "PLATFORM_API_${candidate^^}_IMAGE" "$(image_ref "${registry}" "platform-api" "${version}")"
+  set_env_value "$ENV_FILE" "PLATFORM_FRONTEND_${candidate^^}_IMAGE" "$(image_ref "${registry}" "platform-frontend" "${version}")"
   set_env_value "$ENV_FILE" RELEASE_VERSION "$version"
   set_env_value "$ENV_FILE" HCDR_IMAGE_TAG "$version"
   load_runtime_env
@@ -236,7 +242,7 @@ deploy_version() {
     die "public /readyz did not become healthy"
   fi
   log "traffic switched to $candidate"
-  set_env_value "$ENV_FILE" REGISTRATION_EXECUTOR_IMAGE "${registry}/cluster-registration-executor:${version}"
+  set_env_value "$ENV_FILE" REGISTRATION_EXECUTOR_IMAGE "$(image_ref "${registry}" "cluster-registration-executor" "${version}")"
   load_runtime_env
   compose pull hypercdr-cluster-registration-executor
   compose up -d hypercdr-cluster-registration-executor

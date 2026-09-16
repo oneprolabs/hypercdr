@@ -57,12 +57,7 @@ go_bin() {
   echo "${go}"
 }
 
-image_ref() {
-  local registry="${1%/}"
-  local name="$2"
-  local version="$3"
-  echo "${registry}/${name}:${version}"
-}
+source "${ROOT_DIR}/scripts/lib/registry-config.sh"
 
 release_work_dir() {
   local version="$1"

@@ -83,6 +83,7 @@ cp "${RELEASE_SCRIPTS_DIR}/templates/hypercdr.service" "${package_dir}/templates
 mkdir -p "${package_dir}/config" "${package_dir}/scripts/lib"
 cp "${ROOT_DIR}/config/registries.conf" "${package_dir}/config/registries.conf"
 cp "${ROOT_DIR}/scripts/lib/registry-config.sh" "${package_dir}/scripts/lib/registry-config.sh"
+cp "${ROOT_DIR}/scripts/lib/registry-config.sh" "${package_dir}/registry-config.sh"
 cp "${ROOT_DIR}/docker-compose.yml" "${package_dir}/compose.yaml"
 cp "${RELEASE_SCRIPTS_DIR}/deploy-blue-green.sh" "${package_dir}/deploy-blue-green.sh"
 cp "${RELEASE_SCRIPTS_DIR}/install-blue-green.sh" "${package_dir}/install-blue-green.sh"

@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+source "$ROOT_DIR/scripts/lib/registry-config.sh"
 VERSION=""
 BASE_URL=""
 REGISTRY=""
@@ -57,6 +58,7 @@ install -m 0644 "$ROOT_DIR/docker-compose.yml" "$INSTALL_DIR/docker-compose.yaml
 install -m 0644 "$ROOT_DIR/docker/nginx/edge.conf" "$INSTALL_DIR/nginx/conf.d/default.conf"
 install -m 0644 "$ROOT_DIR/docker/nginx/upstream.conf.default" "$INSTALL_DIR/nginx/conf.d/upstream.conf"
 install -m 0755 "$ROOT_DIR/scripts/release/deploy-blue-green.sh" "$INSTALL_DIR/deploy-blue-green.sh"
+install -m 0644 "$ROOT_DIR/scripts/lib/registry-config.sh" "$INSTALL_DIR/registry-config.sh"
 install -m 0755 "$ROOT_DIR/scripts/release/start-platform.sh" "$INSTALL_DIR/start-platform.sh"
 install -m 0755 "$ROOT_DIR/scripts/release/stop-platform.sh" "$INSTALL_DIR/stop-platform.sh"
 install -m 0755 "$ROOT_DIR/scripts/release/restart-platform.sh" "$INSTALL_DIR/restart-platform.sh"
@@ -93,12 +95,12 @@ HCDR_AGENT_WS_ENDPOINT=${BASE_URL/https:/wss:}/ws/agent
 HCDR_IMAGE_REGISTRY=${REGISTRY%/}
 HCDR_IMAGE_TAG=${VERSION}
 RELEASE_VERSION=${VERSION}
-PLATFORM_API_BLUE_IMAGE=${REGISTRY%/}/platform-api:${VERSION}
-PLATFORM_FRONTEND_BLUE_IMAGE=${REGISTRY%/}/platform-frontend:${VERSION}
-PLATFORM_API_GREEN_IMAGE=${REGISTRY%/}/platform-api:${VERSION}
-PLATFORM_FRONTEND_GREEN_IMAGE=${REGISTRY%/}/platform-frontend:${VERSION}
-REGISTRATION_EXECUTOR_IMAGE=${REGISTRY%/}/cluster-registration-executor:${VERSION}
-POSTGRES_IMAGE=${REGISTRY%/}/postgres:16
+PLATFORM_API_BLUE_IMAGE=$(image_ref "${REGISTRY}" "platform-api" "${VERSION}")
+PLATFORM_FRONTEND_BLUE_IMAGE=$(image_ref "${REGISTRY}" "platform-frontend" "${VERSION}")
+PLATFORM_API_GREEN_IMAGE=$(image_ref "${REGISTRY}" "platform-api" "${VERSION}")
+PLATFORM_FRONTEND_GREEN_IMAGE=$(image_ref "${REGISTRY}" "platform-frontend" "${VERSION}")
+REGISTRATION_EXECUTOR_IMAGE=$(image_ref "${REGISTRY}" "cluster-registration-executor" "${VERSION}")
+POSTGRES_IMAGE=$(image_ref "${REGISTRY}" "postgres" "16")
 HCDR_POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 HCDR_DATABASE_URL=postgres://hypercdr:${POSTGRES_PASSWORD}@hypercdr-postgres:5432/hypercdr?sslmode=disable
 HCDR_INSTALL_DIR=${INSTALL_DIR}

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$ROOT_DIR/scripts/lib/registry-config.sh"
 LOCK_FILE="${ROOT_DIR}/packaging/oadp/image-lock.json"
 REGISTRY="${HCDR_IMAGE_REGISTRY:-}"
 OUTPUT="${HCDR_OADP_RESOLVED_LOCK:-/data/hypercdr-runtime/oadp-mirror/resolved-image-lock.json}"
@@ -35,7 +36,7 @@ jq '. + {resolvedAt:(now|todateiso8601), registry:$registry, images:[]}' \
   --arg registry "$REGISTRY" "$LOCK_FILE" >"$tmp"
 
 while IFS=$'\t' read -r component source source_digest required; do
-  target="${REGISTRY}/${component}:${release}"
+  target="$(image_ref "${REGISTRY}" "${component}" "${release}")"
   [[ "$source_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "locked source digest is invalid: $component" >&2; exit 1; }
   echo "==> Pulling locked ${source%@*}@${source_digest} for ${platform}"
   timeout 300 docker pull --platform "$platform" "${source%@*}@${source_digest}"

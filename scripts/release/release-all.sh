@@ -142,17 +142,17 @@ EOF
 if [[ "${DRY_RUN}" == "true" ]]; then
   cat <<EOF
 Images:
-  ${REGISTRY}/platform-api:${VERSION}
-  ${REGISTRY}/platform-frontend:${VERSION}
-  ${REGISTRY}/cluster-registration-executor:${VERSION}
-  ${REGISTRY}/comm-agent:${VERSION}
-  ${REGISTRY}/oadp-comm-agent:${VERSION}
-  ${REGISTRY}/oadp-catalog:1.3.10-hcdr.1
-  ${REGISTRY}/postgres:16
-  ${REGISTRY}/velero:${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.4}
-  ${REGISTRY}/velero-plugin-for-aws:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}
-  ${REGISTRY}/velero-plugin-for-microsoft-azure:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}
-  ${REGISTRY}/velero-plugin-for-gcp:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}
+  $(image_ref "${REGISTRY}" "platform-api" "${VERSION}")
+  $(image_ref "${REGISTRY}" "platform-frontend" "${VERSION}")
+  $(image_ref "${REGISTRY}" "cluster-registration-executor" "${VERSION}")
+  $(image_ref "${REGISTRY}" "comm-agent" "${VERSION}")
+  $(image_ref "${REGISTRY}" "oadp-comm-agent" "${VERSION}")
+  $(image_ref "${REGISTRY}" "oadp-catalog" "1.3.10-hcdr.1")
+  $(image_ref "${REGISTRY}" "postgres" "16")
+  $(image_ref "${REGISTRY}" "velero" "${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.4}")
+  $(image_ref "${REGISTRY}" "velero-plugin-for-aws" "${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}")
+  $(image_ref "${REGISTRY}" "velero-plugin-for-microsoft-azure" "${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}")
+  $(image_ref "${REGISTRY}" "velero-plugin-for-gcp" "${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}")
 Dry-run complete; no login, build, push, or registration was performed.
 EOF
   exit 0
@@ -163,7 +163,7 @@ login_registry
 if [[ "${RESUME}" == "true" ]]; then
   log "Resume mode: verifying previously pushed core images"
   for name in platform-api platform-frontend cluster-registration-executor comm-agent oadp-comm-agent; do
-    image="${REGISTRY}/${name}:${VERSION}"
+    image="$(image_ref "${REGISTRY}" "${name}" "${VERSION}")"
     docker manifest inspect "${image}" >/dev/null 2>&1 || die "cannot resume: core image is unavailable: ${image}"
     log "Resume prerequisite OK: ${image}"
   done
@@ -195,16 +195,16 @@ OADP_RESOLVED_LOCK="${HCDR_OADP_RESOLVED_LOCK:-/data/hypercdr-runtime/oadp-mirro
 
 log "Verifying pushed image pulls"
 release_images=( \
-  "${REGISTRY}/platform-api:${VERSION}" \
-  "${REGISTRY}/platform-frontend:${VERSION}" \
-  "${REGISTRY}/cluster-registration-executor:${VERSION}" \
-  "${REGISTRY}/comm-agent:${VERSION}" \
-  "${REGISTRY}/oadp-comm-agent:${VERSION}" \
-  "${REGISTRY}/postgres:16" \
-  "${REGISTRY}/velero:${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.4}" \
-  "${REGISTRY}/velero-plugin-for-aws:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}" \
-  "${REGISTRY}/velero-plugin-for-microsoft-azure:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}" \
-  "${REGISTRY}/velero-plugin-for-gcp:${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}" )
+  "$(image_ref "${REGISTRY}" "platform-api" "${VERSION}")" \
+  "$(image_ref "${REGISTRY}" "platform-frontend" "${VERSION}")" \
+  "$(image_ref "${REGISTRY}" "cluster-registration-executor" "${VERSION}")" \
+  "$(image_ref "${REGISTRY}" "comm-agent" "${VERSION}")" \
+  "$(image_ref "${REGISTRY}" "oadp-comm-agent" "${VERSION}")" \
+  "$(image_ref "${REGISTRY}" "postgres" "16")" \
+  "$(image_ref "${REGISTRY}" "velero" "${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.4}")" \
+  "$(image_ref "${REGISTRY}" "velero-plugin-for-aws" "${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}")" \
+  "$(image_ref "${REGISTRY}" "velero-plugin-for-microsoft-azure" "${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}")" \
+  "$(image_ref "${REGISTRY}" "velero-plugin-for-gcp" "${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}")" )
 while IFS= read -r image; do release_images+=("${image}"); done < <(jq -r '.images[].target,.bundle.image,.catalog.image' "${OADP_RESOLVED_LOCK}")
 for image in "${release_images[@]}"; do
   docker pull "${image}" >/dev/null
@@ -220,11 +220,11 @@ remote_digest() {
   printf '%s' "${digest}"
 }
 
-PLATFORM_API_IMAGE="${REGISTRY}/platform-api:${VERSION}"
-PLATFORM_FRONTEND_IMAGE="${REGISTRY}/platform-frontend:${VERSION}"
-REGISTRATION_EXECUTOR_IMAGE="${REGISTRY}/cluster-registration-executor:${VERSION}"
-COMM_AGENT_IMAGE="${REGISTRY}/comm-agent:${VERSION}"
-OADP_COMM_AGENT_IMAGE="${REGISTRY}/oadp-comm-agent:${VERSION}"
+PLATFORM_API_IMAGE="$(image_ref "${REGISTRY}" "platform-api" "${VERSION}")"
+PLATFORM_FRONTEND_IMAGE="$(image_ref "${REGISTRY}" "platform-frontend" "${VERSION}")"
+REGISTRATION_EXECUTOR_IMAGE="$(image_ref "${REGISTRY}" "cluster-registration-executor" "${VERSION}")"
+COMM_AGENT_IMAGE="$(image_ref "${REGISTRY}" "comm-agent" "${VERSION}")"
+OADP_COMM_AGENT_IMAGE="$(image_ref "${REGISTRY}" "oadp-comm-agent" "${VERSION}")"
 OADP_RELEASE="$(jq -er .release "${OADP_RESOLVED_LOCK}")"
 oadp_image() { jq -er --arg component "$1" '.images[]|select(.component==$component)|.target' "${OADP_RESOLVED_LOCK}"; }
 OADP_OPERATOR_IMAGE="$(oadp_image oadp-operator)"
@@ -235,11 +235,11 @@ OADP_RESTORE_HELPER_IMAGE="$(oadp_image oadp-restore-helper)"
 OADP_BUNDLE_IMAGE="$(jq -er .bundle.image "${OADP_RESOLVED_LOCK}")"
 OADP_CATALOG_IMAGE="$(jq -er .catalog.image "${OADP_RESOLVED_LOCK}")"
 VELERO_VERSION="${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.4}"
-VELERO_IMAGE="${REGISTRY}/velero:${VELERO_VERSION}"
+VELERO_IMAGE="$(image_ref "${REGISTRY}" "velero" "${VELERO_VERSION}")"
 PLUGIN_VERSION="${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}"
-AWS_PLUGIN_IMAGE="${REGISTRY}/velero-plugin-for-aws:${PLUGIN_VERSION}"
-AZURE_PLUGIN_IMAGE="${REGISTRY}/velero-plugin-for-microsoft-azure:${PLUGIN_VERSION}"
-GCP_PLUGIN_IMAGE="${REGISTRY}/velero-plugin-for-gcp:${PLUGIN_VERSION}"
+AWS_PLUGIN_IMAGE="$(image_ref "${REGISTRY}" "velero-plugin-for-aws" "${PLUGIN_VERSION}")"
+AZURE_PLUGIN_IMAGE="$(image_ref "${REGISTRY}" "velero-plugin-for-microsoft-azure" "${PLUGIN_VERSION}")"
+GCP_PLUGIN_IMAGE="$(image_ref "${REGISTRY}" "velero-plugin-for-gcp" "${PLUGIN_VERSION}")"
 
 RELEASE_MANIFEST="$(release_work_dir "${VERSION}")/release-manifest.json"
 cat >"${RELEASE_MANIFEST}" <<EOF

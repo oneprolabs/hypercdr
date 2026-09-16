@@ -5,6 +5,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=../lib/registry-config.sh
 source "${ROOT_DIR}/scripts/lib/registry-config.sh"
 
+[[ "$(image_ref registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr platform-api 1.0.39.20260916)" == "registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:platform-api-1.0.39.20260916" ]]
+[[ "$(image_ref docker.io/oneprolabs/hypercdr postgres 16)" == "docker.io/oneprolabs/hypercdr:postgres-16" ]]
+[[ "$(image_ref 192.168.8.149:5001/hypercdr platform-api 1.0.39.20260916)" == "192.168.8.149:5001/hypercdr/platform-api:1.0.39.20260916" ]]
+
 load_registry_profile "${ROOT_DIR}/config/registries.conf"
 [[ "${HCDR_SELECTED_REGISTRY}" == "aliyun_acr" ]]
 [[ "${HCDR_IMAGE_REGISTRY}" == "registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr" ]]

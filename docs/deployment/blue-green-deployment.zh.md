@@ -4,6 +4,11 @@
 两个 API/前端颜色。生产平台版本只通过 GitHub Actions 发布和部署；开发环境
 仍使用 `docker-compose.dev.yml`。
 
+ACR 和 Docker Hub 使用单仓库、多组件 Tag，例如
+`registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:platform-api-1.0.39.20260916`。
+前端使用 `platform-frontend-版本`，PostgreSQL 使用 `postgres-16`；所有组件
+都在同一仓库，不再追加 `/platform-api` 等子路径。Harbor 保留项目下多仓库命名。
+
 ## GitHub 配置
 
 Repository Variables：

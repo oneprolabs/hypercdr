@@ -124,6 +124,10 @@ func defaultImage(registry string, image string) string {
 	if registry == "" {
 		return ""
 	}
+	parts := strings.Split(registry, "/")
+	if len(parts) == 3 && (parts[0] == "docker.io" || strings.HasSuffix(parts[0], ".aliyuncs.com")) {
+		return registry + ":" + strings.Replace(image, ":", "-", 1)
+	}
 	return registry + "/" + image
 }
 
