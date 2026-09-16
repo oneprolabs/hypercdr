@@ -712,7 +712,6 @@ PLATFORM_API_BLUE_IMAGE=${registry}/platform-api:${image_tag}
 PLATFORM_FRONTEND_BLUE_IMAGE=${registry}/platform-frontend:${image_tag}
 PLATFORM_API_GREEN_IMAGE=${registry}/platform-api:${image_tag}
 PLATFORM_FRONTEND_GREEN_IMAGE=${registry}/platform-frontend:${image_tag}
-PLATFORM_UPGRADER_IMAGE=${registry}/platform-upgrader:${image_tag}
 REGISTRATION_EXECUTOR_IMAGE=${registry}/cluster-registration-executor:${image_tag}
 POSTGRES_IMAGE=${registry}/postgres:16
 HCDR_POSTGRES_PASSWORD=${postgres_password}

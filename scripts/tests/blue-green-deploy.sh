@@ -27,8 +27,8 @@ set_env_value "${RUNTIME_DIR}/.env" PLATFORM_FRONTEND_BLUE_IMAGE registry/platfo
 grep -Fxq 'PLATFORM_FRONTEND_BLUE_IMAGE=registry/platform-frontend:new' "${RUNTIME_DIR}/.env"
 
 render_upstream green "${RUNTIME_DIR}/upstream.conf"
-grep -Fq 'hypercdr-platform-api-green:18080' "${RUNTIME_DIR}/upstream.conf"
-grep -Fq 'hypercdr-platform-frontend-green:3002' "${RUNTIME_DIR}/upstream.conf"
+grep -Fq 'map $host $hypercdr_api_active { default hypercdr-platform-api-green:18080; }' "${RUNTIME_DIR}/upstream.conf"
+grep -Fq 'map $host $hypercdr_frontend_active { default hypercdr-platform-frontend-green:3002; }' "${RUNTIME_DIR}/upstream.conf"
 
 FAKE_BIN="${RUNTIME_DIR}/bin"
 mkdir -p "${FAKE_BIN}"
@@ -58,11 +58,11 @@ HCDR_RELEASE_TOKEN=test-release-token
 HCDR_REGISTRATION_EXECUTOR_TOKEN=test-registration-token
 HCDR_TLS_CERT_FILE=/tmp/test.crt
 HCDR_TLS_KEY_FILE=/tmp/test.key
-PLATFORM_API_BLUE_IMAGE=registry.example/hypercdr/platform-api:old
-PLATFORM_FRONTEND_BLUE_IMAGE=registry.example/hypercdr/platform-frontend:old
-PLATFORM_API_GREEN_IMAGE=registry.example/hypercdr/platform-api:old
-PLATFORM_FRONTEND_GREEN_IMAGE=registry.example/hypercdr/platform-frontend:old
-REGISTRATION_EXECUTOR_IMAGE=registry.example/hypercdr/cluster-registration-executor:old
+PLATFORM_API_BLUE_IMAGE=registry.example/hypercdr/platform-api:1.0.32.20260915
+PLATFORM_FRONTEND_BLUE_IMAGE=registry.example/hypercdr/platform-frontend:1.0.32.20260915
+PLATFORM_API_GREEN_IMAGE=registry.example/hypercdr/platform-api:1.0.32.20260915
+PLATFORM_FRONTEND_GREEN_IMAGE=registry.example/hypercdr/platform-frontend:1.0.32.20260915
+REGISTRATION_EXECUTOR_IMAGE=registry.example/hypercdr/cluster-registration-executor:1.0.32.20260915
 EOF
 touch "${RUNTIME_DIR}/docker-compose.yaml"
 HCDR_INSTALL_DIR="${RUNTIME_DIR}" \
@@ -73,7 +73,7 @@ HCDR_HEALTH_INTERVAL=0 \
 PATH="${FAKE_BIN}:${PATH}" \
   "${ROOT_DIR}/scripts/release/deploy-blue-green.sh" 1.0.33.20260916
 grep -Fxq blue "${RUNTIME_DIR}/.active_color"
-grep -Fq 'hypercdr-platform-api-blue:18080' "${RUNTIME_DIR}/nginx/conf.d/upstream.conf"
+grep -Fq 'map $host $hypercdr_api_active { default hypercdr-platform-api-blue:18080; }' "${RUNTIME_DIR}/nginx/conf.d/upstream.conf"
 
 touch "${RUNTIME_DIR}/running"
 FAKE_RUNNING_FILE="${RUNTIME_DIR}/running" \
@@ -85,7 +85,8 @@ HCDR_HEALTH_INTERVAL=0 \
 PATH="${FAKE_BIN}:${PATH}" \
   "${ROOT_DIR}/scripts/release/deploy-blue-green.sh" 1.0.34.20260916
 grep -Fxq green "${RUNTIME_DIR}/.active_color"
-grep -Fq 'hypercdr-platform-api-green:18080' "${RUNTIME_DIR}/nginx/conf.d/upstream.conf"
+grep -Fq 'map $host $hypercdr_api_active { default hypercdr-platform-api-green:18080; }' "${RUNTIME_DIR}/nginx/conf.d/upstream.conf"
+grep -Fxq 1.0.33.20260916 "${RUNTIME_DIR}/.rollback_version"
 
 FAKE_RUNNING_FILE="${RUNTIME_DIR}/running" \
 HCDR_INSTALL_DIR="${RUNTIME_DIR}" \

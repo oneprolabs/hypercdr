@@ -39,6 +39,20 @@ require_registry "${REGISTRY}"
 REGISTRY="${REGISTRY%/}"
 REGISTRY_HOST="${REGISTRY%%/*}"
 
+if [[ -x "${DEPLOY_DIR}/deploy-blue-green.sh" ]]; then
+  COMPOSE_ENV_FILE="${DEPLOY_DIR}/.env"
+  COMPOSE_FILE="${DEPLOY_DIR}/docker-compose.yaml"
+  DOMAIN="$(sed -n 's/^HCDR_DOMAIN=//p' "${COMPOSE_ENV_FILE}" | tail -n 1)"
+  DOMAIN="${DOMAIN:-${HOST}}"
+  log "Docker Compose blue/green services"
+  (cd "${DEPLOY_DIR}" && docker compose --env-file "${COMPOSE_ENV_FILE}" -f "${COMPOSE_FILE}" --profile blue --profile green ps)
+  (cd "${DEPLOY_DIR}" && docker compose --env-file "${COMPOSE_ENV_FILE}" -f "${COMPOSE_FILE}" --profile blue --profile green config --quiet)
+  log "Checking public readiness"
+  curl -kfsS "https://${DOMAIN}/readyz" >/dev/null
+  log "OK"
+  exit 0
+fi
+
 log "Docker Compose services"
 (cd "${DEPLOY_DIR}" && docker compose ps)
 (cd "${DEPLOY_DIR}" && docker compose ps --services --status running | grep -q '^hypercdr-platform-upgrader$')

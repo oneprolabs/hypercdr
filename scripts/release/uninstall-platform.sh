@@ -30,9 +30,9 @@ Examples:
   /srv/hypercdr/uninstall.sh --purge-data --remove-images --execute
 
 This script removes only HyperCDR control plane containers:
-  hypercdr-platform-frontend
-  hypercdr-platform-api
-  hypercdr-platform-upgrader
+  hypercdr-edge
+  hypercdr-platform-frontend-{blue,green}
+  hypercdr-platform-api-{blue,green}
   hypercdr-cluster-registration-executor
   hypercdr-postgres
 
@@ -77,9 +77,9 @@ Remove images:         ${REMOVE_IMAGES}
 Execute changes:       ${EXECUTE}
 
 Target containers:
-  hypercdr-platform-frontend
-  hypercdr-platform-api
-  hypercdr-platform-upgrader
+  hypercdr-edge
+  hypercdr-platform-frontend-{blue,green}
+  hypercdr-platform-api-{blue,green}
   hypercdr-cluster-registration-executor
   hypercdr-postgres
 EOF
@@ -107,7 +107,8 @@ if command -v systemctl >/dev/null 2>&1 && [[ -f /etc/systemd/system/hypercdr-pl
 fi
 
 images=()
-for name in hypercdr-platform-frontend hypercdr-platform-api hypercdr-platform-upgrader hypercdr-cluster-registration-executor hypercdr-postgres; do
+for name in hypercdr-edge hypercdr-platform-frontend-blue hypercdr-platform-frontend-green \
+  hypercdr-platform-api-blue hypercdr-platform-api-green hypercdr-cluster-registration-executor hypercdr-postgres; do
   image="$(container_image "${name}")"
   if [[ -n "${image}" ]]; then
     images+=("${image}")
@@ -120,11 +121,13 @@ if [[ -n "${COMPOSE_FILE}" && -f "${COMPOSE_FILE}" ]]; then
   (
     cd "${compose_dir}"
     down_args=(down --remove-orphans)
+    [[ -x "${INSTALL_DIR}/deploy-blue-green.sh" ]] && down_args+=(--profile blue --profile green)
     [[ "${PURGE_DATA}" == "true" ]] && down_args+=(--volumes)
     docker compose --project-name hypercdr -f "${compose_name}" "${down_args[@]}"
   )
 else
-  docker rm -f hypercdr-platform-frontend hypercdr-platform-api hypercdr-platform-upgrader hypercdr-cluster-registration-executor hypercdr-postgres >/dev/null 2>&1 || true
+  docker rm -f hypercdr-edge hypercdr-platform-frontend-blue hypercdr-platform-frontend-green \
+    hypercdr-platform-api-blue hypercdr-platform-api-green hypercdr-cluster-registration-executor hypercdr-postgres >/dev/null 2>&1 || true
 fi
 
 if [[ "${REMOVE_IMAGES}" == "true" ]]; then

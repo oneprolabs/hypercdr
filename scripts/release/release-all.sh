@@ -144,7 +144,6 @@ if [[ "${DRY_RUN}" == "true" ]]; then
 Images:
   ${REGISTRY}/platform-api:${VERSION}
   ${REGISTRY}/platform-frontend:${VERSION}
-  ${REGISTRY}/platform-upgrader:${VERSION}
   ${REGISTRY}/cluster-registration-executor:${VERSION}
   ${REGISTRY}/comm-agent:${VERSION}
   ${REGISTRY}/oadp-comm-agent:${VERSION}
@@ -163,7 +162,7 @@ login_registry
 
 if [[ "${RESUME}" == "true" ]]; then
   log "Resume mode: verifying previously pushed core images"
-  for name in platform-api platform-frontend platform-upgrader cluster-registration-executor comm-agent oadp-comm-agent; do
+  for name in platform-api platform-frontend cluster-registration-executor comm-agent oadp-comm-agent; do
     image="${REGISTRY}/${name}:${VERSION}"
     docker manifest inspect "${image}" >/dev/null 2>&1 || die "cannot resume: core image is unavailable: ${image}"
     log "Resume prerequisite OK: ${image}"
@@ -198,7 +197,6 @@ log "Verifying pushed image pulls"
 release_images=( \
   "${REGISTRY}/platform-api:${VERSION}" \
   "${REGISTRY}/platform-frontend:${VERSION}" \
-  "${REGISTRY}/platform-upgrader:${VERSION}" \
   "${REGISTRY}/cluster-registration-executor:${VERSION}" \
   "${REGISTRY}/comm-agent:${VERSION}" \
   "${REGISTRY}/oadp-comm-agent:${VERSION}" \
@@ -224,7 +222,6 @@ remote_digest() {
 
 PLATFORM_API_IMAGE="${REGISTRY}/platform-api:${VERSION}"
 PLATFORM_FRONTEND_IMAGE="${REGISTRY}/platform-frontend:${VERSION}"
-PLATFORM_UPGRADER_IMAGE="${REGISTRY}/platform-upgrader:${VERSION}"
 REGISTRATION_EXECUTOR_IMAGE="${REGISTRY}/cluster-registration-executor:${VERSION}"
 COMM_AGENT_IMAGE="${REGISTRY}/comm-agent:${VERSION}"
 OADP_COMM_AGENT_IMAGE="${REGISTRY}/oadp-comm-agent:${VERSION}"
@@ -253,7 +250,6 @@ cat >"${RELEASE_MANIFEST}" <<EOF
   "componentManifest": {
     "platform-api": {"version":"${VERSION}","image":"${PLATFORM_API_IMAGE}","imageDigest":"$(remote_digest "${PLATFORM_API_IMAGE}")"},
     "platform-frontend": {"version":"${VERSION}","image":"${PLATFORM_FRONTEND_IMAGE}","imageDigest":"$(remote_digest "${PLATFORM_FRONTEND_IMAGE}")"},
-    "platform-upgrader": {"version":"${VERSION}","image":"${PLATFORM_UPGRADER_IMAGE}","imageDigest":"$(remote_digest "${PLATFORM_UPGRADER_IMAGE}")"},
     "cluster-registration-executor": {"version":"${VERSION}","image":"${REGISTRATION_EXECUTOR_IMAGE}","imageDigest":"$(remote_digest "${REGISTRATION_EXECUTOR_IMAGE}")"},
     "comm-agent": {"version":"${VERSION}","image":"${COMM_AGENT_IMAGE}","imageDigest":"$(remote_digest "${COMM_AGENT_IMAGE}")"},
     "oadp-comm-agent": {"version":"${VERSION}","image":"${OADP_COMM_AGENT_IMAGE}","imageDigest":"$(remote_digest "${OADP_COMM_AGENT_IMAGE}")"},
@@ -306,5 +302,5 @@ Installer:
   ${HCDR_RELEASE_ROOT:-${RUNTIME_ROOT}/releases/community}/${VERSION}/hypercdr-installer-${VERSION}.tar.gz
 
 Next:
-  Install or upgrade the control plane from the bootstrap page or platform UI.
+  Install from the bootstrap package; upgrade through the blue/green release pipeline.
 EOF

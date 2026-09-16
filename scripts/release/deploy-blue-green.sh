@@ -52,13 +52,19 @@ read_active_color() {
   echo blue
 }
 
+read_color_version() {
+  local color="$1" key="PLATFORM_API_${1^^}_IMAGE" image
+  image="$(sed -n "s/^${key}=//p" "$ENV_FILE" | tail -1)"
+  printf '%s\n' "${image##*:}"
+}
+
 render_upstream() {
   local color="$1" output="$2"
   case "$color" in blue|green) ;; *) return 2 ;; esac
   mkdir -p "$(dirname "$output")"
   cat > "${output}.tmp" <<EOF
-upstream hypercdr_api { server hypercdr-platform-api-${color}:18080; }
-upstream hypercdr_frontend { server hypercdr-platform-frontend-${color}:3002; }
+map \$host \$hypercdr_api_active { default hypercdr-platform-api-${color}:18080; }
+map \$host \$hypercdr_frontend_active { default hypercdr-platform-frontend-${color}:3002; }
 EOF
   mv "${output}.tmp" "$output"
 }
@@ -150,9 +156,16 @@ start_color() {
 
 rollback_color() {
   validate_runtime
-  local current target
+  local current target rollback_version registry
   current="$(read_active_color)"
   target="$(other_color "$current")"
+  rollback_version="$(sed -n 's/^ *//p' "${INSTALL_DIR}/.rollback_version" 2>/dev/null | head -1 || true)"
+  registry="${HCDR_IMAGE_REGISTRY%/}"
+  if [[ "${rollback_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ ]]; then
+    set_env_value "$ENV_FILE" "PLATFORM_API_${target^^}_IMAGE" "${registry}/platform-api:${rollback_version}"
+    set_env_value "$ENV_FILE" "PLATFORM_FRONTEND_${target^^}_IMAGE" "${registry}/platform-frontend:${rollback_version}"
+    load_runtime_env
+  fi
   log "rolling back from $current to $target"
   start_color "$target" || die "rollback target $target did not become healthy"
   switch_traffic "$current" "$target" || die "Nginx rejected rollback"
@@ -181,12 +194,13 @@ acquire_deploy_lock() {
 }
 
 deploy_version() {
-  local version="$1" current candidate first_install=false
+  local version="$1" current candidate previous_version first_install=false
   validate_runtime
   current="$(read_active_color)"
   if ! container_running "hypercdr-platform-api-${current}"; then
     first_install=true
   fi
+  previous_version="$(read_color_version "$current")"
   candidate="$(select_deploy_color "$current" "$([[ "$first_install" == true ]] && echo false || echo true)")"
   log "deploying version $version to $candidate (current=$current, first_install=$first_install)"
 
@@ -209,6 +223,10 @@ deploy_version() {
     switch_traffic "$current" "$candidate" || die "Nginx rejected the blue/green switch; $current remains active"
   fi
   printf '%s\n' "$candidate" > "${INSTALL_DIR}/.active_color"
+  if [[ "$first_install" != true && "${previous_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ ]]; then
+    printf '%s\n' "${previous_version}" > "${INSTALL_DIR}/.rollback_version"
+    chmod 600 "${INSTALL_DIR}/.rollback_version"
+  fi
   if ! wait_for_public_ready; then
     log "public health failed after switch; restoring $current"
     if [[ "$first_install" != true ]]; then
