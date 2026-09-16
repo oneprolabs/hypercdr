@@ -12,6 +12,11 @@ load_registry_profile "${ROOT_DIR}/config/registries.conf"
 [[ "$(bash -c 'printf %s "$HCDR_POSTGRES_SOURCE_IMAGE"')" == "postgres:16" ]]
 [[ "$(bash -c 'printf %s "$HCDR_VELERO_PLUGIN_SOURCE_REGISTRY"')" == "docker.io/velero" ]]
 
+load_registry_profile "${ROOT_DIR}/config/registries.conf" dockerhub
+[[ "${HCDR_SELECTED_REGISTRY}" == "dockerhub" ]]
+[[ "${HCDR_IMAGE_REGISTRY}" == "docker.io/oneprolabs/hypercdr" ]]
+[[ "${HCDR_REGISTRY_SERVER}" == "docker.io" ]]
+
 load_registry_profile "${ROOT_DIR}/config/registries.conf" harbor_149
 [[ "${HCDR_SELECTED_REGISTRY}" == "harbor_149" ]]
 [[ "${HCDR_IMAGE_REGISTRY}" == "192.168.8.149:5001/hypercdr" ]]
