@@ -24,23 +24,11 @@ usage() {
 Build and push a HyperCDR release.
 
 Usage:
-  release-all.sh <version> [options]
+  release-all.sh --config PATH
 
 Options:
-  --config PATH       Release config file, default ./release.conf.
-  --registry-config PATH
-                      Registry profiles file, default config/registries.conf.
-  --registry-profile NAME
-                      Override HCDR_ACTIVE_REGISTRY for this release.
-  --registry PREFIX   Override HCDR_IMAGE_REGISTRY.
-  --skip-tests        Skip Go tests during build.
-  --no-login          Skip docker login.
-  --release-center-url URL  Release Center URL used to publish metadata.
-  --release-center-token-file PATH
-                      File containing the Release Center publishing token.
-  --skip-register     Build and package without registering a release.
-  --dry-run           Resolve configuration and print the plan without changes.
-  --resume            Continue a failed release after verifying all core images exist remotely.
+  --config PATH       Release config file. Defaults to ./release.conf.
+  All release settings, including RELEASE_VERSION, are read from PATH.
   -h, --help          Show help.
 
 Required config:
@@ -60,20 +48,8 @@ USAGE
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --config) CONFIG_FILE="${2:?missing value for --config}"; shift 2 ;;
-    --registry-config) REGISTRY_CONFIG_FILE="${2:?missing value for --registry-config}"; shift 2 ;;
-    --registry-profile) REGISTRY_PROFILE="${2:?missing value for --registry-profile}"; shift 2 ;;
-    --registry) CLI_REGISTRY="${2:?missing value for --registry}"; shift 2 ;;
-    --skip-tests) CLI_SKIP_TESTS="true"; shift ;;
-    --no-login) LOGIN="false"; shift ;;
-    --release-center-url) RELEASE_CENTER_URL="${2:?missing value for --release-center-url}"; shift 2 ;;
-    --release-center-token-file) RELEASE_CENTER_TOKEN_FILE="${2:?missing value for --release-center-token-file}"; shift 2 ;;
-    --skip-register) SKIP_REGISTER="true"; shift ;;
-    --dry-run) DRY_RUN="true"; shift ;;
-    --resume) RESUME="true"; shift ;;
     -h|--help) usage; exit 0 ;;
-    *)
-      if [[ -z "${VERSION}" ]]; then VERSION="$1"; shift; else die "unknown argument: $1"; fi
-      ;;
+    *) die "unknown argument: $1 (use --help)" ;;
   esac
 done
 
@@ -83,6 +59,8 @@ if [[ -f "${CONFIG_FILE}" ]]; then
 elif [[ "${CONFIG_FILE}" != "${SCRIPT_DIR}/release.conf" ]]; then
   die "config file not found: ${CONFIG_FILE}"
 fi
+
+VERSION="${RELEASE_VERSION:-${VERSION}}"
 
 # shellcheck source=../lib/registry-config.sh
 RELEASE_CENTER_URL="${RELEASE_CENTER_URL:-${HCDR_RELEASE_CENTER_URL:-}}"

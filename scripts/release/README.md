@@ -6,14 +6,12 @@ This directory contains the control-plane build, image publishing, installer pac
 
 ```bash
 cd /data/hypercdr-main/scripts/release
-cp release.conf.example release.conf
-# Edit release.conf as needed. It contains the complete registry and build configuration.
-./release-all.sh 1.0.23.20260915 --config ./release.conf
+./release-all.sh --config ./release.conf
 
 The configuration file is optional only when all settings are supplied through
-environment variables or command-line flags. `release.conf.example` is never
-loaded automatically; copy it to `release.conf` (or pass another path with
-`--config`). Registry passwords and Release Center tokens must be stored in
+`release.conf` contains `RELEASE_VERSION` and the complete registry/build
+configuration. Edit it before each release, or pass another file with
+`--config`. Registry passwords and Release Center tokens must be stored in
 separate local files and must not be committed.
 ```
 
