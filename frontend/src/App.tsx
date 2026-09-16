@@ -1106,8 +1106,9 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
 
   useEffect(() => {
     if (authConfig.challengeMode !== 'turnstile' || !authConfig.turnstileSiteKey || authFlow !== 'login') return;
+    let cancelled = false;
     const render = () => {
-      if (!turnstileRef.current || !window.turnstile || turnstileWidget.current) return;
+      if (cancelled || !turnstileRef.current || !window.turnstile || turnstileWidget.current) return;
       const mount = () => { if (!turnstileRef.current || !window.turnstile || turnstileWidget.current) return;
       turnstileWidget.current = window.turnstile.render(turnstileRef.current, {
         language: 'en', size: 'flexible', theme: 'dark',
@@ -1117,7 +1118,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       // The embedded widget owns its loading UI after rendering begins.
       setTurnstileRendered(true);
       };
-      window.turnstile.ready ? window.turnstile.ready(mount) : mount();
+      if (!cancelled) (window.turnstile.ready ? window.turnstile.ready(mount) : mount());
     };
     if (!window.turnstile) {
       const script = document.createElement('script'); script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'; script.async = false; script.defer = false;
@@ -1125,7 +1126,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       return () => script.removeEventListener('load', render);
     }
     render();
-    return () => { if (turnstileWidget.current && window.turnstile?.remove) window.turnstile.remove(turnstileWidget.current); turnstileWidget.current = null; setTurnstileToken(''); setTurnstileRendered(false); };
+    return () => { cancelled = true; if (turnstileWidget.current && window.turnstile?.remove) window.turnstile.remove(turnstileWidget.current); turnstileWidget.current = null; setTurnstileToken(''); setTurnstileRendered(false); };
   }, [authConfig.challengeMode, authConfig.turnstileSiteKey, authFlow, turnstileMountKey]);
 
   useEffect(() => {
@@ -2211,7 +2212,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
               </div>
               {authFlow === 'reset' && !resetToken && <div className="hbdr-login-error">This password reset link is incomplete. Request a new link and try again.</div>}
               {authFlow === 'login' && authConfig.challengeMode === 'turnstile' && <div key={turnstileMountKey} className="hbdr-login-turnstile" aria-label="Cloudflare human verification">
-                {!turnstileRendered && <div className="hbdr-login-turnstile-status">Verifying you are human…</div>}<div ref={turnstileRef} />
+                <div ref={turnstileRef} />
               </div>}
               {authFlow === 'login' && authConfig.challengeMode !== 'turnstile' && <div className="hbdr-login-captcha-code" aria-label="Verification code">
                 <label className="hbdr-login-field">
