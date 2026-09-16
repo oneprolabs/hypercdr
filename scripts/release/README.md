@@ -73,6 +73,24 @@ The legacy `bootstrap/scripts/package-release.sh` entry point is retained only f
 
 ## Installation and validation
 
+### Uninstall an installed platform
+
+Run the installed script by its full path, for example:
+
+```bash
+/srv/hypercdr/uninstall.sh --help
+/srv/hypercdr/uninstall.sh
+/srv/hypercdr/uninstall.sh --execute
+/srv/hypercdr/uninstall.sh --purge-data --remove-images --execute
+```
+
+The script resolves its own directory and requires `docker-compose.yaml` and
+`.env` beside it. No `--install-dir` or `--compose-file` options are accepted.
+Without `--execute`, it only previews the plan. Data is preserved unless
+`--purge-data` is specified. Run the installed copy, not the copy in the
+extracted package or source tree. The installation command still accepts
+`--install-dir` to select where these files are installed.
+
 For detailed local-package prerequisites, installation, upgrade commands,
 configuration-preservation limitations, backup examples, and verification, read
 [Local Package Installation and Upgrade](LOCAL-INSTALLATION.md). The packaging

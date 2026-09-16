@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-INSTALL_DIR="${HCDR_INSTALL_DIR:-/var/lib/hypercdr}"
-COMPOSE_FILE="${HCDR_COMPOSE_FILE:-}"
+INSTALL_DIR="$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd -P)"
+COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yaml"
 PURGE_DATA="false"
 REMOVE_IMAGES="false"
 EXECUTE="false"
@@ -12,16 +12,22 @@ usage() {
 Uninstall the HyperCDR control plane from a standalone Docker host.
 
 Usage:
-  ./uninstall-platform.sh [options]
+  ./uninstall.sh [options]
 
 Options:
-  --install-dir PATH       HyperCDR data/deploy directory, default: /var/lib/hypercdr.
-  --compose-file PATH   Docker Compose file. Defaults to ./compose.yaml when present,
-                        or <install-dir>/docker-compose.yaml when present.
-  --purge-data          Delete <install-dir> after containers are removed.
+  --purge-data          Delete this installation directory after containers are removed.
   --remove-images       Remove HyperCDR platform images used by stopped containers.
   --execute             Apply changes. Without this flag, prints the plan only.
   -h, --help            Show help.
+
+Run the script installed beside docker-compose.yaml. Its own location determines
+the installation directory, regardless of your current working directory.
+Running from the source tree or an extracted installer is not supported.
+
+Examples:
+  /var/lib/hypercdr/uninstall.sh
+  /srv/hypercdr/uninstall.sh --execute
+  /srv/hypercdr/uninstall.sh --purge-data --remove-images --execute
 
 This script removes only HyperCDR control plane containers:
   hypercdr-platform-frontend
@@ -36,8 +42,6 @@ USAGE
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --install-dir) INSTALL_DIR="${2:?missing value for --install-dir}"; shift 2 ;;
-    --compose-file) COMPOSE_FILE="${2:?missing value for --compose-file}"; shift 2 ;;
     --purge-data) PURGE_DATA="true"; shift ;;
     --remove-images) REMOVE_IMAGES="true"; shift ;;
     --execute) EXECUTE="true"; shift ;;
@@ -57,15 +61,11 @@ container_image() {
   docker inspect "$1" --format '{{.Config.Image}}' 2>/dev/null || true
 }
 
-if [[ -z "${COMPOSE_FILE}" ]]; then
-  if [[ -f "${INSTALL_DIR}/docker-compose.yaml" ]]; then
-    COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yaml"
-  elif [[ -f "${INSTALL_DIR}/compose.yaml" ]]; then
-    COMPOSE_FILE="${INSTALL_DIR}/compose.yaml"
-  elif [[ -f ./compose.yaml ]]; then
-    COMPOSE_FILE="$(pwd)/compose.yaml"
-  fi
-fi
+[[ -f "${COMPOSE_FILE}" && -f "${INSTALL_DIR}/.env" ]] || {
+  echo "No installed platform found beside this script: ${INSTALL_DIR}" >&2
+  echo "Run uninstall.sh from the actual installation directory." >&2
+  exit 1
+}
 
 cat <<EOF
 HyperCDR control plane uninstall plan

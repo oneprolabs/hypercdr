@@ -22,13 +22,6 @@ cd /var/lib/hypercdr
 ./uninstall.sh --execute
 ```
 
-使用其他安装目录或 Compose 文件：
-
-```bash
-./start-platform.sh --install-dir /srv/hypercdr
-./restart-platform.sh --compose-file /srv/hypercdr/docker-compose.yaml
-```
-
 卸载并删除安装目录（不可恢复，请确认后执行）：
 
 ```bash
