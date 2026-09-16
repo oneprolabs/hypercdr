@@ -46,8 +46,8 @@ jobs:
       - uses: docker/login-action@v3
         with:
           registry: ${{ steps.release.outputs.server }}
-          username: ${{ secrets.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
+          username: ${{ steps.release.outputs.profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
+          password: ${{ steps.release.outputs.profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
       - name: Build, test, and publish
         env:
           HCDR_GO_BIN: go
