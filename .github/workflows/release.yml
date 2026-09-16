@@ -52,7 +52,6 @@ jobs:
         env:
           HCDR_GO_BIN: go
           HCDR_RUNTIME_ROOT: /tmp/hypercdr-runtime
-          HCDR_BOOTSTRAP_PUBLISH_DIR: /tmp/hypercdr-installer
           HCDR_CONTAINER_POLICY: /tmp/hypercdr-runtime/containers-policy.json
         run: |
           mkdir -p "${HCDR_RUNTIME_ROOT}"
@@ -66,7 +65,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: hypercdr-installer-${{ steps.release.outputs.version }}
-          path: /tmp/hypercdr-installer/releases/dev/*
+          path: /tmp/hypercdr-runtime/releases/community/${{ steps.release.outputs.version }}/*
           if-no-files-found: error
 
   deploy:
