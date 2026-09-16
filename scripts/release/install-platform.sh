@@ -595,8 +595,8 @@ run_docker() {
   install_header
   install_step 1 1 "Validate installation prerequisites"
   run_logged "Docker, Compose V2, tools, permissions, and disk space are ready" preflight_docker_host
-  run_logged "Frontend port ${http_port} is available" preflight_host_port "${http_port}" hypercdr-platform-frontend
-  run_logged "API port ${api_port} is available" preflight_host_port "${api_port}" hypercdr-platform-api
+  run_logged "HTTP port 80 is available" preflight_host_port 80 hypercdr-edge
+  run_logged "HTTPS port 443 is available" preflight_host_port 443 hypercdr-edge
   run_logged "Registry connection is trusted" preflight_registry
 
   if [[ "$execute" != "true" ]]; then
@@ -638,7 +638,6 @@ EOF
     for required_image in \
       "${registry}/platform-api:${image_tag}" \
       "${registry}/platform-frontend:${image_tag}" \
-      "${registry}/platform-upgrader:${image_tag}" \
       "${registry}/cluster-registration-executor:${image_tag}" \
       "${registry}/postgres:16"; do
       docker manifest inspect "${required_image}" >/dev/null 2>&1 || {
@@ -655,6 +654,13 @@ EOF
     printf '%s\n' "${registration_executor_token}" > "${install_dir}/registration-executor-token"
     chmod 600 "${install_dir}/registration-executor-token"
     cp "${COMPOSE_TEMPLATE}" "${target_compose_file}"
+    install -m 0755 "${SCRIPT_DIR}/deploy-blue-green.sh" "${install_dir}/deploy-blue-green.sh"
+    mkdir -p "${install_dir}/nginx/conf.d" "${install_dir}/nginx/acme"
+    nginx_source_dir="${SOURCE_ROOT}/docker/nginx"
+    [[ -d "${nginx_source_dir}" ]] || nginx_source_dir="${SCRIPT_DIR}/nginx"
+    install -m 0644 "${nginx_source_dir}/edge.conf" "${install_dir}/nginx/conf.d/default.conf"
+    install -m 0644 "${nginx_source_dir}/upstream.conf.default" "${install_dir}/nginx/conf.d/upstream.conf"
+    [[ -f "${install_dir}/.active_color" ]] || printf 'blue\n' > "${install_dir}/.active_color"
     if [[ "${registry_trust}" == "private-ca" ]]; then
       cp "${registry_ca_file}" "${installed_registry_ca_file}"
       chmod 644 "${installed_registry_ca_file}"
@@ -702,12 +708,21 @@ HCDR_IMAGE_TAG=${image_tag}
 RELEASE_VERSION=${image_tag}
 PLATFORM_API_IMAGE=${registry}/platform-api:${image_tag}
 PLATFORM_FRONTEND_IMAGE=${registry}/platform-frontend:${image_tag}
+PLATFORM_API_BLUE_IMAGE=${registry}/platform-api:${image_tag}
+PLATFORM_FRONTEND_BLUE_IMAGE=${registry}/platform-frontend:${image_tag}
+PLATFORM_API_GREEN_IMAGE=${registry}/platform-api:${image_tag}
+PLATFORM_FRONTEND_GREEN_IMAGE=${registry}/platform-frontend:${image_tag}
 PLATFORM_UPGRADER_IMAGE=${registry}/platform-upgrader:${image_tag}
 REGISTRATION_EXECUTOR_IMAGE=${registry}/cluster-registration-executor:${image_tag}
 POSTGRES_IMAGE=${registry}/postgres:16
 HCDR_POSTGRES_PASSWORD=${postgres_password}
 HCDR_DATABASE_URL=postgres://hypercdr:${postgres_password}@hypercdr-postgres:5432/hypercdr?sslmode=disable
 HCDR_INSTALL_DIR=${install_dir}
+HCDR_DOMAIN=${public_host}
+HCDR_NGINX_CONFIG_DIR=${install_dir}/nginx/conf.d
+HCDR_ACME_WEBROOT=${install_dir}/nginx/acme
+HCDR_TLS_CERT_FILE=${tls_cert_file}
+HCDR_TLS_KEY_FILE=${tls_key_file}
 HCDR_FRONTEND_PORT=${http_port}
 HCDR_API_PORT=${api_port}
 HCDR_TLS_ENABLED=${tls_enabled}
@@ -726,7 +741,7 @@ EOF
     install_ok "Runtime settings saved"
 
     install_step 6 7 "Start control plane"
-    run_logged "Containers started" bash -c 'cd "$1" && docker compose --project-name hypercdr -f "$2" up -d' _ "${install_dir}" "${target_compose_file}"
+    run_logged "Blue/green control plane started" env HCDR_INSTALL_DIR="${install_dir}" HCDR_COMPOSE_FILE="${target_compose_file}" "${install_dir}/deploy-blue-green.sh" "${image_tag#v}"
     local ready="false"
     local attempt
     for attempt in $(seq 1 60); do
