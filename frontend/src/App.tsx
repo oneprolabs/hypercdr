@@ -1413,7 +1413,9 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     if (loginSubmitting) return;
     const turnstile = authConfig.challengeMode === 'turnstile';
     if (!loginEmail.trim() || !loginPassword || (turnstile ? !turnstileToken : !loginCaptchaCode.trim())) {
-      setLoginError('Email, password, and verification code are required');
+      setLoginError(turnstile
+        ? 'Email, password, and human verification are required'
+        : 'Email, password, and verification code are required');
       return;
     }
     if (authConfig.challengeMode !== 'turnstile' && !loginCaptcha?.id) {
