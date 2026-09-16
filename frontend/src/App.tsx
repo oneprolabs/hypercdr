@@ -2210,7 +2210,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
                 </label>}
               </div>
               {authFlow === 'reset' && !resetToken && <div className="hbdr-login-error">This password reset link is incomplete. Request a new link and try again.</div>}
-              {authFlow === 'login' && authConfig.challengeMode === 'turnstile' && <div className="hbdr-login-turnstile" aria-label="Cloudflare human verification">
+              {authFlow === 'login' && authConfig.challengeMode === 'turnstile' && <div key={turnstileMountKey} className="hbdr-login-turnstile" aria-label="Cloudflare human verification">
                 {!turnstileRendered && <div className="hbdr-login-turnstile-status">Verifying you are human…</div>}<div ref={turnstileRef} />
               </div>}
               {authFlow === 'login' && authConfig.challengeMode !== 'turnstile' && <div className="hbdr-login-captcha-code" aria-label="Verification code">
