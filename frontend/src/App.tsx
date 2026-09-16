@@ -366,7 +366,7 @@ type ApiCaptcha = {
   expiresAt: string;
 };
 type ApiAuthConfig = { challengeMode?: 'image' | 'turnstile'; turnstileSiteKey?: string };
-declare global { interface Window { turnstile?: { ready?: (callback: () => void) => void; render: (element: HTMLElement, options: { sitekey: string; language?: string; size?: 'flexible'; theme?: 'dark'; callback: (token: string) => void; 'expired-callback'?: () => void; 'error-callback'?: () => void }) => string; reset: (id?: string) => void }; } }
+declare global { interface Window { turnstile?: { ready?: (callback: () => void) => void; render: (element: HTMLElement, options: { sitekey: string; language?: string; size?: 'flexible'; theme?: 'dark'; callback: (token: string) => void; 'expired-callback'?: () => void; 'error-callback'?: () => void }) => string; reset: (id?: string) => void; remove?: (id?: string) => void }; } }
 type AuthFlow = 'login' | 'forgot' | 'reset';
 
 type ClusterTaskLog = {
@@ -1069,6 +1069,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   const [authConfig, setAuthConfig] = useState<ApiAuthConfig>({ challengeMode: 'image' });
   const [turnstileToken, setTurnstileToken] = useState('');
   const [turnstileRendered, setTurnstileRendered] = useState(false);
+  const [turnstileMountKey, setTurnstileMountKey] = useState(0);
   const turnstileRef = useRef<HTMLDivElement | null>(null);
   const turnstileWidget = useRef<string | null>(null);
   const [loginError, setLoginError] = useState('');
@@ -1124,8 +1125,8 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       return () => script.removeEventListener('load', render);
     }
     render();
-    return () => { turnstileWidget.current = null; setTurnstileToken(''); setTurnstileRendered(false); };
-  }, [authConfig.challengeMode, authConfig.turnstileSiteKey, authFlow]);
+    return () => { if (turnstileWidget.current && window.turnstile?.remove) window.turnstile.remove(turnstileWidget.current); turnstileWidget.current = null; setTurnstileToken(''); setTurnstileRendered(false); };
+  }, [authConfig.challengeMode, authConfig.turnstileSiteKey, authFlow, turnstileMountKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1572,6 +1573,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     setLoginPassword('');
     setLoginCaptchaCode('');
     setLoginError('');
+    setTurnstileMountKey(key => key + 1);
     setView('login');
   }, [clearTenantResourceState]);
 
