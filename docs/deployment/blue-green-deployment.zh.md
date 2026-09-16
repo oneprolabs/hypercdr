@@ -16,8 +16,6 @@ HCDR_SSH_USER=root
 HCDR_SSH_PORT=22
 HCDR_DEPLOY_PATH=/var/lib/hypercdr
 HCDR_DOMAIN=hypercdr.com
-HCDR_TLS_CERT_FILE=/etc/letsencrypt/live/hypercdr.com/fullchain.pem
-HCDR_TLS_KEY_FILE=/etc/letsencrypt/live/hypercdr.com/privkey.pem
 HCDR_AUTO_DEPLOY=false
 ```
 
@@ -27,7 +25,6 @@ Repository Secrets：
 REGISTRY_USERNAME
 REGISTRY_PASSWORD
 SSH_PRIVATE_KEY
-SSH_KNOWN_HOSTS
 ```
 
 先保持 `HCDR_AUTO_DEPLOY=false`。首次人工部署和一次蓝绿切换、回滚都验证
@@ -42,8 +39,7 @@ hypercdr.com A 47.236.253.138
 ```
 
 安全组开放 80、443；22 只允许管理来源。使用已有有效证书，或在部署前为
-`hypercdr.com` 申请 Let's Encrypt 证书。证书文件必须位于 GitHub Variables
-指定的服务器路径。
+首次部署会在部署目录自动生成自签名证书；如已有正式证书，也可以通过参数显式指定。
 
 服务器当前的 `hypercdr-dev-postgres` 不需要先删除；生产 PostgreSQL 使用
 `/var/lib/hypercdr/data/postgres`，且不发布宿主机端口。
@@ -59,8 +55,6 @@ cd /root/hypercdr
   --domain hypercdr.com \
   --registry crpi-tne0uo16mzanbvpi.cn-zhangjiakou.personal.cr.aliyuncs.com/hypercdr \
   --install-dir /var/lib/hypercdr \
-  --tls-cert-file /etc/letsencrypt/live/hypercdr.com/fullchain.pem \
-  --tls-key-file /etc/letsencrypt/live/hypercdr.com/privkey.pem \
   --execute
 ```
 

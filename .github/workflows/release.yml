@@ -67,11 +67,6 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@v4
-      - uses: shimataro/ssh-key-action@v2
-        with:
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          known_hosts: ${{ secrets.SSH_KNOWN_HOSTS }}
-          if_key_exists: fail
       - uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ vars.HCDR_SSH_HOST }}
@@ -107,8 +102,6 @@ jobs:
                 --domain '${{ vars.HCDR_DOMAIN }}' \
                 --registry '${{ vars.HCDR_IMAGE_REGISTRY }}' \
                 --install-dir "${deploy_path}" \
-                --tls-cert-file '${{ vars.HCDR_TLS_CERT_FILE }}' \
-                --tls-key-file '${{ vars.HCDR_TLS_KEY_FILE }}' \
                 --execute
             else
               install -m 0644 "${source_path}/docker-compose.yml" "${deploy_path}/docker-compose.yaml"
