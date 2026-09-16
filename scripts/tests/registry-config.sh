@@ -7,7 +7,7 @@ source "${ROOT_DIR}/scripts/lib/registry-config.sh"
 
 load_registry_profile "${ROOT_DIR}/config/registries.conf"
 [[ "${HCDR_SELECTED_REGISTRY}" == "aliyun_acr" ]]
-[[ "${HCDR_IMAGE_REGISTRY}" == "crpi-tne0uo16mzanbvpi.cn-zhangjiakou.personal.cr.aliyuncs.com/hypercdr" ]]
+[[ "${HCDR_IMAGE_REGISTRY}" == "registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr" ]]
 [[ "${HCDR_REGISTRY_TRUST}" == "system" ]]
 [[ "$(bash -c 'printf %s "$HCDR_POSTGRES_SOURCE_IMAGE"')" == "postgres:16" ]]
 [[ "$(bash -c 'printf %s "$HCDR_VELERO_PLUGIN_SOURCE_REGISTRY"')" == "docker.io/velero" ]]

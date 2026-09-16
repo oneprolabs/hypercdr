@@ -7,7 +7,7 @@
 HCDR_BASE_URL="https://192.0.2.10:3002"
 
 # Alibaba Cloud image repository used by the installer.
-HCDR_REGISTRY="crpi-tne0uo16mzanbvpi.cn-zhangjiakou.personal.cr.aliyuncs.com/hypercdr"
+HCDR_REGISTRY="registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr"
 
 # Released HyperCDR version. It is updated automatically when the package is built.
 HCDR_IMAGE_TAG="1.0.23.20260915"

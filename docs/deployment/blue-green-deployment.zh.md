@@ -9,8 +9,8 @@
 Repository Variables：
 
 ```text
-HCDR_ACR_SERVER=crpi-tne0uo16mzanbvpi.cn-zhangjiakou.personal.cr.aliyuncs.com
-HCDR_IMAGE_REGISTRY=crpi-tne0uo16mzanbvpi.cn-zhangjiakou.personal.cr.aliyuncs.com/hypercdr
+HCDR_ACR_SERVER=registry.cn-beijing.aliyuncs.com
+HCDR_IMAGE_REGISTRY=registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr
 HCDR_SSH_HOST=47.236.253.138
 HCDR_SSH_USER=root
 HCDR_SSH_PORT=22
@@ -53,7 +53,7 @@ cd /root/hypercdr
 ./scripts/release/install-blue-green.sh 1.0.32.20260915 \
   --base-url https://hypercdr.com \
   --domain hypercdr.com \
-  --registry crpi-tne0uo16mzanbvpi.cn-zhangjiakou.personal.cr.aliyuncs.com/hypercdr \
+  --registry registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr \
   --install-dir /var/lib/hypercdr \
   --execute
 ```
