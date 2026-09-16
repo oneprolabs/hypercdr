@@ -53,7 +53,10 @@ jobs:
           HCDR_GO_BIN: go
           HCDR_RUNTIME_ROOT: /tmp/hypercdr-runtime
           HCDR_BOOTSTRAP_PUBLISH_DIR: /tmp/hypercdr-installer
+          HCDR_CONTAINER_POLICY: /tmp/hypercdr-runtime/containers-policy.json
         run: |
+          mkdir -p "${HCDR_RUNTIME_ROOT}"
+          printf '%s\n' '{"default":[{"type":"insecureAcceptAnything"}]}' > "${HCDR_CONTAINER_POLICY}"
           cat > "${RUNNER_TEMP}/release.conf" <<EOF
           RELEASE_VERSION=${{ steps.release.outputs.version }}
           EOF
