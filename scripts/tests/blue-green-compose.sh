@@ -39,6 +39,8 @@ done
 grep -Fq 'profiles:' "${rendered}"
 grep -Fq 'published: "80"' "${rendered}"
 grep -Fq 'published: "443"' "${rendered}"
+grep -Fq 'hypercdr-edge:' "${rendered}"
+grep -Fq 'networks: [hypercdr-edge, hypercdr-blue, hypercdr-green]' "${ROOT_DIR}/docker-compose.yml"
 ! grep -Eq 'published: "(18080|3002|5432)"' "${rendered}"
 grep -Fq 'hypercdr-platform-api-blue:18080' "${ROOT_DIR}/docker/nginx/upstream.conf.default"
 grep -Fq 'resolver 127.0.0.11 valid=10s' "${ROOT_DIR}/docker/nginx/edge.conf"

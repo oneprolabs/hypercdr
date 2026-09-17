@@ -10,7 +10,7 @@ services:
       - ${HCDR_TLS_CERT_FILE:?HCDR_TLS_CERT_FILE is required}:/etc/hypercdr/tls/tls.crt:ro
       - ${HCDR_TLS_KEY_FILE:?HCDR_TLS_KEY_FILE is required}:/etc/hypercdr/tls/tls.key:ro
       - ${HCDR_ACME_WEBROOT:-./nginx/acme}:/var/www/certbot:ro
-    networks: [hypercdr-blue, hypercdr-green]
+    networks: [hypercdr-edge, hypercdr-blue, hypercdr-green]
     restart: unless-stopped
     logging:
       driver: local
@@ -158,6 +158,8 @@ services:
       options: { max-size: "50m", max-file: "5" }
 
 networks:
+  hypercdr-edge:
+    internal: false
   hypercdr-data:
     internal: true
   hypercdr-blue:
