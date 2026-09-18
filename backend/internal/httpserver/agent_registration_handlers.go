@@ -157,9 +157,11 @@ func (r *Router) installScript(w http.ResponseWriter, req *http.Request) {
 		// Backward-compatible fallback for an active release created before the
 		// OpenShift component was added. New releases publish it explicitly.
 		oadpAgentTarget.Image = strings.Replace(agentTarget.Image, "/comm-agent:", "/oadp-comm-agent:", 1)
+		oadpAgentTarget.Image = strings.Replace(oadpAgentTarget.Image, ":comm-agent-", ":oadp-comm-agent-", 1)
 	}
 	if oadpCatalogErr != nil || strings.TrimSpace(oadpCatalogTarget.Image) == "" {
 		oadpCatalogTarget.Image = strings.Replace(agentTarget.Image, "/comm-agent:", "/oadp-catalog:", 1)
+		oadpCatalogTarget.Image = strings.Replace(oadpCatalogTarget.Image, ":comm-agent-", ":oadp-catalog-", 1)
 	}
 	if oadpRuntimeErr != nil {
 		r.logger.Warn("active release does not contain a complete OADP runtime manifest", "error", oadpRuntimeErr)

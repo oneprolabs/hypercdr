@@ -2,6 +2,24 @@
 
 registry_config_die() { echo "error: $*" >&2; return 1; }
 
+# ACR/Docker Hub profiles name a repository; Harbor profiles name a project.
+image_ref() {
+  local registry="${1%/}" name="$2" version="$3"
+  case "$registry" in
+    *.aliyuncs.com/*/*|docker.io/*/*) printf '%s:%s-%s\n' "$registry" "$name" "$version" ;;
+    *) printf '%s/%s:%s\n' "$registry" "$name" "$version" ;;
+  esac
+}
+
+image_digest() {
+  local image="$1" repo="${1%:*}"
+  docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$image" 2>/dev/null |
+    awk -F@ -v repo="$repo" '
+      BEGIN { sub(/^docker[.]io\//, "", repo) }
+      { actual=$1; sub(/^docker[.]io\//, "", actual); if (actual == repo && $2 ~ /^sha256:[0-9a-f]{64}$/) { print $2; exit } }
+    '
+}
+
 load_registry_profile() {
   local config_file="$1" requested_profile="${2:-}" profile upper field variable value
   local postgres_source_override="${HCDR_POSTGRES_SOURCE_IMAGE_OVERRIDE-}"

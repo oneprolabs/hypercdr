@@ -16,7 +16,7 @@ case "$IMAGE" in
 esac
 command -v docker >/dev/null 2>&1 || { echo "docker is required to inspect the OADP catalog" >&2; exit 2; }
 OPM_IMAGE="${HCDR_OPM_IMAGE:-quay.io/operator-framework/opm@sha256:b32d3891616662620da08d7f0ec42c2e69fa2de43427dc975d35b12f7a969a0f}"
-POLICY_FILE="${HCDR_CONTAINER_POLICY:-/data/hypercdr-runtime/containers-policy.json}"
+POLICY_FILE="${HCDR_CONTAINER_POLICY:-${HCDR_RUNTIME_ROOT:-/data/hypercdr-runtime}/containers-policy.json}"
 [[ -r "$POLICY_FILE" ]] || { echo "containers policy file is missing: $POLICY_FILE" >&2; exit 2; }
 
 rendered="$(mktemp)"

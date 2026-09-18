@@ -151,31 +151,10 @@ func (r *Router) listPlatformUpgrades(w http.ResponseWriter, req *http.Request) 
 	writeJSON(w, 200, map[string]any{"items": nonNilSlice(items)})
 }
 func (r *Router) createPlatformUpgrade(w http.ResponseWriter, req *http.Request) {
-	var body struct {
-		ReleaseID string `json:"releaseId"`
-	}
-	if decodeJSON(req, &body) != nil {
-		writeJSON(w, 400, map[string]any{"error": "invalid_json"})
-		return
-	}
-	checks, passed, release := r.platformPrecheck(body.ReleaseID)
-	if !passed {
-		writeJSON(w, 409, map[string]any{"error": "platform_precheck_failed", "checks": checks})
-		return
-	}
-	if r.editionAdmission != nil {
-		decision := r.editionAdmission(req.Context(), EditionAdmissionRequest{Operation: "platform.upgrade", ReleaseDate: release.PublishedAt})
-		if !decision.Allowed {
-			writeJSON(w, http.StatusConflict, map[string]any{"error": decision.Code, "message": decision.Message, "releaseId": release.ID, "publishedAt": release.PublishedAt})
-			return
-		}
-	}
-	job, err := r.store.CreatePlatformUpgradeJob(store.PlatformUpgradeJobInput{Release: release, FromVersion: buildinfo.Version, RequestedBy: "admin"})
-	if err != nil {
-		writeJSON(w, 409, map[string]any{"error": "platform_upgrade_active", "message": err.Error()})
-		return
-	}
-	writeJSON(w, 202, job)
+	writeJSON(w, http.StatusGone, map[string]any{
+		"error":   "platform_upgrade_disabled",
+		"message": "Platform upgrades are delivered through the blue/green release pipeline.",
+	})
 }
 
 func (r *Router) frontend(w http.ResponseWriter, req *http.Request) {

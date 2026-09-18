@@ -60,7 +60,7 @@ grep -qx "${UPSTREAM_COMMIT}" "${ROOT_DIR}/UPSTREAM_BASELINE" || die "unexpected
 [[ "${IMAGE_TAG}" != *official* ]] || die "custom builds must not use an official tag"
 
 REGISTRY="${REGISTRY%/}"
-IMAGE="${REGISTRY}/velero:${IMAGE_TAG}"
+IMAGE="${HCDR_VELERO_TARGET_IMAGE:-${REGISTRY}/velero:${IMAGE_TAG}}"
 MONOREPO_COMMIT="$(git -C "${ROOT_DIR}" rev-parse HEAD 2>/dev/null || true)"
 [[ -n "${MONOREPO_COMMIT}" ]] || die "unable to determine source commit"
 mkdir -p "${BUILD_DIR}"

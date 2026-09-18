@@ -84,14 +84,20 @@ cp "${RELEASE_SCRIPTS_DIR}/templates/hypercdr.service" "${package_dir}/templates
 mkdir -p "${package_dir}/config" "${package_dir}/scripts/lib"
 cp "${ROOT_DIR}/config/registries.conf" "${package_dir}/config/registries.conf"
 cp "${ROOT_DIR}/scripts/lib/registry-config.sh" "${package_dir}/scripts/lib/registry-config.sh"
+cp "${ROOT_DIR}/scripts/lib/registry-config.sh" "${package_dir}/registry-config.sh"
 cp "${ROOT_DIR}/docker-compose.yml" "${package_dir}/compose.yaml"
+cp "${RELEASE_SCRIPTS_DIR}/deploy-blue-green.sh" "${package_dir}/deploy-blue-green.sh"
+cp "${RELEASE_SCRIPTS_DIR}/install-blue-green.sh" "${package_dir}/install-blue-green.sh"
+mkdir -p "${package_dir}/nginx"
+cp "${ROOT_DIR}/docker/nginx/edge.conf" "${package_dir}/nginx/edge.conf"
+cp "${ROOT_DIR}/docker/nginx/upstream.conf.default" "${package_dir}/nginx/upstream.conf.default"
 [[ -s "${RELEASE_MANIFEST}" ]] || { echo "complete release manifest is required: ${RELEASE_MANIFEST}" >&2; exit 1; }
 manifest_version="$(jq -er '.version' "${RELEASE_MANIFEST}")"
 [[ "${manifest_version}" == "${VERSION}" ]] || {
   echo "release manifest version ${manifest_version:-unknown} does not match package version ${VERSION}" >&2
   exit 1
 }
-jq -e '.componentManifest as $m | ["platform-api", "platform-frontend", "platform-upgrader", "cluster-registration-executor", "comm-agent", "velero", "velero-plugin-for-aws", "velero-plugin-for-microsoft-azure", "velero-plugin-for-gcp", "oadp-comm-agent", "oadp-operator", "oadp-velero", "oadp-openshift-plugin", "oadp-aws-plugin", "oadp-restore-helper", "oadp-bundle", "oadp-catalog"] | all(.[]; . as $name | ($m[$name].version | type == "string" and length > 0) and ($m[$name].image | type == "string" and length > 0))' "${RELEASE_MANIFEST}" >/dev/null || {
+jq -e '.componentManifest as $m | ["platform-api", "platform-frontend", "cluster-registration-executor", "comm-agent", "velero", "velero-plugin-for-aws", "velero-plugin-for-microsoft-azure", "velero-plugin-for-gcp", "oadp-comm-agent", "oadp-operator", "oadp-velero", "oadp-openshift-plugin", "oadp-aws-plugin", "oadp-restore-helper", "oadp-bundle", "oadp-catalog"] | all(.[]; . as $name | ($m[$name].version | type == "string" and length > 0) and ($m[$name].image | type == "string" and length > 0))' "${RELEASE_MANIFEST}" >/dev/null || {
   echo "release manifest must contain all required platform and agent components" >&2
   exit 1
 }

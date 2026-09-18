@@ -89,7 +89,6 @@ PLATFORM_API_IMAGE="$(image_ref "${REGISTRY}" platform-api "${VERSION}")"
 PLATFORM_FRONTEND_IMAGE="$(image_ref "${REGISTRY}" platform-frontend "${VERSION}")"
 COMM_AGENT_IMAGE="$(image_ref "${REGISTRY}" comm-agent "${VERSION}")"
 OADP_COMM_AGENT_IMAGE="$(image_ref "${REGISTRY}" oadp-comm-agent "${VERSION}")"
-PLATFORM_UPGRADER_IMAGE="$(image_ref "${REGISTRY}" platform-upgrader "${VERSION}")"
 REGISTRATION_EXECUTOR_IMAGE="$(image_ref "${REGISTRY}" cluster-registration-executor "${VERSION}")"
 
 log "Release version: ${VERSION}"
@@ -106,7 +105,6 @@ mkdir -p \
   "${WORK_DIR}/platform-frontend/nginx" \
   "${WORK_DIR}/comm-agent" \
   "${WORK_DIR}/oadp-comm-agent" \
-  "${WORK_DIR}/platform-upgrader" \
   "${WORK_DIR}/cluster-registration-executor" \
   "${FRONTEND_DEPS_DIR}" \
   "${GO_BUILD_CACHE}" \
@@ -143,8 +141,6 @@ log "Building backend binaries"
     GOTOOLCHAIN=local GOPROXY="${GOPROXY}" GOCACHE="${GO_BUILD_CACHE}" GOMODCACHE="${GO_MOD_CACHE}" \
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     "${GO_BIN}" build -trimpath -ldflags="-s -w" -o "${WORK_DIR}/platform-api/platform-migrate" ./cmd/platform-migrate
-  PATH="$(dirname "${GO_BIN}"):${PATH}" GOTOOLCHAIN=local GOPROXY="${GOPROXY}" GOCACHE="${GO_BUILD_CACHE}" GOMODCACHE="${GO_MOD_CACHE}" CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    "${GO_BIN}" build -trimpath -ldflags="${VERSION_LDFLAGS}" -o "${WORK_DIR}/platform-upgrader/platform-upgrader" ./cmd/platform-upgrader
   PATH="$(dirname "${GO_BIN}"):${PATH}" GOTOOLCHAIN=local GOPROXY="${GOPROXY}" GOCACHE="${GO_BUILD_CACHE}" GOMODCACHE="${GO_MOD_CACHE}" CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     "${GO_BIN}" build -trimpath -ldflags="${VERSION_LDFLAGS}" -o "${WORK_DIR}/cluster-registration-executor/cluster-registration-executor" ./cmd/cluster-registration-executor
   PATH="$(dirname "${GO_BIN}"):${PATH}" GOTOOLCHAIN=local GOPROXY="${GOPROXY}" GOCACHE="${GO_BUILD_CACHE}" GOMODCACHE="${GO_MOD_CACHE}" CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
@@ -213,7 +209,6 @@ cp "${ROOT_DIR}/docker/platform-frontend.Dockerfile" "${WORK_DIR}/platform-front
 
 cp "${ROOT_DIR}/docker/comm-agent.local.Dockerfile" "${WORK_DIR}/comm-agent/Dockerfile"
 cp "${ROOT_DIR}/docker/oadp-comm-agent.local.Dockerfile" "${WORK_DIR}/oadp-comm-agent/Dockerfile"
-cp "${ROOT_DIR}/docker/platform-upgrader.Dockerfile" "${WORK_DIR}/platform-upgrader/Dockerfile"
 cp /etc/ssl/certs/ca-certificates.crt "${WORK_DIR}/cluster-registration-executor/ca-certificates.crt"
 cp "${ROOT_DIR}/docker/cluster-registration-executor.Dockerfile" "${WORK_DIR}/cluster-registration-executor/Dockerfile"
 if [[ -n "${KUBECTL_BINARY}" ]]; then
@@ -267,9 +262,6 @@ docker build -t "${COMM_AGENT_IMAGE}" "${WORK_DIR}/comm-agent"
 log "Building image ${OADP_COMM_AGENT_IMAGE}"
 docker build -t "${OADP_COMM_AGENT_IMAGE}" "${WORK_DIR}/oadp-comm-agent"
 
-log "Building image ${PLATFORM_UPGRADER_IMAGE}"
-docker build -t "${PLATFORM_UPGRADER_IMAGE}" "${WORK_DIR}/platform-upgrader"
-
 log "Building image ${REGISTRATION_EXECUTOR_IMAGE}"
 docker build --build-arg DEBIAN_IMAGE="${DEBIAN_IMAGE}" -t "${REGISTRATION_EXECUTOR_IMAGE}" "${WORK_DIR}/cluster-registration-executor"
 
@@ -279,7 +271,6 @@ if [[ "${PUSH}" == "true" ]]; then
   docker push "${PLATFORM_FRONTEND_IMAGE}"
   docker push "${COMM_AGENT_IMAGE}"
   docker push "${OADP_COMM_AGENT_IMAGE}"
-  docker push "${PLATFORM_UPGRADER_IMAGE}"
   docker push "${REGISTRATION_EXECUTOR_IMAGE}"
 fi
 
@@ -289,10 +280,9 @@ Built images:
   ${PLATFORM_API_IMAGE}
   ${PLATFORM_FRONTEND_IMAGE}
   ${COMM_AGENT_IMAGE}
-  ${PLATFORM_UPGRADER_IMAGE}
   ${REGISTRATION_EXECUTOR_IMAGE}
 
 Next:
   ${SCRIPT_DIR}/push-release.sh ${VERSION} --registry ${REGISTRY}
-  Install or upgrade from the bootstrap page or platform UI.
+  Install from the bootstrap package; upgrade through the blue/green release pipeline.
 EOF
