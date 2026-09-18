@@ -94,6 +94,7 @@ jobs:
           script_stop: true
           script: |
             set -euo pipefail
+            trap 'rc=$?; echo "remote deploy failed: line=${LINENO} command=${BASH_COMMAND} status=${rc}" >&2; exit "${rc}"' ERR
             deploy_path='${{ vars.HCDR_DEPLOY_PATH }}'
             source_path="${deploy_path}/source"
             ref='${{ needs.publish.outputs.release_ref }}'
