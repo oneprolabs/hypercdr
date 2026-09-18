@@ -6,6 +6,7 @@ source "$ROOT_DIR/scripts/lib/registry-config.sh"
 LOCK_FILE="${ROOT_DIR}/packaging/oadp/image-lock.json"
 REGISTRY="${HCDR_IMAGE_REGISTRY:-}"
 OUTPUT="${HCDR_OADP_RESOLVED_LOCK:-${HCDR_RUNTIME_ROOT:-/data/hypercdr-runtime}/oadp-mirror/resolved-image-lock.json}"
+IMAGE_TIMEOUT="${HCDR_OADP_IMAGE_TIMEOUT_SECONDS:-900}"
 
 usage() {
   echo "Usage: mirror-community-oadp-images.sh --registry HOST/NAMESPACE [--lock FILE] [--output FILE]" >&2
@@ -23,6 +24,7 @@ done
 
 REGISTRY="${REGISTRY%/}"
 [[ "$REGISTRY" == */* ]] || { echo "registry must include host and namespace" >&2; exit 2; }
+[[ "$IMAGE_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || { echo "HCDR_OADP_IMAGE_TIMEOUT_SECONDS must be a positive integer" >&2; exit 2; }
 [[ -r "$LOCK_FILE" ]] || { echo "lock file is not readable: $LOCK_FILE" >&2; exit 2; }
 command -v docker >/dev/null
 command -v jq >/dev/null
@@ -39,10 +41,10 @@ while IFS=$'\t' read -r component source source_digest required; do
   target="$(image_ref "${REGISTRY}" "${component}" "${release}")"
   [[ "$source_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "locked source digest is invalid: $component" >&2; exit 1; }
   echo "==> Pulling locked ${source%@*}@${source_digest} for ${platform}"
-  timeout 300 docker pull --platform "$platform" "${source%@*}@${source_digest}"
+  timeout "$IMAGE_TIMEOUT" docker pull --platform "$platform" "${source%@*}@${source_digest}"
   docker tag "${source%@*}@${source_digest}" "$target"
-  timeout 300 docker push "$target"
-  timeout 300 docker pull --platform "$platform" "$target" >/dev/null
+  timeout "$IMAGE_TIMEOUT" docker push "$target"
+  timeout "$IMAGE_TIMEOUT" docker pull --platform "$platform" "$target" >/dev/null
   target_digest="$(image_digest "$target")"
   [[ "$target_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "target digest unavailable: $target" >&2; exit 1; }
   docker manifest inspect "${target%@*}@${target_digest}" >/dev/null
