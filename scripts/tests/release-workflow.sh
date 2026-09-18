@@ -14,6 +14,8 @@ grep -Fq 'command_timeout: 3600s' "$workflow"
 grep -Fq 'release-all.sh --config "${RUNNER_TEMP}/release.conf"' "$workflow"
 grep -Fq 'export HCDR_REGISTRY_CONFIG="${GITHUB_WORKSPACE}/config/registries.conf"' "$workflow"
 grep -Fq 'export HCDR_REGISTRY_PROFILE="${{ steps.release.outputs.profile }}"' "$workflow"
+grep -Fq 'ref="${GITHUB_SHA}"' "$workflow"
+grep -Fq 'ref="${GITHUB_REF_NAME}"' "$workflow"
 ! grep -Fq 'release-all.sh "${{ steps.release.outputs.version }}"' "$workflow"
 
 echo "release workflow contract passed"
