@@ -167,7 +167,7 @@ start_color() {
   wait_for_service "hypercdr-platform-api-${color}" || return 1
   wait_for_service "hypercdr-platform-frontend-${color}" || return 1
   wait_for_http "hypercdr-platform-api-${color}" 18080 /readyz || return 1
-  wait_for_http "hypercdr-platform-frontend-${color}" 3002 / https || return 1
+  wait_for_http "hypercdr-platform-frontend-${color}" 3002 / http || return 1
 }
 
 rollback_color() {
