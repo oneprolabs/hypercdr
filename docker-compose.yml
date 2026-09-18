@@ -46,6 +46,7 @@ services:
     environment: &platform-api-env
       HCDR_HTTP_ADDR: 0.0.0.0:18080
       HCDR_BASE_URL: ${HCDR_BASE_URL:-https://hypercdr.com}
+      HCDR_PUBLIC_BASE_URL: ${HCDR_PUBLIC_BASE_URL:-${HCDR_BASE_URL:-https://hypercdr.com}}
       HCDR_AGENT_WS_ENDPOINT: ${HCDR_AGENT_WS_ENDPOINT:-wss://hypercdr.com/ws/agent}
       HCDR_AGENT_PRIVATE_WS_ENDPOINT: ${HCDR_AGENT_PRIVATE_WS_ENDPOINT:-}
       HCDR_AGENT_PUBLIC_WS_ENDPOINT: ${HCDR_AGENT_PUBLIC_WS_ENDPOINT:-}

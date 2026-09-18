@@ -11,8 +11,6 @@ REGISTRY_PROFILE="${HCDR_REGISTRY_PROFILE:-}"
 VERSION=""
 SKIP_TESTS="${HCDR_RELEASE_SKIP_TESTS:-false}"
 LOGIN="true"
-CLI_REGISTRY=""
-CLI_SKIP_TESTS=""
 SKIP_REGISTER="false"
 DRY_RUN="false"
 RESUME="false"
@@ -32,16 +30,20 @@ Options:
   -h, --help          Show help.
 
 Required config:
+  RELEASE_VERSION=MAJOR.MINOR.PATCH.YYYYMMDD
   HCDR_IMAGE_REGISTRY=REGISTRY_HOST/NAMESPACE_OR_PROJECT
+  HCDR_RELEASE_SECRETS_FILE=./release.secrets.conf
 
-Optional registry login config:
+Required secrets file values:
   HCDR_REGISTRY_SERVER=registry.example.com
   HCDR_REGISTRY_USERNAME=<username>
   HCDR_REGISTRY_PASSWORD_FILE=/secure/path/to/password
   # or HCDR_REGISTRY_PASSWORD=<password>
+  HCDR_TURNSTILE_SECRET_KEY=<matching-secret-key>
 
-If no username is configured, the script uses credentials already stored by
-`docker login`. Legacy HCDR_HARBOR_* names remain supported.
+Relative secret-file paths are resolved from the directory containing the
+release config. The populated secrets file is local-only. The resulting private
+installer contains the Turnstile deployment secret and must be protected.
 USAGE
 }
 
@@ -54,11 +56,22 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -f "${CONFIG_FILE}" ]]; then
+  CONFIG_FILE="$(cd "$(dirname "${CONFIG_FILE}")" && pwd)/$(basename "${CONFIG_FILE}")"
   # shellcheck disable=SC1090
   source "${CONFIG_FILE}"
 elif [[ "${CONFIG_FILE}" != "${SCRIPT_DIR}/release.conf" ]]; then
   die "config file not found: ${CONFIG_FILE}"
 fi
+
+[[ -n "${HCDR_RELEASE_SECRETS_FILE:-}" ]] || die "HCDR_RELEASE_SECRETS_FILE is required in ${CONFIG_FILE}"
+if [[ "${HCDR_RELEASE_SECRETS_FILE}" = /* ]]; then
+  RELEASE_SECRETS_FILE="${HCDR_RELEASE_SECRETS_FILE}"
+else
+  RELEASE_SECRETS_FILE="$(dirname "${CONFIG_FILE}")/${HCDR_RELEASE_SECRETS_FILE}"
+fi
+[[ -r "${RELEASE_SECRETS_FILE}" ]] || die "release secrets file is not readable: ${RELEASE_SECRETS_FILE} (copy release.secrets.conf.example and populate it)"
+# shellcheck disable=SC1090
+source "${RELEASE_SECRETS_FILE}"
 
 VERSION="${RELEASE_VERSION:-${VERSION}}"
 
@@ -69,13 +82,6 @@ source "${ROOT_DIR}/scripts/lib/registry-config.sh"
 load_registry_profile "${REGISTRY_CONFIG_FILE}" "${REGISTRY_PROFILE}"
 
 SKIP_TESTS="${HCDR_RELEASE_SKIP_TESTS:-${SKIP_TESTS}}"
-if [[ -n "${CLI_REGISTRY}" ]]; then
-  HCDR_IMAGE_REGISTRY="${CLI_REGISTRY}"
-  HCDR_REGISTRY_SERVER="${CLI_REGISTRY%%/*}"
-fi
-if [[ -n "${CLI_SKIP_TESTS}" ]]; then
-  SKIP_TESTS="${CLI_SKIP_TESTS}"
-fi
 
 require_version "${VERSION}"
 require_registry "${HCDR_IMAGE_REGISTRY:-}"
@@ -90,6 +96,20 @@ REGISTRY_SERVER="${HCDR_REGISTRY_SERVER:-${HCDR_HARBOR_SERVER:-${REGISTRY_HOST}}
 REGISTRY_USERNAME="${HCDR_REGISTRY_USERNAME:-${HCDR_HARBOR_USERNAME:-}}"
 REGISTRY_PASSWORD_FILE="${HCDR_REGISTRY_PASSWORD_FILE:-${HCDR_HARBOR_PASSWORD_FILE:-}}"
 REGISTRY_PASSWORD="${HCDR_REGISTRY_PASSWORD:-${HCDR_HARBOR_PASSWORD:-}}"
+AUTH_CHALLENGE_MODE="${HCDR_AUTH_CHALLENGE_MODE:-image}"
+TURNSTILE_SITE_KEY="${HCDR_TURNSTILE_SITE_KEY:-}"
+TURNSTILE_SECRET_KEY="${HCDR_TURNSTILE_SECRET_KEY:-}"
+TURNSTILE_VERIFY_URL="${HCDR_TURNSTILE_VERIFY_URL:-https://challenges.cloudflare.com/turnstile/v0/siteverify}"
+
+case "${AUTH_CHALLENGE_MODE}" in
+  image) ;;
+  turnstile)
+    [[ -n "${TURNSTILE_SITE_KEY}" ]] || die "HCDR_TURNSTILE_SITE_KEY is required when Turnstile is enabled"
+    [[ -n "${TURNSTILE_SECRET_KEY}" ]] || die "HCDR_TURNSTILE_SECRET_KEY is required in ${RELEASE_SECRETS_FILE} when Turnstile is enabled"
+    [[ "${TURNSTILE_VERIFY_URL}" == https://* ]] || die "HCDR_TURNSTILE_VERIFY_URL must use HTTPS"
+    ;;
+  *) die "HCDR_AUTH_CHALLENGE_MODE must be image or turnstile" ;;
+esac
 
 login_registry() {
   if [[ "${LOGIN}" != "true" ]]; then
@@ -136,6 +156,7 @@ Version:        ${VERSION}
 Registry:       ${REGISTRY}
 Profile:        ${HCDR_SELECTED_REGISTRY:-command-line}
 Registry server: ${REGISTRY_SERVER}
+Login challenge: ${AUTH_CHALLENGE_MODE}
 Skip tests:     ${SKIP_TESTS}
 EOF
 
@@ -268,7 +289,12 @@ EOF
 log "Complete release manifest generated: ${RELEASE_MANIFEST}"
 
 log "Generating versioned installer package"
-HCDR_RELEASE_MANIFEST="${RELEASE_MANIFEST}" "${ROOT_DIR}/scripts/release/package-release.sh" "${VERSION}"
+HCDR_RELEASE_MANIFEST="${RELEASE_MANIFEST}" \
+HCDR_AUTH_CHALLENGE_MODE="${AUTH_CHALLENGE_MODE}" \
+HCDR_TURNSTILE_SITE_KEY="${TURNSTILE_SITE_KEY}" \
+HCDR_TURNSTILE_SECRET_KEY="${TURNSTILE_SECRET_KEY}" \
+HCDR_TURNSTILE_VERIFY_URL="${TURNSTILE_VERIFY_URL}" \
+  "${ROOT_DIR}/scripts/release/package-release.sh" "${VERSION}"
 
 if [[ "${SKIP_REGISTER}" == "true" || -z "${RELEASE_CENTER_URL}" ]]; then
   log "Release Center registration disabled (no URL configured)"

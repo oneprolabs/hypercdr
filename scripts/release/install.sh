@@ -2,14 +2,14 @@
 set -euo pipefail
 
 # No file editing required:
-# ./install.sh --base-url https://192.168.8.149:3002 --install-dir /data/hypercdr/deploy
+# ./install.sh --base-url https://192.168.8.149:12443 --install-dir /data/hypercdr/deploy
 usage() {
   printf '%s\n' \
     'Usage: ./install.sh [docker] --base-url HTTPS_URL [--public-base-url URL] [--install-dir PATH] [--check]' \
     'Deployment mode: install.sh installs the control plane on this host using Docker Compose.' \
     'The underlying install-platform.sh command uses the explicit mode: ./install-platform.sh docker ...' \
     'Command-line values override install-config.sh; other settings use that file.' \
-    'Example: ./install.sh --base-url https://192.168.8.149:3002 --install-dir /data/hypercdr/deploy' \
+    'Example: ./install.sh --base-url https://192.168.8.149:12443 --install-dir /data/hypercdr/deploy' \
     'Add --check to validate prerequisites without installing. Installation requires interactive YES confirmation.'
 }
 base_override=""
@@ -45,11 +45,12 @@ fi
 source "${CONFIG_FILE}"
 
 if [[ -n "$base_override" ]]; then
-  [[ "$base_override" =~ ^https://([A-Za-z0-9.-]+)(:([0-9]+))?/?$ ]] || { echo '--base-url must be an HTTPS host URL, optionally with a port' >&2; exit 2; }
-  HCDR_HTTP_PORT="${BASH_REMATCH[3]:-443}"
-  [[ ${#HCDR_HTTP_PORT} -le 5 ]] && (( 10#$HCDR_HTTP_PORT >= 1 && 10#$HCDR_HTTP_PORT <= 65535 )) || { echo 'Port must be between 1 and 65535' >&2; exit 2; }
   HCDR_BASE_URL="${base_override%/}"
 fi
+# Derive the listening port from the effective URL for both config and CLI input.
+[[ "$HCDR_BASE_URL" =~ ^https://([A-Za-z0-9.-]+)(:([0-9]+))?/?$ ]] || { echo '--base-url must be an HTTPS host URL, optionally with a port' >&2; exit 2; }
+HCDR_HTTP_PORT="${BASH_REMATCH[3]:-443}"
+[[ ${#HCDR_HTTP_PORT} -le 5 ]] && (( 10#$HCDR_HTTP_PORT >= 1 && 10#$HCDR_HTTP_PORT <= 65535 )) || { echo 'Port must be between 1 and 65535' >&2; exit 2; }
 if [[ -n "$install_override" ]]; then
   [[ "$install_override" == /* && "$install_override" != / && "$install_override" != *$'\n'* ]] || { echo '--install-dir must be an absolute, non-root directory' >&2; exit 2; }
   HCDR_INSTALL_DIR="$install_override"
@@ -67,8 +68,15 @@ for name in "${required_vars[@]}"; do
   fi
 done
 
+# install-platform.sh runs as a child process. Export authentication settings
+# loaded from install-config.sh so the selected challenge reaches runtime.
+export HCDR_AUTH_CHALLENGE_MODE
+export HCDR_TURNSTILE_SITE_KEY
+export HCDR_TURNSTILE_SECRET_KEY
+export HCDR_TURNSTILE_VERIFY_URL
+
 if [[ "${HCDR_BASE_URL}" == *"192.0.2.10"* ]]; then
-  echo "Supply --base-url https://<host>:3002 or edit install-config.sh before installation" >&2
+  echo "Supply --base-url https://<host>:12443 or edit install-config.sh before installation" >&2
   exit 2
 fi
 

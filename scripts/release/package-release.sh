@@ -48,7 +48,7 @@ if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ && ! "${VERSION}" =~ 
   exit 2
 fi
 
-for required in sed tar date sha256sum; do
+for required in sed tar date sha256sum jq; do
   command -v "${required}" >/dev/null 2>&1 || { echo "missing required command: ${required}" >&2; exit 1; }
 done
 
@@ -60,6 +60,7 @@ for path in "${WORK_DIR}" "${PUBLISH_DIR}"; do
 done
 
 [[ ! -e "${RELEASE_DIR}" ]] || { echo "release already exists: ${RELEASE_DIR}; use a new version or HCDR_RELEASE_ROOT for validation" >&2; exit 1; }
+[[ ! -e "${WORK_DIR}" ]] || { echo "package work directory already exists: ${WORK_DIR}; use a new version or HCDR_PACKAGE_BUILD_ROOT for validation" >&2; exit 1; }
 mkdir -p "${WORK_DIR}/hypercdr-bootstrap" "${RELEASE_DIR}"
 
 package_dir="${WORK_DIR}/hypercdr-bootstrap"
@@ -91,14 +92,36 @@ mkdir -p "${package_dir}/nginx"
 cp "${ROOT_DIR}/docker/nginx/edge.conf" "${package_dir}/nginx/edge.conf"
 cp "${ROOT_DIR}/docker/nginx/upstream.conf.default" "${package_dir}/nginx/upstream.conf.default"
 [[ -s "${RELEASE_MANIFEST}" ]] || { echo "complete release manifest is required: ${RELEASE_MANIFEST}" >&2; exit 1; }
-manifest_version="$(sed -nE 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "${RELEASE_MANIFEST}" | head -1)"
+manifest_version="$(jq -er '.version' "${RELEASE_MANIFEST}")"
 [[ "${manifest_version}" == "${VERSION}" ]] || {
   echo "release manifest version ${manifest_version:-unknown} does not match package version ${VERSION}" >&2
+  exit 1
+}
+jq -e '.componentManifest as $m | ["platform-api", "platform-frontend", "platform-upgrader", "cluster-registration-executor", "comm-agent", "velero", "velero-plugin-for-aws", "velero-plugin-for-microsoft-azure", "velero-plugin-for-gcp", "oadp-comm-agent", "oadp-operator", "oadp-velero", "oadp-openshift-plugin", "oadp-aws-plugin", "oadp-restore-helper", "oadp-bundle", "oadp-catalog"] | all(.[]; . as $name | ($m[$name].version | type == "string" and length > 0) and ($m[$name].image | type == "string" and length > 0))' "${RELEASE_MANIFEST}" >/dev/null || {
+  echo "release manifest must contain all required platform and agent components" >&2
   exit 1
 }
 cp "${RELEASE_MANIFEST}" "${package_dir}/release-manifest.json"
 cp -R "${ROOT_DIR}/charts" "${package_dir}/charts"
 chmod +x "${package_dir}"/*.sh
+
+auth_challenge_mode="${HCDR_AUTH_CHALLENGE_MODE:-image}"
+case "${auth_challenge_mode}" in
+  image) ;;
+  turnstile)
+    [[ -n "${HCDR_TURNSTILE_SITE_KEY:-}" ]] || { echo "HCDR_TURNSTILE_SITE_KEY is required for a Turnstile installer" >&2; exit 1; }
+    [[ -n "${HCDR_TURNSTILE_SECRET_KEY:-}" ]] || { echo "HCDR_TURNSTILE_SECRET_KEY is required for a Turnstile installer" >&2; exit 1; }
+    ;;
+  *) echo "HCDR_AUTH_CHALLENGE_MODE must be image or turnstile" >&2; exit 1 ;;
+esac
+{
+  printf '\n# Authentication settings injected by the release pipeline.\n'
+  printf 'HCDR_AUTH_CHALLENGE_MODE=%q\n' "${auth_challenge_mode}"
+  printf 'HCDR_TURNSTILE_SITE_KEY=%q\n' "${HCDR_TURNSTILE_SITE_KEY:-}"
+  printf 'HCDR_TURNSTILE_SECRET_KEY=%q\n' "${HCDR_TURNSTILE_SECRET_KEY:-}"
+  printf 'HCDR_TURNSTILE_VERIFY_URL=%q\n' "${HCDR_TURNSTILE_VERIFY_URL:-https://challenges.cloudflare.com/turnstile/v0/siteverify}"
+} >> "${package_dir}/install-config.sh"
+chmod 600 "${package_dir}/install-config.sh"
 
 sed -i -E "s/(v[0-9]{8}\.[0-9]+|[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8})/${VERSION}/g" \
   "${package_dir}/install-platform.sh" \
@@ -113,6 +136,7 @@ sed -i -E "s/(v[0-9]{8}\.[0-9]+|[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8})/${VERSION}/g" 
 # hypercdr-bootstrap/hypercdr-bootstrap nesting level.
 tar -C "${package_dir}" -czf "${RELEASE_DIR}/hypercdr-bootstrap.tar.gz" .
 tar -C "${WORK_DIR}" --transform="s,^hypercdr-bootstrap,hypercdr-installer-${VERSION}," -czf "${RELEASE_DIR}/hypercdr-installer-${VERSION}.tar.gz" hypercdr-bootstrap
+chmod 600 "${RELEASE_DIR}/hypercdr-bootstrap.tar.gz" "${RELEASE_DIR}/hypercdr-installer-${VERSION}.tar.gz"
 cp "${RELEASE_MANIFEST}" "${RELEASE_DIR}/release-manifest.json"
 cp "${package_dir}/install-platform.sh" "${RELEASE_DIR}/install-platform.sh"
 cp "${package_dir}/uninstall-platform.sh" "${RELEASE_DIR}/uninstall-platform.sh"
@@ -154,5 +178,5 @@ Portal source:
   ${PUBLISH_DIR}
 
 Install from the extracted package:
-  bash install.sh --base-url https://HOST:3002
+  bash install.sh --base-url https://HOST:12443
 EOF

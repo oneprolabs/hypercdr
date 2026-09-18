@@ -12,6 +12,7 @@ type Config struct {
 	TLSCertFile                   string
 	TLSKeyFile                    string
 	DatabaseURL                   string
+	BaseURL                       string
 	PublicBaseURL                 string
 	AgentWSEndpoint               string
 	AgentPrivateWSEndpoint        string
@@ -69,6 +70,7 @@ func Load() Config {
 		TLSCertFile:                   os.Getenv("HCDR_TLS_CERT_FILE"),
 		TLSKeyFile:                    os.Getenv("HCDR_TLS_KEY_FILE"),
 		DatabaseURL:                   os.Getenv("HCDR_DATABASE_URL"),
+		BaseURL:                       strings.TrimRight(getEnv("HCDR_BASE_URL", ""), "/"),
 		PublicBaseURL:                 strings.TrimRight(getEnv("HCDR_PUBLIC_BASE_URL", ""), "/"),
 		AgentWSEndpoint:               getEnv("HCDR_AGENT_WS_ENDPOINT", ""),
 		AgentPrivateWSEndpoint:        getEnv("HCDR_AGENT_PRIVATE_WS_ENDPOINT", ""),

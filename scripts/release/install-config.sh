@@ -4,7 +4,7 @@
 
 # Address that users and cluster agents use to reach the control plane.
 # Replace 192.0.2.10 with the actual control-plane host IP or DNS name.
-HCDR_BASE_URL="https://192.0.2.10:3002"
+HCDR_BASE_URL="https://192.0.2.10:12443"
 
 # Alibaba Cloud image repository used by the installer.
 HCDR_REGISTRY="registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr"
@@ -12,9 +12,10 @@ HCDR_REGISTRY="registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr"
 # Released HyperCDR version. It is updated automatically when the package is built.
 HCDR_IMAGE_TAG="1.0.23.20260915"
 
-# Persistent data and listening ports on the target host.
+# Persistent data and API listening port on the target host.
+# install.sh derives the frontend port from HCDR_BASE_URL; this value is informational.
 HCDR_INSTALL_DIR="/var/lib/hypercdr"
-HCDR_HTTP_PORT="3002"
+HCDR_HTTP_PORT="12443"
 HCDR_API_PORT="18080"
 
 # Optional public address used as an Agent fallback. Leave empty when unused.

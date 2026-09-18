@@ -53,6 +53,7 @@ dist/
 *.tgz
 *.bak
 *.bak-*
+scripts/release/release.secrets.conf
 
 # Local databases
 *.dump

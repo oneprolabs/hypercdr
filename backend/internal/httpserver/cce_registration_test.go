@@ -138,7 +138,7 @@ func TestCCEDirectRegistrationRequiresInspectionAndCreatesIdempotentTask(t *test
 	defer executor.Close()
 	sessionDir := t.TempDir()
 	repo := store.NewMemoryStore()
-	cfg := config.Config{RegistrationSessionDir: sessionDir, RegistrationExecutorEndpoint: executor.URL, RegistrationExecutorToken: "executor-token", AgentNamespace: "hypercdr-agent", AgentWSEndpoint: "wss://platform/ws/agent"}
+	cfg := config.Config{RegistrationSessionDir: sessionDir, RegistrationExecutorEndpoint: executor.URL, RegistrationExecutorToken: "executor-token", AgentNamespace: "hypercdr-agent", BaseURL: "https://platform:18443"}
 	server := httptest.NewServer(NewRouter(cfg, slog.Default(), repo))
 	defer server.Close()
 	status, uploaded := uploadTestKubeconfig(t, server.URL, "cce.yaml", validCCEKubeconfig)
@@ -169,6 +169,13 @@ func TestCCEDirectRegistrationRequiresInspectionAndCreatesIdempotentTask(t *test
 	}
 	if strings.Contains(string(requestRaw), "registration-request-0001") || !strings.Contains(string(requestRaw), `"token"`) {
 		t.Fatalf("sealed request content invalid: %s", requestRaw)
+	}
+	var installRequest map[string]any
+	if err := json.Unmarshal(requestRaw, &installRequest); err != nil {
+		t.Fatal(err)
+	}
+	if installRequest["installScriptUrl"] != "https://platform:18443/install.sh" || installRequest["endpoint"] != "wss://platform:18443/ws/agent" {
+		t.Fatal("automatic registration did not preserve the configured external port")
 	}
 }
 

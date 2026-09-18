@@ -6,14 +6,25 @@ This directory contains the control-plane build, image publishing, installer pac
 
 ```bash
 cd /data/hypercdr-main/scripts/release
+cp release.secrets.conf.example release.secrets.conf
+chmod 600 release.secrets.conf
+# Populate the Alibaba registry credentials and Turnstile Secret Key.
 ./release-all.sh --config ./release.conf
-
-The configuration file is optional only when all settings are supplied through
-`release.conf` contains `RELEASE_VERSION` and the complete registry/build
-configuration. Edit it before each release, or pass another file with
-`--config`. Registry passwords and Release Center tokens must be stored in
-separate local files and must not be committed.
 ```
+
+`release.conf` contains `RELEASE_VERSION`, non-secret registry/build settings,
+the public Turnstile Site Key, and `HCDR_RELEASE_SECRETS_FILE`. A relative
+secrets path is resolved from the directory containing the selected release
+config, independent of the caller's current directory. The populated secrets
+file is ignored by Git and must not be committed.
+
+Before building, `release-all.sh` validates the configuration and authenticates
+to the registry with `docker login`. Cloudflare validates a Turnstile Secret Key
+only when the deployed login flow submits a browser token; the release step can
+verify only that the matching Site/Secret settings are present and structurally
+consistent. The private installer embeds the deployment Secret Key so a new
+installation uses Turnstile immediately. Protect the archive as a credential-
+bearing artifact and distribute it only through trusted channels.
 
 `release-all.sh` is the complete release entry point. It builds all control-plane and runtime images, pushes them, mirrors Velero/OADP assets, generates the complete `release-manifest.json`, creates the platform installer archive and SHA256 checksum, and registers the candidate release. Use `--skip-register` for the initial seed release.
 
@@ -103,11 +114,11 @@ script includes this guide as `README.md` at the root of every newly generated
 installer package. Previously generated archives are not modified.
 
 ```bash
-./install-platform.sh docker --base-url https://HOST:3002 \
+./install-platform.sh docker --base-url https://HOST:12443 \
   --install-dir /var/lib/hypercdr --execute --confirm-prerequisites
 systemctl status hypercdr.service
 systemctl restart hypercdr.service
-curl -k -o /dev/null -w 'ready=%{http_code}\n' https://HOST:3002/readyz
+curl -k -o /dev/null -w 'ready=%{http_code}\n' https://HOST:12443/readyz
 ```
 
 An installation is healthy only when `hypercdr.service` is enabled and active, all five Compose services are running, and `/readyz` returns HTTP 200.

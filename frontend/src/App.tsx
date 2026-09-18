@@ -1099,7 +1099,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   }, []);
 
   useEffect(() => {
-    if (authConfig.challengeMode !== 'turnstile' || !authConfig.turnstileSiteKey || authFlow !== 'login') return;
+    if (authConfig.challengeMode !== 'turnstile' || !authConfig.turnstileSiteKey || authFlow !== 'login' || view !== 'login' || passwordChangeCompleted) return;
     let cancelled = false;
     const render = () => {
       if (cancelled || !turnstileRef.current || !window.turnstile || turnstileWidget.current) return;
@@ -1121,7 +1121,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     }
     render();
     return () => { cancelled = true; if (turnstileWidget.current && window.turnstile?.remove) window.turnstile.remove(turnstileWidget.current); turnstileWidget.current = null; setTurnstileToken(''); setTurnstileRendered(false); };
-  }, [authConfig.challengeMode, authConfig.turnstileSiteKey, authFlow, turnstileMountKey]);
+  }, [authConfig.challengeMode, authConfig.turnstileSiteKey, authFlow, turnstileMountKey, view, passwordChangeCompleted]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1441,7 +1441,12 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       }
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : 'Login failed');
-      await refreshLoginCaptcha(false);
+      if (authConfig.challengeMode === 'turnstile') {
+        setTurnstileToken('');
+        setTurnstileMountKey(key => key + 1);
+      } else {
+        await refreshLoginCaptcha(false);
+      }
     } finally {
       setLoginSubmitting(false);
     }
