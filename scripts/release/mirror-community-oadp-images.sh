@@ -6,7 +6,7 @@ source "$ROOT_DIR/scripts/lib/registry-config.sh"
 LOCK_FILE="${ROOT_DIR}/packaging/oadp/image-lock.json"
 REGISTRY="${HCDR_IMAGE_REGISTRY:-}"
 OUTPUT="${HCDR_OADP_RESOLVED_LOCK:-${HCDR_RUNTIME_ROOT:-/data/hypercdr-runtime}/oadp-mirror/resolved-image-lock.json}"
-IMAGE_TIMEOUT="${HCDR_OADP_IMAGE_TIMEOUT_SECONDS:-900}"
+IMAGE_TIMEOUT="${HCDR_OADP_IMAGE_TIMEOUT_SECONDS:-3600}"
 
 usage() {
   echo "Usage: mirror-community-oadp-images.sh --registry HOST/NAMESPACE [--lock FILE] [--output FILE]" >&2
