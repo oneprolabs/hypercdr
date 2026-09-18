@@ -80,9 +80,13 @@ compose() {
 }
 
 check_public_ports() {
-  local conflicts
+  local conflicts listeners
   conflicts="$(docker ps --format '{{.Names}}\t{{.Ports}}' | awk '$1 != "hypercdr-edge" && /:80->|:443->/')"
   [[ -z "$conflicts" ]] || die "public ports 80/443 are occupied by:\n$conflicts"
+  if ! container_running "$EDGE_SERVICE" && command -v ss >/dev/null 2>&1; then
+    listeners="$(ss -ltnpH 2>/dev/null | awk '$4 ~ /:80$/ || $4 ~ /:443$/')"
+    [[ -z "$listeners" ]] || die "public ports 80/443 are already listening on the host:\n$listeners"
+  fi
 }
 
 container_running() {
