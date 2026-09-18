@@ -108,6 +108,14 @@ jobs:
               ! grep -q '^PLATFORM_API_GREEN_IMAGE=' "${deploy_path}/.env"; then
               # Existing non-blue/green installs must be converted through the
               # installer so their database credentials and runtime secrets are preserved.
+              # Remove only legacy application containers before publishing 80/443
+              # with the blue/green edge. PostgreSQL and its data are preserved.
+              docker rm -f \
+                hypercdr-edge \
+                hypercdr-platform-api \
+                hypercdr-platform-frontend \
+                hypercdr-platform-upgrader \
+                2>/dev/null || true
               fetch_asset scripts/release/install-blue-green.sh
               fetch_asset scripts/release/start-platform.sh
               fetch_asset scripts/release/stop-platform.sh

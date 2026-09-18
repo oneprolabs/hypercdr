@@ -18,6 +18,8 @@ grep -Fq 'ref="${GITHUB_SHA}"' "$workflow"
 grep -Fq 'ref="${GITHUB_REF_NAME}"' "$workflow"
 grep -Fq "grep -q '^PLATFORM_API_BLUE_IMAGE='" "$workflow"
 grep -Fq "grep -q '^PLATFORM_API_GREEN_IMAGE='" "$workflow"
+grep -Fq 'docker rm -f' "$workflow"
+grep -Fq 'hypercdr-platform-upgrader' "$workflow"
 ! grep -Fq 'release-all.sh "${{ steps.release.outputs.version }}"' "$workflow"
 
 echo "release workflow contract passed"
