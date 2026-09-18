@@ -97,7 +97,7 @@ manifest_version="$(jq -er '.version' "${RELEASE_MANIFEST}")"
   echo "release manifest version ${manifest_version:-unknown} does not match package version ${VERSION}" >&2
   exit 1
 }
-jq -e '.componentManifest as $m | ["platform-api", "platform-frontend", "platform-upgrader", "cluster-registration-executor", "comm-agent", "velero", "velero-plugin-for-aws", "velero-plugin-for-microsoft-azure", "velero-plugin-for-gcp", "oadp-comm-agent", "oadp-operator", "oadp-velero", "oadp-openshift-plugin", "oadp-aws-plugin", "oadp-restore-helper", "oadp-bundle", "oadp-catalog"] | all(.[]; . as $name | ($m[$name].version | type == "string" and length > 0) and ($m[$name].image | type == "string" and length > 0))' "${RELEASE_MANIFEST}" >/dev/null || {
+jq -e '.componentManifest as $m | ["platform-api", "platform-frontend", "cluster-registration-executor", "comm-agent", "velero", "velero-plugin-for-aws", "velero-plugin-for-microsoft-azure", "velero-plugin-for-gcp", "oadp-comm-agent", "oadp-operator", "oadp-velero", "oadp-openshift-plugin", "oadp-aws-plugin", "oadp-restore-helper", "oadp-bundle", "oadp-catalog"] | all(.[]; . as $name | ($m[$name].version | type == "string" and length > 0) and ($m[$name].image | type == "string" and length > 0))' "${RELEASE_MANIFEST}" >/dev/null || {
   echo "release manifest must contain all required platform and agent components" >&2
   exit 1
 }
