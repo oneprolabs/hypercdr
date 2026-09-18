@@ -12,6 +12,14 @@ DOMAIN="hypercdr.com"
 TLS_CERT_FILE=""
 TLS_KEY_FILE=""
 EXECUTE=false
+LEGACY_MIGRATION=false
+LEGACY_BACKUP_DIR=""
+LEGACY_EDGE_NAME=""
+LEGACY_CONTAINERS=(
+  hypercdr-platform-api
+  hypercdr-platform-frontend
+  hypercdr-platform-upgrader
+)
 
 usage() {
   cat <<'USAGE'
@@ -53,7 +61,84 @@ for command_name in docker openssl install; do
 done
 docker compose version >/dev/null 2>&1 || { echo "Docker Compose V2 is required" >&2; exit 1; }
 
+is_legacy_install() {
+  [[ -f "${INSTALL_DIR}/.env" ]] || return 1
+  ! grep -q '^PLATFORM_API_BLUE_IMAGE=' "${INSTALL_DIR}/.env" ||
+    ! grep -q '^PLATFORM_API_GREEN_IMAGE=' "${INSTALL_DIR}/.env"
+}
+
+legacy_container_exists() {
+  docker inspect "$1" >/dev/null 2>&1
+}
+
+prepare_legacy_migration() {
+  LEGACY_MIGRATION=true
+  LEGACY_BACKUP_DIR="${INSTALL_DIR}/backups/legacy-migration-$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -p "${LEGACY_BACKUP_DIR}"
+  [[ -f "${INSTALL_DIR}/.env" ]] && install -m 0600 "${INSTALL_DIR}/.env" "${LEGACY_BACKUP_DIR}/.env"
+  [[ -f "${INSTALL_DIR}/docker-compose.yaml" ]] && install -m 0644 "${INSTALL_DIR}/docker-compose.yaml" "${LEGACY_BACKUP_DIR}/docker-compose.yaml"
+  [[ -d "${INSTALL_DIR}/nginx" ]] && cp -a "${INSTALL_DIR}/nginx" "${LEGACY_BACKUP_DIR}/nginx"
+  [[ -d "${INSTALL_DIR}/tls" ]] && cp -a "${INSTALL_DIR}/tls" "${LEGACY_BACKUP_DIR}/tls"
+  [[ -f "${INSTALL_DIR}/tls.crt" ]] && install -m 0644 "${INSTALL_DIR}/tls.crt" "${LEGACY_BACKUP_DIR}/tls.crt"
+  [[ -f "${INSTALL_DIR}/tls.key" ]] && install -m 0600 "${INSTALL_DIR}/tls.key" "${LEGACY_BACKUP_DIR}/tls.key"
+  docker ps -a --format '{{.Names}} {{.Image}} {{.Status}}' >"${LEGACY_BACKUP_DIR}/containers.txt"
+
+  for container in "${LEGACY_CONTAINERS[@]}"; do
+    if legacy_container_exists "$container"; then
+      docker update --restart=no "$container" >/dev/null 2>&1 || true
+      docker stop "$container" >/dev/null 2>&1 || true
+    fi
+  done
+
+  # The new edge uses the same public ports. Rename, rather than remove, an
+  # existing edge so it can be restored if the migration fails.
+  if legacy_container_exists hypercdr-edge; then
+    LEGACY_EDGE_NAME="hypercdr-edge-legacy-$(date -u +%Y%m%d%H%M%S)"
+    docker rename hypercdr-edge "$LEGACY_EDGE_NAME"
+    docker update --restart=no "$LEGACY_EDGE_NAME" >/dev/null 2>&1 || true
+    docker stop "$LEGACY_EDGE_NAME" >/dev/null 2>&1 || true
+  fi
+}
+
+rollback_legacy_migration() {
+  [[ "$LEGACY_MIGRATION" == true ]] || return 0
+  printf 'Legacy migration failed; restoring the previous application containers.\n' >&2
+  docker rm -f \
+    hypercdr-edge \
+    hypercdr-platform-api-blue \
+    hypercdr-platform-api-green \
+    hypercdr-platform-frontend-blue \
+    hypercdr-platform-frontend-green \
+    hypercdr-cluster-registration-executor \
+    >/dev/null 2>&1 || true
+  if [[ -n "$LEGACY_EDGE_NAME" ]] && legacy_container_exists "$LEGACY_EDGE_NAME"; then
+    docker rename "$LEGACY_EDGE_NAME" hypercdr-edge >/dev/null 2>&1 || true
+    docker start hypercdr-edge >/dev/null 2>&1 || true
+  fi
+  for container in "${LEGACY_CONTAINERS[@]}"; do
+    docker start "$container" >/dev/null 2>&1 || true
+  done
+  if [[ -n "$LEGACY_BACKUP_DIR" ]]; then
+    [[ -f "${LEGACY_BACKUP_DIR}/.env" ]] && install -m 0600 "${LEGACY_BACKUP_DIR}/.env" "${INSTALL_DIR}/.env"
+    [[ -f "${LEGACY_BACKUP_DIR}/docker-compose.yaml" ]] && install -m 0644 "${LEGACY_BACKUP_DIR}/docker-compose.yaml" "${INSTALL_DIR}/docker-compose.yaml"
+    if [[ -d "${LEGACY_BACKUP_DIR}/nginx" ]]; then
+      rm -rf "${INSTALL_DIR}/nginx"
+      cp -a "${LEGACY_BACKUP_DIR}/nginx" "${INSTALL_DIR}/nginx"
+    fi
+    if [[ -d "${LEGACY_BACKUP_DIR}/tls" ]]; then
+      rm -rf "${INSTALL_DIR}/tls"
+      cp -a "${LEGACY_BACKUP_DIR}/tls" "${INSTALL_DIR}/tls"
+    fi
+    [[ -f "${LEGACY_BACKUP_DIR}/tls.crt" ]] && install -m 0644 "${LEGACY_BACKUP_DIR}/tls.crt" "${INSTALL_DIR}/tls.crt"
+    [[ -f "${LEGACY_BACKUP_DIR}/tls.key" ]] && install -m 0600 "${LEGACY_BACKUP_DIR}/tls.key" "${INSTALL_DIR}/tls.key"
+  fi
+}
+
 mkdir -p "$INSTALL_DIR/data/postgres" "$INSTALL_DIR/registration-sessions" "$INSTALL_DIR/nginx/conf.d" "$INSTALL_DIR/nginx/acme" "$INSTALL_DIR/backups"
+if is_legacy_install; then
+  prepare_legacy_migration
+  trap 'rollback_legacy_migration' ERR
+fi
 install -m 0644 "$ROOT_DIR/docker-compose.yml" "$INSTALL_DIR/docker-compose.yaml"
 install -m 0644 "$ROOT_DIR/docker/nginx/edge.conf" "$INSTALL_DIR/nginx/conf.d/default.conf"
 install -m 0644 "$ROOT_DIR/docker/nginx/upstream.conf.default" "$INSTALL_DIR/nginx/conf.d/upstream.conf"
@@ -122,7 +207,15 @@ mv "${INSTALL_DIR}/.env.tmp" "${INSTALL_DIR}/.env"
 
 if [[ ! -f "${INSTALL_DIR}/.active_color" ]]; then printf 'blue\n' >"${INSTALL_DIR}/.active_color"; fi
 if [[ "$EXECUTE" == true ]]; then
-  HCDR_INSTALL_DIR="$INSTALL_DIR" "$INSTALL_DIR/deploy-blue-green.sh" "$VERSION"
+  if ! HCDR_INSTALL_DIR="$INSTALL_DIR" "$INSTALL_DIR/deploy-blue-green.sh" "$VERSION"; then
+    rollback_legacy_migration
+    exit 1
+  fi
+  trap - ERR
+  if [[ "$LEGACY_MIGRATION" == true ]]; then
+    printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"${INSTALL_DIR}/.migration_complete"
+    chmod 600 "${INSTALL_DIR}/.migration_complete"
+  fi
   if command -v systemctl >/dev/null 2>&1; then
     sed "s|__INSTALL_DIR__|${INSTALL_DIR}|g" "$INSTALL_DIR/hypercdr.service.template" > /etc/systemd/system/hypercdr.service
     systemctl daemon-reload
