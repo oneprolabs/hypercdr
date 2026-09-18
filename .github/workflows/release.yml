@@ -102,7 +102,12 @@ jobs:
             fetch_asset scripts/release/deploy-blue-green.sh
             fetch_asset scripts/lib/registry-config.sh
             chmod +x "${source_path}/scripts/release/deploy-blue-green.sh"
-            if [ ! -f "${deploy_path}/.env" ]; then
+            mkdir -p "${deploy_path}/nginx/conf.d" "${deploy_path}/nginx/acme"
+            if [ ! -f "${deploy_path}/.env" ] || \
+              ! grep -q '^PLATFORM_API_BLUE_IMAGE=' "${deploy_path}/.env" || \
+              ! grep -q '^PLATFORM_API_GREEN_IMAGE=' "${deploy_path}/.env"; then
+              # Existing non-blue/green installs must be converted through the
+              # installer so their database credentials and runtime secrets are preserved.
               fetch_asset scripts/release/install-blue-green.sh
               fetch_asset scripts/release/start-platform.sh
               fetch_asset scripts/release/stop-platform.sh
