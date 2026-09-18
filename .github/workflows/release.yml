@@ -109,6 +109,10 @@ jobs:
             set -eu
             deploy_path='${{ vars.HCDR_DEPLOY_PATH }}'
             source_path="${deploy_path}/source"
+            log_file="${deploy_path}/deploy-${{ needs.publish.outputs.image_version }}.log"
+            exec 3>&1 4>&2
+            exec >"${log_file}" 2>&1
+            trap 'status=$?; if [ "$status" -ne 0 ]; then cat "${log_file}" >&3; fi; exit "$status"' EXIT
             ref='${{ needs.publish.outputs.release_ref }}'
             mkdir -p "${source_path}/docker/nginx" "${source_path}/scripts/release"
             fetch_asset() {
