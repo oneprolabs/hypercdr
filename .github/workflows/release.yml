@@ -84,6 +84,19 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@v4
+      - name: Check SSH access
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ vars.HCDR_SSH_HOST }}
+          username: ${{ vars.HCDR_SSH_USER }}
+          port: ${{ vars.HCDR_SSH_PORT }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script_stop: true
+          script: |
+            set -eu
+            echo "connected as $(id -un) on $(hostname)"
+            mkdir -p '${{ vars.HCDR_DEPLOY_PATH }}'
+            test -w '${{ vars.HCDR_DEPLOY_PATH }}'
       - uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ vars.HCDR_SSH_HOST }}
