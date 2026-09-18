@@ -79,6 +79,12 @@ compose() {
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --project-name hypercdr "$@"
 }
 
+check_public_ports() {
+  local conflicts
+  conflicts="$(docker ps --format '{{.Names}}\t{{.Ports}}' | awk '$1 != "hypercdr-edge" && /:80->|:443->/')"
+  [[ -z "$conflicts" ]] || die "public ports 80/443 are occupied by:\n$conflicts"
+}
+
 container_running() {
   [[ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null || true)" == true ]]
 }
@@ -217,6 +223,7 @@ deploy_version() {
   set_env_value "$ENV_FILE" HCDR_IMAGE_TAG "$version"
   load_runtime_env
 
+  check_public_ports
   compose up -d hypercdr-postgres hypercdr-edge
   compose pull "hypercdr-platform-api-${candidate}" "hypercdr-platform-frontend-${candidate}"
   start_color "$candidate" || die "candidate color $candidate failed health checks; active color remains $current"
