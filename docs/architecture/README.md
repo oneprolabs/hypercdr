@@ -1,5 +1,8 @@
 # Architecture
 
+- [Control-plane architecture](control-plane-architecture.md)
+- [中控平台架构设计（中文）](control-plane-architecture.zh.md)
+
 The control plane owns business orchestration, state management, and task
 scheduling. The cluster-side agent connects to the control plane, collects
 cluster inventory, receives tasks, and drives Velero through the Kubernetes API.
