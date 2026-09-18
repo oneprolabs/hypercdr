@@ -91,7 +91,6 @@ jobs:
           username: ${{ vars.HCDR_SSH_USER }}
           port: ${{ vars.HCDR_SSH_PORT }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script_stop: true
           script: |
             set -eu
             echo "connected as $(id -un) on $(hostname)"
@@ -104,7 +103,6 @@ jobs:
           port: ${{ vars.HCDR_SSH_PORT }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           command_timeout: 3600s
-          script_stop: true
           script: |
             set -eu
             deploy_path='${{ vars.HCDR_DEPLOY_PATH }}'
