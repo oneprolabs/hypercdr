@@ -19,6 +19,14 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$base_url" && -n "$image_tag" ]] || { usage >&2; exit 2; }
 [[ -f "$install_dir/.env" ]] || { echo "existing installation not found: $install_dir" >&2; exit 1; }
+CONFIG_FILE="${HCDR_INSTALL_CONFIG:-${SCRIPT_DIR}/install-config.sh}"
+[[ -r "${CONFIG_FILE}" ]] || { echo "installation config is not readable: ${CONFIG_FILE}" >&2; exit 1; }
+# shellcheck disable=SC1090
+source "${CONFIG_FILE}"
+export HCDR_AUTH_CHALLENGE_MODE
+export HCDR_TURNSTILE_SITE_KEY
+export HCDR_TURNSTILE_SECRET_KEY
+export HCDR_TURNSTILE_VERIFY_URL
 args=(docker --base-url "$base_url" --image-tag "$image_tag" --install-dir "$install_dir" --confirm-prerequisites --execute)
 [[ -z "$registry" ]] || args+=(--registry "$registry")
 exec "$SCRIPT_DIR/install-platform.sh" "${args[@]}"

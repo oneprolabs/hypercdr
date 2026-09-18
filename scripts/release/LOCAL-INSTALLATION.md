@@ -1,5 +1,12 @@
 # Local Package Installation and Upgrade
 
+The package defaults to HTTPS port `12443`. To select another port, use
+`./install.sh --base-url https://HOST:18443`, or edit `HCDR_BASE_URL` in
+`install-config.sh`. The installer derives the frontend host port from this
+URL and persists it for cluster registration commands and agent WebSocket
+connections. An HTTPS URL without an explicit port uses port `443`.
+The container's internal listening port is independent of the published port.
+
 ## Scope
 
 This guide covers a Community control plane on a dedicated Linux Docker host.
@@ -10,6 +17,12 @@ This is a small online-image installer, not a fully offline image bundle. Copy
 the archive to the host; the installer still pulls images from the configured
 registry. Neither Bootstrap nor Release Center, nor a Release Center token, is
 required for this workflow. Registry authentication, if required, is separate.
+
+The private installer may contain the Cloudflare Turnstile deployment Secret
+Key in `install-config.sh`. Store the archive with restricted permissions and
+share it only with authorized operators. A package built with Turnstile enabled
+installs that login challenge by default; no separate CAPTCHA configuration is
+required on the target host.
 
 ## Package contents
 
@@ -46,7 +59,7 @@ temporarily unavailable. Before starting:
 - Ensure Docker is running, the host has sufficient free disk space (the
   installer requires at least 10 GiB and recommends 100 GiB), and registry DNS,
   network connectivity, and certificate trust work.
-- Allow access to the selected frontend port, normally TCP 3002. If the registry
+- Allow access to the selected frontend port, normally TCP 12443. If the registry
   requires credentials, run `docker login REGISTRY_HOST` on this host first.
 - Enable Docker at boot when automatic recovery after a host restart is needed.
 
@@ -81,7 +94,7 @@ selects the Docker deployment automatically. The lower-level
 `install-platform.sh` script requires the explicit `docker` mode:
 
 ```bash
-./install-platform.sh docker --base-url https://192.0.2.10:3002
+./install-platform.sh docker --base-url https://192.0.2.10:12443
 ```
 
 Stop if checksum verification fails. Do not mix scripts or manifests from
@@ -92,10 +105,10 @@ different releases or edit the package to refer to an unrelated image version.
 ### Private address only
 
 ```bash
-./install.sh --base-url https://192.0.2.10:3002 \
+./install.sh --base-url https://192.0.2.10:12443 \
   --install-dir /var/lib/hypercdr --check
 
-./install.sh --base-url https://192.0.2.10:3002 \
+./install.sh --base-url https://192.0.2.10:12443 \
   --install-dir /var/lib/hypercdr
 ```
 
@@ -107,8 +120,8 @@ type `YES` at the interactive prerequisite prompt.
 ### Private address and optional public address
 
 ```bash
-./install.sh --base-url https://192.0.2.10:3002 \
-  --public-base-url https://control-plane.example.com:3002 \
+./install.sh --base-url https://192.0.2.10:12443 \
+  --public-base-url https://control-plane.example.com:12443 \
   --install-dir /var/lib/hypercdr
 ```
 
@@ -141,8 +154,8 @@ database password, platform secret, and local release/registration credentials
 through their supported settings/files, and normally reuses existing TLS files.
 It does **not** preserve arbitrary `.env` settings or custom Compose edits. The
 wrapper does not forward public-address, private-CA, or custom API-port options.
-It does not read `install-config.sh`, and it does not automatically infer the
-target image tag from the manifest.
+It reads the package's `install-config.sh` for login-challenge settings, but it
+does not automatically infer the target image tag from the manifest.
 
 Therefore the wrapper is currently suitable only for the standard Docker setup
 after a configuration review. If your installation has a public fallback address,
@@ -179,7 +192,7 @@ Run this from the **newly extracted package**, not an old installation directory
 
 ```bash
 ./upgrade-local.sh \
-  --base-url https://192.0.2.10:3002 \
+  --base-url https://192.0.2.10:12443 \
   --image-tag 1.0.23.20260915 \
   --install-dir /var/lib/hypercdr \
   --registry crpi-tne0uo16mzanbvpi.cn-zhangjiakou.personal.cr.aliyuncs.com/hypercdr
@@ -198,7 +211,7 @@ systemctl is-enabled hypercdr
 systemctl is-active hypercdr
 docker compose --project-name hypercdr \
   -f /var/lib/hypercdr/docker-compose.yaml ps
-curl -kfsS https://192.0.2.10:3002/readyz
+curl -kfsS https://192.0.2.10:12443/readyz
 docker inspect hypercdr-platform-api hypercdr-platform-frontend \
   --format '{{.Name}} {{.Config.Image}} {{.State.Status}}'
 ```

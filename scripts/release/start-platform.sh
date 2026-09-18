@@ -22,7 +22,7 @@ docker compose --env-file "${install_dir}/.env" -f "$compose_file" --project-nam
 docker compose --env-file "${install_dir}/.env" -f "$compose_file" --project-name hypercdr restart hypercdr-platform-frontend
 port="$(sed -n 's/^HCDR_FRONTEND_PORT=//p' "${install_dir}/.env" | tail -1)"
 for ((attempt=0; attempt<90; attempt++)); do
-  if curl -kfsS --connect-timeout 2 --max-time 3 "https://127.0.0.1:${port:-3002}/readyz" >/dev/null 2>&1; then
+  if curl -kfsS --connect-timeout 2 --max-time 3 "https://127.0.0.1:${port:-12443}/readyz" >/dev/null 2>&1; then
     echo "HyperCDR is ready."; exit 0
   fi
   sleep 2

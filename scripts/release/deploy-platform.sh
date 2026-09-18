@@ -9,6 +9,7 @@ REGISTRY="${HCDR_IMAGE_REGISTRY:-}"
 REGISTRY_CONFIG_FILE="${HCDR_REGISTRY_CONFIG:-${ROOT_DIR}/config/registries.conf}"
 REGISTRY_PROFILE="${HCDR_REGISTRY_PROFILE:-}"
 HOST="${HCDR_PLATFORM_HOST:-${DEFAULT_HOST}}"
+PORT="${HCDR_PLATFORM_PORT:-12443}"
 DEPLOY_DIR="${HCDR_DEPLOY_DIR:-/var/lib/hypercdr}"
 VERSION=""
 EXECUTE="false"
@@ -30,6 +31,7 @@ Options:
   --registry-config PATH  Registry profiles file, default config/registries.conf.
   --registry-profile NAME Override the active Registry profile.
   --host HOST             Public platform host, default 192.168.8.149.
+  --port PORT             Public frontend port, default 12443.
   --deploy-dir DIR        Deploy directory, default /var/lib/hypercdr.
   --velero-image IMAGE    Velero image to expose through install.sh.
   --execute               Run docker compose pull/up after rendering files.
@@ -43,6 +45,7 @@ while [[ $# -gt 0 ]]; do
     --registry-config) REGISTRY_CONFIG_FILE="${2:?missing value for --registry-config}"; shift 2 ;;
     --registry-profile) REGISTRY_PROFILE="${2:?missing value for --registry-profile}"; shift 2 ;;
     --host) HOST="${2:?missing value for --host}"; shift 2 ;;
+    --port) PORT="${2:?missing value for --port}"; shift 2 ;;
     --deploy-dir) DEPLOY_DIR="${2:?missing value for --deploy-dir}"; shift 2 ;;
     --velero-image) VELERO_IMAGE="${2:?missing value for --velero-image}"; shift 2 ;;
     --execute) EXECUTE="true"; shift ;;
@@ -54,6 +57,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 require_version "${VERSION}"
+[[ "$PORT" =~ ^[0-9]{1,5}$ ]] && ((10#$PORT >= 1 && 10#$PORT <= 65535)) || die "port must be between 1 and 65535"
 if [[ -z "${REGISTRY}" ]]; then
   # shellcheck source=../lib/registry-config.sh
   source "${ROOT_DIR}/scripts/lib/registry-config.sh"
@@ -140,6 +144,7 @@ cat >"${DEPLOY_DIR}/.env" <<EOF
 RELEASE_VERSION=${VERSION}
 REGISTRY=${REGISTRY}
 PLATFORM_HOST=${HOST}
+HCDR_FRONTEND_PORT=${PORT}
 
 PLATFORM_API_IMAGE=${PLATFORM_API_IMAGE}
 PLATFORM_FRONTEND_IMAGE=${PLATFORM_FRONTEND_IMAGE}
@@ -150,8 +155,9 @@ POSTGRES_IMAGE=${POSTGRES_IMAGE}
 HCDR_POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 HCDR_DATABASE_URL=postgres://hypercdr:${POSTGRES_PASSWORD}@hypercdr-postgres:5432/hypercdr?sslmode=disable
 HCDR_HTTP_ADDR=0.0.0.0:18080
-HCDR_PUBLIC_BASE_URL=https://${HOST}:3002
-HCDR_AGENT_WS_ENDPOINT=wss://${HOST}:3002/ws/agent
+HCDR_BASE_URL=https://${HOST}:${PORT}
+HCDR_PUBLIC_BASE_URL=https://${HOST}:${PORT}
+HCDR_AGENT_WS_ENDPOINT=wss://${HOST}:${PORT}/ws/agent
 HCDR_IMAGE_REGISTRY=${REGISTRY}
 HCDR_REGISTRY_PROFILE=${HCDR_SELECTED_REGISTRY:-custom}
 HCDR_REGISTRY_TRUST=${REGISTRY_TRUST}
@@ -234,7 +240,7 @@ services:
     depends_on:
       - hypercdr-platform-api
     ports:
-      - "3002:3002"
+      - "${HCDR_FRONTEND_PORT}:3002"
     volumes:
       - ./tls:/etc/hypercdr/tls:ro
     restart: unless-stopped

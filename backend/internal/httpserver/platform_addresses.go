@@ -9,6 +9,9 @@ func (r *Router) publicBaseURL(req *http.Request) string {
 	if r.cfg.PublicBaseURL != "" {
 		return r.cfg.PublicBaseURL
 	}
+	if r.cfg.BaseURL != "" {
+		return r.cfg.BaseURL
+	}
 	proto := req.Header.Get("X-Forwarded-Proto")
 	if proto == "" {
 		proto = "http"
@@ -16,9 +19,6 @@ func (r *Router) publicBaseURL(req *http.Request) string {
 	host := req.Header.Get("X-Forwarded-Host")
 	if host == "" {
 		host = req.Host
-	}
-	if proto == "https" && !strings.Contains(host, ":") {
-		host += ":3002"
 	}
 	return strings.TrimRight(proto+"://"+host, "/")
 }

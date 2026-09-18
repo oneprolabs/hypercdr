@@ -98,7 +98,7 @@ Docker options:
   --registry-trust MODE        system (default) or private-ca
   --registry-ca-file PATH      PEM CA certificate, required for private-ca
   --image-tag TAG              Platform/agent image tag, default 1.0.23.20260915.
-  --http-port PORT             Frontend host port. Defaults to the port in --base-url, or 3002.
+  --http-port PORT             Frontend host port. Defaults to the URL port (HTTPS 443 if omitted).
   --api-port PORT              API host port, default 18080.
   --tls-cert-file PATH         Existing platform certificate to use. Optional.
   --tls-key-file PATH          Existing platform private key to use. Optional.
@@ -242,6 +242,10 @@ extract_port_from_url() {
   local hostport="${without_scheme%%/*}"
   if [[ "$hostport" == *:* ]]; then
     echo "${hostport##*:}"
+  elif [[ "$url" == https://* ]]; then
+    echo "443"
+  elif [[ "$url" == http://* ]]; then
+    echo "80"
   fi
 }
 
@@ -364,7 +368,7 @@ run_k8s() {
     http_port="$(extract_port_from_url "$base_url" || true)"
   fi
   if [[ -z "$http_port" ]]; then
-    http_port="3002"
+    http_port="12443"
   fi
   if [[ -z "${velero_image}" ]]; then
     velero_image="${registry}/velero:v1.18.2-hcdr.4"
@@ -567,7 +571,7 @@ run_docker() {
     http_port="$(extract_port_from_url "$base_url" || true)"
   fi
   if [[ -z "$http_port" ]]; then
-    http_port="3002"
+    http_port="12443"
   fi
   if [[ -z "${velero_image}" ]]; then
     velero_image="${registry}/velero:v1.18.2-hcdr.4"
@@ -690,9 +694,19 @@ EOF
     fi
     install_ok "Platform TLS is ready"
 
+    case "${HCDR_AUTH_CHALLENGE_MODE:-image}" in
+      image) ;;
+      turnstile)
+        [[ -n "${HCDR_TURNSTILE_SITE_KEY:-}" ]] || { install_fail "Turnstile Site Key is required"; exit 1; }
+        [[ -n "${HCDR_TURNSTILE_SECRET_KEY:-}" ]] || { install_fail "Turnstile Secret Key is required"; exit 1; }
+        ;;
+      *) install_fail "HCDR_AUTH_CHALLENGE_MODE must be image or turnstile"; exit 1 ;;
+    esac
+
     install_step 5 7 "Write runtime settings"
     cat > "${install_dir}/.env" <<EOF
 HCDR_BASE_URL=${base_url}
+HCDR_PUBLIC_BASE_URL=${public_base_url:-$base_url}
 HCDR_AGENT_WS_ENDPOINT=${agent_ws_endpoint}
 HCDR_AGENT_PRIVATE_WS_ENDPOINT=${agent_private_endpoint}
 HCDR_AGENT_PUBLIC_WS_ENDPOINT=${agent_public_endpoint}
@@ -729,8 +743,12 @@ EOF
     run_logged "Containers started" bash -c 'cd "$1" && docker compose --project-name hypercdr -f "$2" up -d' _ "${install_dir}" "${target_compose_file}"
     local ready="false"
     local attempt
+    # A host may advertise a public/NAT address that is not hairpin-routable
+    # from itself. Probe that address first, then the local published port.
+    local local_ready_url="https://127.0.0.1:${http_port}/readyz"
     for attempt in $(seq 1 60); do
-      if curl -kfsS --connect-timeout 2 --max-time 5 "${base_url%/}/readyz" >/dev/null 2>&1; then
+      if curl -kfsS --connect-timeout 2 --max-time 5 "${base_url%/}/readyz" >/dev/null 2>&1 \
+        || curl -kfsS --connect-timeout 2 --max-time 5 "${local_ready_url}" >/dev/null 2>&1; then
         ready="true"
         break
       fi
@@ -770,13 +788,10 @@ EOF
     install_step 7 7 "Initialize and verify release catalog"
     local release_manifest_file="${SCRIPT_DIR}/release-manifest.json"
     [[ -s "${release_manifest_file}" ]] || install_fail "Release package is missing release-manifest.json"
-    run_logged "Platform release is registered" curl -kfsS --connect-timeout 5 --max-time 30 \
-      -H "Content-Type: application/json" \
-      -H "X-HyperCDR-Release-Token: ${release_token}" \
-      --data-binary "@${release_manifest_file}" \
-      "${base_url%/}/api/v1/platform/releases"
-    run_logged "Release component manifest is active" curl -kfsS --connect-timeout 5 --max-time 30 \
-      "${base_url%/}/install.sh"
+    local release_url="${base_url%/}/api/v1/platform/releases"
+    run_logged "Platform release is registered" bash -c 'curl -kfsS --connect-timeout 5 --max-time 30 -H "Content-Type: application/json" -H "X-HyperCDR-Release-Token: $2" --data-binary "@$3" "$1" || curl -kfsS --connect-timeout 5 --max-time 30 -H "Content-Type: application/json" -H "X-HyperCDR-Release-Token: $2" --data-binary "@$3" "https://127.0.0.1:$4/api/v1/platform/releases"' _ "${release_url}" "${release_token}" "${release_manifest_file}" "${http_port}"
+    run_logged "Release component manifest is active" bash -c 'curl -kfsS --connect-timeout 5 --max-time 30 "$1" || curl -kfsS --connect-timeout 5 --max-time 30 "https://127.0.0.1:$2/install.sh"' _ \
+      "${base_url%/}/install.sh" "${http_port}"
     cat <<EOF
 
 ============================================================

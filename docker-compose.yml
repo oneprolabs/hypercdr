@@ -27,6 +27,9 @@ services:
     environment:
       HCDR_HTTP_ADDR: 0.0.0.0:18080
       HCDR_BASE_URL: ${HCDR_BASE_URL}
+      # Keep generated registration commands on the externally advertised
+      # port even when the reverse proxy strips the incoming Host port.
+      HCDR_PUBLIC_BASE_URL: ${HCDR_PUBLIC_BASE_URL:-${HCDR_BASE_URL}}
       HCDR_AGENT_WS_ENDPOINT: ${HCDR_AGENT_WS_ENDPOINT}
       HCDR_AGENT_PRIVATE_WS_ENDPOINT: ${HCDR_AGENT_PRIVATE_WS_ENDPOINT:-}
       HCDR_AGENT_PUBLIC_WS_ENDPOINT: ${HCDR_AGENT_PUBLIC_WS_ENDPOINT:-}
@@ -69,7 +72,7 @@ services:
     volumes:
       - ${HCDR_TLS_DIR:?HCDR_TLS_DIR is required}:/etc/hypercdr/tls:ro
     ports:
-      - ${HCDR_FRONTEND_PORT:-3002}:3002
+      - ${HCDR_FRONTEND_PORT:-12443}:3002
     restart: unless-stopped
     logging:
       driver: local
