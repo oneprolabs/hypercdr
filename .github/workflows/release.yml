@@ -53,11 +53,20 @@ jobs:
           HCDR_GO_BIN: go
           HCDR_RUNTIME_ROOT: /tmp/hypercdr-runtime
           HCDR_CONTAINER_POLICY: /tmp/hypercdr-runtime/containers-policy.json
+          RELEASE_REGISTRY_USERNAME: ${{ steps.release.outputs.profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
+          RELEASE_REGISTRY_PASSWORD: ${{ steps.release.outputs.profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
         run: |
           mkdir -p "${HCDR_RUNTIME_ROOT}"
           printf '%s\n' '{"default":[{"type":"insecureAcceptAnything"}]}' > "${HCDR_CONTAINER_POLICY}"
           cat > "${RUNNER_TEMP}/release.conf" <<EOF
           RELEASE_VERSION=${{ steps.release.outputs.version }}
+          HCDR_RELEASE_SECRETS_FILE=${RUNNER_TEMP}/release.secrets.conf
+          EOF
+          umask 077
+          cat > "${RUNNER_TEMP}/release.secrets.conf" <<EOF
+          HCDR_REGISTRY_SERVER=${{ steps.release.outputs.server }}
+          HCDR_REGISTRY_USERNAME=${RELEASE_REGISTRY_USERNAME}
+          HCDR_REGISTRY_PASSWORD=${RELEASE_REGISTRY_PASSWORD}
           EOF
           export HCDR_REGISTRY_CONFIG="${GITHUB_WORKSPACE}/config/registries.conf"
           export HCDR_REGISTRY_PROFILE="${{ steps.release.outputs.profile }}"
