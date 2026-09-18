@@ -62,12 +62,12 @@ jobs:
           RELEASE_VERSION=${{ steps.release.outputs.version }}
           HCDR_RELEASE_SECRETS_FILE=${RUNNER_TEMP}/release.secrets.conf
           EOF
-          umask 077
-          cat > "${RUNNER_TEMP}/release.secrets.conf" <<EOF
+          (umask 077; cat > "${RUNNER_TEMP}/release.secrets.conf" <<EOF
           HCDR_REGISTRY_SERVER=${{ steps.release.outputs.server }}
           HCDR_REGISTRY_USERNAME=${RELEASE_REGISTRY_USERNAME}
           HCDR_REGISTRY_PASSWORD=${RELEASE_REGISTRY_PASSWORD}
           EOF
+          )
           export HCDR_REGISTRY_CONFIG="${GITHUB_WORKSPACE}/config/registries.conf"
           export HCDR_REGISTRY_PROFILE="${{ steps.release.outputs.profile }}"
           ./scripts/release/release-all.sh --config "${RUNNER_TEMP}/release.conf"
