@@ -12,6 +12,26 @@ HyperCDR 采用中控平台集中管理模式。中控平台提供 Web 页面和
 
 Agent 在集群内部执行备份、同步、Drill、存储和恢复等操作，并将心跳、资源清单、任务进度及事件上报给中控平台。
 
+## 2.1 技术架构组成
+
+| 层次 | 技术 | 作用 |
+|---|---|---|
+| Web 前端 | React、TypeScript | 中控平台管理页面 |
+| HTTP 后端 | Go `net/http` | REST API、认证、任务编排和调度 |
+| WebSocket | Gorilla WebSocket | Agent 注册、任务、进度和事件双向传输 |
+| 数据库 | PostgreSQL | 持久化用户、集群、任务、计划、调度、事件和配置 |
+| 集群执行 | Kubernetes API | Agent 在 Kubernetes、OpenShift 和 CCE 中执行操作 |
+| 备份恢复 | Velero/OADP、CSI 集成 | 备份、恢复、同步和 DR 流程 |
+| 部署方式 | Docker Compose | 中控容器生命周期和私有服务网络 |
+| 安全通信 | TLS/HTTPS/WSS | 浏览器和 Agent 的安全通信 |
+| 登录挑战 | Cloudflare Turnstile（可选） | 登录过程的人机验证 |
+| 注册辅助服务 | `cluster-registration-executor` | 受限的集群注册流程执行 |
+| 平台生命周期 | `platform-upgrader` | 平台升级和部署生命周期操作 |
+
+后端没有使用 Gin、Echo、Fiber 等 Go Web 框架，而是使用 Go 标准库 `net/http`，并由应用自身实现路由和中间件。
+
+当前平台也没有使用 Redis、RabbitMQ、Kafka、NATS 或其他外部消息队列。任务由 PostgreSQL 持久化，实时派发通过 WebSocket 完成。
+
 ```text
                     用户 / 运维人员
                            |
@@ -226,4 +246,3 @@ Agent 主动向中控平台建立 WebSocket 连接，完成以下工作：
 - `docs/protocols/platform-agent-messages.md`
 - `docs/protocols/dr-task-state-machine.md`
 - `docs/agent/agent-design.md`
-

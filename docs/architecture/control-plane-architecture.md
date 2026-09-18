@@ -10,6 +10,24 @@ HyperCDR uses a control-plane-centric architecture. The control plane exposes th
 
 The current deployment does not require Redis or an external message broker. PostgreSQL is the durable source of truth for tasks; WebSocket is the real-time transport; in-process Go channels and goroutines provide local coordination.
 
+## 2.1 Technology stack
+
+| Layer | Technology | Role |
+|---|---|---|
+| Web UI | React and TypeScript | Control-plane management interface |
+| HTTP backend | Go `net/http` | REST APIs, authentication, orchestration, and scheduling |
+| WebSocket | Gorilla WebSocket | Bidirectional Agent registration, task, progress, and event transport |
+| Database | PostgreSQL | Durable users, clusters, tasks, plans, schedules, events, and configuration |
+| Cluster execution | Kubernetes API | Agent-side operations on Kubernetes, OpenShift, and CCE |
+| Backup and recovery | Velero/OADP and CSI integrations | Backup, restore, synchronization, and DR workflows |
+| Deployment | Docker Compose | Control-plane container lifecycle and private service networking |
+| Security transport | TLS/HTTPS/WSS | Browser and Agent secure communication |
+| Login challenge | Cloudflare Turnstile (optional) | Human-verification challenge during authentication |
+| Registration helper | `cluster-registration-executor` | Restricted cluster registration workflow execution |
+| Platform lifecycle | `platform-upgrader` | Upgrade and deployment lifecycle operations |
+
+The backend does not use Gin, Echo, Fiber, or another Go Web framework. It uses the Go standard HTTP library with application-owned routing and middleware. The platform also does not currently use Redis, RabbitMQ, Kafka, NATS, or another external message broker.
+
 ```text
                     Users / Operators
                            |
@@ -183,4 +201,3 @@ The frontend exposes the configurable external port (default `12443`), while the
 - `docs/protocols/platform-agent-messages.md`
 - `docs/protocols/dr-task-state-machine.md`
 - `docs/agent/agent-design.md`
-
