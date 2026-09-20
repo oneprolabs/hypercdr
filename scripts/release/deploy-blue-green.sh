@@ -132,9 +132,10 @@ switch_traffic() {
 }
 
 wait_for_public_ready() {
-  local url="https://${DOMAIN}/readyz" attempt
+  local https_port="${HCDR_HTTPS_PORT:-12443}"
+  local url="https://${DOMAIN}:${https_port}/readyz" attempt
   for ((attempt=1; attempt<=HEALTH_RETRIES; attempt++)); do
-    if curl -kfsS --resolve "${DOMAIN}:443:127.0.0.1" --connect-timeout 2 --max-time 5 "$url" >/dev/null 2>&1; then
+    if curl -kfsS --resolve "${DOMAIN}:${https_port}:127.0.0.1" --connect-timeout 2 --max-time 5 "$url" >/dev/null 2>&1; then
       return 0
     fi
     sleep "$HEALTH_INTERVAL"

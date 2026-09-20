@@ -30,6 +30,7 @@ render_upstream green "${RUNTIME_DIR}/upstream.conf"
 grep -Fq 'map $host $hypercdr_api_active { default hypercdr-platform-api-green:18080; }' "${RUNTIME_DIR}/upstream.conf"
 grep -Fq 'map $host $hypercdr_frontend_active { default hypercdr-platform-frontend-green:3002; }' "${RUNTIME_DIR}/upstream.conf"
 grep -Fq 'wait_for_http "hypercdr-platform-frontend-${color}" 3002 / https' "${ROOT_DIR}/scripts/release/deploy-blue-green.sh"
+grep -Fq 'HCDR_HTTPS_PORT:-12443' "${ROOT_DIR}/scripts/release/deploy-blue-green.sh"
 
 FAKE_BIN="${RUNTIME_DIR}/bin"
 mkdir -p "${FAKE_BIN}"
@@ -59,6 +60,7 @@ HCDR_RELEASE_TOKEN=test-release-token
 HCDR_REGISTRATION_EXECUTOR_TOKEN=test-registration-token
 HCDR_TLS_CERT_FILE=/tmp/test.crt
 HCDR_TLS_KEY_FILE=/tmp/test.key
+HCDR_HTTPS_PORT=12443
 PLATFORM_API_BLUE_IMAGE=registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:platform-api-1.0.32.20260915
 PLATFORM_FRONTEND_BLUE_IMAGE=registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:platform-frontend-1.0.32.20260915
 PLATFORM_API_GREEN_IMAGE=registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:platform-api-1.0.32.20260915
