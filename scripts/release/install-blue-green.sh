@@ -168,6 +168,8 @@ if is_legacy_install; then
 fi
 install -m 0644 "$COMPOSE_TEMPLATE" "$INSTALL_DIR/docker-compose.yaml"
 install -m 0644 "$EDGE_CONFIG" "$INSTALL_DIR/nginx/conf.d/default.conf"
+if [[ "$HTTPS_PORT" == 443 ]]; then https_port_suffix=""; else https_port_suffix=":${HTTPS_PORT}"; fi
+sed -i "s/__HCDR_HTTPS_PORT_SUFFIX__/${https_port_suffix}/g" "$INSTALL_DIR/nginx/conf.d/default.conf"
 install -m 0644 "$UPSTREAM_CONFIG" "$INSTALL_DIR/nginx/conf.d/upstream.conf"
 install -m 0755 "$DEPLOY_SCRIPT" "$INSTALL_DIR/deploy-blue-green.sh"
 install -m 0644 "$REGISTRY_HELPER" "$INSTALL_DIR/registry-config.sh"
