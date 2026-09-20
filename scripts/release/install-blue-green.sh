@@ -28,6 +28,7 @@ fi
 source "$REGISTRY_HELPER"
 VERSION=""
 BASE_URL=""
+HTTPS_PORT=""
 REGISTRY=""
 INSTALL_DIR="/var/lib/hypercdr"
 DOMAIN="hypercdr.com"
@@ -66,6 +67,10 @@ done
 
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ ]] || { echo "invalid version: $VERSION" >&2; exit 2; }
 [[ "$BASE_URL" == https://* ]] || { echo "--base-url must use https://" >&2; exit 2; }
+url_authority="${BASE_URL#https://}"
+url_authority="${url_authority%%/*}"
+if [[ "$url_authority" == *:* ]]; then HTTPS_PORT="${url_authority##*:}"; else HTTPS_PORT="443"; fi
+[[ "$HTTPS_PORT" =~ ^[0-9]+$ && "$HTTPS_PORT" -ge 1 && "$HTTPS_PORT" -le 65535 ]] || { echo "invalid HTTPS port in --base-url: $HTTPS_PORT" >&2; exit 2; }
 [[ -n "$REGISTRY" ]] || { echo "--registry is required" >&2; exit 2; }
 [[ "$INSTALL_DIR" == /* && "$INSTALL_DIR" != / ]] || { echo "--install-dir must be an absolute non-root path" >&2; exit 2; }
 if [[ -n "$TLS_CERT_FILE" || -n "$TLS_KEY_FILE" ]]; then
@@ -197,6 +202,8 @@ TURNSTILE_SECRET_KEY="$(read_env HCDR_TURNSTILE_SECRET_KEY)"
 
 cat >"${INSTALL_DIR}/.env.tmp" <<EOF
 HCDR_DOMAIN=${DOMAIN}
+HCDR_HTTP_PORT=80
+HCDR_HTTPS_PORT=${HTTPS_PORT}
 HCDR_BASE_URL=${BASE_URL}
 HCDR_PUBLIC_BASE_URL=${BASE_URL}
 HCDR_AGENT_WS_ENDPOINT=${BASE_URL/https:/wss:}/ws/agent
