@@ -28,7 +28,7 @@ Options:
   -h, --help                 Show this help
 
 The script downloads the versioned installer asset from a GitHub Release and
-delegates installation to install-platform.sh. It does not use Bootstrap.
+delegates installation to install-blue-green.sh. It does not use Bootstrap.
 USAGE
 }
 
