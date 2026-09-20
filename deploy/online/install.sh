@@ -5,7 +5,7 @@ OWNER_REPO="${HCDR_GITHUB_REPOSITORY:-oneprolabs/hypercdr}"
 VERSION=""
 BASE_URL=""
 PUBLIC_BASE_URL=""
-REGISTRY=""
+REGISTRY="registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr"
 INSTALL_DIR="/var/lib/hypercdr"
 ASSUME_YES="false"
 WORK_DIR=""
@@ -73,9 +73,10 @@ fi
 curl -fL --retry 3 -o "${WORK_DIR}/${asset}" "$download_url"
 tar -xzf "${WORK_DIR}/${asset}" -C "$WORK_DIR"
 package_dir="${WORK_DIR}/hypercdr-installer-${VERSION}"
-[[ -x "${package_dir}/install-platform.sh" ]] || fail "downloaded package is missing install-platform.sh"
+[[ -x "${package_dir}/install-blue-green.sh" ]] || fail "downloaded package is missing install-blue-green.sh"
 
-args=(docker --base-url "$BASE_URL" --install-dir "$INSTALL_DIR" --image-tag "$VERSION" --execute)
-[[ -n "$PUBLIC_BASE_URL" ]] && args+=(--public-base-url "$PUBLIC_BASE_URL")
-[[ -n "$REGISTRY" ]] && args+=(--registry "$REGISTRY")
-exec "${package_dir}/install-platform.sh" "${args[@]}"
+domain="${BASE_URL#https://}"
+domain="${domain%%/*}"
+domain="${domain%%:*}"
+args=("$VERSION" --base-url "$BASE_URL" --domain "$domain" --registry "$REGISTRY" --install-dir "$INSTALL_DIR" --execute)
+exec "${package_dir}/install-blue-green.sh" "${args[@]}"
