@@ -7,7 +7,7 @@ on:
       version: {description: 'Release version in MAJOR.MINOR.PATCH.YYYYMMDD format', required: true}
       registry_profile: {description: 'Profile from config/registries.conf', required: true, default: aliyun_acr}
 concurrency: {group: hypercdr-release, cancel-in-progress: false}
-permissions: {contents: read}
+permissions: {contents: write}
 jobs:
   publish:
     outputs:
@@ -76,6 +76,14 @@ jobs:
           name: hypercdr-installer-${{ steps.release.outputs.version }}
           path: /tmp/hypercdr-runtime/releases/community/${{ steps.release.outputs.version }}/*
           if-no-files-found: error
+      - name: Publish installer assets to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.release.outputs.version }}
+          generate_release_notes: true
+          files: |
+            /tmp/hypercdr-runtime/releases/community/${{ steps.release.outputs.version }}/hypercdr-installer-${{ steps.release.outputs.version }}.tar.gz
+            /tmp/hypercdr-runtime/releases/community/${{ steps.release.outputs.version }}/hypercdr-installer-${{ steps.release.outputs.version }}.sha256
 
   deploy:
     needs: publish
