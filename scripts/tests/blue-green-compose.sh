@@ -13,6 +13,7 @@ HCDR_IMAGE_REGISTRY=registry.example/hypercdr
 HCDR_RELEASE_TOKEN=test-release-token
 HCDR_REGISTRATION_EXECUTOR_TOKEN=test-registration-token
 HCDR_DOMAIN=hypercdr.com
+HCDR_HTTP_PORT=18088
 HCDR_HTTPS_PORT=12443
 HCDR_TLS_CERT_FILE=/tmp/tls.crt
 HCDR_TLS_KEY_FILE=/tmp/tls.key
@@ -38,7 +39,7 @@ done
 
 ! grep -Fq 'hypercdr-platform-upgrader:' "${rendered}"
 grep -Fq 'profiles:' "${rendered}"
-grep -Fq 'published: "80"' "${rendered}"
+grep -Fq 'published: "18088"' "${rendered}"
 grep -Fq 'published: "12443"' "${rendered}"
 grep -Fq 'hypercdr-edge:' "${rendered}"
 grep -Fq 'networks: [hypercdr-edge, hypercdr-blue, hypercdr-green]' "${ROOT_DIR}/docker-compose.yml"
