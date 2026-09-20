@@ -4,7 +4,7 @@ services:
     container_name: hypercdr-edge
     ports:
       - "80:80"
-      - "443:443"
+      - "${HCDR_HTTPS_PORT:-12443}:443"
     volumes:
       - ${HCDR_NGINX_CONFIG_DIR:-./nginx/conf.d}:/etc/nginx/conf.d:ro
       - ${HCDR_TLS_CERT_FILE:?HCDR_TLS_CERT_FILE is required}:/etc/hypercdr/tls/tls.crt:ro
