@@ -2,6 +2,11 @@
 
 This directory contains the control-plane build, image publishing, installer packaging, installation, and operations scripts. Bootstrap only provides the Portal UI and distribution assets; it does not build platform images or the platform installer.
 
+The public online installation entry point is `deploy/online/install.sh`. It is
+kept outside this release-tool directory so users can run it directly from the
+GitHub Raw URL. It downloads a versioned GitHub Release installer asset and
+then delegates to the packaged platform installer.
+
 ## Recommended command
 
 ```bash

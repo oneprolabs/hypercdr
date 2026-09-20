@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+OWNER_REPO="${HCDR_GITHUB_REPOSITORY:-oneprolabs/hypercdr}"
+VERSION=""
+BASE_URL=""
+PUBLIC_BASE_URL=""
+REGISTRY=""
+INSTALL_DIR="/var/lib/hypercdr"
+ASSUME_YES="false"
+WORK_DIR=""
+
+usage() {
+  cat <<'USAGE'
+HyperCDR online installer
+
+Usage:
+  curl -fsSL https://raw.githubusercontent.com/oneprolabs/hypercdr/main/deploy/online/install.sh \
+    | sudo bash -s -- --base-url https://HOST:12443 [options]
+
+Options:
+  --version VERSION          GitHub Release version; default: latest
+  --base-url URL             Required public control-plane URL
+  --public-base-url URL      Optional public URL used in generated commands
+  --registry REGISTRY        Optional image registry override
+  --install-dir PATH         Installation directory, default: /var/lib/hypercdr
+  --yes                      Skip confirmation
+  -h, --help                 Show this help
+
+The script downloads the versioned installer asset from a GitHub Release and
+delegates installation to install-platform.sh. It does not use Bootstrap.
+USAGE
+}
+
+fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --version) VERSION="${2:?missing value for --version}"; shift 2 ;;
+    --base-url) BASE_URL="${2:?missing value for --base-url}"; shift 2 ;;
+    --public-base-url) PUBLIC_BASE_URL="${2:?missing value for --public-base-url}"; shift 2 ;;
+    --registry) REGISTRY="${2:?missing value for --registry}"; shift 2 ;;
+    --install-dir) INSTALL_DIR="${2:?missing value for --install-dir}"; shift 2 ;;
+    --yes) ASSUME_YES="true"; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage; fail "unknown option: $1" ;;
+  esac
+done
+
+[[ -n "$BASE_URL" ]] || { usage; fail "--base-url is required"; }
+command -v curl >/dev/null 2>&1 || fail "curl is required"
+command -v tar >/dev/null 2>&1 || fail "tar is required"
+command -v docker >/dev/null 2>&1 || fail "Docker is required; install Docker before running this installer"
+[[ "$(id -u)" -eq 0 ]] || fail "run this command as root, for example: curl ... | sudo bash -s -- ..."
+
+api_url="https://api.github.com/repos/${OWNER_REPO}/releases"
+if [[ -z "$VERSION" ]]; then
+  VERSION="$(curl -fsSL "${api_url}/latest" | sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p' | head -1)"
+fi
+[[ -n "$VERSION" ]] || fail "could not resolve a GitHub Release version"
+VERSION="${VERSION#v}"
+asset="hypercdr-installer-${VERSION}.tar.gz"
+download_url="https://github.com/${OWNER_REPO}/releases/download/v${VERSION}/${asset}"
+WORK_DIR="$(mktemp -d /tmp/hypercdr-online.XXXXXX)"
+trap 'rm -rf "${WORK_DIR}"' EXIT
+
+printf 'HyperCDR online installer\nVersion: %s\nBase URL: %s\nInstall directory: %s\n' "$VERSION" "$BASE_URL" "$INSTALL_DIR"
+if [[ "$ASSUME_YES" != "true" ]]; then
+  read -r -p 'Continue installation? [y/N] ' answer
+  [[ "$answer" =~ ^[Yy]$ ]] || { echo 'Installation cancelled.'; exit 0; }
+fi
+
+curl -fL --retry 3 -o "${WORK_DIR}/${asset}" "$download_url"
+tar -xzf "${WORK_DIR}/${asset}" -C "$WORK_DIR"
+package_dir="${WORK_DIR}/hypercdr-installer-${VERSION}"
+[[ -x "${package_dir}/install-platform.sh" ]] || fail "downloaded package is missing install-platform.sh"
+
+args=(docker --base-url "$BASE_URL" --install-dir "$INSTALL_DIR" --image-tag "$VERSION" --execute)
+[[ -n "$PUBLIC_BASE_URL" ]] && args+=(--public-base-url "$PUBLIC_BASE_URL")
+[[ -n "$REGISTRY" ]] && args+=(--registry "$REGISTRY")
+exec "${package_dir}/install-platform.sh" "${args[@]}"
