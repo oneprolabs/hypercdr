@@ -80,12 +80,17 @@ compose() {
 }
 
 check_public_ports() {
-  local conflicts listeners
-  conflicts="$(docker ps --format '{{.Names}}\t{{.Ports}}' | awk '$1 != "hypercdr-edge" && /:80->|:443->/')"
-  [[ -z "$conflicts" ]] || die "public ports 80/443 are occupied by:\n$conflicts"
+  local http_port https_port conflicts listeners
+  http_port="$(sed -n 's/^HCDR_HTTP_PORT=//p' "$ENV_FILE" 2>/dev/null | tail -1)"
+  https_port="$(sed -n 's/^HCDR_HTTPS_PORT=//p' "$ENV_FILE" 2>/dev/null | tail -1)"
+  http_port="${http_port:-8080}"
+  https_port="${https_port:-12443}"
+  [[ "$http_port" =~ ^[0-9]+$ && "$https_port" =~ ^[0-9]+$ ]] || die "configured public ports are invalid: ${http_port}/${https_port}"
+  conflicts="$(docker ps --format '{{.Names}}\t{{.Ports}}' | awk -v http="$http_port" -v https="$https_port" '$1 != "hypercdr-edge" && (index($0, ":" http "->") || index($0, ":" https "->"))')"
+  [[ -z "$conflicts" ]] || die "configured public ports ${http_port}/${https_port} are occupied by:\n$conflicts"
   if ! container_running "$EDGE_SERVICE" && command -v ss >/dev/null 2>&1; then
-    listeners="$(ss -ltnpH 2>/dev/null | awk '$4 ~ /:80$/ || $4 ~ /:443$/')"
-    [[ -z "$listeners" ]] || die "public ports 80/443 are already listening on the host:\n$listeners"
+    listeners="$(ss -ltnpH 2>/dev/null | awk -v http="$http_port" -v https="$https_port" '$4 ~ ":" http "$" || $4 ~ ":" https "$"')"
+    [[ -z "$listeners" ]] || die "configured public ports ${http_port}/${https_port} are already listening on the host:\n$listeners"
   fi
 }
 
@@ -132,9 +137,10 @@ switch_traffic() {
 }
 
 wait_for_public_ready() {
-  local url="https://${DOMAIN}/readyz" attempt
+  local https_port="${HCDR_HTTPS_PORT:-12443}"
+  local url="https://${DOMAIN}:${https_port}/readyz" attempt
   for ((attempt=1; attempt<=HEALTH_RETRIES; attempt++)); do
-    if curl -kfsS --resolve "${DOMAIN}:443:127.0.0.1" --connect-timeout 2 --max-time 5 "$url" >/dev/null 2>&1; then
+    if curl -kfsS --resolve "${DOMAIN}:${https_port}:127.0.0.1" --connect-timeout 2 --max-time 5 "$url" >/dev/null 2>&1; then
       return 0
     fi
     sleep "$HEALTH_INTERVAL"

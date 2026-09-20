@@ -3,7 +3,7 @@ services:
     image: ${HCDR_EDGE_IMAGE:-nginx:1.27-alpine}
     container_name: hypercdr-edge
     ports:
-      - "80:80"
+      - "${HCDR_HTTP_PORT:-8080}:80"
       - "${HCDR_HTTPS_PORT:-12443}:443"
     volumes:
       - ${HCDR_NGINX_CONFIG_DIR:-./nginx/conf.d}:/etc/nginx/conf.d:ro

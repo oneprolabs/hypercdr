@@ -151,7 +151,7 @@ jobs:
               chmod +x "${source_path}/scripts/release/install-blue-green.sh"
               "${source_path}/scripts/release/install-blue-green.sh" \
                 '${{ needs.publish.outputs.image_version }}' \
-                --base-url 'https://${{ vars.HCDR_DOMAIN }}:12443' \
+                --base-url 'https://${{ vars.HCDR_DOMAIN }}' \
                 --domain '${{ vars.HCDR_DOMAIN }}' \
                 --registry '${{ vars.HCDR_IMAGE_REGISTRY }}' \
                 --install-dir "${deploy_path}" \

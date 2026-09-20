@@ -30,12 +30,17 @@ render_upstream green "${RUNTIME_DIR}/upstream.conf"
 grep -Fq 'map $host $hypercdr_api_active { default hypercdr-platform-api-green:18080; }' "${RUNTIME_DIR}/upstream.conf"
 grep -Fq 'map $host $hypercdr_frontend_active { default hypercdr-platform-frontend-green:3002; }' "${RUNTIME_DIR}/upstream.conf"
 grep -Fq 'wait_for_http "hypercdr-platform-frontend-${color}" 3002 / https' "${ROOT_DIR}/scripts/release/deploy-blue-green.sh"
+grep -Fq 'HCDR_HTTPS_PORT:-12443' "${ROOT_DIR}/scripts/release/deploy-blue-green.sh"
 
 FAKE_BIN="${RUNTIME_DIR}/bin"
 mkdir -p "${FAKE_BIN}"
 cat >"${FAKE_BIN}/docker" <<'EOF'
 #!/usr/bin/env bash
 set -e
+if [[ "$1" == ps ]]; then
+  printf '%s\n' "${FAKE_DOCKER_PS:-}"
+  exit 0
+fi
 if [[ "$1" == inspect ]]; then
   case "$*" in
     *".State.Running"*)
@@ -50,7 +55,11 @@ cat >"${FAKE_BIN}/curl" <<'EOF'
 #!/usr/bin/env bash
 exit "${FAKE_CURL_EXIT:-0}"
 EOF
-chmod +x "${FAKE_BIN}/docker" "${FAKE_BIN}/curl"
+cat >"${FAKE_BIN}/ss" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "${FAKE_SS_OUTPUT:-}"
+EOF
+chmod +x "${FAKE_BIN}/docker" "${FAKE_BIN}/curl" "${FAKE_BIN}/ss"
 cat >"${RUNTIME_DIR}/.env" <<'EOF'
 HCDR_IMAGE_REGISTRY=registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr
 HCDR_POSTGRES_PASSWORD=test-password
@@ -59,6 +68,8 @@ HCDR_RELEASE_TOKEN=test-release-token
 HCDR_REGISTRATION_EXECUTOR_TOKEN=test-registration-token
 HCDR_TLS_CERT_FILE=/tmp/test.crt
 HCDR_TLS_KEY_FILE=/tmp/test.key
+HCDR_HTTP_PORT=18088
+HCDR_HTTPS_PORT=12443
 PLATFORM_API_BLUE_IMAGE=registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:platform-api-1.0.32.20260915
 PLATFORM_FRONTEND_BLUE_IMAGE=registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:platform-frontend-1.0.32.20260915
 PLATFORM_API_GREEN_IMAGE=registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:platform-api-1.0.32.20260915
@@ -66,6 +77,11 @@ PLATFORM_FRONTEND_GREEN_IMAGE=registry.cn-beijing.aliyuncs.com/oneprolabs/hyperc
 REGISTRATION_EXECUTOR_IMAGE=registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:cluster-registration-executor-1.0.32.20260915
 EOF
 touch "${RUNTIME_DIR}/docker-compose.yaml"
+FAKE_DOCKER_PS=$'nginx-proxy-manager\t0.0.0.0:80-81->80-81/tcp, 0.0.0.0:443->443/tcp' \
+HCDR_INSTALL_DIR="${RUNTIME_DIR}" \
+HCDR_COMPOSE_FILE="${RUNTIME_DIR}/docker-compose.yaml" \
+PATH="${FAKE_BIN}:${PATH}" \
+  check_public_ports
 HCDR_INSTALL_DIR="${RUNTIME_DIR}" \
 HCDR_COMPOSE_FILE="${RUNTIME_DIR}/docker-compose.yaml" \
 HCDR_DOMAIN=hypercdr.com \
