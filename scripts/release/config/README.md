@@ -18,7 +18,6 @@ project. The current release flow requires:
 ```text
 platform-api
 platform-frontend
-platform-upgrader
 comm-agent
 postgres
 velero

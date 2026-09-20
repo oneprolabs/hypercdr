@@ -4,7 +4,16 @@ hypercdr
 
 {{- define "hypercdr.registrationExecutorImage" -}}
 {{- $tag := default .Values.platform.image.tag .Values.registrationExecutor.image.tag -}}
-{{- printf "%s/%s:%s" (.Values.global.imageRegistry | trimSuffix "/") .Values.registrationExecutor.image.repository $tag -}}
+{{- include "hypercdr.imageRef" (list .Values.global.imageRegistry .Values.registrationExecutor.image.repository $tag) -}}
+{{- end -}}
+
+{{- define "hypercdr.imageRef" -}}
+{{- $registry := index . 0 | trimSuffix "/" -}}
+{{- if regexMatch "^(docker[.]io|[^/]+[.]aliyuncs[.]com)/[^/]+/[^/]+$" $registry -}}
+{{- printf "%s:%s-%s" $registry (index . 1) (index . 2) -}}
+{{- else -}}
+{{- printf "%s/%s:%s" $registry (index . 1) (index . 2) -}}
+{{- end -}}
 {{- end -}}
 
 {{- define "hypercdr.fullname" -}}
@@ -24,7 +33,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "hypercdr.platformImage" -}}
-{{- printf "%s/%s:%s" (.Values.global.imageRegistry | trimSuffix "/") .Values.platform.image.repository .Values.platform.image.tag -}}
+{{- include "hypercdr.imageRef" (list .Values.global.imageRegistry .Values.platform.image.repository .Values.platform.image.tag) -}}
 {{- end -}}
 
 {{- define "hypercdr.databaseURL" -}}

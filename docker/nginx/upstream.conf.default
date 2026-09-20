@@ -1,0 +1,7 @@
+map $host $hypercdr_api_active {
+    default hypercdr-platform-api-blue:18080;
+}
+
+map $host $hypercdr_frontend_active {
+    default hypercdr-platform-frontend-blue:3002;
+}

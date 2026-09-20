@@ -69,15 +69,15 @@ REGISTRY="${REGISTRY%/}"
 REGISTRY_TRUST="${HCDR_REGISTRY_TRUST:-system}"
 REGISTRY_CA_SOURCE="${HCDR_REGISTRY_CA_FILE:-/dev/null}"
 if [[ -z "${VELERO_IMAGE}" ]]; then
-  VELERO_IMAGE="${REGISTRY}/velero:${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.4}"
+  VELERO_IMAGE="$(image_ref "${REGISTRY}" "velero" "${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.4}")"
 fi
 if [[ -z "${VELERO_AWS_PLUGIN_IMAGE}" ]]; then
-  VELERO_AWS_PLUGIN_IMAGE="${REGISTRY}/velero-plugin-for-aws:v1.13.0"
+  VELERO_AWS_PLUGIN_IMAGE="$(image_ref "${REGISTRY}" "velero-plugin-for-aws" "v1.13.0")"
 fi
-if [[ -z "${VELERO_AZURE_PLUGIN_IMAGE}" ]]; then VELERO_AZURE_PLUGIN_IMAGE="${REGISTRY}/velero-plugin-for-microsoft-azure:v1.13.0"; fi
-if [[ -z "${VELERO_GCP_PLUGIN_IMAGE}" ]]; then VELERO_GCP_PLUGIN_IMAGE="${REGISTRY}/velero-plugin-for-gcp:v1.13.0"; fi
+if [[ -z "${VELERO_AZURE_PLUGIN_IMAGE}" ]]; then VELERO_AZURE_PLUGIN_IMAGE="$(image_ref "${REGISTRY}" "velero-plugin-for-microsoft-azure" "v1.13.0")"; fi
+if [[ -z "${VELERO_GCP_PLUGIN_IMAGE}" ]]; then VELERO_GCP_PLUGIN_IMAGE="$(image_ref "${REGISTRY}" "velero-plugin-for-gcp" "v1.13.0")"; fi
 if [[ "${POSTGRES_IMAGE}" == "postgres:16" ]]; then
-  POSTGRES_IMAGE="${REGISTRY}/postgres:16"
+  POSTGRES_IMAGE="$(image_ref "${REGISTRY}" "postgres" "16")"
 fi
 
 mkdir -p "${DEPLOY_DIR}/tls" "${DEPLOY_DIR}/data/postgres" "${DEPLOY_DIR}/logs"

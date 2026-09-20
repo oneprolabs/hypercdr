@@ -1,15 +1,18 @@
 name: Build and Publish Release
 on:
   push:
-    tags: ['v[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].[0-9]*']
+    tags: ['v*']
   workflow_dispatch:
     inputs:
-      version: {description: 'Release version in vYYYYMMDD.N format', required: true}
+      version: {description: 'Release version in MAJOR.MINOR.PATCH.YYYYMMDD format', required: true}
       registry_profile: {description: 'Profile from config/registries.conf', required: true, default: aliyun_acr}
 concurrency: {group: hypercdr-release, cancel-in-progress: false}
 permissions: {contents: read}
 jobs:
   publish:
+    outputs:
+      image_version: ${{ steps.release.outputs.version }}
+      release_ref: ${{ steps.release.outputs.ref }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,25 +34,124 @@ jobs:
         run: |
           version="${{ inputs.version }}"
           profile="${{ inputs.registry_profile }}"
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then version="${GITHUB_REF_NAME}"; profile="aliyun_acr"; fi
+          ref="${GITHUB_SHA}"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then version="${GITHUB_REF_NAME#v}"; ref="${GITHUB_REF_NAME}"; profile="aliyun_acr"; fi
+          [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ ]] || { echo "invalid release version: ${version}" >&2; exit 2; }
           source scripts/lib/registry-config.sh
           load_registry_profile config/registries.conf "${profile}"
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "ref=${ref}" >> "${GITHUB_OUTPUT}"
           echo "profile=${profile}" >> "${GITHUB_OUTPUT}"
           echo "server=${HCDR_REGISTRY_SERVER}" >> "${GITHUB_OUTPUT}"
       - uses: docker/login-action@v3
         with:
           registry: ${{ steps.release.outputs.server }}
-          username: ${{ secrets.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
+          username: ${{ steps.release.outputs.profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
+          password: ${{ steps.release.outputs.profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
       - name: Build, test, and publish
         env:
           HCDR_GO_BIN: go
           HCDR_RUNTIME_ROOT: /tmp/hypercdr-runtime
-          HCDR_BOOTSTRAP_PUBLISH_DIR: /tmp/hypercdr-installer
-        run: ./scripts/release/release-all.sh "${{ steps.release.outputs.version }}" --registry-profile "${{ steps.release.outputs.profile }}" --skip-register
+          HCDR_CONTAINER_POLICY: /tmp/hypercdr-runtime/containers-policy.json
+          RELEASE_REGISTRY_USERNAME: ${{ steps.release.outputs.profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
+          RELEASE_REGISTRY_PASSWORD: ${{ steps.release.outputs.profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
+        run: |
+          mkdir -p "${HCDR_RUNTIME_ROOT}"
+          printf '%s\n' '{"default":[{"type":"insecureAcceptAnything"}]}' > "${HCDR_CONTAINER_POLICY}"
+          cat > "${RUNNER_TEMP}/release.conf" <<EOF
+          RELEASE_VERSION=${{ steps.release.outputs.version }}
+          HCDR_RELEASE_SECRETS_FILE=${RUNNER_TEMP}/release.secrets.conf
+          EOF
+          (umask 077; cat > "${RUNNER_TEMP}/release.secrets.conf" <<EOF
+          HCDR_REGISTRY_SERVER=${{ steps.release.outputs.server }}
+          HCDR_REGISTRY_USERNAME=${RELEASE_REGISTRY_USERNAME}
+          HCDR_REGISTRY_PASSWORD=${RELEASE_REGISTRY_PASSWORD}
+          EOF
+          )
+          export HCDR_REGISTRY_CONFIG="${GITHUB_WORKSPACE}/config/registries.conf"
+          export HCDR_REGISTRY_PROFILE="${{ steps.release.outputs.profile }}"
+          ./scripts/release/release-all.sh --config "${RUNNER_TEMP}/release.conf"
       - uses: actions/upload-artifact@v4
         with:
           name: hypercdr-installer-${{ steps.release.outputs.version }}
-          path: /tmp/hypercdr-installer/releases/dev/*
+          path: /tmp/hypercdr-runtime/releases/community/${{ steps.release.outputs.version }}/*
           if-no-files-found: error
+
+  deploy:
+    needs: publish
+    if: ${{ vars.HCDR_AUTO_DEPLOY == 'true' }}
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check SSH access
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ vars.HCDR_SSH_HOST }}
+          username: ${{ vars.HCDR_SSH_USER }}
+          port: ${{ vars.HCDR_SSH_PORT }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -eu
+            echo "connected as $(id -un) on $(hostname)"
+            mkdir -p '${{ vars.HCDR_DEPLOY_PATH }}'
+            test -w '${{ vars.HCDR_DEPLOY_PATH }}'
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ vars.HCDR_SSH_HOST }}
+          username: ${{ vars.HCDR_SSH_USER }}
+          port: ${{ vars.HCDR_SSH_PORT }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          command_timeout: 3600s
+          script: |
+            set -eu
+            deploy_path='${{ vars.HCDR_DEPLOY_PATH }}'
+            source_path="${deploy_path}/source"
+            log_file="${deploy_path}/deploy-${{ needs.publish.outputs.image_version }}.log"
+            exec 3>&1 4>&2
+            exec >"${log_file}" 2>&1
+            trap 'status=$?; if [ "$status" -ne 0 ]; then cat "${log_file}" >&3; fi; exit "$status"' EXIT
+            ref='${{ needs.publish.outputs.release_ref }}'
+            mkdir -p "${source_path}/docker/nginx" "${source_path}/scripts/release"
+            fetch_asset() {
+              local path="$1"
+              local destination="${source_path}/${path}"
+              mkdir -p "$(dirname "${destination}")"
+              curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${ref}/${path}" -o "${destination}.tmp"
+              mv "${destination}.tmp" "${destination}"
+            }
+            fetch_asset docker-compose.yml
+            fetch_asset docker/nginx/edge.conf
+            fetch_asset docker/nginx/upstream.conf.default
+            fetch_asset scripts/release/deploy-blue-green.sh
+            fetch_asset scripts/lib/registry-config.sh
+            chmod +x "${source_path}/scripts/release/deploy-blue-green.sh"
+            mkdir -p "${deploy_path}/nginx/conf.d" "${deploy_path}/nginx/acme"
+            legacy_install=false
+            if [ -f "${deploy_path}/.env" ] && { \
+              ! grep -q '^PLATFORM_API_BLUE_IMAGE=' "${deploy_path}/.env" || \
+              ! grep -q '^PLATFORM_API_GREEN_IMAGE=' "${deploy_path}/.env"; \
+            }; then
+              legacy_install=true
+            fi
+            if [ "$legacy_install" = true ] || [ ! -f "${deploy_path}/.env" ]; then
+              fetch_asset scripts/release/install-blue-green.sh
+              fetch_asset scripts/release/start-platform.sh
+              fetch_asset scripts/release/stop-platform.sh
+              fetch_asset scripts/release/restart-platform.sh
+              fetch_asset scripts/release/templates/hypercdr.service
+              chmod +x "${source_path}/scripts/release/install-blue-green.sh"
+              "${source_path}/scripts/release/install-blue-green.sh" \
+                '${{ needs.publish.outputs.image_version }}' \
+                --base-url 'https://${{ vars.HCDR_DOMAIN }}' \
+                --domain '${{ vars.HCDR_DOMAIN }}' \
+                --registry '${{ vars.HCDR_IMAGE_REGISTRY }}' \
+                --install-dir "${deploy_path}" \
+                --execute
+            else
+              install -m 0644 "${source_path}/docker-compose.yml" "${deploy_path}/docker-compose.yaml"
+              install -m 0644 "${source_path}/docker/nginx/edge.conf" "${deploy_path}/nginx/conf.d/default.conf"
+              install -m 0755 "${source_path}/scripts/release/deploy-blue-green.sh" "${deploy_path}/deploy-blue-green.sh"
+              install -m 0644 "${source_path}/scripts/lib/registry-config.sh" "${deploy_path}/registry-config.sh"
+              HCDR_INSTALL_DIR="${deploy_path}" "${deploy_path}/deploy-blue-green.sh" '${{ needs.publish.outputs.image_version }}'
+            fi

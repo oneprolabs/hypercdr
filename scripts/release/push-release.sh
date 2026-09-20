@@ -32,7 +32,7 @@ require_registry "${REGISTRY}"
 require_cmd docker
 REGISTRY="${REGISTRY%/}"
 
-for name in platform-api platform-frontend platform-upgrader cluster-registration-executor comm-agent oadp-comm-agent; do
+for name in platform-api platform-frontend cluster-registration-executor comm-agent oadp-comm-agent; do
   image="$(image_ref "${REGISTRY}" "${name}" "${VERSION}")"
   log "Pushing ${image}"
   docker push "${image}"

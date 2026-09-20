@@ -34,4 +34,5 @@ args=(--registry "${REGISTRY}" --tag "${IMAGE_TAG}" --version "${IMAGE_TAG}" --b
 STAGING_PARENT="$(mktemp -d "${HCDR_RUNTIME_ROOT:-${RUNTIME_ROOT}}/build/velero-patched-${IMAGE_TAG}-XXXXXX")"
 PATCHED_SOURCE="${STAGING_PARENT}/source"
 "${ROOT_DIR}/third_party/velero/deployments/prepare-patched-source.sh" "${PATCHED_SOURCE}" >/dev/null
-"${PATCHED_SOURCE}/deployments/build-velero-image.sh" "${args[@]}"
+HCDR_VELERO_TARGET_IMAGE="$(image_ref "$REGISTRY" velero "$IMAGE_TAG")" \
+  "${PATCHED_SOURCE}/deployments/build-velero-image.sh" "${args[@]}"
