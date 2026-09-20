@@ -45,7 +45,7 @@ grep -Fq 'networks: [hypercdr-edge, hypercdr-blue, hypercdr-green]' "${ROOT_DIR}
 ! grep -Eq 'published: "(18080|3002|5432)"' "${rendered}"
 grep -Fq 'hypercdr-platform-api-blue:18080' "${ROOT_DIR}/docker/nginx/upstream.conf.default"
 grep -Fq 'resolver 127.0.0.11 valid=10s' "${ROOT_DIR}/docker/nginx/edge.conf"
-grep -Fq 'return 301 https://$host:12443$request_uri;' "${ROOT_DIR}/docker/nginx/edge.conf"
+grep -Fq 'return 301 https://$host$request_uri;' "${ROOT_DIR}/docker/nginx/edge.conf"
 grep -Fq 'proxy_pass http://$hypercdr_api_active' "${ROOT_DIR}/docker/nginx/edge.conf"
 grep -Fq 'proxy_pass https://$hypercdr_frontend_active' "${ROOT_DIR}/docker/nginx/edge.conf"
 
