@@ -174,10 +174,16 @@ if [[ -n "$TLS_CERT_FILE" ]]; then
   install -m 0644 "$TLS_CERT_FILE" "$INSTALL_DIR/tls.crt"
   install -m 0600 "$TLS_KEY_FILE" "$INSTALL_DIR/tls.key"
 else
+  if [[ "$DOMAIN" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
+    cert_san="IP:${DOMAIN}"
+  else
+    cert_san="DNS:${DOMAIN},DNS:*.${DOMAIN}"
+  fi
   openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
     -keyout "$INSTALL_DIR/tls.key" -out "$INSTALL_DIR/tls.crt" \
     -subj "/CN=${DOMAIN}" \
-    -addext "subjectAltName=DNS:${DOMAIN},DNS:*.${DOMAIN}" >/dev/null 2>&1
+    -addext "subjectAltName=${cert_san}" \
+    -addext "extendedKeyUsage=serverAuth" >/dev/null 2>&1
   chmod 0644 "$INSTALL_DIR/tls.crt"
   chmod 0600 "$INSTALL_DIR/tls.key"
 fi
