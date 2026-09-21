@@ -45,6 +45,8 @@ verify: test
 	bash scripts/tests/blue-green-deploy.sh
 	bash scripts/tests/blue-green-compose.sh
 	bash scripts/tests/release-workflow.sh
+	bash scripts/tests/oadp-mirror.sh
+	bash scripts/tests/pr-review-notification.sh
 	git diff --check -- . ':!third_party/velero'
 	test "$$(cat third_party/velero/UPSTREAM_BASELINE)" = "c253c7fe37d78c9b7e55c68544f7c5b2608712d8"
 	bash -n third_party/velero/deployments/build-velero-image.sh third_party/velero/hack/build-restic.sh

@@ -14,6 +14,7 @@ LOGIN="true"
 SKIP_REGISTER="false"
 DRY_RUN="false"
 RESUME="false"
+PHASE="${HCDR_RELEASE_PHASE:-all}"
 RELEASE_CENTER_URL="${HCDR_RELEASE_CENTER_URL:-}"
 RELEASE_CENTER_TOKEN_FILE="${HCDR_RELEASE_CENTER_TOKEN_FILE:-}"
 
@@ -82,6 +83,11 @@ source "${ROOT_DIR}/scripts/lib/registry-config.sh"
 load_registry_profile "${REGISTRY_CONFIG_FILE}" "${REGISTRY_PROFILE}"
 
 SKIP_TESTS="${HCDR_RELEASE_SKIP_TESTS:-${SKIP_TESTS}}"
+
+case "${PHASE}" in
+  all|core|dependencies|finalize) ;;
+  *) die "HCDR_RELEASE_PHASE must be all, core, dependencies, or finalize" ;;
+esac
 
 require_version "${VERSION}"
 require_registry "${HCDR_IMAGE_REGISTRY:-}"
@@ -158,6 +164,7 @@ Profile:        ${HCDR_SELECTED_REGISTRY:-command-line}
 Registry server: ${REGISTRY_SERVER}
 Login challenge: ${AUTH_CHALLENGE_MODE}
 Skip tests:     ${SKIP_TESTS}
+Phase:          ${PHASE}
 EOF
 
 if [[ "${DRY_RUN}" == "true" ]]; then
@@ -181,40 +188,62 @@ fi
 
 login_registry
 
-if [[ "${RESUME}" == "true" ]]; then
-  log "Resume mode: verifying previously pushed core images"
-  for name in platform-api platform-frontend cluster-registration-executor comm-agent oadp-comm-agent; do
-    image="$(image_ref "${REGISTRY}" "${name}" "${VERSION}")"
-    docker manifest inspect "${image}" >/dev/null 2>&1 || die "cannot resume: core image is unavailable: ${image}"
-    log "Resume prerequisite OK: ${image}"
-  done
-else
-  log "Building release images"
-  "${SCRIPT_DIR}/build-release.sh" "${build_args[@]}"
+if [[ "${PHASE}" == "all" || "${PHASE}" == "core" ]]; then
+  if [[ "${RESUME}" == "true" ]]; then
+    log "Resume mode: verifying previously pushed core images"
+    for name in platform-api platform-frontend cluster-registration-executor comm-agent oadp-comm-agent; do
+      image="$(image_ref "${REGISTRY}" "${name}" "${VERSION}")"
+      docker manifest inspect "${image}" >/dev/null 2>&1 || die "cannot resume: core image is unavailable: ${image}"
+      log "Resume prerequisite OK: ${image}"
+    done
+  else
+    log "Building release images"
+    "${SCRIPT_DIR}/build-release.sh" "${build_args[@]}"
 
-  log "Pushing release images"
-  "${SCRIPT_DIR}/push-release.sh" "${VERSION}" --registry "${REGISTRY}"
+    log "Pushing release images"
+    "${SCRIPT_DIR}/push-release.sh" "${VERSION}" --registry "${REGISTRY}"
+  fi
 fi
 
-log "Publishing required runtime images"
-"${SCRIPT_DIR}/publish-runtime-images.sh" --registry "${REGISTRY}"
-
-log "Mirroring Velero object-storage plugins"
-plugin_sync_args=(--registry "${REGISTRY}" --version "${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}")
-if [[ -n "${HCDR_VELERO_PLUGIN_SOURCE_REGISTRY:-}" ]]; then
-  plugin_sync_args+=(--source-registry "${HCDR_VELERO_PLUGIN_SOURCE_REGISTRY}")
+if [[ "${PHASE}" == "core" ]]; then
+  log "Core release images published"
+  exit 0
 fi
-"${SCRIPT_DIR}/sync-velero-plugins.sh" "${plugin_sync_args[@]}"
 
-log "Mirroring the pinned OADP image closure"
-"${SCRIPT_DIR}/mirror-community-oadp-images.sh" --registry "${REGISTRY}"
-log "Building the pinned OADP bundle"
-"${SCRIPT_DIR}/build-community-oadp-bundle.sh" --registry "${REGISTRY}"
-log "Building the self-contained OADP catalog"
-"${SCRIPT_DIR}/build-community-oadp-catalog.sh" --registry "${REGISTRY}"
+if [[ "${PHASE}" == "all" || "${PHASE}" == "dependencies" ]]; then
+  log "Publishing required runtime images"
+  "${SCRIPT_DIR}/publish-runtime-images.sh" --registry "${REGISTRY}"
+
+  log "Mirroring Velero object-storage plugins"
+  plugin_sync_args=(--registry "${REGISTRY}" --version "${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}")
+  if [[ -n "${HCDR_VELERO_PLUGIN_SOURCE_REGISTRY:-}" ]]; then
+    plugin_sync_args+=(--source-registry "${HCDR_VELERO_PLUGIN_SOURCE_REGISTRY}")
+  fi
+  "${SCRIPT_DIR}/sync-velero-plugins.sh" "${plugin_sync_args[@]}"
+
+  log "Mirroring the pinned OADP image closure"
+  "${SCRIPT_DIR}/mirror-community-oadp-images.sh" --registry "${REGISTRY}"
+  log "Building the pinned OADP bundle"
+  "${SCRIPT_DIR}/build-community-oadp-bundle.sh" --registry "${REGISTRY}"
+  log "Building the self-contained OADP catalog"
+  "${SCRIPT_DIR}/build-community-oadp-catalog.sh" --registry "${REGISTRY}"
+fi
+
 OADP_RESOLVED_LOCK="${HCDR_OADP_RESOLVED_LOCK:-${HCDR_RUNTIME_ROOT:-/data/hypercdr-runtime}/oadp-mirror/resolved-image-lock.json}"
 
+if [[ "${PHASE}" == "dependencies" ]]; then
+  [[ -r "${OADP_RESOLVED_LOCK}" ]] || die "resolved OADP image lock is missing: ${OADP_RESOLVED_LOCK}"
+  log "Release dependencies published: ${OADP_RESOLVED_LOCK}"
+  exit 0
+fi
+
+[[ -r "${OADP_RESOLVED_LOCK}" ]] || die "resolved OADP image lock is missing: ${OADP_RESOLVED_LOCK}"
+
 log "Verifying pushed image pulls"
+PULL_PARALLELISM="${HCDR_RELEASE_PULL_PARALLELISM:-4}"
+PULL_TIMEOUT="${HCDR_RELEASE_PULL_TIMEOUT_SECONDS:-3600}"
+[[ "${PULL_PARALLELISM}" =~ ^[1-9][0-9]*$ ]] || die "HCDR_RELEASE_PULL_PARALLELISM must be a positive integer"
+[[ "${PULL_TIMEOUT}" =~ ^[1-9][0-9]*$ ]] || die "HCDR_RELEASE_PULL_TIMEOUT_SECONDS must be a positive integer"
 release_images=( \
   "$(image_ref "${REGISTRY}" "platform-api" "${VERSION}")" \
   "$(image_ref "${REGISTRY}" "platform-frontend" "${VERSION}")" \
@@ -227,10 +256,25 @@ release_images=( \
   "$(image_ref "${REGISTRY}" "velero-plugin-for-microsoft-azure" "${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}")" \
   "$(image_ref "${REGISTRY}" "velero-plugin-for-gcp" "${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}")" )
 while IFS= read -r image; do release_images+=("${image}"); done < <(jq -r '.images[].target,.bundle.image,.catalog.image' "${OADP_RESOLVED_LOCK}")
-for image in "${release_images[@]}"; do
-  docker pull "${image}" >/dev/null
-  log "Pull OK: ${image}"
-done
+
+pull_release_image() {
+  local image="$1" attempt status
+  for attempt in 1 2 3; do
+    if timeout "${PULL_TIMEOUT}" docker pull "${image}" >/dev/null; then
+      echo "==> Pull OK: ${image}"
+      return 0
+    else
+      status=$?
+    fi
+    echo "pull ${image} failed (attempt ${attempt}/3, status ${status})" >&2
+    (( attempt == 3 )) || sleep $((attempt * 5))
+  done
+  return "${status}"
+}
+export PULL_TIMEOUT
+export -f pull_release_image
+printf '%s\0' "${release_images[@]}" \
+  | xargs -0 -P "${PULL_PARALLELISM}" -n 1 bash -c 'pull_release_image "$1"' _
 
 remote_digest() {
   local image="$1" digest
@@ -261,6 +305,7 @@ AZURE_PLUGIN_IMAGE="$(image_ref "${REGISTRY}" "velero-plugin-for-microsoft-azure
 GCP_PLUGIN_IMAGE="$(image_ref "${REGISTRY}" "velero-plugin-for-gcp" "${PLUGIN_VERSION}")"
 
 RELEASE_MANIFEST="$(release_work_dir "${VERSION}")/release-manifest.json"
+mkdir -p "$(dirname "${RELEASE_MANIFEST}")"
 cat >"${RELEASE_MANIFEST}" <<EOF
 {
   "version": "${VERSION}",
