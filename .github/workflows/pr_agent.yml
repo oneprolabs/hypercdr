@@ -22,6 +22,8 @@ jobs:
       pull-requests: write
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Validate LLM configuration
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
@@ -44,6 +46,16 @@ jobs:
           CONFIG.CUSTOM_MODEL_MAX_TOKENS: ${{ vars.LLM_MODEL_MAX_TOKENS || '64000' }}
           CONFIG.RESPONSE_LANGUAGE: en-US
           CONFIG.REPO_CONTEXT_FILES: '["PR_WORKFLOW.md"]'
+          PR_REVIEWER.EXTRA_INSTRUCTIONS: >-
+            Write every review summary, finding, inline comment, test note,
+            merge recommendation, and no-issue conclusion in English only.
+            Include requirement coverage, issues found, tests and verification,
+            and a clear merge recommendation.
+          PR_DESCRIPTION.EXTRA_INSTRUCTIONS: >-
+            Write every generated PR title, description, summary, walkthrough,
+            and diagram label in English only.
+          PR_CODE_SUGGESTIONS.EXTRA_INSTRUCTIONS: >-
+            Write every code suggestion explanation in English only.
           GITHUB_ACTION_CONFIG.AUTO_DESCRIBE: "true"
           GITHUB_ACTION_CONFIG.AUTO_REVIEW: "true"
           GITHUB_ACTION_CONFIG.AUTO_IMPROVE: "false"
@@ -57,58 +69,15 @@ jobs:
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_AGENT_OUTCOME: ${{ steps.pr_agent.outcome }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PROJECT_NAME: HyperCDR
+          PR_ADDITIONS: ${{ github.event.pull_request.additions }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
-          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR_CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
-          PR_ADDITIONS: ${{ github.event.pull_request.additions }}
           PR_DELETIONS: ${{ github.event.pull_request.deletions }}
-        run: |
-          set -euo pipefail
-          if [ -z "${FEISHU_WEBHOOK}" ]; then
-            echo "::warning::FEISHU_WEBHOOK is not configured; skipping notification."
-            exit 0
-          fi
-
-          case "${PR_AGENT_OUTCOME}" in
-            success) STATUS="✅ AI PR review completed"; TEMPLATE="green" ;;
-            *) STATUS="❌ AI PR review failed"; TEMPLATE="red" ;;
-          esac
-
-          PAYLOAD="$(jq -n \
-            --arg status "${STATUS}" \
-            --arg template "${TEMPLATE}" \
-            --arg number "${PR_NUMBER}" \
-            --arg title "${PR_TITLE}" \
-            --arg author "${PR_AUTHOR}" \
-            --arg repository "${GITHUB_REPOSITORY}" \
-            --arg head "${PR_HEAD_REF}" \
-            --arg base "${PR_BASE_REF}" \
-            --arg files "${PR_CHANGED_FILES}" \
-            --arg additions "${PR_ADDITIONS}" \
-            --arg deletions "${PR_DELETIONS}" \
-            --arg url "${PR_URL}" \
-            '{
-              msg_type: "interactive",
-              card: {
-                schema: "2.0",
-                config: {wide_screen_mode: true},
-                header: {
-                  title: {tag: "plain_text", content: ("HyperCDR AI PR Review #" + $number)},
-                  template: $template
-                },
-                body: {elements: [
-                  {tag: "markdown", content: ("**" + $status + "**\n\n" + $title)},
-                  {tag: "markdown", content: ("仓库：" + $repository + "\n作者：" + $author + "\n分支：" + $head + " → " + $base + "\n变更：" + $files + " files | +" + $additions + " / -" + $deletions)},
-                  {tag: "hr"},
-                  {tag: "button", text: {tag: "plain_text", content: "查看 PR"}, type: "primary", behaviors: [{type: "open_url", default_url: {url: $url}}]}
-                ]}
-              }
-            }')"
-
-          curl --fail --silent --show-error --retry 3 --max-time 20 \
-            -H "Content-Type: application/json" \
-            -d "${PAYLOAD}" "${FEISHU_WEBHOOK}"
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_STATE: ${{ github.event.pull_request.state }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: ./scripts/ci/notify-pr-review.sh

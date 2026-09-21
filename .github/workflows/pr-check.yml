@@ -51,6 +51,8 @@ jobs:
           bash scripts/tests/blue-green-deploy.sh
           bash scripts/tests/blue-green-compose.sh
           bash scripts/tests/release-workflow.sh
+          bash scripts/tests/oadp-mirror.sh
+          bash scripts/tests/pr-review-notification.sh
       - name: Reject generated artifacts
         run: bash scripts/tests/repository-hygiene.sh
       - name: Reject tracked secrets and logs

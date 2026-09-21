@@ -9,25 +9,15 @@ on:
 concurrency: {group: hypercdr-release, cancel-in-progress: false}
 permissions: {contents: write}
 jobs:
-  publish:
+  prepare-release:
     outputs:
       image_version: ${{ steps.release.outputs.version }}
       release_ref: ${{ steps.release.outputs.ref }}
+      registry_profile: ${{ steps.release.outputs.profile }}
+      registry_server: ${{ steps.release.outputs.server }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.24.x'
-          cache-dependency-path: |
-            backend/go.sum
-            agent/comm-agent/go.sum
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - uses: docker/setup-buildx-action@v3
       - name: Resolve release and registry
         id: release
         shell: bash
@@ -43,47 +33,157 @@ jobs:
           echo "ref=${ref}" >> "${GITHUB_OUTPUT}"
           echo "profile=${profile}" >> "${GITHUB_OUTPUT}"
           echo "server=${HCDR_REGISTRY_SERVER}" >> "${GITHUB_OUTPUT}"
+
+  publish-core:
+    needs: prepare-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache-dependency-path: |
+            backend/go.sum
+            agent/comm-agent/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
-          registry: ${{ steps.release.outputs.server }}
-          username: ${{ steps.release.outputs.profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
-          password: ${{ steps.release.outputs.profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
-      - name: Build, test, and publish
+          registry: ${{ needs.prepare-release.outputs.registry_server }}
+          username: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
+          password: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
+      - name: Build, test, and publish core images
         env:
           HCDR_GO_BIN: go
           HCDR_RUNTIME_ROOT: /tmp/hypercdr-runtime
+          HCDR_RELEASE_PHASE: core
+          HCDR_BUILD_GOPROXY: https://proxy.golang.org,direct
           HCDR_CONTAINER_POLICY: /tmp/hypercdr-runtime/containers-policy.json
-          RELEASE_REGISTRY_USERNAME: ${{ steps.release.outputs.profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
-          RELEASE_REGISTRY_PASSWORD: ${{ steps.release.outputs.profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
+          RELEASE_REGISTRY_USERNAME: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
+          RELEASE_REGISTRY_PASSWORD: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
         run: |
           mkdir -p "${HCDR_RUNTIME_ROOT}"
           printf '%s\n' '{"default":[{"type":"insecureAcceptAnything"}]}' > "${HCDR_CONTAINER_POLICY}"
           cat > "${RUNNER_TEMP}/release.conf" <<EOF
-          RELEASE_VERSION=${{ steps.release.outputs.version }}
+          RELEASE_VERSION=${{ needs.prepare-release.outputs.image_version }}
           HCDR_RELEASE_SECRETS_FILE=${RUNNER_TEMP}/release.secrets.conf
           EOF
           (umask 077; cat > "${RUNNER_TEMP}/release.secrets.conf" <<EOF
-          HCDR_REGISTRY_SERVER=${{ steps.release.outputs.server }}
+          HCDR_REGISTRY_SERVER=${{ needs.prepare-release.outputs.registry_server }}
           HCDR_REGISTRY_USERNAME=${RELEASE_REGISTRY_USERNAME}
           HCDR_REGISTRY_PASSWORD=${RELEASE_REGISTRY_PASSWORD}
           EOF
           )
           export HCDR_REGISTRY_CONFIG="${GITHUB_WORKSPACE}/config/registries.conf"
-          export HCDR_REGISTRY_PROFILE="${{ steps.release.outputs.profile }}"
+          export HCDR_REGISTRY_PROFILE="${{ needs.prepare-release.outputs.registry_profile }}"
+          ./scripts/release/release-all.sh --config "${RUNNER_TEMP}/release.conf"
+
+  publish-dependencies:
+    needs: prepare-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ needs.prepare-release.outputs.registry_server }}
+          username: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
+          password: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
+      - name: Publish runtime, Velero, and OADP images
+        env:
+          HCDR_RUNTIME_ROOT: /tmp/hypercdr-runtime
+          HCDR_RELEASE_PHASE: dependencies
+          HCDR_OADP_PARALLELISM: '3'
+          HCDR_OADP_IMAGE_TIMEOUT_SECONDS: '3600'
+          HCDR_CONTAINER_POLICY: /tmp/hypercdr-runtime/containers-policy.json
+          RELEASE_REGISTRY_USERNAME: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
+          RELEASE_REGISTRY_PASSWORD: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
+        run: |
+          mkdir -p "${HCDR_RUNTIME_ROOT}"
+          printf '%s\n' '{"default":[{"type":"insecureAcceptAnything"}]}' > "${HCDR_CONTAINER_POLICY}"
+          cat > "${RUNNER_TEMP}/release.conf" <<EOF
+          RELEASE_VERSION=${{ needs.prepare-release.outputs.image_version }}
+          HCDR_RELEASE_SECRETS_FILE=${RUNNER_TEMP}/release.secrets.conf
+          EOF
+          (umask 077; cat > "${RUNNER_TEMP}/release.secrets.conf" <<EOF
+          HCDR_REGISTRY_SERVER=${{ needs.prepare-release.outputs.registry_server }}
+          HCDR_REGISTRY_USERNAME=${RELEASE_REGISTRY_USERNAME}
+          HCDR_REGISTRY_PASSWORD=${RELEASE_REGISTRY_PASSWORD}
+          EOF
+          )
+          export HCDR_REGISTRY_CONFIG="${GITHUB_WORKSPACE}/config/registries.conf"
+          export HCDR_REGISTRY_PROFILE="${{ needs.prepare-release.outputs.registry_profile }}"
           ./scripts/release/release-all.sh --config "${RUNNER_TEMP}/release.conf"
       - uses: actions/upload-artifact@v4
         with:
-          name: hypercdr-installer-${{ steps.release.outputs.version }}
-          path: /tmp/hypercdr-runtime/releases/community/${{ steps.release.outputs.version }}/*
+          name: hypercdr-oadp-lock-${{ needs.prepare-release.outputs.image_version }}
+          path: /tmp/hypercdr-runtime/oadp-mirror/resolved-image-lock.json
           if-no-files-found: error
+          overwrite: true
+
+  publish:
+    needs: [prepare-release, publish-core, publish-dependencies]
+    outputs:
+      image_version: ${{ needs.prepare-release.outputs.image_version }}
+      release_ref: ${{ needs.prepare-release.outputs.release_ref }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: hypercdr-oadp-lock-${{ needs.prepare-release.outputs.image_version }}
+          path: /tmp/hypercdr-runtime/oadp-mirror
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ needs.prepare-release.outputs.registry_server }}
+          username: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
+          password: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
+      - name: Verify images and package release
+        env:
+          HCDR_RUNTIME_ROOT: /tmp/hypercdr-runtime
+          HCDR_RELEASE_PHASE: finalize
+          HCDR_RELEASE_PULL_PARALLELISM: '4'
+          HCDR_RELEASE_PULL_TIMEOUT_SECONDS: '3600'
+          HCDR_CONTAINER_POLICY: /tmp/hypercdr-runtime/containers-policy.json
+          RELEASE_REGISTRY_USERNAME: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
+          RELEASE_REGISTRY_PASSWORD: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
+        run: |
+          mkdir -p "${HCDR_RUNTIME_ROOT}"
+          printf '%s\n' '{"default":[{"type":"insecureAcceptAnything"}]}' > "${HCDR_CONTAINER_POLICY}"
+          cat > "${RUNNER_TEMP}/release.conf" <<EOF
+          RELEASE_VERSION=${{ needs.prepare-release.outputs.image_version }}
+          HCDR_RELEASE_SECRETS_FILE=${RUNNER_TEMP}/release.secrets.conf
+          EOF
+          (umask 077; cat > "${RUNNER_TEMP}/release.secrets.conf" <<EOF
+          HCDR_REGISTRY_SERVER=${{ needs.prepare-release.outputs.registry_server }}
+          HCDR_REGISTRY_USERNAME=${RELEASE_REGISTRY_USERNAME}
+          HCDR_REGISTRY_PASSWORD=${RELEASE_REGISTRY_PASSWORD}
+          EOF
+          )
+          export HCDR_REGISTRY_CONFIG="${GITHUB_WORKSPACE}/config/registries.conf"
+          export HCDR_REGISTRY_PROFILE="${{ needs.prepare-release.outputs.registry_profile }}"
+          ./scripts/release/release-all.sh --config "${RUNNER_TEMP}/release.conf"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hypercdr-installer-${{ needs.prepare-release.outputs.image_version }}
+          path: /tmp/hypercdr-runtime/releases/community/${{ needs.prepare-release.outputs.image_version }}/*
+          if-no-files-found: error
+          overwrite: true
       - name: Publish installer assets to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.release.outputs.version }}
+          tag_name: v${{ needs.prepare-release.outputs.image_version }}
           generate_release_notes: true
           files: |
-            /tmp/hypercdr-runtime/releases/community/${{ steps.release.outputs.version }}/hypercdr-installer-${{ steps.release.outputs.version }}.tar.gz
-            /tmp/hypercdr-runtime/releases/community/${{ steps.release.outputs.version }}/hypercdr-installer-${{ steps.release.outputs.version }}.sha256
+            /tmp/hypercdr-runtime/releases/community/${{ needs.prepare-release.outputs.image_version }}/hypercdr-installer-${{ needs.prepare-release.outputs.image_version }}.tar.gz
+            /tmp/hypercdr-runtime/releases/community/${{ needs.prepare-release.outputs.image_version }}/hypercdr-installer-${{ needs.prepare-release.outputs.image_version }}.sha256
 
   deploy:
     needs: publish

@@ -2,8 +2,21 @@
 set -euo pipefail
 
 workflow=.github/workflows/release.yml
+review_workflow=.github/workflows/pr_agent.yml
 installer=scripts/release/install-blue-green.sh
 grep -Fq "needs: publish" "$workflow"
+grep -Fq 'prepare-release:' "$workflow"
+grep -Fq 'publish-core:' "$workflow"
+grep -Fq 'publish-dependencies:' "$workflow"
+grep -Fq 'needs: [prepare-release, publish-core, publish-dependencies]' "$workflow"
+grep -Fq 'HCDR_RELEASE_PHASE: core' "$workflow"
+grep -Fq 'HCDR_RELEASE_PHASE: dependencies' "$workflow"
+grep -Fq 'HCDR_RELEASE_PHASE: finalize' "$workflow"
+grep -Fq "HCDR_OADP_PARALLELISM: '3'" "$workflow"
+grep -Fq "HCDR_RELEASE_PULL_PARALLELISM: '4'" "$workflow"
+grep -Fq 'actions/upload-artifact@v4' "$workflow"
+grep -Fq 'actions/download-artifact@v4' "$workflow"
+grep -Fq 'resolved-image-lock.json' "$workflow"
 grep -Fq "vars.HCDR_AUTO_DEPLOY == 'true'" "$workflow"
 grep -Fq 'secrets.SSH_PRIVATE_KEY' "$workflow"
 grep -Fq "secrets.ALIYUN_REGISTRY_USERNAME" "$workflow"
@@ -16,7 +29,7 @@ grep -Fq 'release-all.sh --config "${RUNNER_TEMP}/release.conf"' "$workflow"
 grep -Fq 'HCDR_RELEASE_SECRETS_FILE=${RUNNER_TEMP}/release.secrets.conf' "$workflow"
 grep -Fq 'RELEASE_REGISTRY_USERNAME' "$workflow"
 grep -Fq 'export HCDR_REGISTRY_CONFIG="${GITHUB_WORKSPACE}/config/registries.conf"' "$workflow"
-grep -Fq 'export HCDR_REGISTRY_PROFILE="${{ steps.release.outputs.profile }}"' "$workflow"
+grep -Fq 'export HCDR_REGISTRY_PROFILE="${{ needs.prepare-release.outputs.registry_profile }}"' "$workflow"
 grep -Fq 'ref="${GITHUB_SHA}"' "$workflow"
 grep -Fq 'ref="${GITHUB_REF_NAME}"' "$workflow"
 grep -Fq "grep -q '^PLATFORM_API_BLUE_IMAGE='" "$workflow"
@@ -30,5 +43,9 @@ grep -Fq -- "--base-url 'https://\${{ vars.HCDR_DOMAIN }}'" "$workflow"
 grep -Fq 'prepare_legacy_migration' "$installer"
 grep -Fq 'rollback_legacy_migration' "$installer"
 grep -Fq '.migration_complete' "$installer"
+grep -Fq 'scripts/ci/notify-pr-review.sh' "$review_workflow"
+grep -Fq 'PR_REVIEWER.EXTRA_INSTRUCTIONS' "$review_workflow"
+grep -Fq 'Requirement Coverage' scripts/ci/notify-pr-review.sh
+grep -Fq 'Tests and Verification' scripts/ci/notify-pr-review.sh
 
 echo "release workflow contract passed"
