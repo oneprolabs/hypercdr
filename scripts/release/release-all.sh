@@ -305,6 +305,7 @@ AZURE_PLUGIN_IMAGE="$(image_ref "${REGISTRY}" "velero-plugin-for-microsoft-azure
 GCP_PLUGIN_IMAGE="$(image_ref "${REGISTRY}" "velero-plugin-for-gcp" "${PLUGIN_VERSION}")"
 
 RELEASE_MANIFEST="$(release_work_dir "${VERSION}")/release-manifest.json"
+mkdir -p "$(dirname "${RELEASE_MANIFEST}")"
 cat >"${RELEASE_MANIFEST}" <<EOF
 {
   "version": "${VERSION}",

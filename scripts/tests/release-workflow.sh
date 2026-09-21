@@ -47,5 +47,6 @@ grep -Fq 'scripts/ci/notify-pr-review.sh' "$review_workflow"
 grep -Fq 'PR_REVIEWER.EXTRA_INSTRUCTIONS' "$review_workflow"
 grep -Fq 'Requirement Coverage' scripts/ci/notify-pr-review.sh
 grep -Fq 'Tests and Verification' scripts/ci/notify-pr-review.sh
+grep -Fq 'mkdir -p "$(dirname "${RELEASE_MANIFEST}")"' scripts/release/release-all.sh
 
 echo "release workflow contract passed"
