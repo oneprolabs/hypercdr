@@ -40,6 +40,16 @@ jobs:
             printf '%s' "${TARGET_REGISTRY_PASSWORD}" | docker login registry.cn-beijing.aliyuncs.com \
               --username "${TARGET_REGISTRY_USERNAME}" --password-stdin
 
+            nginx_source='docker.io/library/nginx:1.27-alpine'
+            nginx_target="${new_repository}:nginx-1.27-alpine"
+            if ! docker manifest inspect "${nginx_target}" >/dev/null 2>&1; then
+              docker pull "${nginx_source}"
+              docker tag "${nginx_source}" "${nginx_target}"
+              docker push "${nginx_target}"
+            fi
+            docker manifest inspect "${nginx_target}" >/dev/null
+            echo "Verified: ${nginx_target}"
+
             while IFS='|' read -r component tag; do
               source_image="${old_registry}/${component}:${tag}"
               target_image="${new_repository}:${component}-${tag}"
