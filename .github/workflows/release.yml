@@ -107,6 +107,7 @@ jobs:
           HCDR_RELEASE_PHASE: dependencies
           HCDR_OADP_PARALLELISM: '3'
           HCDR_OADP_IMAGE_TIMEOUT_SECONDS: '3600'
+          GITHUB_TOKEN: ${{ github.token }}
           HCDR_AUTH_CHALLENGE_MODE: ${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'image' }}
           HCDR_TURNSTILE_SITE_KEY: ${{ secrets.HCDR_TURNSTILE_SITE_KEY }}
           HCDR_TURNSTILE_SECRET_KEY: ${{ secrets.HCDR_TURNSTILE_SECRET_KEY }}
