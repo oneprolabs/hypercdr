@@ -120,10 +120,11 @@ if [[ -n "${COMPOSE_FILE}" && -f "${COMPOSE_FILE}" ]]; then
   compose_name="$(basename "${COMPOSE_FILE}")"
   (
     cd "${compose_dir}"
+    compose_args=(--project-name hypercdr -f "${compose_name}")
+    [[ -x "${INSTALL_DIR}/deploy-blue-green.sh" ]] && compose_args+=(--profile blue --profile green)
     down_args=(down --remove-orphans)
-    [[ -x "${INSTALL_DIR}/deploy-blue-green.sh" ]] && down_args+=(--profile blue --profile green)
     [[ "${PURGE_DATA}" == "true" ]] && down_args+=(--volumes)
-    docker compose --project-name hypercdr -f "${compose_name}" "${down_args[@]}"
+    docker compose "${compose_args[@]}" "${down_args[@]}"
   )
 else
   docker rm -f hypercdr-edge hypercdr-platform-frontend-blue hypercdr-platform-frontend-green \
