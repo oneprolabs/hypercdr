@@ -77,6 +77,9 @@ jobs:
           HCDR_REGISTRY_SERVER=${{ needs.prepare-release.outputs.registry_server }}
           HCDR_REGISTRY_USERNAME=${RELEASE_REGISTRY_USERNAME}
           HCDR_REGISTRY_PASSWORD=${RELEASE_REGISTRY_PASSWORD}
+          HCDR_AUTH_CHALLENGE_MODE=${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'image' }}
+          HCDR_TURNSTILE_SITE_KEY=${{ secrets.HCDR_TURNSTILE_SITE_KEY }}
+          HCDR_TURNSTILE_SECRET_KEY=${{ secrets.HCDR_TURNSTILE_SECRET_KEY }}
           EOF
           )
           export HCDR_REGISTRY_CONFIG="${GITHUB_WORKSPACE}/config/registries.conf"
