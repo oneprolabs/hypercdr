@@ -6,10 +6,79 @@ on:
     inputs:
       version: {description: 'Release version in MAJOR.MINOR.PATCH.YYYYMMDD format', required: true}
       registry_profile: {description: 'Profile from config/registries.conf', required: true, default: aliyun_acr}
+      operation:
+        description: 'Operation to run'
+        required: true
+        default: release
+        type: choice
+        options: [release, migrate_legacy_acr]
 concurrency: {group: hypercdr-release, cancel-in-progress: false}
 permissions: {contents: write}
 jobs:
+  migrate-legacy-acr:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.operation == 'migrate_legacy_acr' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Copy legacy ACR images
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          TARGET_REGISTRY_USERNAME: ${{ secrets.ALIYUN_REGISTRY_USERNAME }}
+          TARGET_REGISTRY_PASSWORD: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
+        with:
+          host: ${{ vars.HCDR_SSH_HOST }}
+          username: ${{ vars.HCDR_SSH_USER }}
+          port: ${{ vars.HCDR_SSH_PORT }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          command_timeout: 7200s
+          envs: TARGET_REGISTRY_USERNAME,TARGET_REGISTRY_PASSWORD
+          script: |
+            set -eu
+            old_registry='crpi-tne0uo16mzanbvpi.cn-zhangjiakou.personal.cr.aliyuncs.com/hypercdr'
+            new_repository='registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr'
+
+            printf '%s' "${TARGET_REGISTRY_PASSWORD}" | docker login registry.cn-beijing.aliyuncs.com \
+              --username "${TARGET_REGISTRY_USERNAME}" --password-stdin
+
+            while IFS='|' read -r component tag; do
+              source_image="${old_registry}/${component}:${tag}"
+              target_image="${new_repository}:${component}-${tag}"
+              if docker manifest inspect "${target_image}" >/dev/null 2>&1; then
+                echo "Already exists: ${target_image}"
+                continue
+              fi
+              echo "Copying ${source_image} -> ${target_image}"
+              docker pull "${source_image}"
+              docker tag "${source_image}" "${target_image}"
+              docker push "${target_image}"
+              docker manifest inspect "${target_image}" >/dev/null
+              echo "Verified: ${target_image}"
+            done <<'IMAGES'
+            cluster-registration-executor|1.0.39.20260917
+            comm-agent|1.0.39.20260917
+            oadp-aws-plugin|1.3.10-hcdr.1
+            oadp-bundle|1.3.10-hcdr.1
+            oadp-catalog|1.3.10-hcdr.1
+            oadp-comm-agent|1.0.39.20260917
+            oadp-openshift-plugin|1.3.10-hcdr.1
+            oadp-operator|1.3.10-hcdr.1
+            oadp-restore-helper|1.3.10-hcdr.1
+            oadp-velero|1.3.10-hcdr.1
+            platform-api|1.0.39.20260917
+            platform-frontend|1.0.39.20260917
+            platform-upgrader|1.0.39.20260917
+            postgres|16
+            velero-plugin-for-aws|v1.13.0
+            velero-plugin-for-gcp|v1.13.0
+            velero-plugin-for-microsoft-azure|v1.13.0
+            velero|v1.18.2-hcdr.4
+            IMAGES
+
+            unset TARGET_REGISTRY_USERNAME TARGET_REGISTRY_PASSWORD
+            echo 'Legacy ACR image migration completed; registry credentials remain logged in.'
+
   prepare-release:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.operation != 'migrate_legacy_acr' }}
     outputs:
       image_version: ${{ steps.release.outputs.version }}
       release_ref: ${{ steps.release.outputs.ref }}
