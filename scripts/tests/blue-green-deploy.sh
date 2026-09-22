@@ -38,6 +38,9 @@ mkdir -p "${FAKE_BIN}"
 cat >"${FAKE_BIN}/docker" <<'EOF'
 #!/usr/bin/env bash
 set -e
+if [[ -n "${FAKE_DOCKER_LOG:-}" ]]; then
+  printf '%s\n' "$*" >> "${FAKE_DOCKER_LOG}"
+fi
 if [[ "$1" == ps ]]; then
   printf '%s\n' "${FAKE_DOCKER_PS:-}"
   exit 0
@@ -48,6 +51,9 @@ if [[ "$1" == inspect ]]; then
       if [[ -n "${FAKE_RUNNING_FILE:-}" && -f "${FAKE_RUNNING_FILE}" ]]; then echo true; else echo false; fi
       ;;
     *".State.Health"*) echo healthy ;;
+    *)
+      [[ -n "${FAKE_RUNNING_FILE:-}" && -f "${FAKE_RUNNING_FILE}" ]] || exit 1
+      ;;
   esac
 fi
 exit 0
@@ -94,7 +100,15 @@ grep -Fxq blue "${RUNTIME_DIR}/.active_color"
 grep -Fq 'map $host $hypercdr_api_active { default hypercdr-platform-api-blue:18080; }' "${RUNTIME_DIR}/nginx/conf.d/upstream.conf"
 
 touch "${RUNTIME_DIR}/running"
+rm -f "${RUNTIME_DIR}/.active_color" "${RUNTIME_DIR}/nginx/conf.d/upstream.conf"
+[[ "$(FAKE_RUNNING_FILE="${RUNTIME_DIR}/running" PATH="${FAKE_BIN}:${PATH}" read_active_color)" == blue ]]
+ensure_runtime_state blue
+grep -Fxq blue "${RUNTIME_DIR}/.active_color"
+grep -Fq 'hypercdr-platform-api-blue:18080' "${RUNTIME_DIR}/nginx/conf.d/upstream.conf"
+DOCKER_LOG="${RUNTIME_DIR}/docker.log"
+: > "${DOCKER_LOG}"
 FAKE_RUNNING_FILE="${RUNTIME_DIR}/running" \
+FAKE_DOCKER_LOG="${DOCKER_LOG}" \
 HCDR_INSTALL_DIR="${RUNTIME_DIR}" \
 HCDR_COMPOSE_FILE="${RUNTIME_DIR}/docker-compose.yaml" \
 HCDR_POST_SWITCH_OBSERVE_SECONDS=0 \
@@ -102,6 +116,8 @@ HCDR_OLD_COLOR_DRAIN_SECONDS=0 \
 HCDR_HEALTH_INTERVAL=0 \
 PATH="${FAKE_BIN}:${PATH}" \
   "${ROOT_DIR}/scripts/release/deploy-blue-green.sh" 1.0.34.20260916
+grep -Fq 'start hypercdr-postgres hypercdr-edge' "${DOCKER_LOG}"
+! grep -Fq 'up -d hypercdr-postgres hypercdr-edge' "${DOCKER_LOG}"
 grep -Fxq green "${RUNTIME_DIR}/.active_color"
 grep -Fxq 'PLATFORM_API_GREEN_IMAGE=registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:platform-api-1.0.34.20260916' "${RUNTIME_DIR}/.env"
 grep -Fq 'map $host $hypercdr_api_active { default hypercdr-platform-api-green:18080; }' "${RUNTIME_DIR}/nginx/conf.d/upstream.conf"

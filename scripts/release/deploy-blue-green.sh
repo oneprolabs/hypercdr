@@ -57,6 +57,13 @@ read_active_color() {
     color="$(tr -d '[:space:]' < "$marker")"
     case "$color" in blue|green) echo "$color"; return ;; esac
   fi
+  local color
+  for color in blue green; do
+    if container_running "hypercdr-platform-api-${color}" && container_running "hypercdr-platform-frontend-${color}"; then
+      echo "$color"
+      return
+    fi
+  done
   echo blue
 }
 
@@ -76,6 +83,15 @@ map \$host \$hypercdr_api_active { default hypercdr-platform-api-${color}:18080;
 map \$host \$hypercdr_frontend_active { default hypercdr-platform-frontend-${color}:3002; }
 EOF
   mv "${output}.tmp" "$output"
+}
+
+ensure_runtime_state() {
+  local color="$1" marker="${INSTALL_DIR}/.active_color" upstream="${INSTALL_DIR}/nginx/conf.d/upstream.conf"
+  if [[ ! -s "$marker" ]]; then
+    printf '%s\n' "$color" > "$marker"
+    chmod 600 "$marker"
+  fi
+  [[ -s "$upstream" ]] || render_upstream "$color" "$upstream"
 }
 
 compose() {
@@ -99,6 +115,14 @@ check_public_ports() {
 
 container_running() {
   [[ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null || true)" == true ]]
+}
+
+start_base_services() {
+  if docker inspect hypercdr-postgres "$EDGE_SERVICE" >/dev/null 2>&1; then
+    docker start hypercdr-postgres "$EDGE_SERVICE" >/dev/null || die "failed to start existing base services"
+  else
+    compose up -d hypercdr-postgres "$EDGE_SERVICE"
+  fi
 }
 
 wait_for_service() {
@@ -203,6 +227,7 @@ rollback_color() {
   validate_runtime
   local current target rollback_version registry
   current="$(read_active_color)"
+  ensure_runtime_state "$current"
   target="$(other_color "$current")"
   rollback_version="$(sed -n 's/^ *//p' "${INSTALL_DIR}/.rollback_version" 2>/dev/null | head -1 || true)"
   registry="${HCDR_IMAGE_REGISTRY%/}"
@@ -222,7 +247,9 @@ start_current() {
   validate_runtime
   local current
   current="$(read_active_color)"
-  compose up -d hypercdr-postgres hypercdr-edge hypercdr-cluster-registration-executor
+  ensure_runtime_state "$current"
+  start_base_services
+  compose up -d hypercdr-cluster-registration-executor
   start_color "$current" || die "active color $current did not become healthy"
   log "active color started: $current"
 }
@@ -242,6 +269,7 @@ deploy_version() {
   local version="$1" current candidate previous_version first_install=false
   validate_runtime
   current="$(read_active_color)"
+  ensure_runtime_state "$current"
   if ! container_running "hypercdr-platform-api-${current}"; then
     first_install=true
   fi
@@ -257,7 +285,7 @@ deploy_version() {
   load_runtime_env
 
   check_public_ports
-  compose up -d hypercdr-postgres hypercdr-edge
+  start_base_services
   compose pull "hypercdr-platform-api-${candidate}" "hypercdr-platform-frontend-${candidate}"
   start_color "$candidate" || die "candidate color $candidate failed health checks; active color remains $current"
 
