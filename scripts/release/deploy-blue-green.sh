@@ -17,6 +17,9 @@ HEALTH_INTERVAL="${HCDR_HEALTH_INTERVAL:-2}"
 OBSERVE_SECONDS="${HCDR_POST_SWITCH_OBSERVE_SECONDS:-30}"
 DRAIN_SECONDS="${HCDR_OLD_COLOR_DRAIN_SECONDS:-180}"
 LOCK_DIR=""
+DEPLOY_AUTH_CHALLENGE_MODE="${HCDR_AUTH_CHALLENGE_MODE:-}"
+DEPLOY_TURNSTILE_SITE_KEY="${HCDR_TURNSTILE_SITE_KEY:-}"
+DEPLOY_TURNSTILE_SECRET_KEY="${HCDR_TURNSTILE_SECRET_KEY:-}"
 
 log() { printf '[blue-green] %s\n' "$*"; }
 die() { printf '[blue-green] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -167,6 +170,26 @@ load_runtime_env() {
   DOMAIN="${HCDR_DOMAIN:-$DOMAIN}"
 }
 
+sync_auth_challenge_env() {
+  [[ -n "$DEPLOY_AUTH_CHALLENGE_MODE" ]] || return 0
+  case "$DEPLOY_AUTH_CHALLENGE_MODE" in
+    image)
+      set_env_value "$ENV_FILE" HCDR_AUTH_CHALLENGE_MODE image
+      set_env_value "$ENV_FILE" HCDR_TURNSTILE_SITE_KEY ""
+      set_env_value "$ENV_FILE" HCDR_TURNSTILE_SECRET_KEY ""
+      ;;
+    turnstile)
+      [[ -n "$DEPLOY_TURNSTILE_SITE_KEY" && -n "$DEPLOY_TURNSTILE_SECRET_KEY" ]] ||
+        die "Turnstile mode requires both GitHub Turnstile keys"
+      set_env_value "$ENV_FILE" HCDR_AUTH_CHALLENGE_MODE turnstile
+      set_env_value "$ENV_FILE" HCDR_TURNSTILE_SITE_KEY "$DEPLOY_TURNSTILE_SITE_KEY"
+      set_env_value "$ENV_FILE" HCDR_TURNSTILE_SECRET_KEY "$DEPLOY_TURNSTILE_SECRET_KEY"
+      ;;
+    *) die "HCDR_AUTH_CHALLENGE_MODE must be image or turnstile" ;;
+  esac
+  load_runtime_env
+}
+
 start_color() {
   local color="$1"
   compose --profile "$color" up -d "hypercdr-platform-api-${color}" "hypercdr-platform-frontend-${color}"
@@ -273,6 +296,7 @@ main() {
   mkdir -p "$INSTALL_DIR"
   acquire_deploy_lock
   load_runtime_env
+  sync_auth_challenge_env
   if [[ "${1:-}" == --rollback ]]; then rollback_color; return; fi
   if [[ "${1:-}" == --start-current ]]; then start_current; return; fi
   local version="${1:-}"

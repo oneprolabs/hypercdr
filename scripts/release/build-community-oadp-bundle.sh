@@ -24,6 +24,8 @@ release="$(jq -er .release "$RESOLVED_LOCK")"
 commit="$(jq -er .sourceCommit "$RESOLVED_LOCK")"
 bundle_dir="${WORK_DIR}/${release}/bundle"
 mkdir -p "$bundle_dir/manifests" "$bundle_dir/metadata"
+github_api_args=()
+[[ -n "${GITHUB_TOKEN:-}" ]] && github_api_args=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
 
 tree_file="${bundle_dir}/source-tree.json"
 if [[ "$(jq -r '.sha // empty' "$tree_file" 2>/dev/null || true)" == "$commit" ]] &&
@@ -31,6 +33,7 @@ if [[ "$(jq -r '.sha // empty' "$tree_file" 2>/dev/null || true)" == "$commit" ]
   echo "Using cached, commit-qualified OADP bundle source: ${commit}"
 else
   curl -LfsS --retry 4 --connect-timeout 10 --max-time 120 \
+    "${github_api_args[@]}" \
     "https://api.github.com/repos/openshift/oadp-operator/git/trees/${commit}?recursive=1" -o "$tree_file"
 fi
 jq -e '.truncated == false' "$tree_file" >/dev/null
@@ -39,6 +42,7 @@ download_blob() {
   local source_path="$1" target_path="$2" sha
   sha="$(jq -er --arg path "$source_path" '.tree[]|select(.path==$path and .type=="blob")|.sha' "$tree_file")"
   if ! curl -LfsS --retry 2 --connect-timeout 10 --max-time 120 \
+      "${github_api_args[@]}" \
       "https://api.github.com/repos/openshift/oadp-operator/git/blobs/${sha}" \
       | jq -er .content | tr -d '\n' | base64 -d >"$target_path"; then
     # GitHub's API is rate limited without a token; the immutable raw commit
