@@ -15,6 +15,7 @@ SKIP_REGISTER="false"
 DRY_RUN="false"
 RESUME="false"
 PHASE="${HCDR_RELEASE_PHASE:-all}"
+CORE_COMPONENT="${HCDR_CORE_COMPONENT:-all}"
 RELEASE_CENTER_URL="${HCDR_RELEASE_CENTER_URL:-}"
 RELEASE_CENTER_TOKEN_FILE="${HCDR_RELEASE_CENTER_TOKEN_FILE:-}"
 
@@ -88,6 +89,10 @@ case "${PHASE}" in
   all|core|dependencies|finalize) ;;
   *) die "HCDR_RELEASE_PHASE must be all, core, dependencies, or finalize" ;;
 esac
+case "${CORE_COMPONENT}" in
+  all|platform|agents|executor) ;;
+  *) die "HCDR_CORE_COMPONENT must be all, platform, agents, or executor" ;;
+esac
 
 require_version "${VERSION}"
 require_registry "${HCDR_IMAGE_REGISTRY:-}"
@@ -145,6 +150,7 @@ login_registry() {
 }
 
 build_args=("${VERSION}" --registry "${REGISTRY}")
+build_args+=(--component "${CORE_COMPONENT}")
 if [[ "${SKIP_TESTS}" == "true" ]]; then
   build_args+=(--skip-tests)
 fi
@@ -165,6 +171,7 @@ Registry server: ${REGISTRY_SERVER}
 Login challenge: ${AUTH_CHALLENGE_MODE}
 Skip tests:     ${SKIP_TESTS}
 Phase:          ${PHASE}
+Core component: ${CORE_COMPONENT}
 EOF
 
 if [[ "${DRY_RUN}" == "true" ]]; then
@@ -191,7 +198,13 @@ login_registry
 if [[ "${PHASE}" == "all" || "${PHASE}" == "core" ]]; then
   if [[ "${RESUME}" == "true" ]]; then
     log "Resume mode: verifying previously pushed core images"
-    for name in platform-api platform-frontend cluster-registration-executor comm-agent oadp-comm-agent; do
+    case "${CORE_COMPONENT}" in
+      all) core_images=(platform-api platform-frontend cluster-registration-executor comm-agent oadp-comm-agent) ;;
+      platform) core_images=(platform-api platform-frontend) ;;
+      agents) core_images=(comm-agent oadp-comm-agent) ;;
+      executor) core_images=(cluster-registration-executor) ;;
+    esac
+    for name in "${core_images[@]}"; do
       image="$(image_ref "${REGISTRY}" "${name}" "${VERSION}")"
       docker manifest inspect "${image}" >/dev/null 2>&1 || die "cannot resume: core image is unavailable: ${image}"
       log "Resume prerequisite OK: ${image}"
@@ -201,7 +214,7 @@ if [[ "${PHASE}" == "all" || "${PHASE}" == "core" ]]; then
     "${SCRIPT_DIR}/build-release.sh" "${build_args[@]}"
 
     log "Pushing release images"
-    "${SCRIPT_DIR}/push-release.sh" "${VERSION}" --registry "${REGISTRY}"
+    "${SCRIPT_DIR}/push-release.sh" "${VERSION}" --registry "${REGISTRY}" --component "${CORE_COMPONENT}"
   fi
 fi
 
