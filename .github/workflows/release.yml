@@ -63,7 +63,7 @@ jobs:
           HCDR_RUNTIME_ROOT: /tmp/hypercdr-runtime
           HCDR_RELEASE_PHASE: core
           HCDR_BUILD_GOPROXY: https://proxy.golang.org,direct
-          HCDR_AUTH_CHALLENGE_MODE: ${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'image' }}
+          HCDR_AUTH_CHALLENGE_MODE: ${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'turnstile' }}
           HCDR_TURNSTILE_SITE_KEY: ${{ secrets.HCDR_TURNSTILE_SITE_KEY }}
           HCDR_TURNSTILE_SECRET_KEY: ${{ secrets.HCDR_TURNSTILE_SECRET_KEY }}
           HCDR_CONTAINER_POLICY: /tmp/hypercdr-runtime/containers-policy.json
@@ -80,7 +80,7 @@ jobs:
           HCDR_REGISTRY_SERVER=${{ needs.prepare-release.outputs.registry_server }}
           HCDR_REGISTRY_USERNAME=${RELEASE_REGISTRY_USERNAME}
           HCDR_REGISTRY_PASSWORD=${RELEASE_REGISTRY_PASSWORD}
-          HCDR_AUTH_CHALLENGE_MODE=${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'image' }}
+          HCDR_AUTH_CHALLENGE_MODE=${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'turnstile' }}
           HCDR_TURNSTILE_SITE_KEY=${{ secrets.HCDR_TURNSTILE_SITE_KEY }}
           HCDR_TURNSTILE_SECRET_KEY=${{ secrets.HCDR_TURNSTILE_SECRET_KEY }}
           EOF
@@ -108,7 +108,7 @@ jobs:
           HCDR_OADP_PARALLELISM: '3'
           HCDR_OADP_IMAGE_TIMEOUT_SECONDS: '3600'
           GITHUB_TOKEN: ${{ github.token }}
-          HCDR_AUTH_CHALLENGE_MODE: ${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'image' }}
+          HCDR_AUTH_CHALLENGE_MODE: ${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'turnstile' }}
           HCDR_TURNSTILE_SITE_KEY: ${{ secrets.HCDR_TURNSTILE_SITE_KEY }}
           HCDR_TURNSTILE_SECRET_KEY: ${{ secrets.HCDR_TURNSTILE_SECRET_KEY }}
           HCDR_CONTAINER_POLICY: /tmp/hypercdr-runtime/containers-policy.json
@@ -125,7 +125,7 @@ jobs:
           HCDR_REGISTRY_SERVER=${{ needs.prepare-release.outputs.registry_server }}
           HCDR_REGISTRY_USERNAME=${RELEASE_REGISTRY_USERNAME}
           HCDR_REGISTRY_PASSWORD=${RELEASE_REGISTRY_PASSWORD}
-          HCDR_AUTH_CHALLENGE_MODE=${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'image' }}
+          HCDR_AUTH_CHALLENGE_MODE=${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'turnstile' }}
           HCDR_TURNSTILE_SITE_KEY=${{ secrets.HCDR_TURNSTILE_SITE_KEY }}
           HCDR_TURNSTILE_SECRET_KEY=${{ secrets.HCDR_TURNSTILE_SECRET_KEY }}
           EOF
@@ -164,7 +164,7 @@ jobs:
           HCDR_RELEASE_PHASE: finalize
           HCDR_RELEASE_PULL_PARALLELISM: '4'
           HCDR_RELEASE_PULL_TIMEOUT_SECONDS: '3600'
-          HCDR_AUTH_CHALLENGE_MODE: ${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'image' }}
+          HCDR_AUTH_CHALLENGE_MODE: ${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'turnstile' }}
           HCDR_TURNSTILE_SITE_KEY: ${{ secrets.HCDR_TURNSTILE_SITE_KEY }}
           HCDR_TURNSTILE_SECRET_KEY: ${{ secrets.HCDR_TURNSTILE_SECRET_KEY }}
           HCDR_CONTAINER_POLICY: /tmp/hypercdr-runtime/containers-policy.json
@@ -181,7 +181,7 @@ jobs:
           HCDR_REGISTRY_SERVER=${{ needs.prepare-release.outputs.registry_server }}
           HCDR_REGISTRY_USERNAME=${RELEASE_REGISTRY_USERNAME}
           HCDR_REGISTRY_PASSWORD=${RELEASE_REGISTRY_PASSWORD}
-          HCDR_AUTH_CHALLENGE_MODE=${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'image' }}
+          HCDR_AUTH_CHALLENGE_MODE=${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'turnstile' }}
           HCDR_TURNSTILE_SITE_KEY=${{ secrets.HCDR_TURNSTILE_SITE_KEY }}
           HCDR_TURNSTILE_SECRET_KEY=${{ secrets.HCDR_TURNSTILE_SECRET_KEY }}
           EOF
@@ -225,7 +225,7 @@ jobs:
             test -w '${{ vars.HCDR_DEPLOY_PATH }}'
       - uses: appleboy/ssh-action@v1.0.3
         env:
-          HCDR_AUTH_CHALLENGE_MODE: ${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'image' }}
+          HCDR_AUTH_CHALLENGE_MODE: ${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'turnstile' }}
           HCDR_TURNSTILE_SITE_KEY: ${{ secrets.HCDR_TURNSTILE_SITE_KEY }}
           HCDR_TURNSTILE_SECRET_KEY: ${{ secrets.HCDR_TURNSTILE_SECRET_KEY }}
         with:

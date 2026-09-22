@@ -21,10 +21,10 @@ HCDR_API_PORT="18080"
 # Optional public address used as an Agent fallback. Leave empty when unused.
 HCDR_PUBLIC_BASE_URL=""
 
-# Login challenge mode: image (local numeric CAPTCHA) or turnstile.
+# Login challenge mode: turnstile (Cloudflare, default) or image (local numeric CAPTCHA).
 # Turnstile requires a Cloudflare Site Key and Secret Key; keep the secret out
 # of Git and provide it through a protected runtime environment or .env file.
-HCDR_AUTH_CHALLENGE_MODE="image"
+HCDR_AUTH_CHALLENGE_MODE="turnstile"
 HCDR_TURNSTILE_SITE_KEY=""
 HCDR_TURNSTILE_SECRET_KEY=""
 HCDR_TURNSTILE_VERIFY_URL="https://challenges.cloudflare.com/turnstile/v0/siteverify"

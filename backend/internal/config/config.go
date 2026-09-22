@@ -114,7 +114,7 @@ func Load() Config {
 		ReleaseCenterToken:            strings.TrimSpace(os.Getenv("HCDR_RELEASE_CENTER_TOKEN")),
 		ReleaseCenterCAFile:           os.Getenv("HCDR_RELEASE_CENTER_CA_FILE"),
 		ReleaseCenterSyncInterval:     getEnv("HCDR_RELEASE_CENTER_SYNC_INTERVAL", "3600"),
-		AuthChallengeMode:             getEnv("HCDR_AUTH_CHALLENGE_MODE", "image"),
+		AuthChallengeMode:             getEnv("HCDR_AUTH_CHALLENGE_MODE", "turnstile"),
 		TurnstileSiteKey:              strings.TrimSpace(os.Getenv("HCDR_TURNSTILE_SITE_KEY")),
 		TurnstileSecretKey:            strings.TrimSpace(os.Getenv("HCDR_TURNSTILE_SECRET_KEY")),
 		TurnstileVerifyURL:            getEnv("HCDR_TURNSTILE_VERIFY_URL", "https://challenges.cloudflare.com/turnstile/v0/siteverify"),

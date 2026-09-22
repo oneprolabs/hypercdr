@@ -30,8 +30,8 @@ func TestVerifyTurnstile(t *testing.T) {
 	}))
 	defer server.Close()
 	r := &Router{cfg: config.Config{TurnstileSecretKey: "secret", TurnstileVerifyURL: server.URL}, logger: slog.Default(), store: store.NewMemoryStore()}
-	if !r.verifyTurnstile(httptest.NewRequest(http.MethodPost, "/", nil), "token") {
-		t.Fatal("expected valid Turnstile response")
+	if ok, codes, _ := r.verifyTurnstile(httptest.NewRequest(http.MethodPost, "/", nil), "token"); !ok {
+		t.Fatalf("expected valid Turnstile response, got codes=%v", codes)
 	}
 }
 
@@ -41,7 +41,7 @@ func TestVerifyTurnstileRejectsUnsuccessfulResponse(t *testing.T) {
 	}))
 	defer server.Close()
 	r := &Router{cfg: config.Config{TurnstileSecretKey: "secret", TurnstileVerifyURL: server.URL}}
-	if r.verifyTurnstile(httptest.NewRequest(http.MethodPost, "/", nil), "token") {
+	if ok, _, _ := r.verifyTurnstile(httptest.NewRequest(http.MethodPost, "/", nil), "token"); ok {
 		t.Fatal("expected unsuccessful Turnstile response to be rejected")
 	}
 }

@@ -706,11 +706,17 @@ EOF
     fi
     install_ok "Platform TLS is ready"
 
-    case "${HCDR_AUTH_CHALLENGE_MODE:-image}" in
+    # Cloudflare Turnstile is the default human verification. Fall back to the
+    # image captcha (with a warning) when the Turnstile credentials are absent,
+    # because Turnstile cannot function without them.
+    AUTH_CHALLENGE_MODE="${HCDR_AUTH_CHALLENGE_MODE:-turnstile}"
+    case "${AUTH_CHALLENGE_MODE}" in
       image) ;;
       turnstile)
-        [[ -n "${HCDR_TURNSTILE_SITE_KEY:-}" ]] || { install_fail "Turnstile Site Key is required"; exit 1; }
-        [[ -n "${HCDR_TURNSTILE_SECRET_KEY:-}" ]] || { install_fail "Turnstile Secret Key is required"; exit 1; }
+        if [[ -z "${HCDR_TURNSTILE_SITE_KEY:-}" || -z "${HCDR_TURNSTILE_SECRET_KEY:-}" ]]; then
+          printf '      WARN  Turnstile credentials missing; using image captcha\n' >&2
+          AUTH_CHALLENGE_MODE=image
+        fi
         ;;
       *) install_fail "HCDR_AUTH_CHALLENGE_MODE must be image or turnstile"; exit 1 ;;
     esac
@@ -751,7 +757,7 @@ HCDR_REGISTRY_CA_FILE=$([[ "${registry_trust}" == "private-ca" ]] && echo "${ins
 HCDR_SECRET_KEY=${secret_key}
 HCDR_RELEASE_TOKEN=${release_token}
 HCDR_REGISTRATION_EXECUTOR_TOKEN=${registration_executor_token}
-HCDR_AUTH_CHALLENGE_MODE=${HCDR_AUTH_CHALLENGE_MODE:-image}
+HCDR_AUTH_CHALLENGE_MODE=${AUTH_CHALLENGE_MODE}
 HCDR_TURNSTILE_SITE_KEY=${HCDR_TURNSTILE_SITE_KEY:-}
 HCDR_TURNSTILE_SECRET_KEY=${HCDR_TURNSTILE_SECRET_KEY:-}
 HCDR_TURNSTILE_VERIFY_URL=${HCDR_TURNSTILE_VERIFY_URL:-https://challenges.cloudflare.com/turnstile/v0/siteverify}

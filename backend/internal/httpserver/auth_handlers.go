@@ -5,13 +5,22 @@ import (
 	"encoding/json"
 	"hypercdr-platform/platform/backend/internal/store"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 )
 
-func (r *Router) verifyTurnstile(req *http.Request, token string) bool {
+func (r *Router) verifyTurnstile(req *http.Request, token string) (bool, []string, string) {
+	log := r.logger
+	if log == nil {
+		log = slog.Default()
+	}
+	if strings.TrimSpace(r.cfg.TurnstileSecretKey) == "" {
+		log.Warn("turnstile verification skipped: secret key not configured")
+		return false, []string{"missing-input-secret"}, ""
+	}
 	form := url.Values{"secret": {r.cfg.TurnstileSecretKey}, "response": {token}}
 	if ip := strings.TrimSpace(strings.Split(req.Header.Get("X-Forwarded-For"), ",")[0]); ip != "" {
 		form.Set("remoteip", ip)
@@ -20,24 +29,47 @@ func (r *Router) verifyTurnstile(req *http.Request, token string) bool {
 	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, r.cfg.TurnstileVerifyURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return false
+		log.Warn("turnstile verification: failed to build request", "error", err)
+		return false, []string{"client-error"}, ""
 	}
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
-		return false
+		log.Warn("turnstile verification: cloudflare request failed", "error", err)
+		return false, []string{"network-error"}, ""
 	}
 	defer response.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	if response.StatusCode != http.StatusOK {
-		return false
+		log.Warn(
+			"turnstile verification: non-OK status from cloudflare",
+			"status", response.StatusCode,
+			"body", string(body),
+		)
+		return false, []string{"siteverify-non-200"}, ""
 	}
 	var result struct {
-		Success bool `json:"success"`
+		Success    bool     `json:"success"`
+		ErrorCodes []string `json:"error-codes"`
+		Hostname   string   `json:"hostname"`
 	}
-	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&result); err != nil {
-		return false
+	if err := json.Unmarshal(body, &result); err != nil {
+		log.Warn(
+			"turnstile verification: failed to decode response",
+			"error", err,
+			"body", string(body),
+		)
+		return false, []string{"decode-error"}, ""
 	}
-	return result.Success
+	if !result.Success {
+		log.Warn(
+			"turnstile verification rejected by cloudflare",
+			"error_codes", result.ErrorCodes,
+			"hostname", result.Hostname,
+			"token_len", len(token),
+		)
+	}
+	return result.Success, result.ErrorCodes, result.Hostname
 }
 
 func (r *Router) listCommunityUsers(w http.ResponseWriter, req *http.Request) {
@@ -100,7 +132,9 @@ func (r *Router) login(w http.ResponseWriter, req *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "challenge_required", "message": "Human verification is required"})
 			return
 		}
-		if !r.verifyTurnstile(req, strings.TrimSpace(body.TurnstileToken)) {
+		ok, codes, hostname := r.verifyTurnstile(req, strings.TrimSpace(body.TurnstileToken))
+		if !ok {
+			r.logger.Warn("login rejected: turnstile failed", "email", body.Email, "error_codes", codes, "hostname", hostname)
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "challenge_invalid", "message": "Human verification failed"})
 			return
 		}

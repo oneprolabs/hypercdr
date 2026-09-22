@@ -105,7 +105,7 @@ cp "${RELEASE_MANIFEST}" "${package_dir}/release-manifest.json"
 cp -R "${ROOT_DIR}/charts" "${package_dir}/charts"
 chmod +x "${package_dir}"/*.sh
 
-auth_challenge_mode="${HCDR_AUTH_CHALLENGE_MODE:-image}"
+auth_challenge_mode="${HCDR_AUTH_CHALLENGE_MODE:-turnstile}"
 case "${auth_challenge_mode}" in
   image) ;;
   turnstile)
