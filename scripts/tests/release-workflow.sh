@@ -2,6 +2,7 @@
 set -euo pipefail
 
 workflow=.github/workflows/release.yml
+root=$(pwd)
 review_workflow=.github/workflows/pr_agent.yml
 installer=scripts/release/install-blue-green.sh
 grep -Fq "needs: publish" "$workflow"
@@ -14,6 +15,11 @@ grep -Fq 'HCDR_RELEASE_PHASE: dependencies' "$workflow"
 grep -Fq 'HCDR_RELEASE_PHASE: finalize' "$workflow"
 grep -Fq "HCDR_OADP_PARALLELISM: '3'" "$workflow"
 grep -Fq "HCDR_RELEASE_PULL_PARALLELISM: '4'" "$workflow"
+grep -Fq 'HCDR_AUTH_CHALLENGE_MODE: ${{ vars.HCDR_AUTH_CHALLENGE_MODE || '\''image'\'' }}' "$workflow"
+grep -Fq 'HCDR_TURNSTILE_SITE_KEY: ${{ secrets.HCDR_TURNSTILE_SITE_KEY }}' "$workflow"
+grep -Fq 'HCDR_TURNSTILE_SECRET_KEY: ${{ secrets.HCDR_TURNSTILE_SECRET_KEY }}' "$workflow"
+grep -Fq 'envs: HCDR_AUTH_CHALLENGE_MODE,HCDR_TURNSTILE_SITE_KEY,HCDR_TURNSTILE_SECRET_KEY' "$workflow"
+grep -Fq 'sync_auth_challenge_env' "$root/scripts/release/deploy-blue-green.sh"
 grep -Fq 'actions/upload-artifact@v4' "$workflow"
 grep -Fq 'actions/download-artifact@v4' "$workflow"
 grep -Fq 'resolved-image-lock.json' "$workflow"

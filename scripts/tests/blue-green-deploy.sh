@@ -31,6 +31,7 @@ grep -Fq 'map $host $hypercdr_api_active { default hypercdr-platform-api-green:1
 grep -Fq 'map $host $hypercdr_frontend_active { default hypercdr-platform-frontend-green:3002; }' "${RUNTIME_DIR}/upstream.conf"
 grep -Fq 'wait_for_http "hypercdr-platform-frontend-${color}" 3002 / https' "${ROOT_DIR}/scripts/release/deploy-blue-green.sh"
 grep -Fq 'HCDR_HTTPS_PORT:-12443' "${ROOT_DIR}/scripts/release/deploy-blue-green.sh"
+grep -Fq 'sync_auth_challenge_env' "${ROOT_DIR}/scripts/release/deploy-blue-green.sh"
 
 FAKE_BIN="${RUNTIME_DIR}/bin"
 mkdir -p "${FAKE_BIN}"

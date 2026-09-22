@@ -63,6 +63,9 @@ jobs:
           HCDR_RUNTIME_ROOT: /tmp/hypercdr-runtime
           HCDR_RELEASE_PHASE: core
           HCDR_BUILD_GOPROXY: https://proxy.golang.org,direct
+          HCDR_AUTH_CHALLENGE_MODE: ${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'image' }}
+          HCDR_TURNSTILE_SITE_KEY: ${{ secrets.HCDR_TURNSTILE_SITE_KEY }}
+          HCDR_TURNSTILE_SECRET_KEY: ${{ secrets.HCDR_TURNSTILE_SECRET_KEY }}
           HCDR_CONTAINER_POLICY: /tmp/hypercdr-runtime/containers-policy.json
           RELEASE_REGISTRY_USERNAME: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
           RELEASE_REGISTRY_PASSWORD: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
@@ -104,6 +107,9 @@ jobs:
           HCDR_RELEASE_PHASE: dependencies
           HCDR_OADP_PARALLELISM: '3'
           HCDR_OADP_IMAGE_TIMEOUT_SECONDS: '3600'
+          HCDR_AUTH_CHALLENGE_MODE: ${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'image' }}
+          HCDR_TURNSTILE_SITE_KEY: ${{ secrets.HCDR_TURNSTILE_SITE_KEY }}
+          HCDR_TURNSTILE_SECRET_KEY: ${{ secrets.HCDR_TURNSTILE_SECRET_KEY }}
           HCDR_CONTAINER_POLICY: /tmp/hypercdr-runtime/containers-policy.json
           RELEASE_REGISTRY_USERNAME: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
           RELEASE_REGISTRY_PASSWORD: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
@@ -118,6 +124,9 @@ jobs:
           HCDR_REGISTRY_SERVER=${{ needs.prepare-release.outputs.registry_server }}
           HCDR_REGISTRY_USERNAME=${RELEASE_REGISTRY_USERNAME}
           HCDR_REGISTRY_PASSWORD=${RELEASE_REGISTRY_PASSWORD}
+          HCDR_AUTH_CHALLENGE_MODE=${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'image' }}
+          HCDR_TURNSTILE_SITE_KEY=${{ secrets.HCDR_TURNSTILE_SITE_KEY }}
+          HCDR_TURNSTILE_SECRET_KEY=${{ secrets.HCDR_TURNSTILE_SECRET_KEY }}
           EOF
           )
           export HCDR_REGISTRY_CONFIG="${GITHUB_WORKSPACE}/config/registries.conf"
@@ -154,6 +163,9 @@ jobs:
           HCDR_RELEASE_PHASE: finalize
           HCDR_RELEASE_PULL_PARALLELISM: '4'
           HCDR_RELEASE_PULL_TIMEOUT_SECONDS: '3600'
+          HCDR_AUTH_CHALLENGE_MODE: ${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'image' }}
+          HCDR_TURNSTILE_SITE_KEY: ${{ secrets.HCDR_TURNSTILE_SITE_KEY }}
+          HCDR_TURNSTILE_SECRET_KEY: ${{ secrets.HCDR_TURNSTILE_SECRET_KEY }}
           HCDR_CONTAINER_POLICY: /tmp/hypercdr-runtime/containers-policy.json
           RELEASE_REGISTRY_USERNAME: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
           RELEASE_REGISTRY_PASSWORD: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
@@ -168,6 +180,9 @@ jobs:
           HCDR_REGISTRY_SERVER=${{ needs.prepare-release.outputs.registry_server }}
           HCDR_REGISTRY_USERNAME=${RELEASE_REGISTRY_USERNAME}
           HCDR_REGISTRY_PASSWORD=${RELEASE_REGISTRY_PASSWORD}
+          HCDR_AUTH_CHALLENGE_MODE=${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'image' }}
+          HCDR_TURNSTILE_SITE_KEY=${{ secrets.HCDR_TURNSTILE_SITE_KEY }}
+          HCDR_TURNSTILE_SECRET_KEY=${{ secrets.HCDR_TURNSTILE_SECRET_KEY }}
           EOF
           )
           export HCDR_REGISTRY_CONFIG="${GITHUB_WORKSPACE}/config/registries.conf"
@@ -208,12 +223,17 @@ jobs:
             mkdir -p '${{ vars.HCDR_DEPLOY_PATH }}'
             test -w '${{ vars.HCDR_DEPLOY_PATH }}'
       - uses: appleboy/ssh-action@v1.0.3
+        env:
+          HCDR_AUTH_CHALLENGE_MODE: ${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'image' }}
+          HCDR_TURNSTILE_SITE_KEY: ${{ secrets.HCDR_TURNSTILE_SITE_KEY }}
+          HCDR_TURNSTILE_SECRET_KEY: ${{ secrets.HCDR_TURNSTILE_SECRET_KEY }}
         with:
           host: ${{ vars.HCDR_SSH_HOST }}
           username: ${{ vars.HCDR_SSH_USER }}
           port: ${{ vars.HCDR_SSH_PORT }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           command_timeout: 3600s
+          envs: HCDR_AUTH_CHALLENGE_MODE,HCDR_TURNSTILE_SITE_KEY,HCDR_TURNSTILE_SECRET_KEY
           script: |
             set -eu
             deploy_path='${{ vars.HCDR_DEPLOY_PATH }}'
