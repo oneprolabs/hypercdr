@@ -1,6 +1,6 @@
 services:
   hypercdr-edge:
-    image: ${HCDR_EDGE_IMAGE:-nginx:1.27-alpine}
+    image: ${HCDR_EDGE_IMAGE:-registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:nginx-1.27-alpine}
     container_name: hypercdr-edge
     ports:
       - "${HCDR_HTTP_PORT:-8080}:80"
