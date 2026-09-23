@@ -75,6 +75,17 @@ tar -xzf "${WORK_DIR}/${asset}" -C "$WORK_DIR"
 package_dir="${WORK_DIR}/hypercdr-installer-${VERSION}"
 [[ -x "${package_dir}/install-blue-green.sh" ]] || fail "downloaded package is missing install-blue-green.sh"
 
+# The release package carries non-registry runtime settings injected by the
+# publish workflow (for example the Turnstile site and secret keys). Load
+# those settings before delegating to the blue/green installer so an online
+# install has the same authentication configuration as a local install.
+if [[ -r "${package_dir}/install-config.sh" ]]; then
+  # shellcheck disable=SC1090
+  source "${package_dir}/install-config.sh"
+  export HCDR_AUTH_CHALLENGE_MODE HCDR_TURNSTILE_SITE_KEY
+  export HCDR_TURNSTILE_SECRET_KEY HCDR_TURNSTILE_VERIFY_URL
+fi
+
 domain="${BASE_URL#https://}"
 domain="${domain%%/*}"
 domain="${domain%%:*}"
