@@ -6,8 +6,9 @@ pr_workflow=.github/workflows/pr-check.yml
 root=$(pwd)
 review_workflow=.github/workflows/pr_agent.yml
 installer=scripts/release/install-blue-green.sh
-! grep -Fq "needs: publish" "$workflow"
-! grep -Fq 'needs.publish.outputs.' "$workflow"
+grep -A1 '^  deploy:' "$workflow" | grep -Fxq '    needs: publish'
+grep -Fq 'needs.publish.outputs.image_version' "$workflow"
+grep -Fq 'needs.publish.outputs.release_ref' "$workflow"
 grep -Fq 'prepare-release:' "$workflow"
 grep -Fq 'build-images:' "$workflow"
 ! grep -Fq 'test-core:' "$workflow"

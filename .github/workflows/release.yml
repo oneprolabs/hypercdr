@@ -154,6 +154,9 @@ jobs:
 
   publish:
     needs: [prepare-release, build-images]
+    outputs:
+      image_version: ${{ needs.prepare-release.outputs.image_version }}
+      release_ref: ${{ needs.prepare-release.outputs.release_ref }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -229,7 +232,7 @@ jobs:
             "${RELEASE_DIR}/release-manifest.json" --clobber
 
   deploy:
-    needs: [prepare-release, build-images]
+    needs: publish
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy == true }}
     runs-on: ubuntu-latest
     environment: production
@@ -263,11 +266,11 @@ jobs:
             set -eu
             deploy_path='${{ vars.HCDR_DEPLOY_PATH }}'
             source_path="${deploy_path}/source"
-            log_file="${deploy_path}/deploy-${{ needs.prepare-release.outputs.image_version }}.log"
+            log_file="${deploy_path}/deploy-${{ needs.publish.outputs.image_version }}.log"
             exec 3>&1 4>&2
             exec >"${log_file}" 2>&1
             trap 'status=$?; if [ "$status" -ne 0 ]; then cat "${log_file}" >&3; fi; exit "$status"' EXIT
-            ref='${{ needs.prepare-release.outputs.release_ref }}'
+            ref='${{ needs.publish.outputs.release_ref }}'
             mkdir -p "${source_path}/docker/nginx" "${source_path}/scripts/release"
             fetch_asset() {
               local path="$1"
@@ -298,7 +301,7 @@ jobs:
               fetch_asset scripts/release/templates/hypercdr.service
               chmod +x "${source_path}/scripts/release/install-blue-green.sh"
               "${source_path}/scripts/release/install-blue-green.sh" \
-                '${{ needs.prepare-release.outputs.image_version }}' \
+                '${{ needs.publish.outputs.image_version }}' \
                 --base-url 'https://${{ vars.HCDR_DOMAIN }}' \
                 --domain '${{ vars.HCDR_DOMAIN }}' \
                 --registry '${{ vars.HCDR_IMAGE_REGISTRY }}' \
@@ -309,5 +312,5 @@ jobs:
               install -m 0644 "${source_path}/docker/nginx/edge.conf" "${deploy_path}/nginx/conf.d/default.conf"
               install -m 0755 "${source_path}/scripts/release/deploy-blue-green.sh" "${deploy_path}/deploy-blue-green.sh"
               install -m 0644 "${source_path}/scripts/lib/registry-config.sh" "${deploy_path}/registry-config.sh"
-              HCDR_INSTALL_DIR="${deploy_path}" "${deploy_path}/deploy-blue-green.sh" '${{ needs.prepare-release.outputs.image_version }}'
+              HCDR_INSTALL_DIR="${deploy_path}" "${deploy_path}/deploy-blue-green.sh" '${{ needs.publish.outputs.image_version }}'
             fi
