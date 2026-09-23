@@ -43,20 +43,27 @@ SSH_PRIVATE_KEY
 hypercdr.com A 47.236.253.138
 ```
 
-安全组开放 80、443 给 NPM；22 只允许管理来源。证书配置在 NPM 中。
-确认 NPM 和 HyperCDR 使用同一个 Docker 网络。服务器当前网络名是
+安全组开放 80、443 给 NPM；22 只允许管理来源。浏览器使用的域名证书配置
+在 NPM 中。NPM 保持现有 Proxy Host，通过 HTTPS 转发到服务器内网地址的
+12443 端口；HyperCDR edge 将宿主机 12443 映射到容器 443，并使用本地源站
+证书。edge 到蓝绿 API/前端仍在 Docker 私有网络中使用 HTTP。
+蓝、绿 API 另外接入专用出网 bridge 网络，用于后端访问 Cloudflare
+Turnstile 验证接口；前端、数据库和注册执行器不接入该网络。
+
+确认 NPM 与 HyperCDR edge 使用同一个 Docker 网络。服务器当前网络名是
 `nginx-proxy-manager_default`，可用以下命令核对：
 
 ```bash
 docker network inspect nginx-proxy-manager_default
 ```
 
-NPM 的 Proxy Host 需设置为 `http://hypercdr-edge:80`，启用 WebSocket 支持。
-HyperCDR Compose 不发布宿主机端口。旧部署迁移时先改好 NPM 转发，再在部署
-目录 `.env` 设置：
+NPM Proxy Host 的现有 HTTPS、内网 IP 和 12443 端口保持不变，并启用
+WebSocket 支持。HyperCDR 不占宿主机 80/443，也不发布前端/API 端口。部署
+目录 `.env` 中确认：
 
 ```dotenv
 HCDR_PROXY_NETWORK=nginx-proxy-manager_default
+HCDR_HTTPS_PORT=12443
 HCDR_NPM_UPSTREAM_READY=true
 ```
 
@@ -65,8 +72,9 @@ HCDR_NPM_UPSTREAM_READY=true
 ## 首次部署
 
 Actions 在 Tag 发布后将 Compose 和部署脚本下载到 `HCDR_DEPLOY_PATH`，然后执行
-蓝绿部署。首次切换前先确认 NPM Proxy Host 已指向 `hypercdr-edge:80` 并设置
-`HCDR_NPM_UPSTREAM_READY=true`；部署脚本会在重建入口前检查这两个前置条件。
+蓝绿部署。首次切换前先确认现有 NPM Proxy Host 可通过 HTTPS 到达服务器
+12443 端口，并设置 `HCDR_NPM_UPSTREAM_READY=true`；部署脚本会在重建入口前
+检查这些前置条件。
 
 检查：
 

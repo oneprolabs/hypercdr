@@ -2,8 +2,12 @@ services:
   hypercdr-edge:
     image: ${HCDR_EDGE_IMAGE:-registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:nginx-1.27-alpine}
     container_name: hypercdr-edge
+    ports:
+      - "${HCDR_HTTPS_PORT:-12443}:443"
     volumes:
       - ${HCDR_NGINX_CONFIG_DIR:-./nginx/conf.d}:/etc/nginx/conf.d:ro
+      - ${HCDR_TLS_CERT_FILE:-./tls.crt}:/etc/hypercdr/tls/tls.crt:ro
+      - ${HCDR_TLS_KEY_FILE:-./tls.key}:/etc/hypercdr/tls/tls.key:ro
     networks: [hypercdr-proxy, hypercdr-blue, hypercdr-green]
     restart: unless-stopped
     logging:
@@ -65,6 +69,7 @@ services:
       - hypercdr-registration-sessions:/var/lib/hypercdr/registration-sessions
     networks:
       hypercdr-data: {}
+      hypercdr-egress: {}
       hypercdr-blue:
         aliases: [hypercdr-platform-api]
     command: ["/bin/sh", "-c", "/usr/local/bin/platform-migrate && exec /usr/local/bin/platform-api"]
@@ -84,6 +89,7 @@ services:
     volumes: *platform-api-volumes
     networks:
       hypercdr-data: {}
+      hypercdr-egress: {}
       hypercdr-green:
         aliases: [hypercdr-platform-api]
     command: ["/bin/sh", "-c", "/usr/local/bin/platform-migrate && exec /usr/local/bin/platform-api"]
@@ -152,6 +158,8 @@ networks:
     name: ${HCDR_PROXY_NETWORK:-nginx-proxy-manager_default}
   hypercdr-data:
     internal: true
+  hypercdr-egress:
+    driver: bridge
   hypercdr-blue:
     internal: true
   hypercdr-green:

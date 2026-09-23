@@ -31,6 +31,9 @@ grep -Fq 'map $host $hypercdr_api_active { default hypercdr-platform-api-green:1
 grep -Fq 'map $host $hypercdr_frontend_active { default hypercdr-platform-frontend-green:80; }' "${RUNTIME_DIR}/upstream.conf"
 grep -Fq 'wait_for_http "hypercdr-platform-frontend-${color}" 80 /' "${ROOT_DIR}/scripts/release/deploy-blue-green.sh"
 grep -Fq 'docker network inspect "$network"' "${ROOT_DIR}/scripts/release/deploy-blue-green.sh"
+grep -Fq 'ensure_edge_tls' "${ROOT_DIR}/scripts/release/deploy-blue-green.sh"
+grep -Fq 'HCDR_HTTPS_PORT:-12443' "${ROOT_DIR}/docker-compose.yml"
+grep -Fq 'https://127.0.0.1/readyz' "${ROOT_DIR}/scripts/release/deploy-blue-green.sh"
 grep -Fq 'sync_auth_challenge_env' "${ROOT_DIR}/scripts/release/deploy-blue-green.sh"
 
 FAKE_BIN="${RUNTIME_DIR}/bin"
@@ -100,6 +103,9 @@ HCDR_HEALTH_INTERVAL=0 \
 PATH="${FAKE_BIN}:${PATH}" \
   "${ROOT_DIR}/scripts/release/deploy-blue-green.sh" 1.0.33.20260916
 grep -Fxq blue "${RUNTIME_DIR}/.active_color"
+test -s "${RUNTIME_DIR}/tls.crt"
+test -s "${RUNTIME_DIR}/tls.key"
+grep -Fxq "HCDR_TLS_CERT_FILE=${RUNTIME_DIR}/tls.crt" "${RUNTIME_DIR}/.env"
 grep -Fq 'map $host $hypercdr_api_active { default hypercdr-platform-api-blue:18080; }' "${RUNTIME_DIR}/nginx/conf.d/upstream.conf"
 
 touch "${RUNTIME_DIR}/running"
