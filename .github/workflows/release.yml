@@ -6,6 +6,7 @@ on:
     inputs:
       version: {description: 'Release version in MAJOR.MINOR.PATCH.YYYYMMDD format', required: true}
       registry_profile: {description: 'Profile from config/registries.conf', required: true, default: aliyun_acr}
+      deploy: {description: 'Deploy the published version to the configured environment', required: true, default: false, type: boolean}
 concurrency: {group: hypercdr-release, cancel-in-progress: false}
 permissions: {contents: write}
 jobs:
@@ -239,7 +240,7 @@ jobs:
 
   deploy:
     needs: publish
-    if: ${{ vars.HCDR_AUTO_DEPLOY == 'true' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy == true }}
     runs-on: ubuntu-latest
     environment: production
     steps:
