@@ -15,6 +15,10 @@ jobs:
       release_ref: ${{ steps.release.outputs.ref }}
       registry_profile: ${{ steps.release.outputs.profile }}
       registry_server: ${{ steps.release.outputs.server }}
+      registry_prefix: ${{ steps.release.outputs.prefix }}
+      build_time: ${{ steps.release.outputs.build_time }}
+      release_date: ${{ steps.release.outputs.release_date }}
+      git_commit: ${{ steps.release.outputs.git_commit }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,31 +37,77 @@ jobs:
           echo "ref=${ref}" >> "${GITHUB_OUTPUT}"
           echo "profile=${profile}" >> "${GITHUB_OUTPUT}"
           echo "server=${HCDR_REGISTRY_SERVER}" >> "${GITHUB_OUTPUT}"
+          echo "prefix=${HCDR_IMAGE_REGISTRY}" >> "${GITHUB_OUTPUT}"
+          echo "build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${GITHUB_OUTPUT}"
+          echo "release_date=$(date -u +%Y/%m/%d)" >> "${GITHUB_OUTPUT}"
+          echo "git_commit=$(git rev-parse --short HEAD)" >> "${GITHUB_OUTPUT}"
 
-  publish-core:
-    needs: prepare-release
+  test-core:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
     strategy:
       fail-fast: false
-      max-parallel: 4
       matrix:
-        component: [api, frontend, agents, executor]
+        component: [backend, agent/comm-agent, frontend]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         if: ${{ matrix.component != 'frontend' }}
         with:
-          go-version: '1.25.x'
-          cache-dependency-path: |
-            backend/go.sum
-            agent/comm-agent/go.sum
+          go-version: '1.25.13'
+          cache-dependency-path: ${{ matrix.component }}/go.sum
       - uses: actions/setup-node@v4
         if: ${{ matrix.component == 'frontend' }}
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      - name: Test ${{ matrix.component }}
+        env:
+          HCDR_RUNTIME_ROOT: /tmp/hypercdr-runtime
+        run: |
+          if [ '${{ matrix.component }}' = frontend ]; then
+            cd frontend
+            npm ci
+            npm run test:extensions
+            npm run test:topology
+            npx tsc --noEmit
+          else
+            cd '${{ matrix.component }}'
+            GOTOOLCHAIN=local go test ./...
+          fi
+
+  publish-core:
+    needs: [prepare-release, test-core]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - image_name: platform-api
+            context: ./backend
+            dockerfile: ./backend/Dockerfile
+          - image_name: platform-frontend
+            context: .
+            dockerfile: ./frontend/Dockerfile
+          - image_name: comm-agent
+            context: ./agent/comm-agent
+            dockerfile: ./agent/comm-agent/Dockerfile
+          - image_name: oadp-comm-agent
+            context: ./agent/comm-agent
+            dockerfile: ./agent/comm-agent/oadp.Dockerfile
+          - image_name: cluster-registration-executor
+            context: ./backend
+            dockerfile: ./backend/cluster-registration-executor.Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve image reference
+        id: image
+        shell: bash
+        run: |
+          source scripts/lib/registry-config.sh
+          echo "ref=$(image_ref '${{ needs.prepare-release.outputs.registry_prefix }}' '${{ matrix.image_name }}' '${{ needs.prepare-release.outputs.image_version }}')" >> "${GITHUB_OUTPUT}"
       - uses: docker/setup-buildx-action@v3
       - name: Login to release registry with retry
         env:
@@ -72,41 +122,26 @@ jobs:
             sleep $((attempt * 10))
           done
           exit 1
-      - name: Build, test, and publish ${{ matrix.component }} image(s)
-        env:
-          HCDR_GO_BIN: go
-          HCDR_RUNTIME_ROOT: /tmp/hypercdr-runtime
-          HCDR_RELEASE_PHASE: core
-          HCDR_RELEASE_COMPONENT: ${{ matrix.component }}
-          HCDR_BUILD_GOPROXY: https://proxy.golang.org,direct
-          HCDR_AUTH_CHALLENGE_MODE: ${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'turnstile' }}
-          HCDR_TURNSTILE_SITE_KEY: ${{ secrets.HCDR_TURNSTILE_SITE_KEY }}
-          HCDR_TURNSTILE_SECRET_KEY: ${{ secrets.HCDR_TURNSTILE_SECRET_KEY }}
-          HCDR_CONTAINER_POLICY: /tmp/hypercdr-runtime/containers-policy.json
-          RELEASE_REGISTRY_USERNAME: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
-          RELEASE_REGISTRY_PASSWORD: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
-        run: |
-          mkdir -p "${HCDR_RUNTIME_ROOT}"
-          printf '%s\n' '{"default":[{"type":"insecureAcceptAnything"}]}' > "${HCDR_CONTAINER_POLICY}"
-          cat > "${RUNNER_TEMP}/release.conf" <<EOF
-          RELEASE_VERSION=${{ needs.prepare-release.outputs.image_version }}
-          HCDR_RELEASE_SECRETS_FILE=${RUNNER_TEMP}/release.secrets.conf
-          EOF
-          (umask 077; cat > "${RUNNER_TEMP}/release.secrets.conf" <<EOF
-          HCDR_REGISTRY_SERVER=${{ needs.prepare-release.outputs.registry_server }}
-          HCDR_REGISTRY_USERNAME=${RELEASE_REGISTRY_USERNAME}
-          HCDR_REGISTRY_PASSWORD=${RELEASE_REGISTRY_PASSWORD}
-          HCDR_AUTH_CHALLENGE_MODE=${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'turnstile' }}
-          HCDR_TURNSTILE_SITE_KEY=${{ secrets.HCDR_TURNSTILE_SITE_KEY }}
-          HCDR_TURNSTILE_SECRET_KEY=${{ secrets.HCDR_TURNSTILE_SECRET_KEY }}
-          EOF
-          )
-          export HCDR_REGISTRY_CONFIG="${GITHUB_WORKSPACE}/config/registries.conf"
-          export HCDR_REGISTRY_PROFILE="${{ needs.prepare-release.outputs.registry_profile }}"
-          ./scripts/release/release-all.sh --config "${RUNNER_TEMP}/release.conf"
+      - name: Build and push ${{ matrix.image_name }}
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.image.outputs.ref }}
+          build-args: |
+            GOPROXY=https://proxy.golang.org,direct
+            NPM_REGISTRY=https://registry.npmmirror.com
+            VERSION=${{ needs.prepare-release.outputs.image_version }}
+            GIT_COMMIT=${{ needs.prepare-release.outputs.git_commit }}
+            BUILD_TIME=${{ needs.prepare-release.outputs.build_time }}
+            RELEASE_DATE=${{ needs.prepare-release.outputs.release_date }}
+          cache-from: type=gha,scope=${{ matrix.image_name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image_name }}
 
   publish-dependencies:
-    needs: prepare-release
+    needs: [prepare-release, test-core]
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
