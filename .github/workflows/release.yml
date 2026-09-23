@@ -230,6 +230,7 @@ jobs:
       - name: Publish installer assets to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          token: ${{ github.token }}
           tag_name: v${{ needs.prepare-release.outputs.image_version }}
           generate_release_notes: true
           files: |
