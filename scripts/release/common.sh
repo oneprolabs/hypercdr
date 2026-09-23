@@ -22,6 +22,20 @@ log() {
   echo "==> $*"
 }
 
+docker_push_with_retry() {
+  local image="$1" attempt=1 max_attempts="${HCDR_DOCKER_PUSH_ATTEMPTS:-5}"
+  while ! docker push "${image}"; do
+    if (( attempt >= max_attempts )); then
+      echo "error: failed to push ${image} after ${max_attempts} attempts" >&2
+      return 1
+    fi
+    local delay=$((5 * attempt))
+    log "Push failed for ${image}; retrying in ${delay}s (${attempt}/${max_attempts})"
+    sleep "${delay}"
+    ((attempt++))
+  done
+}
+
 require_version() {
   local version="${1:-}"
   [[ -n "${version}" ]] || die "version is required, for example 1.0.0.20260901"

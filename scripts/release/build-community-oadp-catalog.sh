@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/registry-config.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 RESOLVED_LOCK="${HCDR_OADP_RESOLVED_LOCK:-${HCDR_RUNTIME_ROOT:-/data/hypercdr-runtime}/oadp-mirror/resolved-image-lock.json}"
 WORK_DIR="${HCDR_OADP_BUILD_DIR:-${HCDR_RUNTIME_ROOT:-/data/hypercdr-runtime}/build/oadp}"
@@ -55,7 +55,7 @@ opm validate /workspace/configs
 opm generate dockerfile /workspace/configs --builder-image "$OPM_IMAGE" --base-image "$OPM_IMAGE"
 catalog_image="$(image_ref "${REGISTRY}" "oadp-catalog" "${release}")"
 docker build --platform linux/amd64 -f "$catalog_dir/configs.Dockerfile" -t "$catalog_image" "$catalog_dir"
-docker push "$catalog_image"
+docker_push_with_retry "$catalog_image"
 docker pull --platform linux/amd64 "$catalog_image" >/dev/null
 catalog_digest="$(image_digest "$catalog_image")"
 [[ "$catalog_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "catalog digest is unavailable" >&2; exit 1; }

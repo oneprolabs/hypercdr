@@ -29,7 +29,7 @@ mirror_image() {
   log "Mirroring ${source} to ${target}"
   docker pull "${source}"
   docker tag "${source}" "${target}"
-  docker push "${target}"
+  docker_push_with_retry "${target}"
 }
 
 mirror_image "${POSTGRES_SOURCE}" "$(image_ref "${REGISTRY}" "postgres" "16")"

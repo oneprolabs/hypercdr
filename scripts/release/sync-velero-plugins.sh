@@ -40,5 +40,5 @@ for entry in "${plugins[@]}"; do
   log "Mirroring ${source_image} to ${target_image}"
   docker pull "${source_image}"
   docker tag "${source_image}" "${target_image}"
-  docker push "${target_image}"
+  docker_push_with_retry "${target_image}"
 done

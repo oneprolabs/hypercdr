@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source "$ROOT_DIR/scripts/lib/registry-config.sh"
+source "$ROOT_DIR/scripts/release/common.sh"
 RESOLVED_LOCK="${HCDR_OADP_RESOLVED_LOCK:-${HCDR_RUNTIME_ROOT:-/data/hypercdr-runtime}/oadp-mirror/resolved-image-lock.json}"
 WORK_DIR="${HCDR_OADP_BUILD_DIR:-${HCDR_RUNTIME_ROOT:-/data/hypercdr-runtime}/build/oadp}"
 REGISTRY="${HCDR_IMAGE_REGISTRY:-}"
@@ -91,7 +91,7 @@ grep -q 'version: 1.3.10' "$csv" || { echo "CSV is not OADP 1.3.10" >&2; exit 1;
 
 bundle_image="$(image_ref "${REGISTRY}" "oadp-bundle" "${release}")"
 docker build --platform linux/amd64 -t "$bundle_image" "$bundle_dir"
-docker push "$bundle_image"
+docker_push_with_retry "$bundle_image"
 docker pull --platform linux/amd64 "$bundle_image" >/dev/null
 bundle_digest="$(image_digest "$bundle_image")"
 [[ "$bundle_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "bundle digest is unavailable" >&2; exit 1; }
