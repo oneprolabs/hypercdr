@@ -1,0 +1,12 @@
+[Unit]
+Description=HyperCDR Blue/Green Upgrade Runner
+Requires=docker.service hypercdr.service
+After=docker.service hypercdr.service
+[Service]
+Type=simple
+Environment=HCDR_INSTALL_DIR=__INSTALL_DIR__
+ExecStart=__INSTALL_DIR__/platform-upgrade-runner.sh
+Restart=always
+RestartSec=10
+[Install]
+WantedBy=multi-user.target

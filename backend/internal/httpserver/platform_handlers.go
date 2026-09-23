@@ -188,6 +188,28 @@ func (r *Router) createPlatformUpgrade(w http.ResponseWriter, req *http.Request)
 	writeJSON(w, http.StatusAccepted, job)
 }
 
+func (r *Router) updatePlatformUpgradeStatus(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Status, Step, ErrorCode, ErrorMessage, ExecutorID string
+		Progress                                          int
+		MarkStarted, MarkDone                             bool
+	}
+	if decodeJSON(req, &body) != nil || strings.TrimSpace(body.Status) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "status_required"})
+		return
+	}
+	job, ok, err := r.store.UpdatePlatformUpgradeJob(store.PlatformUpgradeJobUpdate{ID: req.PathValue("id"), Status: body.Status, Step: body.Step, Progress: body.Progress, ErrorCode: body.ErrorCode, ErrorMessage: body.ErrorMessage, ExecutorID: body.ExecutorID, MarkStarted: body.MarkStarted, MarkDone: body.MarkDone})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "update_platform_upgrade_failed"})
+		return
+	}
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "upgrade_not_found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, job)
+}
+
 func (r *Router) frontend(w http.ResponseWriter, req *http.Request) {
 	frontendDir := strings.TrimSpace(r.cfg.FrontendDir)
 	if frontendDir == "" {

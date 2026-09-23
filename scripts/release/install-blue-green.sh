@@ -13,6 +13,7 @@ if [[ -r "${SCRIPT_DIR}/scripts/lib/registry-config.sh" ]]; then
   STOP_SCRIPT="${SCRIPT_DIR}/stop-platform.sh"
   RESTART_SCRIPT="${SCRIPT_DIR}/restart-platform.sh"
   SERVICE_TEMPLATE="${SCRIPT_DIR}/templates/hypercdr.service"
+  UPGRADE_RUNNER_TEMPLATE="${SCRIPT_DIR}/templates/hypercdr-upgrade-runner.service"
 else
   ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
   REGISTRY_HELPER="${ROOT_DIR}/scripts/lib/registry-config.sh"
@@ -24,6 +25,7 @@ else
   STOP_SCRIPT="${ROOT_DIR}/scripts/release/stop-platform.sh"
   RESTART_SCRIPT="${ROOT_DIR}/scripts/release/restart-platform.sh"
   SERVICE_TEMPLATE="${ROOT_DIR}/scripts/release/templates/hypercdr.service"
+  UPGRADE_RUNNER_TEMPLATE="${ROOT_DIR}/scripts/release/templates/hypercdr-upgrade-runner.service"
 fi
 source "$REGISTRY_HELPER"
 VERSION=""
@@ -161,6 +163,8 @@ install -m 0755 "$START_SCRIPT" "$INSTALL_DIR/start-platform.sh"
 install -m 0755 "$STOP_SCRIPT" "$INSTALL_DIR/stop-platform.sh"
 install -m 0755 "$RESTART_SCRIPT" "$INSTALL_DIR/restart-platform.sh"
 install -m 0644 "$SERVICE_TEMPLATE" "$INSTALL_DIR/hypercdr.service.template"
+install -m 0755 "${ROOT_DIR}/scripts/release/platform-upgrade-runner.sh" "$INSTALL_DIR/platform-upgrade-runner.sh"
+install -m 0644 "$UPGRADE_RUNNER_TEMPLATE" "$INSTALL_DIR/hypercdr-upgrade-runner.service.template"
 # Keep the package manifest in the installation directory. The API uses this
 # immutable, environment-local file as the cluster component source.
 if [[ -s "${SCRIPT_DIR}/release-manifest.json" ]]; then
@@ -234,8 +238,10 @@ if [[ "$EXECUTE" == true ]]; then
   fi
   if command -v systemctl >/dev/null 2>&1; then
     sed "s|__INSTALL_DIR__|${INSTALL_DIR}|g" "$INSTALL_DIR/hypercdr.service.template" > /etc/systemd/system/hypercdr.service
+    sed "s|__INSTALL_DIR__|${INSTALL_DIR}|g" "$INSTALL_DIR/hypercdr-upgrade-runner.service.template" > /etc/systemd/system/hypercdr-upgrade-runner.service
     systemctl daemon-reload
-    systemctl enable docker.service hypercdr.service >/dev/null
+    systemctl enable docker.service hypercdr.service hypercdr-upgrade-runner.service >/dev/null
+    systemctl restart hypercdr-upgrade-runner.service >/dev/null 2>&1 || true
   fi
 fi
 

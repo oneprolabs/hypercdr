@@ -12,4 +12,5 @@ func (r *Router) mountPlatformRoutes() {
 	r.mux.HandleFunc("GET /api/v1/platform/upgrades", r.listPlatformUpgrades)
 	r.mux.HandleFunc("GET /api/v1/platform/upgrades/precheck", r.precheckPlatformUpgrade)
 	r.mux.HandleFunc("POST /api/v1/platform/upgrades", r.createPlatformUpgrade)
+	r.mux.HandleFunc("POST /api/v1/platform/upgrades/{id}/status", r.updatePlatformUpgradeStatus)
 }
