@@ -59,7 +59,7 @@ docker_push_with_retry "$catalog_image"
 docker_pull_with_retry "$catalog_image" >/dev/null
 catalog_digest="$(image_digest "$catalog_image")"
 [[ "$catalog_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "catalog digest is unavailable" >&2; exit 1; }
-docker_manifest_inspect_with_retry "${catalog_image%@*}@${catalog_digest}"
+docker_manifest_verify_or_warn "${catalog_image%@*}@${catalog_digest}"
 
 rendered="${catalog_dir}/rendered-catalog.yaml"
 opm render "${catalog_image%:*}@${catalog_digest}" --output yaml >"$rendered"

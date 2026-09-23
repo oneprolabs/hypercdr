@@ -95,7 +95,7 @@ docker_push_with_retry "$bundle_image"
 docker_pull_with_retry "$bundle_image" >/dev/null
 bundle_digest="$(image_digest "$bundle_image")"
 [[ "$bundle_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "bundle digest is unavailable" >&2; exit 1; }
-docker_manifest_inspect_with_retry "${bundle_image%@*}@${bundle_digest}"
+docker_manifest_verify_or_warn "${bundle_image%@*}@${bundle_digest}"
 jq '.bundle={component:"oadp-bundle",version:$version,image:$image,imageDigest:$digest}' \
   --arg version "$release" --arg image "$bundle_image" --arg digest "$bundle_digest" \
   "$RESOLVED_LOCK" >"${RESOLVED_LOCK}.next"

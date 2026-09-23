@@ -52,6 +52,13 @@ docker_manifest_inspect_with_retry() {
   done
 }
 
+docker_manifest_verify_or_warn() {
+  local image="$1"
+  if ! docker_manifest_inspect_with_retry "$image"; then
+    echo "warning: registry manifest verification unavailable for ${image}; push digest was already obtained" >&2
+  fi
+}
+
 require_version() {
   local version="${1:-}"
   [[ -n "${version}" ]] || die "version is required, for example 1.0.0.20260901"
