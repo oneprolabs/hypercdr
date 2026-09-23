@@ -36,6 +36,21 @@ docker_push_with_retry() {
   done
 }
 
+docker_build_with_retry() {
+  local image="$1"; shift
+  local attempt=1 max_attempts="${HCDR_DOCKER_BUILD_ATTEMPTS:-3}"
+  while ! docker build -t "${image}" "$@"; do
+    if (( attempt >= max_attempts )); then
+      echo "error: failed to build ${image} after ${max_attempts} attempts" >&2
+      return 1
+    fi
+    local delay=$((10 * attempt))
+    log "Build failed for ${image}; retrying in ${delay}s (${attempt}/${max_attempts})"
+    sleep "${delay}"
+    ((attempt++))
+  done
+}
+
 docker_pull_with_retry() {
   local image="$1" attempt=1 max_attempts="${HCDR_DOCKER_PUSH_ATTEMPTS:-5}"
   while ! docker pull --platform linux/amd64 "${image}"; do

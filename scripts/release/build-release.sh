@@ -270,25 +270,25 @@ fi
 
 if [[ "${COMPONENT}" == all || "${COMPONENT}" == api ]]; then
 log "Building image ${PLATFORM_API_IMAGE}"
-docker build -t "${PLATFORM_API_IMAGE}" "${WORK_DIR}/platform-api"
+docker_build_with_retry "${PLATFORM_API_IMAGE}" "${WORK_DIR}/platform-api"
 fi
 
 if [[ "${COMPONENT}" == all || "${COMPONENT}" == frontend ]]; then
 log "Building image ${PLATFORM_FRONTEND_IMAGE}"
-docker build --build-arg NGINX_IMAGE="${NGINX_IMAGE}" -t "${PLATFORM_FRONTEND_IMAGE}" "${WORK_DIR}/platform-frontend"
+docker_build_with_retry "${PLATFORM_FRONTEND_IMAGE}" --build-arg NGINX_IMAGE="${NGINX_IMAGE}" "${WORK_DIR}/platform-frontend"
 fi
 
 if [[ "${COMPONENT}" == all || "${COMPONENT}" == agents ]]; then
 log "Building image ${COMM_AGENT_IMAGE}"
-docker build -t "${COMM_AGENT_IMAGE}" "${WORK_DIR}/comm-agent"
+docker_build_with_retry "${COMM_AGENT_IMAGE}" "${WORK_DIR}/comm-agent"
 
 log "Building image ${OADP_COMM_AGENT_IMAGE}"
-docker build -t "${OADP_COMM_AGENT_IMAGE}" "${WORK_DIR}/oadp-comm-agent"
+docker_build_with_retry "${OADP_COMM_AGENT_IMAGE}" "${WORK_DIR}/oadp-comm-agent"
 fi
 
 if [[ "${COMPONENT}" == all || "${COMPONENT}" == executor ]]; then
 log "Building image ${REGISTRATION_EXECUTOR_IMAGE}"
-docker build --build-arg DEBIAN_IMAGE="${DEBIAN_IMAGE}" -t "${REGISTRATION_EXECUTOR_IMAGE}" "${WORK_DIR}/cluster-registration-executor"
+docker_build_with_retry "${REGISTRATION_EXECUTOR_IMAGE}" --build-arg DEBIAN_IMAGE="${DEBIAN_IMAGE}" "${WORK_DIR}/cluster-registration-executor"
 fi
 
 if [[ "${PUSH}" == "true" ]]; then
