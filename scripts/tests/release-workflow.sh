@@ -2,17 +2,33 @@
 set -euo pipefail
 
 workflow=.github/workflows/release.yml
+pr_workflow=.github/workflows/pr-check.yml
 root=$(pwd)
 review_workflow=.github/workflows/pr_agent.yml
 installer=scripts/release/install-blue-green.sh
-grep -Fq "needs: publish" "$workflow"
+grep -A1 '^  deploy:' "$workflow" | grep -Fxq '    needs: publish'
+grep -Fq 'needs.publish.outputs.image_version' "$workflow"
+grep -Fq 'needs.publish.outputs.release_ref' "$workflow"
 grep -Fq 'prepare-release:' "$workflow"
-grep -Fq 'publish-core:' "$workflow"
-grep -Fq 'component: [api, frontend, agents, executor]' "$workflow"
-grep -Fq 'HCDR_RELEASE_COMPONENT: ${{ matrix.component }}' "$workflow"
-grep -Fq 'publish-dependencies:' "$workflow"
-grep -Fq 'needs: [prepare-release, publish-core, publish-dependencies]' "$workflow"
-grep -Fq 'HCDR_RELEASE_PHASE: core' "$workflow"
+grep -Fq 'build-images:' "$workflow"
+grep -Fq 'test-core:' "$workflow"
+grep -Fq 'needs: prepare-release' "$workflow"
+grep -Fq 'needs: [prepare-release, test-core]' "$workflow"
+grep -Fq 'component: [backend, agent/comm-agent, frontend]' "$workflow"
+grep -Fq 'GOTOOLCHAIN=local go test ./...' "$workflow"
+grep -Fq './scripts/build-frontend.sh' "$workflow"
+grep -Fq 'pull_request:' "$pr_workflow"
+grep -Fq 'go test ./...' "$pr_workflow"
+grep -Fq './scripts/build-frontend.sh' "$pr_workflow"
+for image in platform-api platform-frontend comm-agent oadp-comm-agent cluster-registration-executor; do
+  grep -Fq "image_name: ${image}" "$workflow"
+done
+grep -Fq 'image_name: dependencies' "$workflow"
+grep -Fq 'docker/build-push-action@v5' "$workflow"
+grep -Fq 'provenance: false' "$workflow"
+grep -Fq 'cache-to: type=gha,mode=max,scope=${{ matrix.image_name }}' "$workflow"
+! grep -Fq 'publish-dependencies:' "$workflow"
+grep -Fq 'needs: [prepare-release, build-images]' "$workflow"
 grep -Fq 'HCDR_RELEASE_PHASE: dependencies' "$workflow"
 grep -Fq 'HCDR_RELEASE_PHASE: finalize' "$workflow"
 grep -Fq "HCDR_OADP_PARALLELISM: '3'" "$workflow"
@@ -58,8 +74,14 @@ grep -Fq 'PR_REVIEWER.EXTRA_INSTRUCTIONS' "$review_workflow"
 grep -Fq 'Requirement Coverage' scripts/ci/notify-pr-review.sh
 grep -Fq 'Tests and Verification' scripts/ci/notify-pr-review.sh
 grep -Fq 'mkdir -p "$(dirname "${RELEASE_MANIFEST}")"' scripts/release/release-all.sh
-grep -Fq 'cp "${WORK_DIR}/comm-agent/comm-agent" "${WORK_DIR}/oadp-comm-agent/oadp-comm-agent"' scripts/release/build-release.sh
-grep -Fq 'docker push "${PLATFORM_API_IMAGE}"' scripts/release/build-release.sh
-grep -Fq 'docker push "${REGISTRATION_EXECUTOR_IMAGE}"' scripts/release/build-release.sh
+grep -Fq 'docker_build_with_retry "${PLATFORM_API_IMAGE}" --platform linux/amd64 -f "${ROOT_DIR}/backend/Dockerfile"' scripts/release/build-release.sh
+grep -Fq 'docker_build_with_retry "${PLATFORM_FRONTEND_IMAGE}" --platform linux/amd64 -f "${ROOT_DIR}/frontend/Dockerfile"' scripts/release/build-release.sh
+grep -Fq 'docker_build_with_retry "${COMM_AGENT_IMAGE}" --platform linux/amd64 -f "${ROOT_DIR}/agent/comm-agent/Dockerfile"' scripts/release/build-release.sh
+grep -Fq 'docker_build_with_retry "${REGISTRATION_EXECUTOR_IMAGE}" --platform linux/amd64 -f "${ROOT_DIR}/backend/cluster-registration-executor.Dockerfile"' scripts/release/build-release.sh
+grep -Fq '"${SCRIPT_DIR}/push-release.sh"' scripts/release/build-release.sh
+grep -Fq 'FROM golang:1.25.13-bookworm AS builder' backend/Dockerfile
+grep -Fq 'FROM debian:bookworm-slim' backend/Dockerfile
+grep -Fq 'FROM node:22-alpine AS builder' frontend/Dockerfile
+grep -Fq 'FROM nginx:1.27-alpine' frontend/Dockerfile
 
 echo "release workflow contract passed"

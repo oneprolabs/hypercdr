@@ -26,7 +26,9 @@ func TestAgentUpgradeReturnsPersistedQueuedTaskBeforeAsyncDispatch(t *testing.T)
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	server := httptest.NewServer(NewRouter(config.Config{AgentNamespace: "hypercdr-agent"}, logger, repo))
+	var router *Router
+	handler := NewRouterWithProductInfo(config.Config{AgentNamespace: "hypercdr-agent"}, logger, repo, ProductInfo{Product: "HyperCDR", Edition: "community"}, RouterOption(func(r *Router) { router = r }))
+	server := httptest.NewServer(handler)
 	defer server.Close()
 
 	token := createTestAgentToken(t, server.URL)
@@ -46,6 +48,7 @@ func TestAgentUpgradeReturnsPersistedQueuedTaskBeforeAsyncDispatch(t *testing.T)
 		t.Fatal(err)
 	}
 	clusterID := accepted.Payload.ClusterID
+	waitForAgentConnection(t, router, clusterID)
 
 	response, err := http.Post(server.URL+"/api/v1/clusters/"+clusterID+"/agent/upgrade", "application/json", bytes.NewReader([]byte(`{}`)))
 	if err != nil {
@@ -111,7 +114,9 @@ func TestOpenShiftAgentUpgradeTargetsDedicatedImageAndExistingContainer(t *testi
 	if _, err := repo.UpsertPlatformRelease(store.PlatformReleaseInput{Version: "v2", APIImage: manifest["platform-api"].Image, APIImageDigest: manifest["platform-api"].ImageDigest, FrontendImage: manifest["platform-frontend"].Image, FrontendImageDigest: manifest["platform-frontend"].ImageDigest, Status: "active", ComponentManifest: manifest}); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewRouter(config.Config{AgentNamespace: "hypercdr-agent"}, slog.New(slog.NewTextHandler(os.Stdout, nil)), repo))
+	var router *Router
+	handler := NewRouterWithProductInfo(config.Config{AgentNamespace: "hypercdr-agent"}, slog.New(slog.NewTextHandler(os.Stdout, nil)), repo, ProductInfo{Product: "HyperCDR", Edition: "community"}, RouterOption(func(r *Router) { router = r }))
+	server := httptest.NewServer(handler)
 	defer server.Close()
 	resp, err := http.Post(server.URL+"/api/v1/agent-tokens", "application/json", bytes.NewReader([]byte(`{"clusterType":"openshift"}`)))
 	if err != nil {
@@ -136,6 +141,7 @@ func TestOpenShiftAgentUpgradeTargetsDedicatedImageAndExistingContainer(t *testi
 	if err = conn.ReadJSON(&accepted); err != nil {
 		t.Fatal(err)
 	}
+	waitForAgentConnection(t, router, accepted.Payload.ClusterID)
 	response, err := http.Post(server.URL+"/api/v1/clusters/"+accepted.Payload.ClusterID+"/agent/upgrade", "application/json", bytes.NewReader([]byte(`{}`)))
 	if err != nil {
 		t.Fatal(err)
@@ -152,6 +158,17 @@ func TestOpenShiftAgentUpgradeTargetsDedicatedImageAndExistingContainer(t *testi
 	command := dispatch.Payload.AgentUpgrade
 	if command == nil || command.Namespace != "openshift-adp" || command.ContainerName != "comm-agent" || !strings.Contains(command.Image, "/oadp-comm-agent@sha256:") {
 		t.Fatalf("unexpected OpenShift agent upgrade: %#v", command)
+	}
+}
+
+func waitForAgentConnection(t *testing.T, router *Router, clusterID string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for !router.hub.has(clusterID) {
+		if time.Now().After(deadline) {
+			t.Fatal("agent connection was not registered")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 

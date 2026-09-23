@@ -33,12 +33,20 @@ bearing artifact and distribute it only through trusted channels.
 
 `release-all.sh` is the complete release entry point. It builds all control-plane and runtime images, pushes them, mirrors Velero/OADP assets, generates the complete `release-manifest.json`, creates the platform installer archive and SHA256 checksum, and registers the candidate release. Use `--skip-register` for the initial seed release.
 
+GitHub releases run backend, agent, and frontend checks before publishing images.
+`release.yml` builds the five application images from the Dockerfiles in
+`backend/`, `frontend/`, and `agent/comm-agent/`; each Dockerfile compiles in a
+builder stage and copies only runtime files into its final stage. Dependency
+images and installer packaging still use `release-all.sh`. For a local release,
+`build-release.sh` builds the same Dockerfiles and `release-all.sh` remains the
+complete entry point.
+
 ## Script responsibilities
 
 | File | Purpose |
 |---|---|
 | `release-all.sh` | Complete release pipeline |
-| `build-release.sh` | Build platform binaries and images |
+| `build-release.sh` | Build application images from source Dockerfiles |
 | `push-release.sh` | Push built platform images |
 | `publish-runtime-images.sh` | Publish Velero/runtime images |
 | `sync-velero-plugins.sh` | Mirror object-storage plugins |
