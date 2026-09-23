@@ -59,11 +59,19 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ needs.prepare-release.outputs.registry_server }}
-          username: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
-          password: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
+      - name: Login to release registry with retry
+        env:
+          REGISTRY: ${{ needs.prepare-release.outputs.registry_server }}
+          REGISTRY_USERNAME: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if printf '%s' "$REGISTRY_PASSWORD" | docker login "$REGISTRY" --username "$REGISTRY_USERNAME" --password-stdin; then
+              exit 0
+            fi
+            sleep $((attempt * 10))
+          done
+          exit 1
       - name: Build, test, and publish ${{ matrix.component }} image(s)
         env:
           HCDR_GO_BIN: go
@@ -104,11 +112,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ needs.prepare-release.outputs.registry_server }}
-          username: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
-          password: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
+      - name: Login to release registry with retry
+        env:
+          REGISTRY: ${{ needs.prepare-release.outputs.registry_server }}
+          REGISTRY_USERNAME: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if printf '%s' "$REGISTRY_PASSWORD" | docker login "$REGISTRY" --username "$REGISTRY_USERNAME" --password-stdin; then
+              exit 0
+            fi
+            sleep $((attempt * 10))
+          done
+          exit 1
       - name: Publish runtime, Velero, and OADP images
         env:
           HCDR_RUNTIME_ROOT: /tmp/hypercdr-runtime
@@ -161,11 +177,19 @@ jobs:
         with:
           name: hypercdr-oadp-lock-${{ needs.prepare-release.outputs.image_version }}
           path: /tmp/hypercdr-runtime/oadp-mirror
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ needs.prepare-release.outputs.registry_server }}
-          username: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
-          password: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
+      - name: Login to release registry with retry
+        env:
+          REGISTRY: ${{ needs.prepare-release.outputs.registry_server }}
+          REGISTRY_USERNAME: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if printf '%s' "$REGISTRY_PASSWORD" | docker login "$REGISTRY" --username "$REGISTRY_USERNAME" --password-stdin; then
+              exit 0
+            fi
+            sleep $((attempt * 10))
+          done
+          exit 1
       - name: Verify images and package release
         env:
           HCDR_RUNTIME_ROOT: /tmp/hypercdr-runtime
