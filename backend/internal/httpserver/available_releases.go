@@ -10,6 +10,7 @@ import (
 )
 
 type githubRelease struct {
+	ID          int64  `json:"id"`
 	TagName     string `json:"tag_name"`
 	Name        string `json:"name"`
 	Body        string `json:"body"`
@@ -20,6 +21,12 @@ type githubRelease struct {
 		Name string `json:"name"`
 		URL  string `json:"browser_download_url"`
 	} `json:"assets"`
+	AssetsURL string `json:"assets_url"`
+}
+
+type githubAsset struct {
+	Name string `json:"name"`
+	URL  string `json:"browser_download_url"`
 }
 
 // listAvailableReleases reads immutable release metadata from GitHub. A network
@@ -57,7 +64,23 @@ func (r *Router) listAvailableReleases(w http.ResponseWriter, req *http.Request)
 		version := strings.TrimPrefix(item.TagName, "v")
 		publishedAt, _ := time.Parse(time.RFC3339, item.PublishedAt)
 		entry := store.PlatformRelease{ID: item.TagName, Version: version, ReleaseNotes: item.Body, Status: "published", PublishedAt: publishedAt}
+		assets := make([]githubAsset, 0, len(item.Assets))
 		for _, asset := range item.Assets {
+			assets = append(assets, githubAsset{Name: asset.Name, URL: asset.URL})
+		}
+		if item.AssetsURL != "" {
+			assetsReq, _ := http.NewRequestWithContext(req.Context(), http.MethodGet, item.AssetsURL, nil)
+			assetsReq.Header.Set("Accept", "application/vnd.github+json")
+			assetsReq.Header.Set("User-Agent", "hypercdr-platform")
+			if assetsResp, assetsErr := client.Do(assetsReq); assetsErr == nil && assetsResp.StatusCode >= 200 && assetsResp.StatusCode < 300 {
+				var remoteAssets []githubAsset
+				if json.NewDecoder(assetsResp.Body).Decode(&remoteAssets) == nil {
+					assets = remoteAssets
+				}
+				assetsResp.Body.Close()
+			}
+		}
+		for _, asset := range assets {
 			if asset.Name != "release-manifest.json" {
 				continue
 			}
