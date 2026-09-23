@@ -16,6 +16,8 @@ HCDR_DOMAIN=hypercdr.com
 HCDR_PROXY_NETWORK=nginx-proxy-manager_default
 HCDR_TLS_DIR=/tmp/tls
 HCDR_HTTPS_PORT=12443
+HCDR_INSTALL_DIR=/srv/hypercdr-custom
+HCDR_RELEASE_MANIFEST_PATH=/deploy/current-release.json
 HCDR_TLS_CERT_FILE=/tmp/tls.crt
 HCDR_TLS_KEY_FILE=/tmp/tls.key
 PLATFORM_API_BLUE_IMAGE=registry.example/hypercdr/platform-api:test
@@ -60,5 +62,13 @@ jq -e '.services["hypercdr-platform-api-green"].networks | has("hypercdr-egress"
 jq -e '(.services["hypercdr-platform-frontend-blue"].networks | has("hypercdr-egress")) | not' "${RUNTIME_DIR}/compose.json" >/dev/null
 jq -e '(.services["hypercdr-platform-frontend-green"].networks | has("hypercdr-egress")) | not' "${RUNTIME_DIR}/compose.json" >/dev/null
 jq -e '.networks["hypercdr-egress"].internal != true' "${RUNTIME_DIR}/compose.json" >/dev/null
+for color in blue green; do
+  jq -e --arg service "hypercdr-platform-api-${color}" '
+    .services[$service] |
+    .environment.HCDR_RELEASE_MANIFEST_PATH == "/deploy/current-release.json" and
+    any(.volumes[]; .source == "/srv/hypercdr-custom" and .target == "/deploy")
+  ' "${RUNTIME_DIR}/compose.json" >/dev/null
+done
+grep -Fxq 'HCDR_RELEASE_MANIFEST_PATH=/deploy/current-release.json' "${ROOT_DIR}/scripts/release/install-blue-green.sh"
 
 echo "blue-green compose contract passed"
