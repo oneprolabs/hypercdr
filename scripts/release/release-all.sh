@@ -224,22 +224,24 @@ if [[ "${PHASE}" == "core" ]]; then
 fi
 
 if [[ "${PHASE}" == "all" || "${PHASE}" == "dependencies" ]]; then
+  DEPENDENCY_STEP_TIMEOUT="${HCDR_DEPENDENCY_STEP_TIMEOUT_SECONDS:-3600}"
+  [[ "${DEPENDENCY_STEP_TIMEOUT}" =~ ^[1-9][0-9]*$ ]] || die "HCDR_DEPENDENCY_STEP_TIMEOUT_SECONDS must be a positive integer"
   log "Publishing required runtime images"
-  "${SCRIPT_DIR}/publish-runtime-images.sh" --registry "${REGISTRY}"
+  timeout "${DEPENDENCY_STEP_TIMEOUT}" "${SCRIPT_DIR}/publish-runtime-images.sh" --registry "${REGISTRY}"
 
   log "Mirroring Velero object-storage plugins"
   plugin_sync_args=(--registry "${REGISTRY}" --version "${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}")
   if [[ -n "${HCDR_VELERO_PLUGIN_SOURCE_REGISTRY:-}" ]]; then
     plugin_sync_args+=(--source-registry "${HCDR_VELERO_PLUGIN_SOURCE_REGISTRY}")
   fi
-  "${SCRIPT_DIR}/sync-velero-plugins.sh" "${plugin_sync_args[@]}"
+  timeout "${DEPENDENCY_STEP_TIMEOUT}" "${SCRIPT_DIR}/sync-velero-plugins.sh" "${plugin_sync_args[@]}"
 
   log "Mirroring the pinned OADP image closure"
-  "${SCRIPT_DIR}/mirror-community-oadp-images.sh" --registry "${REGISTRY}"
+  timeout "${DEPENDENCY_STEP_TIMEOUT}" "${SCRIPT_DIR}/mirror-community-oadp-images.sh" --registry "${REGISTRY}"
   log "Building the pinned OADP bundle"
-  "${SCRIPT_DIR}/build-community-oadp-bundle.sh" --registry "${REGISTRY}"
+  timeout "${DEPENDENCY_STEP_TIMEOUT}" "${SCRIPT_DIR}/build-community-oadp-bundle.sh" --registry "${REGISTRY}"
   log "Building the self-contained OADP catalog"
-  "${SCRIPT_DIR}/build-community-oadp-catalog.sh" --registry "${REGISTRY}"
+  timeout "${DEPENDENCY_STEP_TIMEOUT}" "${SCRIPT_DIR}/build-community-oadp-catalog.sh" --registry "${REGISTRY}"
 fi
 
 OADP_RESOLVED_LOCK="${HCDR_OADP_RESOLVED_LOCK:-${HCDR_RUNTIME_ROOT:-/data/hypercdr-runtime}/oadp-mirror/resolved-image-lock.json}"
