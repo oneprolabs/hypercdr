@@ -36,6 +36,19 @@ func (r *Router) listAvailableReleases(w http.ResponseWriter, req *http.Request)
 		writeJSON(w, http.StatusNotImplemented, map[string]any{"error": "release_repository_not_configured"})
 		return
 	}
+	r.releaseCatalogMu.Lock()
+	if time.Since(r.releaseCatalogAt) < 5*time.Minute && r.releaseCatalogItems != nil {
+		items := append([]store.PlatformRelease(nil), r.releaseCatalogItems...)
+		r.releaseCatalogMu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]any{"items": items, "cached": true})
+		return
+	}
+	if time.Since(r.releaseCatalogFailure) < 30*time.Second {
+		r.releaseCatalogMu.Unlock()
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "release_catalog_backoff"})
+		return
+	}
+	r.releaseCatalogMu.Unlock()
 	client := &http.Client{Timeout: 15 * time.Second}
 	url := "https://api.github.com/repos/" + strings.TrimSpace(r.cfg.ReleaseRepository) + "/releases?per_page=30"
 	request, _ := http.NewRequestWithContext(req.Context(), http.MethodGet, url, nil)
@@ -43,16 +56,25 @@ func (r *Router) listAvailableReleases(w http.ResponseWriter, req *http.Request)
 	request.Header.Set("User-Agent", "hypercdr-platform")
 	response, err := client.Do(request)
 	if err != nil {
+		r.releaseCatalogMu.Lock()
+		r.releaseCatalogFailure = time.Now()
+		r.releaseCatalogMu.Unlock()
 		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "release_catalog_unavailable", "message": err.Error()})
 		return
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		r.releaseCatalogMu.Lock()
+		r.releaseCatalogFailure = time.Now()
+		r.releaseCatalogMu.Unlock()
 		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "release_catalog_unavailable"})
 		return
 	}
 	var releases []githubRelease
 	if err := json.NewDecoder(response.Body).Decode(&releases); err != nil {
+		r.releaseCatalogMu.Lock()
+		r.releaseCatalogFailure = time.Now()
+		r.releaseCatalogMu.Unlock()
 		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "release_catalog_invalid"})
 		return
 	}
@@ -116,5 +138,10 @@ func (r *Router) listAvailableReleases(w http.ResponseWriter, req *http.Request)
 		}
 		items = append(items, entry)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	r.releaseCatalogMu.Lock()
+	r.releaseCatalogItems = append([]store.PlatformRelease(nil), items...)
+	r.releaseCatalogAt = time.Now()
+	r.releaseCatalogFailure = time.Time{}
+	r.releaseCatalogMu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "cached": false})
 }

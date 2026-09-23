@@ -28,6 +28,10 @@ type Router struct {
 	inventory              map[string]inventoryRequestStatus
 	imageDigestMu          sync.Mutex
 	imageDigests           map[string]imageDigestCacheEntry
+	releaseCatalogMu       sync.Mutex
+	releaseCatalogItems    []store.PlatformRelease
+	releaseCatalogAt       time.Time
+	releaseCatalogFailure  time.Time
 	logRequestMu           sync.Mutex
 	logRequests            map[string]chan protocol.LogReportPayload
 	backupContentRequestMu sync.Mutex
