@@ -44,6 +44,7 @@ jobs:
           echo "git_commit=$(git rev-parse --short HEAD)" >> "${GITHUB_OUTPUT}"
 
   test-core:
+    needs: prepare-release
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -77,13 +78,13 @@ jobs:
             GOTOOLCHAIN=local go test ./...
           fi
 
-  publish-core:
+  build-images:
+    name: build-images (${{ matrix.image_name }})
     needs: [prepare-release, test-core]
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     strategy:
       fail-fast: false
-      max-parallel: 4
       matrix:
         include:
           - image_name: platform-api
@@ -101,9 +102,11 @@ jobs:
           - image_name: cluster-registration-executor
             context: ./backend
             dockerfile: ./backend/cluster-registration-executor.Dockerfile
+          - image_name: dependencies
     steps:
       - uses: actions/checkout@v4
       - name: Resolve image reference
+        if: ${{ matrix.image_name != 'dependencies' }}
         id: image
         shell: bash
         run: |
@@ -124,12 +127,14 @@ jobs:
           done
           exit 1
       - name: Build and push ${{ matrix.image_name }}
+        if: ${{ matrix.image_name != 'dependencies' }}
         uses: docker/build-push-action@v5
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           platforms: linux/amd64
           push: true
+          provenance: false
           tags: ${{ steps.image.outputs.ref }}
           build-args: |
             GOPROXY=https://proxy.golang.org,direct
@@ -141,27 +146,8 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.image_name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image_name }}
 
-  publish-dependencies:
-    needs: [prepare-release, test-core]
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - name: Login to release registry with retry
-        env:
-          REGISTRY: ${{ needs.prepare-release.outputs.registry_server }}
-          REGISTRY_USERNAME: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
-          REGISTRY_PASSWORD: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
-        run: |
-          for attempt in 1 2 3 4 5; do
-            if printf '%s' "$REGISTRY_PASSWORD" | docker login "$REGISTRY" --username "$REGISTRY_USERNAME" --password-stdin; then
-              exit 0
-            fi
-            sleep $((attempt * 10))
-          done
-          exit 1
       - name: Publish runtime, Velero, and OADP images
+        if: ${{ matrix.image_name == 'dependencies' }}
         env:
           HCDR_RUNTIME_ROOT: /tmp/hypercdr-runtime
           HCDR_RELEASE_PHASE: dependencies
@@ -194,6 +180,7 @@ jobs:
           export HCDR_REGISTRY_PROFILE="${{ needs.prepare-release.outputs.registry_profile }}"
           ./scripts/release/release-all.sh --config "${RUNNER_TEMP}/release.conf"
       - uses: actions/upload-artifact@v4
+        if: ${{ matrix.image_name == 'dependencies' }}
         with:
           name: hypercdr-oadp-lock-${{ needs.prepare-release.outputs.image_version }}
           path: /tmp/hypercdr-runtime/oadp-mirror/resolved-image-lock.json
@@ -201,7 +188,7 @@ jobs:
           overwrite: true
 
   publish:
-    needs: [prepare-release, publish-core, publish-dependencies]
+    needs: [prepare-release, build-images]
     outputs:
       image_version: ${{ needs.prepare-release.outputs.image_version }}
       release_ref: ${{ needs.prepare-release.outputs.release_ref }}

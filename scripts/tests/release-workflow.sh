@@ -7,17 +7,20 @@ review_workflow=.github/workflows/pr_agent.yml
 installer=scripts/release/install-blue-green.sh
 grep -Fq "needs: publish" "$workflow"
 grep -Fq 'prepare-release:' "$workflow"
-grep -Fq 'publish-core:' "$workflow"
+grep -Fq 'build-images:' "$workflow"
 grep -Fq 'test-core:' "$workflow"
+grep -Fq 'needs: prepare-release' "$workflow"
 grep -Fq 'needs: [prepare-release, test-core]' "$workflow"
 grep -Fq "go-version: '1.25.13'" "$workflow"
 for image in platform-api platform-frontend comm-agent oadp-comm-agent cluster-registration-executor; do
   grep -Fq "image_name: ${image}" "$workflow"
 done
+grep -Fq 'image_name: dependencies' "$workflow"
 grep -Fq 'docker/build-push-action@v5' "$workflow"
+grep -Fq 'provenance: false' "$workflow"
 grep -Fq 'cache-to: type=gha,mode=max,scope=${{ matrix.image_name }}' "$workflow"
-grep -Fq 'publish-dependencies:' "$workflow"
-grep -Fq 'needs: [prepare-release, publish-core, publish-dependencies]' "$workflow"
+! grep -Fq 'publish-dependencies:' "$workflow"
+grep -Fq 'needs: [prepare-release, build-images]' "$workflow"
 grep -Fq 'HCDR_RELEASE_PHASE: dependencies' "$workflow"
 grep -Fq 'HCDR_RELEASE_PHASE: finalize' "$workflow"
 grep -Fq "HCDR_OADP_PARALLELISM: '3'" "$workflow"
