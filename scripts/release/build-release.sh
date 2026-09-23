@@ -18,7 +18,7 @@ DEBIAN_IMAGE="${HCDR_API_RUNTIME_IMAGE:-debian:bookworm-slim}"
 KUBECTL_VERSION="${HCDR_REGISTRATION_KUBECTL_VERSION:-v1.28.15}"
 KUBECTL_BINARY="${HCDR_REGISTRATION_KUBECTL_BINARY:-}"
 KUBECTL_SHA256="${HCDR_REGISTRATION_KUBECTL_SHA256:-}"
-KUBECTL_DOWNLOAD_MAX_TIME="${HCDR_REGISTRATION_KUBECTL_DOWNLOAD_MAX_TIME:-300}"
+KUBECTL_DOWNLOAD_MAX_TIME="${HCDR_REGISTRATION_KUBECTL_DOWNLOAD_MAX_TIME:-900}"
 COMPONENT="${HCDR_RELEASE_COMPONENT:-all}"
 
 usage() {
@@ -244,7 +244,7 @@ else
     # checksum-protected download instead of restarting a large transfer.
     download_attempt=1
     until curl -fL --retry 2 --retry-max-time "${KUBECTL_DOWNLOAD_MAX_TIME}" \
-      --connect-timeout 10 --max-time "${KUBECTL_DOWNLOAD_MAX_TIME}" --speed-time 30 --speed-limit 1024 \
+      --connect-timeout 30 --max-time "${KUBECTL_DOWNLOAD_MAX_TIME}" --speed-time 60 --speed-limit 128 \
       --continue-at - "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
       -o "${KUBECTL_PART_FILE}"; do
       (( download_attempt < 5 )) || die "kubectl ${KUBECTL_VERSION} download failed after ${download_attempt} resumable attempts"
