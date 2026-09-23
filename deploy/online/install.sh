@@ -50,6 +50,7 @@ done
 [[ -n "$BASE_URL" ]] || { usage; fail "--base-url is required"; }
 command -v curl >/dev/null 2>&1 || fail "curl is required"
 command -v tar >/dev/null 2>&1 || fail "tar is required"
+command -v jq >/dev/null 2>&1 || fail "jq is required"
 command -v docker >/dev/null 2>&1 || fail "Docker is required; install Docker before running this installer"
 [[ "$(id -u)" -eq 0 ]] || fail "run this command as root, for example: curl ... | sudo bash -s -- ..."
 
@@ -60,7 +61,9 @@ fi
 [[ -n "$VERSION" ]] || fail "could not resolve a GitHub Release version"
 VERSION="${VERSION#v}"
 asset="hypercdr-installer-${VERSION}.tar.gz"
-download_url="https://github.com/${OWNER_REPO}/releases/download/v${VERSION}/${asset}"
+release_json="$(curl -fsSL "${api_url}/tags/v${VERSION}")" || fail "could not read GitHub Release metadata"
+asset_api_url="$(printf '%s' "${release_json}" | jq -er --arg name "${asset}" '.assets[] | select(.name == $name) | .url' | head -1)" ||
+  fail "GitHub Release does not contain ${asset}"
 WORK_DIR="$(mktemp -d /tmp/hypercdr-online.XXXXXX)"
 trap 'rm -rf "${WORK_DIR}"' EXIT
 
@@ -70,7 +73,7 @@ if [[ "$ASSUME_YES" != "true" ]]; then
   [[ "$answer" =~ ^[Yy]$ ]] || { echo 'Installation cancelled.'; exit 0; }
 fi
 
-curl -fL --retry 3 -o "${WORK_DIR}/${asset}" "$download_url"
+curl -fL --retry 3 -H 'Accept: application/octet-stream' -o "${WORK_DIR}/${asset}" "$asset_api_url"
 tar -xzf "${WORK_DIR}/${asset}" -C "$WORK_DIR"
 package_dir="${WORK_DIR}/hypercdr-installer-${VERSION}"
 [[ -x "${package_dir}/install-blue-green.sh" ]] || fail "downloaded package is missing install-blue-green.sh"
