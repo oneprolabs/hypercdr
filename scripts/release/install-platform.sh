@@ -99,10 +99,7 @@ Docker options:
   --registry-trust MODE        system (default) or private-ca
   --registry-ca-file PATH      PEM CA certificate, required for private-ca
   --image-tag TAG              Platform/agent image tag, default 1.0.23.20260915.
-  --http-port PORT             Frontend host port. Defaults to the URL port (HTTPS 443 if omitted).
-  --api-port PORT              API host port, default 18080.
-  --tls-cert-file PATH         Existing platform certificate to use. Optional.
-  --tls-key-file PATH          Existing platform private key to use. Optional.
+  --tls-cert-file/--tls-key-file are Kubernetes-only; Docker TLS terminates at the outer proxy.
   --execute                    Run docker compose commands. Without this flag, prints the plan only.
   --confirm-prerequisites      Confirm Docker, Compose V2, curl, and openssl are installed.
 
@@ -136,8 +133,6 @@ database_mode="bundled"
 node_port=""
 secret_key="dev-secret-change-me"
 install_dir="/var/lib/hypercdr"
-http_port=""
-api_port="18080"
 image_tag="${HCDR_IMAGE_TAG:-1.0.23.20260915}"
 image_tag_explicit="false"
 velero_image=""
@@ -167,8 +162,6 @@ while [[ $# -gt 0 ]]; do
     --node-port) node_port="${2:?missing value for --node-port}"; shift 2 ;;
     --secret-key) secret_key="${2:?missing value for --secret-key}"; shift 2 ;;
     --install-dir) install_dir="${2:?missing value for --install-dir}"; shift 2 ;;
-    --http-port) http_port="${2:?missing value for --http-port}"; shift 2 ;;
-    --api-port) api_port="${2:?missing value for --api-port}"; shift 2 ;;
     --tls-cert-file) input_tls_cert_file="${2:?missing value for --tls-cert-file}"; shift 2 ;;
     --tls-key-file) input_tls_key_file="${2:?missing value for --tls-key-file}"; shift 2 ;;
     --timeout) timeout="${2:?missing value for --timeout}"; shift 2 ;;
@@ -288,18 +281,6 @@ preflight_registry() {
   esac
 }
 
-preflight_host_port() {
-  local port="$1"
-  local expected_container="$2"
-  if docker ps --filter "name=^/${expected_container}$" --format '{{.Names}}' | grep -qx "${expected_container}"; then
-    return 0
-  fi
-  if command -v ss >/dev/null 2>&1 && ss -H -ltn "sport = :${port}" | grep -q .; then
-    echo "Host port ${port} is already in use. Stop the conflicting service or select another port." >&2
-    return 1
-  fi
-}
-
 preflight_docker_host() {
   local available_kb disk_path
   for command_name in docker curl openssl; do
@@ -367,12 +348,6 @@ run_k8s() {
   local tls_key_file="${tls_dir}/platform.key"
   local public_host
   public_host="$(extract_host_from_url "$base_url")"
-  if [[ -z "$http_port" ]]; then
-    http_port="$(extract_port_from_url "$base_url" || true)"
-  fi
-  if [[ -z "$http_port" ]]; then
-    http_port="12443"
-  fi
   if [[ -z "${velero_image}" ]]; then
     velero_image="$(image_ref "${registry}" "velero" "v1.18.2-hcdr.4")"
   fi
@@ -532,11 +507,10 @@ EOF
 
 run_docker() {
   local tls_enabled="false"
-  local tls_dir="${install_dir}/tls"
-  local tls_cert_file="${tls_dir}/platform.crt"
-  local tls_key_file="${tls_dir}/platform.key"
   local installed_registry_ca_file="${install_dir}/certs/registry-ca.crt"
   local target_compose_file="${install_dir}/docker-compose.yaml"
+  local existing_proxy_network="" existing_npm_ready=""
+  local proxy_network="${HCDR_PROXY_NETWORK:-}" npm_upstream_ready="${HCDR_NPM_UPSTREAM_READY:-}"
   local postgres_password=""
   local installed_secret_key=""
   local release_token=""
@@ -547,6 +521,8 @@ run_docker() {
         HCDR_POSTGRES_PASSWORD) postgres_password="${value}" ;;
         HCDR_SECRET_KEY) installed_secret_key="${value}" ;;
         HCDR_REGISTRATION_EXECUTOR_TOKEN) registration_executor_token="${value}" ;;
+        HCDR_PROXY_NETWORK) existing_proxy_network="${value}" ;;
+        HCDR_NPM_UPSTREAM_READY) existing_npm_ready="${value}" ;;
       esac
     done < "${install_dir}/.env"
     # Compatibility with installations created before the password setting was
@@ -572,12 +548,6 @@ run_docker() {
   fi
   local public_host
   public_host="$(extract_host_from_url "$base_url")"
-  if [[ -z "$http_port" ]]; then
-    http_port="$(extract_port_from_url "$base_url" || true)"
-  fi
-  if [[ -z "$http_port" ]]; then
-    http_port="12443"
-  fi
   if [[ -z "${velero_image}" ]]; then
     velero_image="$(image_ref "${registry}" "velero" "v1.18.2-hcdr.4")"
   fi
@@ -587,25 +557,20 @@ run_docker() {
   if [[ "${secret_key}" == "dev-secret-change-me" ]] && command -v openssl >/dev/null 2>&1; then
     secret_key="$(openssl rand -hex 32)"
   fi
+  proxy_network="${proxy_network:-${existing_proxy_network:-nginx-proxy-manager_default}}"
+  npm_upstream_ready="${npm_upstream_ready:-${existing_npm_ready:-false}}"
   if [[ "$base_url" != https://* ]]; then
     echo "Docker Compose deployment requires an https:// public base URL" >&2
     exit 2
   fi
-  tls_enabled="true"
   if [[ -n "${input_tls_cert_file}" || -n "${input_tls_key_file}" ]]; then
-    if [[ -z "${input_tls_cert_file}" || -z "${input_tls_key_file}" ]]; then
-      echo "--tls-cert-file and --tls-key-file must be supplied together" >&2
-      exit 2
-    fi
-    [[ -r "${input_tls_cert_file}" ]] || { echo "TLS certificate is not readable: ${input_tls_cert_file}" >&2; exit 1; }
-    [[ -r "${input_tls_key_file}" ]] || { echo "TLS private key is not readable: ${input_tls_key_file}" >&2; exit 1; }
+    echo "Docker Compose TLS terminates at the outer proxy; do not pass --tls-cert-file or --tls-key-file." >&2
+    exit 2
   fi
 
   install_header
   install_step 1 1 "Validate installation prerequisites"
   run_logged "Docker, Compose V2, tools, permissions, and disk space are ready" preflight_docker_host
-  run_logged "HTTP port 80 is available" preflight_host_port 80 hypercdr-edge
-  run_logged "HTTPS port 443 is available" preflight_host_port 443 hypercdr-edge
   run_logged "Registry connection is trusted" preflight_registry
 
   if [[ "$execute" != "true" ]]; then
@@ -616,14 +581,14 @@ run_docker() {
  Registry trust   ${registry_trust}
  Release          ${image_tag}
  Install directory   ${install_dir}
- Frontend port    ${http_port}
- API port         ${api_port}
+ HTTPS termination  Outer reverse proxy
+ Proxy network      ${proxy_network}
 
  Planned stages
    1. Validate host and registry
    2. Verify required images
    3. Prepare persistent configuration
-   4. Prepare platform TLS
+   4. Confirm outer proxy networking
    5. Write runtime settings
    6. Start control plane
    7. Initialize and verify release catalog
@@ -665,7 +630,7 @@ EOF
     cp "${COMPOSE_TEMPLATE}" "${target_compose_file}"
     install -m 0755 "${SCRIPT_DIR}/deploy-blue-green.sh" "${install_dir}/deploy-blue-green.sh"
     install -m 0644 "$REGISTRY_HELPER" "${install_dir}/registry-config.sh"
-    mkdir -p "${install_dir}/nginx/conf.d" "${install_dir}/nginx/acme"
+    mkdir -p "${install_dir}/nginx/conf.d"
     nginx_source_dir="${SOURCE_ROOT}/docker/nginx"
     [[ -d "${nginx_source_dir}" ]] || nginx_source_dir="${SCRIPT_DIR}/nginx"
     install -m 0644 "${nginx_source_dir}/edge.conf" "${install_dir}/nginx/conf.d/default.conf"
@@ -677,34 +642,8 @@ EOF
     fi
     install_ok "Configuration files are prepared"
 
-    install_step 4 7 "Prepare platform TLS"
-    if [[ "${tls_enabled}" == "true" ]]; then
-      require_command openssl
-      mkdir -p "${tls_dir}"
-      if [[ -n "${input_tls_cert_file}" ]]; then
-        cp "${input_tls_cert_file}" "${tls_cert_file}"
-        cp "${input_tls_key_file}" "${tls_key_file}"
-      elif [[ ! -f "${tls_cert_file}" || ! -f "${tls_key_file}" ]]; then
-        local san_entry="DNS:${public_host}"
-        if [[ "${public_host}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          san_entry="IP:${public_host}"
-        fi
-        local private_host=""
-        if [[ -n "${agent_private_endpoint}" ]]; then private_host="$(extract_host_from_url "${agent_private_endpoint}")"; fi
-        local private_san=""
-        if [[ -n "${private_host}" ]]; then
-          if [[ "${private_host}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then private_san=",IP:${private_host}"; else private_san=",DNS:${private_host}"; fi
-        fi
-        openssl req -x509 -nodes -newkey rsa:4096 -sha256 -days 7300 \
-          -subj "/CN=${public_host}" \
-          -addext "subjectAltName=${san_entry}${private_san},DNS:localhost,IP:127.0.0.1" \
-          -keyout "${tls_key_file}" \
-          -out "${tls_cert_file}" >/dev/null 2>&1
-      fi
-      chmod 600 "${tls_key_file}"
-      chmod 644 "${tls_cert_file}"
-    fi
-    install_ok "Platform TLS is ready"
+    install_step 4 7 "Use outer proxy for HTTPS"
+    install_ok "HyperCDR services use HTTP only inside Docker"
 
     # Cloudflare Turnstile is the default human verification. Fall back to the
     # image captcha (with a warning) when the Turnstile credentials are absent,
@@ -744,14 +683,10 @@ HCDR_POSTGRES_PASSWORD=${postgres_password}
 HCDR_DATABASE_URL=postgres://hypercdr:${postgres_password}@hypercdr-postgres:5432/hypercdr?sslmode=disable
 HCDR_INSTALL_DIR=${install_dir}
 HCDR_DOMAIN=${public_host}
+HCDR_PROXY_NETWORK=${proxy_network}
+HCDR_NPM_UPSTREAM_READY=${npm_upstream_ready}
 HCDR_NGINX_CONFIG_DIR=${install_dir}/nginx/conf.d
-HCDR_ACME_WEBROOT=${install_dir}/nginx/acme
-HCDR_TLS_CERT_FILE=${tls_cert_file}
-HCDR_TLS_KEY_FILE=${tls_key_file}
-HCDR_FRONTEND_PORT=${http_port}
-HCDR_API_PORT=${api_port}
 HCDR_TLS_ENABLED=${tls_enabled}
-HCDR_TLS_DIR=${tls_dir}
 HCDR_REGISTRY_CA_PATH=$([[ "${registry_trust}" == "private-ca" ]] && echo "/etc/hypercdr/registry/ca.crt" || true)
 HCDR_REGISTRY_CA_FILE=$([[ "${registry_trust}" == "private-ca" ]] && echo "${installed_registry_ca_file}" || echo "/dev/null")
 HCDR_SECRET_KEY=${secret_key}
@@ -769,12 +704,8 @@ EOF
     run_logged "Blue/green control plane started" env HCDR_INSTALL_DIR="${install_dir}" HCDR_COMPOSE_FILE="${target_compose_file}" "${install_dir}/deploy-blue-green.sh" "${image_tag#v}"
     local ready="false"
     local attempt
-    # A host may advertise a public/NAT address that is not hairpin-routable
-    # from itself. Probe that address first, then the local published port.
-    local local_ready_url="https://127.0.0.1:${http_port}/readyz"
     for attempt in $(seq 1 60); do
-      if curl -kfsS --connect-timeout 2 --max-time 5 "${base_url%/}/readyz" >/dev/null 2>&1 \
-        || curl -kfsS --connect-timeout 2 --max-time 5 "${local_ready_url}" >/dev/null 2>&1; then
+      if docker exec hypercdr-edge wget -q -O /dev/null http://127.0.0.1/readyz >/dev/null 2>&1; then
         ready="true"
         break
       fi
@@ -815,9 +746,8 @@ EOF
     local release_manifest_file="${SCRIPT_DIR}/release-manifest.json"
     [[ -s "${release_manifest_file}" ]] || install_fail "Release package is missing release-manifest.json"
     local release_url="${base_url%/}/api/v1/platform/releases"
-    run_logged "Platform release is registered" bash -c 'curl -kfsS --connect-timeout 5 --max-time 30 -H "Content-Type: application/json" -H "X-HyperCDR-Release-Token: $2" --data-binary "@$3" "$1" || curl -kfsS --connect-timeout 5 --max-time 30 -H "Content-Type: application/json" -H "X-HyperCDR-Release-Token: $2" --data-binary "@$3" "https://127.0.0.1:$4/api/v1/platform/releases"' _ "${release_url}" "${release_token}" "${release_manifest_file}" "${http_port}"
-    run_logged "Release component manifest is active" bash -c 'curl -kfsS --connect-timeout 5 --max-time 30 "$1" || curl -kfsS --connect-timeout 5 --max-time 30 "https://127.0.0.1:$2/install.sh"' _ \
-      "${base_url%/}/install.sh" "${http_port}"
+    run_logged "Platform release is registered" curl -kfsS --connect-timeout 5 --max-time 30 -H "Content-Type: application/json" -H "X-HyperCDR-Release-Token: ${release_token}" --data-binary "@${release_manifest_file}" "${release_url}"
+    run_logged "Release component manifest is active" curl -kfsS --connect-timeout 5 --max-time 30 "${base_url%/}/install.sh"
     cat <<EOF
 
 ============================================================

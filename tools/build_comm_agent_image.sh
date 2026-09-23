@@ -43,7 +43,7 @@ echo "==> Building comm-agent binary outside the source tree"
     "${GO_BIN}" build -trimpath -ldflags="-s -w" -o "${WORK_DIR}/comm-agent" ./cmd/comm-agent
 )
 
-cp "${ROOT_DIR}/docker/comm-agent.local.Dockerfile" "${WORK_DIR}/Dockerfile"
+cp "${ROOT_DIR}/agent/comm-agent/Dockerfile" "${WORK_DIR}/Dockerfile"
 # The scratch runtime needs the host trust bundle for TLS. Keep the build
 # context self-contained instead of relying on a file accidentally present in
 # the source tree.

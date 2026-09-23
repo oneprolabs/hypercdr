@@ -178,5 +178,5 @@ Portal source:
   ${PUBLISH_DIR}
 
 Install from the extracted package:
-  bash install.sh --base-url https://HOST:12443
+  bash install.sh --base-url https://HOST
 EOF

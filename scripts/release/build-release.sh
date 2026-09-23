@@ -19,6 +19,7 @@ KUBECTL_VERSION="${HCDR_REGISTRATION_KUBECTL_VERSION:-v1.28.15}"
 KUBECTL_BINARY="${HCDR_REGISTRATION_KUBECTL_BINARY:-}"
 KUBECTL_SHA256="${HCDR_REGISTRATION_KUBECTL_SHA256:-}"
 KUBECTL_DOWNLOAD_MAX_TIME="${HCDR_REGISTRATION_KUBECTL_DOWNLOAD_MAX_TIME:-300}"
+COMPONENT="${HCDR_RELEASE_COMPONENT:-all}"
 
 usage() {
   cat <<'USAGE'
@@ -54,11 +55,16 @@ done
 require_version "${VERSION}"
 require_registry "${REGISTRY}"
 require_cmd docker
-require_cmd npm
 require_cmd curl
 require_cmd sha256sum
+case "${COMPONENT}" in
+  all|api|frontend|agents|executor) ;;
+  *) die "HCDR_RELEASE_COMPONENT must be all, api, frontend, agents, or executor" ;;
+esac
+if [[ "${COMPONENT}" == all || "${COMPONENT}" == frontend ]]; then require_cmd npm; fi
 
-GO_BIN="$(go_bin)"
+GO_BIN=""
+if [[ "${COMPONENT}" != frontend ]]; then GO_BIN="$(go_bin)"; fi
 WORK_DIR="$(release_work_dir "${VERSION}")"
 CACHE_ROOT="${HCDR_CACHE_ROOT:-${DEFAULT_CACHE_ROOT}}"
 GO_BUILD_CACHE="${HCDR_GO_BUILD_CACHE:-${CACHE_ROOT}/go-build}"
@@ -111,7 +117,7 @@ mkdir -p \
   "${GO_MOD_CACHE}" \
   "${NPM_CACHE}"
 
-if [[ "${SKIP_TESTS}" != "true" ]]; then
+if [[ "${SKIP_TESTS}" != "true" && ( "${COMPONENT}" == all || "${COMPONENT}" == api || "${COMPONENT}" == executor ) ]]; then
   log "Testing backend"
   (
     cd "${ROOT_DIR}/backend"
@@ -119,6 +125,9 @@ if [[ "${SKIP_TESTS}" != "true" ]]; then
       GOCACHE="${GO_BUILD_CACHE}" GOMODCACHE="${GO_MOD_CACHE}" "${GO_BIN}" test ./...
   )
 
+fi
+
+if [[ "${SKIP_TESTS}" != "true" && ( "${COMPONENT}" == all || "${COMPONENT}" == agents ) ]]; then
   log "Testing comm-agent"
   (
     cd "${ROOT_DIR}/agent/comm-agent"
@@ -127,26 +136,29 @@ if [[ "${SKIP_TESTS}" != "true" ]]; then
   )
 fi
 
+if [[ "${COMPONENT}" == all || "${COMPONENT}" == api || "${COMPONENT}" == executor ]]; then
 log "Building backend binaries"
 (
   cd "${ROOT_DIR}/backend"
   BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   GIT_COMMIT="$(git -C "${ROOT_DIR}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
   VERSION_LDFLAGS="-s -w -X hypercdr-platform/platform/backend/internal/buildinfo.Version=${VERSION} -X hypercdr-platform/platform/backend/internal/buildinfo.GitCommit=${GIT_COMMIT} -X hypercdr-platform/platform/backend/internal/buildinfo.BuildTime=${BUILD_TIME}"
-  PATH="$(dirname "${GO_BIN}"):${PATH}" \
-    GOTOOLCHAIN=local GOPROXY="${GOPROXY}" GOCACHE="${GO_BUILD_CACHE}" GOMODCACHE="${GO_MOD_CACHE}" \
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    "${GO_BIN}" build -trimpath -ldflags="${VERSION_LDFLAGS}" -o "${WORK_DIR}/platform-api/platform-api" ./cmd/platform-api
-  PATH="$(dirname "${GO_BIN}"):${PATH}" \
-    GOTOOLCHAIN=local GOPROXY="${GOPROXY}" GOCACHE="${GO_BUILD_CACHE}" GOMODCACHE="${GO_MOD_CACHE}" \
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    "${GO_BIN}" build -trimpath -ldflags="-s -w" -o "${WORK_DIR}/platform-api/platform-migrate" ./cmd/platform-migrate
-  PATH="$(dirname "${GO_BIN}"):${PATH}" GOTOOLCHAIN=local GOPROXY="${GOPROXY}" GOCACHE="${GO_BUILD_CACHE}" GOMODCACHE="${GO_MOD_CACHE}" CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    "${GO_BIN}" build -trimpath -ldflags="${VERSION_LDFLAGS}" -o "${WORK_DIR}/cluster-registration-executor/cluster-registration-executor" ./cmd/cluster-registration-executor
-  PATH="$(dirname "${GO_BIN}"):${PATH}" GOTOOLCHAIN=local GOPROXY="${GOPROXY}" GOCACHE="${GO_BUILD_CACHE}" GOMODCACHE="${GO_MOD_CACHE}" CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    "${GO_BIN}" build -trimpath -ldflags="-s -w" -o "${WORK_DIR}/cluster-registration-executor/curl" ./cmd/registration-curl
+  if [[ "${COMPONENT}" == all || "${COMPONENT}" == api ]]; then
+    PATH="$(dirname "${GO_BIN}"):${PATH}" GOTOOLCHAIN=local GOPROXY="${GOPROXY}" GOCACHE="${GO_BUILD_CACHE}" GOMODCACHE="${GO_MOD_CACHE}" CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+      "${GO_BIN}" build -trimpath -ldflags="${VERSION_LDFLAGS}" -o "${WORK_DIR}/platform-api/platform-api" ./cmd/platform-api
+    PATH="$(dirname "${GO_BIN}"):${PATH}" GOTOOLCHAIN=local GOPROXY="${GOPROXY}" GOCACHE="${GO_BUILD_CACHE}" GOMODCACHE="${GO_MOD_CACHE}" CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+      "${GO_BIN}" build -trimpath -ldflags="-s -w" -o "${WORK_DIR}/platform-api/platform-migrate" ./cmd/platform-migrate
+  fi
+  if [[ "${COMPONENT}" == all || "${COMPONENT}" == executor ]]; then
+    PATH="$(dirname "${GO_BIN}"):${PATH}" GOTOOLCHAIN=local GOPROXY="${GOPROXY}" GOCACHE="${GO_BUILD_CACHE}" GOMODCACHE="${GO_MOD_CACHE}" CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+      "${GO_BIN}" build -trimpath -ldflags="${VERSION_LDFLAGS}" -o "${WORK_DIR}/cluster-registration-executor/cluster-registration-executor" ./cmd/cluster-registration-executor
+    PATH="$(dirname "${GO_BIN}"):${PATH}" GOTOOLCHAIN=local GOPROXY="${GOPROXY}" GOCACHE="${GO_BUILD_CACHE}" GOMODCACHE="${GO_MOD_CACHE}" CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+      "${GO_BIN}" build -trimpath -ldflags="-s -w" -o "${WORK_DIR}/cluster-registration-executor/curl" ./cmd/registration-curl
+  fi
 )
+fi
 
+if [[ "${COMPONENT}" == all || "${COMPONENT}" == frontend ]]; then
 log "Building frontend dist"
 if [[ -e "${FRONTEND_SOURCE_DIR}/node_modules" || -L "${FRONTEND_SOURCE_DIR}/node_modules" ]]; then
   mv "${FRONTEND_SOURCE_DIR}/node_modules" "${FRONTEND_ORIGINAL_NODE_MODULES}"
@@ -174,11 +186,15 @@ for required_utility in '.grid{' '.flex{' '.items-center{' '.px-5{' '.py-4{'; do
   grep -Fq "${required_utility}" "${FRONTEND_CSS}" || die "frontend CSS is missing required Tailwind utility ${required_utility}; refusing to publish"
 done
 log "Verified Tailwind utilities in $(basename "${FRONTEND_CSS}")"
+fi
 
+if [[ "${COMPONENT}" == all || "${COMPONENT}" == api ]]; then
 cat >"${WORK_DIR}/release-manifest.json" <<EOF
 {"version":"${VERSION}","apiImage":"${PLATFORM_API_IMAGE}","frontendImage":"${PLATFORM_FRONTEND_IMAGE}","databaseSchemaVersion":"${DATABASE_SCHEMA_VERSION}","minimumAgentVersion":"v20260721.4","rollbackSupported":true}
 EOF
+fi
 
+if [[ "${COMPONENT}" == all || "${COMPONENT}" == agents ]]; then
 log "Building comm-agent binary"
 (
   cd "${ROOT_DIR}/agent/comm-agent"
@@ -187,30 +203,31 @@ log "Building comm-agent binary"
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     "${GO_BIN}" build -trimpath -ldflags="-s -w" -o "${WORK_DIR}/comm-agent/comm-agent" ./cmd/comm-agent
 )
-
-log "Building oadp-comm-agent binary"
-(
-  cd "${ROOT_DIR}/agent/comm-agent"
-  PATH="$(dirname "${GO_BIN}"):${PATH}" \
-    GOTOOLCHAIN=local GOPROXY="${GOPROXY}" GOCACHE="${GO_BUILD_CACHE}" GOMODCACHE="${GO_MOD_CACHE}" \
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    "${GO_BIN}" build -trimpath -ldflags="-s -w" -o "${WORK_DIR}/oadp-comm-agent/oadp-comm-agent" ./cmd/comm-agent
-)
+cp "${WORK_DIR}/comm-agent/comm-agent" "${WORK_DIR}/oadp-comm-agent/oadp-comm-agent"
+fi
 
 log "Preparing Docker contexts"
+if [[ "${COMPONENT}" == all || "${COMPONENT}" == api ]]; then
 cp /etc/ssl/certs/ca-certificates.crt "${WORK_DIR}/platform-api/ca-certificates.crt"
+cp "${ROOT_DIR}/backend/Dockerfile" "${WORK_DIR}/platform-api/Dockerfile"
+sed -i "s#^FROM debian:bookworm-slim#FROM ${DEBIAN_IMAGE}#" "${WORK_DIR}/platform-api/Dockerfile"
+fi
+
+if [[ "${COMPONENT}" == all || "${COMPONENT}" == frontend ]]; then
+cp -a "${ROOT_DIR}/docker/nginx/." "${WORK_DIR}/platform-frontend/nginx/"
+cp "${ROOT_DIR}/frontend/Dockerfile" "${WORK_DIR}/platform-frontend/Dockerfile"
+fi
+
+if [[ "${COMPONENT}" == all || "${COMPONENT}" == agents ]]; then
 cp /etc/ssl/certs/ca-certificates.crt "${WORK_DIR}/comm-agent/ca-certificates.crt"
 cp /etc/ssl/certs/ca-certificates.crt "${WORK_DIR}/oadp-comm-agent/ca-certificates.crt"
-cp "${ROOT_DIR}/docker/platform-api.runtime.Dockerfile" "${WORK_DIR}/platform-api/Dockerfile"
-sed -i "s#^FROM debian:bookworm-slim#FROM ${DEBIAN_IMAGE}#" "${WORK_DIR}/platform-api/Dockerfile"
+cp "${ROOT_DIR}/agent/comm-agent/Dockerfile" "${WORK_DIR}/comm-agent/Dockerfile"
+cp "${ROOT_DIR}/agent/comm-agent/oadp.Dockerfile" "${WORK_DIR}/oadp-comm-agent/Dockerfile"
+fi
 
-cp -a "${ROOT_DIR}/docker/nginx/." "${WORK_DIR}/platform-frontend/nginx/"
-cp "${ROOT_DIR}/docker/platform-frontend.Dockerfile" "${WORK_DIR}/platform-frontend/Dockerfile"
-
-cp "${ROOT_DIR}/docker/comm-agent.local.Dockerfile" "${WORK_DIR}/comm-agent/Dockerfile"
-cp "${ROOT_DIR}/docker/oadp-comm-agent.local.Dockerfile" "${WORK_DIR}/oadp-comm-agent/Dockerfile"
+if [[ "${COMPONENT}" == all || "${COMPONENT}" == executor ]]; then
 cp /etc/ssl/certs/ca-certificates.crt "${WORK_DIR}/cluster-registration-executor/ca-certificates.crt"
-cp "${ROOT_DIR}/docker/cluster-registration-executor.Dockerfile" "${WORK_DIR}/cluster-registration-executor/Dockerfile"
+cp "${ROOT_DIR}/backend/cluster-registration-executor.Dockerfile" "${WORK_DIR}/cluster-registration-executor/Dockerfile"
 if [[ -n "${KUBECTL_BINARY}" ]]; then
   [[ -f "${KUBECTL_BINARY}" && -r "${KUBECTL_BINARY}" ]] || die "configured kubectl binary is not readable: ${KUBECTL_BINARY}"
   [[ "${KUBECTL_SHA256}" =~ ^[0-9a-f]{64}$ ]] || die "HCDR_REGISTRATION_KUBECTL_SHA256 is required with a local kubectl binary"
@@ -249,29 +266,40 @@ fi
 KUBECTL_ACTUAL="$(sha256sum "${WORK_DIR}/cluster-registration-executor/kubectl" | awk '{print $1}')"
 [[ "${KUBECTL_SHA256}" =~ ^[0-9a-f]{64}$ && "${KUBECTL_ACTUAL}" == "${KUBECTL_SHA256}" ]] || die "kubectl ${KUBECTL_VERSION} checksum verification failed"
 chmod 0755 "${WORK_DIR}/cluster-registration-executor/kubectl"
+fi
 
+if [[ "${COMPONENT}" == all || "${COMPONENT}" == api ]]; then
 log "Building image ${PLATFORM_API_IMAGE}"
 docker build -t "${PLATFORM_API_IMAGE}" "${WORK_DIR}/platform-api"
+fi
 
+if [[ "${COMPONENT}" == all || "${COMPONENT}" == frontend ]]; then
 log "Building image ${PLATFORM_FRONTEND_IMAGE}"
 docker build --build-arg NGINX_IMAGE="${NGINX_IMAGE}" -t "${PLATFORM_FRONTEND_IMAGE}" "${WORK_DIR}/platform-frontend"
+fi
 
+if [[ "${COMPONENT}" == all || "${COMPONENT}" == agents ]]; then
 log "Building image ${COMM_AGENT_IMAGE}"
 docker build -t "${COMM_AGENT_IMAGE}" "${WORK_DIR}/comm-agent"
 
 log "Building image ${OADP_COMM_AGENT_IMAGE}"
 docker build -t "${OADP_COMM_AGENT_IMAGE}" "${WORK_DIR}/oadp-comm-agent"
+fi
 
+if [[ "${COMPONENT}" == all || "${COMPONENT}" == executor ]]; then
 log "Building image ${REGISTRATION_EXECUTOR_IMAGE}"
 docker build --build-arg DEBIAN_IMAGE="${DEBIAN_IMAGE}" -t "${REGISTRATION_EXECUTOR_IMAGE}" "${WORK_DIR}/cluster-registration-executor"
+fi
 
 if [[ "${PUSH}" == "true" ]]; then
   log "Pushing images"
-  docker push "${PLATFORM_API_IMAGE}"
-  docker push "${PLATFORM_FRONTEND_IMAGE}"
-  docker push "${COMM_AGENT_IMAGE}"
-  docker push "${OADP_COMM_AGENT_IMAGE}"
-  docker push "${REGISTRATION_EXECUTOR_IMAGE}"
+  if [[ "${COMPONENT}" == all || "${COMPONENT}" == api ]]; then docker push "${PLATFORM_API_IMAGE}"; fi
+  if [[ "${COMPONENT}" == all || "${COMPONENT}" == frontend ]]; then docker push "${PLATFORM_FRONTEND_IMAGE}"; fi
+  if [[ "${COMPONENT}" == all || "${COMPONENT}" == agents ]]; then
+    docker push "${COMM_AGENT_IMAGE}"
+    docker push "${OADP_COMM_AGENT_IMAGE}"
+  fi
+  if [[ "${COMPONENT}" == all || "${COMPONENT}" == executor ]]; then docker push "${REGISTRATION_EXECUTOR_IMAGE}"; fi
 fi
 
 cat <<EOF

@@ -16,6 +16,7 @@ cp "${SCRIPT_DIR}/../docker/nginx/edge.conf" "${TEST_ROOT}/package/nginx/edge.co
 cp "${SCRIPT_DIR}/../docker/nginx/upstream.conf.default" "${TEST_ROOT}/package/nginx/upstream.conf.default"
 SCRIPT_DIR="${TEST_ROOT}/package"
 export HCDR_SYSTEMD_UNIT_DIR="${TEST_ROOT}/systemd"
+export HCDR_NPM_UPSTREAM_READY=true
 file_mode() {
   stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"
 }
@@ -82,6 +83,7 @@ grep -q '^  hypercdr-cluster-registration-executor:' "${PRIVATE_DATA}/docker-com
 test -x "${PRIVATE_DATA}/deploy-blue-green.sh"
 test -f "${PRIVATE_DATA}/nginx/conf.d/default.conf"
 grep -qx 'blue' "${PRIVATE_DATA}/.active_color"
+grep -qx 'HCDR_NPM_UPSTREAM_READY=true' "${PRIVATE_DATA}/.env"
 ! grep -q 'HCDR_POSTGRES_PORT' "${PRIVATE_DATA}/docker-compose.yaml"
 "${REAL_DOCKER:-docker}" compose --project-directory "${PRIVATE_DATA}" --env-file "${PRIVATE_DATA}/.env" -f "${PRIVATE_DATA}/docker-compose.yaml" config --quiet
 

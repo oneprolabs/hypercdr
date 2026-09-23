@@ -28,9 +28,9 @@ grep -Fxq 'PLATFORM_FRONTEND_BLUE_IMAGE=registry/platform-frontend:new' "${RUNTI
 
 render_upstream green "${RUNTIME_DIR}/upstream.conf"
 grep -Fq 'map $host $hypercdr_api_active { default hypercdr-platform-api-green:18080; }' "${RUNTIME_DIR}/upstream.conf"
-grep -Fq 'map $host $hypercdr_frontend_active { default hypercdr-platform-frontend-green:3002; }' "${RUNTIME_DIR}/upstream.conf"
-grep -Fq 'wait_for_http "hypercdr-platform-frontend-${color}" 3002 / https' "${ROOT_DIR}/scripts/release/deploy-blue-green.sh"
-grep -Fq 'HCDR_HTTPS_PORT:-12443' "${ROOT_DIR}/scripts/release/deploy-blue-green.sh"
+grep -Fq 'map $host $hypercdr_frontend_active { default hypercdr-platform-frontend-green:80; }' "${RUNTIME_DIR}/upstream.conf"
+grep -Fq 'wait_for_http "hypercdr-platform-frontend-${color}" 80 /' "${ROOT_DIR}/scripts/release/deploy-blue-green.sh"
+grep -Fq 'docker network inspect "$network"' "${ROOT_DIR}/scripts/release/deploy-blue-green.sh"
 grep -Fq 'sync_auth_challenge_env' "${ROOT_DIR}/scripts/release/deploy-blue-green.sh"
 
 FAKE_BIN="${RUNTIME_DIR}/bin"
@@ -50,6 +50,13 @@ if [[ "$1" == inspect ]]; then
     *".State.Health"*) echo healthy ;;
   esac
 fi
+if [[ "$1" == network && "$2" == inspect ]]; then
+  [[ "${FAKE_NETWORK_MISSING:-false}" != true ]]
+  exit
+fi
+if [[ "$1" == exec && "${FAKE_EDGE_READY_FAIL:-false}" == true && "$*" == *readyz* ]]; then
+  exit 1
+fi
 exit 0
 EOF
 cat >"${FAKE_BIN}/curl" <<'EOF'
@@ -67,10 +74,8 @@ HCDR_POSTGRES_PASSWORD=test-password
 HCDR_DATABASE_URL=postgres://hypercdr:test-password@hypercdr-postgres:5432/hypercdr?sslmode=disable
 HCDR_RELEASE_TOKEN=test-release-token
 HCDR_REGISTRATION_EXECUTOR_TOKEN=test-registration-token
-HCDR_TLS_CERT_FILE=/tmp/test.crt
-HCDR_TLS_KEY_FILE=/tmp/test.key
-HCDR_HTTP_PORT=18088
-HCDR_HTTPS_PORT=12443
+HCDR_PROXY_NETWORK=nginx-proxy-manager_default
+HCDR_NPM_UPSTREAM_READY=true
 PLATFORM_API_BLUE_IMAGE=registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:platform-api-1.0.32.20260915
 PLATFORM_FRONTEND_BLUE_IMAGE=registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:platform-frontend-1.0.32.20260915
 PLATFORM_API_GREEN_IMAGE=registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:platform-api-1.0.32.20260915
@@ -78,11 +83,15 @@ PLATFORM_FRONTEND_GREEN_IMAGE=registry.cn-beijing.aliyuncs.com/oneprolabs/hyperc
 REGISTRATION_EXECUTOR_IMAGE=registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:cluster-registration-executor-1.0.32.20260915
 EOF
 touch "${RUNTIME_DIR}/docker-compose.yaml"
-FAKE_DOCKER_PS=$'nginx-proxy-manager\t0.0.0.0:80-81->80-81/tcp, 0.0.0.0:443->443/tcp' \
 HCDR_INSTALL_DIR="${RUNTIME_DIR}" \
 HCDR_COMPOSE_FILE="${RUNTIME_DIR}/docker-compose.yaml" \
+HCDR_NPM_UPSTREAM_READY=true \
 PATH="${FAKE_BIN}:${PATH}" \
-  check_public_ports
+  check_proxy_network
+if (HCDR_NPM_UPSTREAM_READY=false; check_proxy_network); then
+  echo "deployment did not require Nginx Proxy Manager readiness" >&2
+  exit 1
+fi
 HCDR_INSTALL_DIR="${RUNTIME_DIR}" \
 HCDR_COMPOSE_FILE="${RUNTIME_DIR}/docker-compose.yaml" \
 HCDR_DOMAIN=hypercdr.com \
@@ -115,7 +124,7 @@ PATH="${FAKE_BIN}:${PATH}" \
 grep -Fxq blue "${RUNTIME_DIR}/.active_color"
 grep -Fxq 'PLATFORM_API_BLUE_IMAGE=registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:platform-api-1.0.33.20260916' "${RUNTIME_DIR}/.env"
 
-if FAKE_CURL_EXIT=1 FAKE_RUNNING_FILE="${RUNTIME_DIR}/running" \
+if FAKE_EDGE_READY_FAIL=true FAKE_RUNNING_FILE="${RUNTIME_DIR}/running" \
   HCDR_INSTALL_DIR="${RUNTIME_DIR}" \
   HCDR_COMPOSE_FILE="${RUNTIME_DIR}/docker-compose.yaml" \
   HCDR_POST_SWITCH_OBSERVE_SECONDS=0 HCDR_HEALTH_INTERVAL=0 \

@@ -73,7 +73,7 @@ render_upstream() {
   mkdir -p "$(dirname "$output")"
   cat > "${output}.tmp" <<EOF
 map \$host \$hypercdr_api_active { default hypercdr-platform-api-${color}:18080; }
-map \$host \$hypercdr_frontend_active { default hypercdr-platform-frontend-${color}:3002; }
+map \$host \$hypercdr_frontend_active { default hypercdr-platform-frontend-${color}:80; }
 EOF
   mv "${output}.tmp" "$output"
 }
@@ -82,19 +82,12 @@ compose() {
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --project-name hypercdr "$@"
 }
 
-check_public_ports() {
-  local http_port https_port conflicts listeners
-  http_port="$(sed -n 's/^HCDR_HTTP_PORT=//p' "$ENV_FILE" 2>/dev/null | tail -1)"
-  https_port="$(sed -n 's/^HCDR_HTTPS_PORT=//p' "$ENV_FILE" 2>/dev/null | tail -1)"
-  http_port="${http_port:-8080}"
-  https_port="${https_port:-12443}"
-  [[ "$http_port" =~ ^[0-9]+$ && "$https_port" =~ ^[0-9]+$ ]] || die "configured public ports are invalid: ${http_port}/${https_port}"
-  conflicts="$(docker ps --format '{{.Names}}\t{{.Ports}}' | awk -v http="$http_port" -v https="$https_port" '$1 != "hypercdr-edge" && (index($0, ":" http "->") || index($0, ":" https "->"))')"
-  [[ -z "$conflicts" ]] || die "configured public ports ${http_port}/${https_port} are occupied by:\n$conflicts"
-  if ! container_running "$EDGE_SERVICE" && command -v ss >/dev/null 2>&1; then
-    listeners="$(ss -ltnpH 2>/dev/null | awk -v http="$http_port" -v https="$https_port" '$4 ~ ":" http "$" || $4 ~ ":" https "$"')"
-    [[ -z "$listeners" ]] || die "configured public ports ${http_port}/${https_port} are already listening on the host:\n$listeners"
-  fi
+check_proxy_network() {
+  local network="${HCDR_PROXY_NETWORK:-nginx-proxy-manager_default}"
+  [[ "${HCDR_NPM_UPSTREAM_READY:-false}" == true ]] ||
+    die "confirm Nginx Proxy Manager forwards to http://hypercdr-edge:80, then set HCDR_NPM_UPSTREAM_READY=true in ${ENV_FILE}"
+  docker network inspect "$network" >/dev/null 2>&1 ||
+    die "shared Nginx Proxy Manager network does not exist: ${network}; set HCDR_PROXY_NETWORK to its exact Docker network name"
 }
 
 container_running() {
@@ -140,10 +133,9 @@ switch_traffic() {
 }
 
 wait_for_public_ready() {
-  local https_port="${HCDR_HTTPS_PORT:-12443}"
-  local url="https://${DOMAIN}:${https_port}/readyz" attempt
+  local attempt
   for ((attempt=1; attempt<=HEALTH_RETRIES; attempt++)); do
-    if curl -kfsS --resolve "${DOMAIN}:${https_port}:127.0.0.1" --connect-timeout 2 --max-time 5 "$url" >/dev/null 2>&1; then
+    if docker exec "$EDGE_SERVICE" wget -q -O /dev/null "http://127.0.0.1/readyz" >/dev/null 2>&1; then
       return 0
     fi
     sleep "$HEALTH_INTERVAL"
@@ -196,7 +188,7 @@ start_color() {
   wait_for_service "hypercdr-platform-api-${color}" || return 1
   wait_for_service "hypercdr-platform-frontend-${color}" || return 1
   wait_for_http "hypercdr-platform-api-${color}" 18080 /readyz || return 1
-  wait_for_http "hypercdr-platform-frontend-${color}" 3002 / https || return 1
+  wait_for_http "hypercdr-platform-frontend-${color}" 80 / || return 1
 }
 
 rollback_color() {
@@ -220,6 +212,7 @@ rollback_color() {
 
 start_current() {
   validate_runtime
+  check_proxy_network
   local current
   current="$(read_active_color)"
   compose up -d hypercdr-postgres hypercdr-edge hypercdr-cluster-registration-executor
@@ -256,7 +249,7 @@ deploy_version() {
   set_env_value "$ENV_FILE" HCDR_IMAGE_TAG "$version"
   load_runtime_env
 
-  check_public_ports
+  check_proxy_network
   compose up -d hypercdr-postgres hypercdr-edge
   compose pull "hypercdr-platform-api-${candidate}" "hypercdr-platform-frontend-${candidate}"
   start_color "$candidate" || die "candidate color $candidate failed health checks; active color remains $current"

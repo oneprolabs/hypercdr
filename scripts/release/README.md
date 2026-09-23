@@ -112,6 +112,16 @@ For the production blue/green Compose topology used by GitHub Actions, read
 That topology uses GitHub Actions as the sole platform deployment controller
 and is separate from the development Compose stack.
 
+The production edge is HTTP-only inside Docker. Nginx Proxy Manager (NPM) owns
+public ports 80/443 and terminates TLS; it must forward the HyperCDR host to
+`http://hypercdr-edge:80`. Attach HyperCDR to NPM's existing Docker network by
+setting `HCDR_PROXY_NETWORK` (default `nginx-proxy-manager_default`). Do not
+publish HyperCDR edge/frontend/API ports on the host. Before upgrading an
+existing install, update the NPM Proxy Host target and verify the container can
+resolve `hypercdr-edge` on the shared network; otherwise removing old host-port
+bindings will interrupt public access. The deployment script refuses to recreate
+the edge until `HCDR_NPM_UPSTREAM_READY=true` is present in the server `.env`.
+
 For detailed local-package prerequisites, installation, upgrade commands,
 configuration-preservation limitations, backup examples, and verification, read
 [Local Package Installation and Upgrade](LOCAL-INSTALLATION.md). The packaging
@@ -119,11 +129,11 @@ script includes this guide as `README.md` at the root of every newly generated
 installer package. Previously generated archives are not modified.
 
 ```bash
-./install-platform.sh docker --base-url https://HOST:12443 \
+./install-platform.sh docker --base-url https://HOST \
   --install-dir /var/lib/hypercdr --execute --confirm-prerequisites
 systemctl status hypercdr.service
 systemctl restart hypercdr.service
-curl -k -o /dev/null -w 'ready=%{http_code}\n' https://HOST:12443/readyz
+curl -f -o /dev/null -w 'ready=%{http_code}\n' https://HOST/readyz
 ```
 
 An installation is healthy only when `hypercdr.service` is enabled and active, all five Compose services are running, and `/readyz` returns HTTP 200.

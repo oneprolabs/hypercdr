@@ -15,6 +15,7 @@ SKIP_REGISTER="false"
 DRY_RUN="false"
 RESUME="false"
 PHASE="${HCDR_RELEASE_PHASE:-all}"
+COMPONENT="${HCDR_RELEASE_COMPONENT:-all}"
 RELEASE_CENTER_URL="${HCDR_RELEASE_CENTER_URL:-}"
 RELEASE_CENTER_TOKEN_FILE="${HCDR_RELEASE_CENTER_TOKEN_FILE:-}"
 
@@ -87,6 +88,10 @@ SKIP_TESTS="${HCDR_RELEASE_SKIP_TESTS:-${SKIP_TESTS}}"
 case "${PHASE}" in
   all|core|dependencies|finalize) ;;
   *) die "HCDR_RELEASE_PHASE must be all, core, dependencies, or finalize" ;;
+esac
+case "${COMPONENT}" in
+  all|api|frontend|agents|executor) ;;
+  *) die "HCDR_RELEASE_COMPONENT must be all, api, frontend, agents, or executor" ;;
 esac
 
 require_version "${VERSION}"
@@ -165,6 +170,7 @@ Registry server: ${REGISTRY_SERVER}
 Login challenge: ${AUTH_CHALLENGE_MODE}
 Skip tests:     ${SKIP_TESTS}
 Phase:          ${PHASE}
+Core component: ${COMPONENT}
 EOF
 
 if [[ "${DRY_RUN}" == "true" ]]; then
@@ -189,9 +195,16 @@ fi
 login_registry
 
 if [[ "${PHASE}" == "all" || "${PHASE}" == "core" ]]; then
+  case "${COMPONENT}" in
+    all) core_images=(platform-api platform-frontend cluster-registration-executor comm-agent oadp-comm-agent) ;;
+    api) core_images=(platform-api) ;;
+    frontend) core_images=(platform-frontend) ;;
+    agents) core_images=(comm-agent oadp-comm-agent) ;;
+    executor) core_images=(cluster-registration-executor) ;;
+  esac
   if [[ "${RESUME}" == "true" ]]; then
     log "Resume mode: verifying previously pushed core images"
-    for name in platform-api platform-frontend cluster-registration-executor comm-agent oadp-comm-agent; do
+    for name in "${core_images[@]}"; do
       image="$(image_ref "${REGISTRY}" "${name}" "${VERSION}")"
       docker manifest inspect "${image}" >/dev/null 2>&1 || die "cannot resume: core image is unavailable: ${image}"
       log "Resume prerequisite OK: ${image}"
@@ -201,7 +214,7 @@ if [[ "${PHASE}" == "all" || "${PHASE}" == "core" ]]; then
     "${SCRIPT_DIR}/build-release.sh" "${build_args[@]}"
 
     log "Pushing release images"
-    "${SCRIPT_DIR}/push-release.sh" "${VERSION}" --registry "${REGISTRY}"
+    "${SCRIPT_DIR}/push-release.sh" "${VERSION}" --registry "${REGISTRY}" --component "${COMPONENT}"
   fi
 fi
 

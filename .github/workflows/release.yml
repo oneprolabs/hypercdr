@@ -38,15 +38,22 @@ jobs:
     needs: prepare-release
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        component: [api, frontend, agents, executor]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
+        if: ${{ matrix.component != 'frontend' }}
         with:
           go-version: '1.24.x'
           cache-dependency-path: |
             backend/go.sum
             agent/comm-agent/go.sum
       - uses: actions/setup-node@v4
+        if: ${{ matrix.component == 'frontend' }}
         with:
           node-version: '22'
           cache: npm
@@ -57,11 +64,12 @@ jobs:
           registry: ${{ needs.prepare-release.outputs.registry_server }}
           username: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
           password: ${{ needs.prepare-release.outputs.registry_profile == 'aliyun_acr' && secrets.ALIYUN_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
-      - name: Build, test, and publish core images
+      - name: Build, test, and publish ${{ matrix.component }} image(s)
         env:
           HCDR_GO_BIN: go
           HCDR_RUNTIME_ROOT: /tmp/hypercdr-runtime
           HCDR_RELEASE_PHASE: core
+          HCDR_RELEASE_COMPONENT: ${{ matrix.component }}
           HCDR_BUILD_GOPROXY: https://proxy.golang.org,direct
           HCDR_AUTH_CHALLENGE_MODE: ${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'turnstile' }}
           HCDR_TURNSTILE_SITE_KEY: ${{ secrets.HCDR_TURNSTILE_SITE_KEY }}
@@ -258,7 +266,7 @@ jobs:
             fetch_asset scripts/release/deploy-blue-green.sh
             fetch_asset scripts/lib/registry-config.sh
             chmod +x "${source_path}/scripts/release/deploy-blue-green.sh"
-            mkdir -p "${deploy_path}/nginx/conf.d" "${deploy_path}/nginx/acme"
+            mkdir -p "${deploy_path}/nginx/conf.d"
             legacy_install=false
             if [ -f "${deploy_path}/.env" ] && { \
               ! grep -q '^PLATFORM_API_BLUE_IMAGE=' "${deploy_path}/.env" || \
