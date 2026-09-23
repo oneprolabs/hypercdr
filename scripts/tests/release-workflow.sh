@@ -5,7 +5,8 @@ workflow=.github/workflows/release.yml
 root=$(pwd)
 review_workflow=.github/workflows/pr_agent.yml
 installer=scripts/release/install-blue-green.sh
-grep -Fq "needs: publish" "$workflow"
+! grep -Fq "needs: publish" "$workflow"
+! grep -Fq 'needs.publish.outputs.' "$workflow"
 grep -Fq 'prepare-release:' "$workflow"
 grep -Fq 'build-images:' "$workflow"
 grep -Fq 'test-core:' "$workflow"
@@ -34,7 +35,7 @@ grep -Fq 'sync_auth_challenge_env' "$root/scripts/release/deploy-blue-green.sh"
 grep -Fq 'actions/upload-artifact@v4' "$workflow"
 grep -Fq 'actions/download-artifact@v4' "$workflow"
 grep -Fq 'resolved-image-lock.json' "$workflow"
-grep -Fq "vars.HCDR_AUTO_DEPLOY == 'true'" "$workflow"
+grep -Fq "github.event_name == 'workflow_dispatch' && inputs.deploy == true" "$workflow"
 grep -Fq 'secrets.SSH_PRIVATE_KEY' "$workflow"
 grep -Fq "secrets.ALIYUN_REGISTRY_USERNAME" "$workflow"
 grep -Fq "secrets.ALIYUN_REGISTRY_PASSWORD" "$workflow"

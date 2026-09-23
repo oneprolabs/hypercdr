@@ -2018,7 +2018,9 @@ func TestCleanupConsentDoesNotBypassOfflineAgent(t *testing.T) {
 	if _, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: "other-source", TargetClusterID: clusterID, Status: "active"}); err != nil {
 		t.Fatal(err)
 	}
-	// No hub session is retained by registerClusterViaWS, so this cluster is offline.
+	// Closing the test WebSocket is asynchronous; make the offline state explicit.
+	waitForAgentConnection(t, router, clusterID)
+	router.hub.close(clusterID)
 	resp := postJSON(t, server.URL+"/api/v1/clusters/"+clusterID+"/unregister", map[string]any{"deleteBackupData": true})
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusConflict {
