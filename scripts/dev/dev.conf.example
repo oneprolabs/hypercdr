@@ -11,7 +11,7 @@ HCDR_PLATFORM_DEPLOY_ENV=/var/lib/hypercdr/.env
 HCDR_DEV_TLS_CERT_FILE=/data/hypercdr-runtime/shared/certs/platform.crt
 HCDR_DEV_TLS_KEY_FILE=/data/hypercdr-runtime/shared/certs/platform.key
 
-HCDR_IMAGE_REGISTRY=registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr
+HCDR_IMAGE_REGISTRY=crpi-tne0uo16mzanbvpi.cn-zhangjiakou.personal.cr.aliyuncs.com/hypercdr
 HCDR_REGISTRY_CA_PATH=
 
 HCDR_BUILD_GOPROXY=https://goproxy.cn,direct

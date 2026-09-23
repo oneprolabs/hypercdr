@@ -6,7 +6,7 @@ registry_config_die() { echo "error: $*" >&2; return 1; }
 image_ref() {
   local registry="${1%/}" name="$2" version="$3"
   case "$registry" in
-    *.aliyuncs.com/*/*|docker.io/*/*) printf '%s:%s-%s\n' "$registry" "$name" "$version" ;;
+    *.aliyuncs.com/*|docker.io/*/*) printf '%s:%s-%s\n' "$registry" "$name" "$version" ;;
     *) printf '%s/%s:%s\n' "$registry" "$name" "$version" ;;
   esac
 }
