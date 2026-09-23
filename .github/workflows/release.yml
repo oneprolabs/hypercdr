@@ -213,15 +213,20 @@ jobs:
           if-no-files-found: error
           overwrite: true
       - name: Publish installer assets to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          token: ${{ github.token }}
-          tag_name: v${{ needs.prepare-release.outputs.image_version }}
-          generate_release_notes: true
-          files: |
-            /tmp/hypercdr-runtime/releases/community/${{ needs.prepare-release.outputs.image_version }}/hypercdr-installer-${{ needs.prepare-release.outputs.image_version }}.tar.gz
-            /tmp/hypercdr-runtime/releases/community/${{ needs.prepare-release.outputs.image_version }}/hypercdr-installer-${{ needs.prepare-release.outputs.image_version }}.sha256
-            /tmp/hypercdr-runtime/releases/community/${{ needs.prepare-release.outputs.image_version }}/release-manifest.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: v${{ needs.prepare-release.outputs.image_version }}
+          RELEASE_DIR: /tmp/hypercdr-runtime/releases/community/${{ needs.prepare-release.outputs.image_version }}
+        run: |
+          set -euo pipefail
+          test -s "${RELEASE_DIR}/hypercdr-installer-${{ needs.prepare-release.outputs.image_version }}.tar.gz"
+          test -s "${RELEASE_DIR}/hypercdr-installer-${{ needs.prepare-release.outputs.image_version }}.sha256"
+          test -s "${RELEASE_DIR}/release-manifest.json"
+          gh release view "${RELEASE_TAG}" >/dev/null 2>&1 || gh release create "${RELEASE_TAG}" --generate-notes
+          gh release upload "${RELEASE_TAG}" \
+            "${RELEASE_DIR}/hypercdr-installer-${{ needs.prepare-release.outputs.image_version }}.tar.gz" \
+            "${RELEASE_DIR}/hypercdr-installer-${{ needs.prepare-release.outputs.image_version }}.sha256" \
+            "${RELEASE_DIR}/release-manifest.json" --clobber
 
   deploy:
     needs: [prepare-release, build-images]
