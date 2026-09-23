@@ -243,6 +243,8 @@ jobs:
             "${RELEASE_DIR}/hypercdr-installer-${{ needs.prepare-release.outputs.image_version }}.tar.gz" \
             "${RELEASE_DIR}/hypercdr-installer-${{ needs.prepare-release.outputs.image_version }}.sha256" \
             "${RELEASE_DIR}/release-manifest.json" --clobber
+          asset_count="$(gh release view "${RELEASE_TAG}" --json assets --jq '.assets | length')"
+          test "${asset_count}" -eq 3 || { echo "expected 3 GitHub Release assets, got ${asset_count}" >&2; gh release view "${RELEASE_TAG}" --json assets; exit 1; }
 
   deploy:
     needs: publish
