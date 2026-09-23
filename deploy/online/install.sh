@@ -62,8 +62,12 @@ fi
 VERSION="${VERSION#v}"
 asset="hypercdr-installer-${VERSION}.tar.gz"
 release_json="$(curl -fsSL "${api_url}/tags/v${VERSION}")" || fail "could not read GitHub Release metadata"
-asset_api_url="$(printf '%s' "${release_json}" | jq -er --arg name "${asset}" '.assets[] | select(.name == $name) | .url' | head -1)" ||
-  fail "GitHub Release does not contain ${asset}"
+asset_api_url="$(printf '%s' "${release_json}" | jq -er --arg name "${asset}" '.assets[] | select(.name == $name) | .url' | head -1 || true)"
+if [[ -z "${asset_api_url}" ]]; then
+  assets_url="$(printf '%s' "${release_json}" | jq -er '.assets_url')" || fail "GitHub Release metadata has no assets endpoint"
+  asset_api_url="$(curl -fsSL -H 'Accept: application/vnd.github+json' "${assets_url}" | jq -er --arg name "${asset}" '.[] | select(.name == $name) | .url' | head -1 || true)"
+fi
+[[ -n "${asset_api_url}" ]] || fail "GitHub Release does not contain ${asset}"
 WORK_DIR="$(mktemp -d /tmp/hypercdr-online.XXXXXX)"
 trap 'rm -rf "${WORK_DIR}"' EXIT
 
