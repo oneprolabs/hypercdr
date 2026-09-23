@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -202,6 +203,10 @@ func run(repo store.Store, job store.PlatformUpgradeJob, deployDir, hostDeployDi
 		rollback(err)
 		return
 	}
+	if err = activateLocalManifest(deployDir, release); err != nil {
+		rollback(err)
+		return
+	}
 	if _, _, err = repo.ActivatePlatformRelease(job.ReleaseID, "platform-upgrader"); err != nil {
 		rollback(err)
 		return
@@ -211,6 +216,34 @@ func run(repo store.Store, job store.PlatformUpgradeJob, deployDir, hostDeployDi
 	if err = scheduleUpgraderReplacement(hostDeployDir, executorID); err != nil {
 		logger.Error("schedule upgrader replacement", "job", job.ID, "error", err)
 	}
+}
+
+func activateLocalManifest(deployDir string, release store.PlatformRelease) error {
+	if !filepath.IsAbs(deployDir) || deployDir == "/" || strings.TrimSpace(release.Version) == "" {
+		return fmt.Errorf("unsafe local manifest destination")
+	}
+	payload := struct {
+		Version               string                            `json:"version"`
+		DatabaseSchemaVersion string                            `json:"databaseSchemaVersion"`
+		RollbackSupported     bool                              `json:"rollbackSupported"`
+		ComponentManifest     map[string]store.ReleaseComponent `json:"componentManifest"`
+	}{release.Version, release.DatabaseSchemaVersion, release.RollbackSupported, release.ComponentManifest}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(deployDir, "releases", release.Version), 0700); err != nil {
+		return err
+	}
+	versionPath := filepath.Join(deployDir, "releases", release.Version, "release-manifest.json")
+	if err := os.WriteFile(versionPath, append(data, '\n'), 0600); err != nil {
+		return err
+	}
+	tmp := filepath.Join(deployDir, "current-release.json.tmp")
+	if err := os.WriteFile(tmp, append(data, '\n'), 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, filepath.Join(deployDir, "current-release.json"))
 }
 
 func scheduleUpgraderReplacement(hostDeployDir, executorID string) error {

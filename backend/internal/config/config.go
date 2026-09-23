@@ -7,6 +7,8 @@ import (
 )
 
 type Config struct {
+	ReleaseManifestPath           string
+	ReleaseRepository             string
 	HTTPAddr                      string
 	TLSEnabled                    bool
 	TLSCertFile                   string
@@ -65,6 +67,8 @@ type Config struct {
 func Load() Config {
 	imageRegistry := strings.TrimRight(getEnv("HCDR_IMAGE_REGISTRY", ""), "/")
 	return Config{
+		ReleaseManifestPath:           strings.TrimSpace(os.Getenv("HCDR_RELEASE_MANIFEST_PATH")),
+		ReleaseRepository:             getEnv("HCDR_RELEASE_REPOSITORY", "oneprolabs/hypercdr"),
 		HTTPAddr:                      getEnv("HCDR_HTTP_ADDR", ":8080"),
 		TLSEnabled:                    parseBool("HCDR_TLS_ENABLED", false),
 		TLSCertFile:                   os.Getenv("HCDR_TLS_CERT_FILE"),

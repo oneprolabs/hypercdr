@@ -20,6 +20,9 @@ import (
 )
 
 func (r *Router) componentTarget(ctx context.Context, component string) (store.ComponentRelease, error) {
+	if r.cfg.ReleaseManifestPath != "" {
+		return localManifestComponent(r.cfg.ReleaseManifestPath, component)
+	}
 	releases, err := r.store.ListPlatformReleases()
 	if err != nil {
 		return store.ComponentRelease{}, err

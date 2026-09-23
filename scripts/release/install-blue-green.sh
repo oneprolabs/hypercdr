@@ -161,6 +161,14 @@ install -m 0755 "$START_SCRIPT" "$INSTALL_DIR/start-platform.sh"
 install -m 0755 "$STOP_SCRIPT" "$INSTALL_DIR/stop-platform.sh"
 install -m 0755 "$RESTART_SCRIPT" "$INSTALL_DIR/restart-platform.sh"
 install -m 0644 "$SERVICE_TEMPLATE" "$INSTALL_DIR/hypercdr.service.template"
+# Keep the package manifest in the installation directory. The API uses this
+# immutable, environment-local file as the cluster component source.
+if [[ -s "${SCRIPT_DIR}/release-manifest.json" ]]; then
+  mkdir -p "${INSTALL_DIR}/releases/${VERSION}"
+  install -m 0644 "${SCRIPT_DIR}/release-manifest.json" "${INSTALL_DIR}/releases/${VERSION}/release-manifest.json"
+  install -m 0644 "${SCRIPT_DIR}/release-manifest.json" "${INSTALL_DIR}/current-release.json.tmp"
+  mv "${INSTALL_DIR}/current-release.json.tmp" "${INSTALL_DIR}/current-release.json"
+fi
 read_env() {
   local key="$1" file="$INSTALL_DIR/.env"
   [[ -f "$file" ]] || return 0
@@ -203,6 +211,7 @@ HCDR_TLS_CERT_FILE=${INSTALL_DIR}/tls.crt
 HCDR_TLS_KEY_FILE=${INSTALL_DIR}/tls.key
 HCDR_SECRET_KEY=${SECRET_KEY}
 HCDR_RELEASE_TOKEN=${RELEASE_TOKEN}
+HCDR_RELEASE_MANIFEST_PATH=${INSTALL_DIR}/current-release.json
 HCDR_REGISTRATION_EXECUTOR_TOKEN=${EXECUTOR_TOKEN}
 HCDR_DEPLOY_MODE=docker-compose
 HCDR_TLS_ENABLED=false

@@ -39,6 +39,7 @@ grep -Fq 'actions/upload-artifact@v4' "$workflow"
 grep -Fq 'actions/download-artifact@v4' "$workflow"
 grep -Fq 'resolved-image-lock.json' "$workflow"
 grep -Fq "github.event_name == 'workflow_dispatch' && inputs.deploy == true" "$workflow"
+! grep -Fq "vars.HCDR_AUTO_DEPLOY == 'true'" "$workflow"
 grep -Fq 'secrets.SSH_PRIVATE_KEY' "$workflow"
 grep -Fq "secrets.ALIYUN_REGISTRY_USERNAME" "$workflow"
 grep -Fq "secrets.ALIYUN_REGISTRY_PASSWORD" "$workflow"
@@ -69,10 +70,10 @@ grep -Fq 'PR_REVIEWER.EXTRA_INSTRUCTIONS' "$review_workflow"
 grep -Fq 'Requirement Coverage' scripts/ci/notify-pr-review.sh
 grep -Fq 'Tests and Verification' scripts/ci/notify-pr-review.sh
 grep -Fq 'mkdir -p "$(dirname "${RELEASE_MANIFEST}")"' scripts/release/release-all.sh
-grep -Fq 'docker build --platform linux/amd64 -f "${ROOT_DIR}/backend/Dockerfile"' scripts/release/build-release.sh
-grep -Fq 'docker build --platform linux/amd64 -f "${ROOT_DIR}/frontend/Dockerfile"' scripts/release/build-release.sh
-grep -Fq 'docker build --platform linux/amd64 -f "${ROOT_DIR}/agent/comm-agent/Dockerfile"' scripts/release/build-release.sh
-grep -Fq 'docker build --platform linux/amd64 -f "${ROOT_DIR}/backend/cluster-registration-executor.Dockerfile"' scripts/release/build-release.sh
+grep -Fq 'docker_build_with_retry "${PLATFORM_API_IMAGE}" --platform linux/amd64 -f "${ROOT_DIR}/backend/Dockerfile"' scripts/release/build-release.sh
+grep -Fq 'docker_build_with_retry "${PLATFORM_FRONTEND_IMAGE}" --platform linux/amd64 -f "${ROOT_DIR}/frontend/Dockerfile"' scripts/release/build-release.sh
+grep -Fq 'docker_build_with_retry "${COMM_AGENT_IMAGE}" --platform linux/amd64 -f "${ROOT_DIR}/agent/comm-agent/Dockerfile"' scripts/release/build-release.sh
+grep -Fq 'docker_build_with_retry "${REGISTRATION_EXECUTOR_IMAGE}" --platform linux/amd64 -f "${ROOT_DIR}/backend/cluster-registration-executor.Dockerfile"' scripts/release/build-release.sh
 grep -Fq '"${SCRIPT_DIR}/push-release.sh"' scripts/release/build-release.sh
 grep -Fq 'FROM golang:1.25.13-bookworm AS builder' backend/Dockerfile
 grep -Fq 'FROM debian:bookworm-slim' backend/Dockerfile

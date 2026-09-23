@@ -12,7 +12,7 @@ PUSH="false"
 GOPROXY="${HCDR_BUILD_GOPROXY:-${DEFAULT_GOPROXY}}"
 NPM_REGISTRY="${HCDR_BUILD_NPM_REGISTRY:-${DEFAULT_NPM_REGISTRY}}"
 KUBECTL_VERSION="${HCDR_REGISTRATION_KUBECTL_VERSION:-v1.28.15}"
-KUBECTL_DOWNLOAD_MAX_TIME="${HCDR_REGISTRATION_KUBECTL_DOWNLOAD_MAX_TIME:-300}"
+KUBECTL_DOWNLOAD_MAX_TIME="${HCDR_REGISTRATION_KUBECTL_DOWNLOAD_MAX_TIME:-900}"
 KUBECTL_BINARY="${HCDR_REGISTRATION_KUBECTL_BINARY:-}"
 KUBECTL_SHA256="${HCDR_REGISTRATION_KUBECTL_SHA256:-}"
 COMPONENT="${HCDR_RELEASE_COMPONENT:-all}"
@@ -87,7 +87,7 @@ BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 if [[ "${COMPONENT}" == all || "${COMPONENT}" == api ]]; then
   log "Building ${PLATFORM_API_IMAGE}"
-  docker build --platform linux/amd64 -f "${ROOT_DIR}/backend/Dockerfile" -t "${PLATFORM_API_IMAGE}" \
+  docker_build_with_retry "${PLATFORM_API_IMAGE}" --platform linux/amd64 -f "${ROOT_DIR}/backend/Dockerfile" \
     --build-arg "GOPROXY=${GOPROXY}" \
     --build-arg "VERSION=${VERSION}" --build-arg "GIT_COMMIT=${GIT_COMMIT}" \
     --build-arg "BUILD_TIME=${BUILD_TIME}" "${ROOT_DIR}/backend"
@@ -103,17 +103,17 @@ fi
 
 if [[ "${COMPONENT}" == all || "${COMPONENT}" == frontend ]]; then
   log "Building ${PLATFORM_FRONTEND_IMAGE}"
-  docker build --platform linux/amd64 -f "${ROOT_DIR}/frontend/Dockerfile" -t "${PLATFORM_FRONTEND_IMAGE}" \
+  docker_build_with_retry "${PLATFORM_FRONTEND_IMAGE}" --platform linux/amd64 -f "${ROOT_DIR}/frontend/Dockerfile" \
     --build-arg "NPM_REGISTRY=${NPM_REGISTRY}" \
     --build-arg "VERSION=${VERSION}" --build-arg "RELEASE_DATE=$(date -u +%Y/%m/%d)" "${ROOT_DIR}"
 fi
 
 if [[ "${COMPONENT}" == all || "${COMPONENT}" == agents ]]; then
   log "Building ${COMM_AGENT_IMAGE}"
-  docker build --platform linux/amd64 -f "${ROOT_DIR}/agent/comm-agent/Dockerfile" -t "${COMM_AGENT_IMAGE}" \
+  docker_build_with_retry "${COMM_AGENT_IMAGE}" --platform linux/amd64 -f "${ROOT_DIR}/agent/comm-agent/Dockerfile" \
     --build-arg "GOPROXY=${GOPROXY}" "${ROOT_DIR}/agent/comm-agent"
   log "Building ${OADP_COMM_AGENT_IMAGE}"
-  docker build --platform linux/amd64 -f "${ROOT_DIR}/agent/comm-agent/oadp.Dockerfile" -t "${OADP_COMM_AGENT_IMAGE}" \
+  docker_build_with_retry "${OADP_COMM_AGENT_IMAGE}" --platform linux/amd64 -f "${ROOT_DIR}/agent/comm-agent/oadp.Dockerfile" \
     --build-arg "GOPROXY=${GOPROXY}" "${ROOT_DIR}/agent/comm-agent"
 fi
 
@@ -127,7 +127,7 @@ if [[ "${COMPONENT}" == all || "${COMPONENT}" == executor ]]; then
     kubectl_context=(--build-context "kubectl-downloader=${WORK_DIR}/kubectl-context")
   fi
   log "Building ${REGISTRATION_EXECUTOR_IMAGE}"
-  docker build --platform linux/amd64 -f "${ROOT_DIR}/backend/cluster-registration-executor.Dockerfile" -t "${REGISTRATION_EXECUTOR_IMAGE}" \
+  docker_build_with_retry "${REGISTRATION_EXECUTOR_IMAGE}" --platform linux/amd64 -f "${ROOT_DIR}/backend/cluster-registration-executor.Dockerfile" \
     --build-arg "GOPROXY=${GOPROXY}" \
     --build-arg "KUBECTL_VERSION=${KUBECTL_VERSION}" --build-arg "KUBECTL_DOWNLOAD_MAX_TIME=${KUBECTL_DOWNLOAD_MAX_TIME}" --build-arg "VERSION=${VERSION}" \
     --build-arg "GIT_COMMIT=${GIT_COMMIT}" --build-arg "BUILD_TIME=${BUILD_TIME}" \

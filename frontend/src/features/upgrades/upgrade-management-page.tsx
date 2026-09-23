@@ -42,7 +42,7 @@ export default function UpgradeManagementPage({ isAdmin, toast, refreshPlatformD
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [runtime, platformReleaseRes, platformUpgradeRes] = await Promise.all([apiGet<ApiPlatformVersion>('/api/v1/platform/version'), apiGet<ApiList<ApiPlatformRelease>>('/api/v1/platform/releases'), apiGet<ApiList<ApiPlatformUpgrade>>('/api/v1/platform/upgrades')]);
+      const [runtime, platformReleaseRes, platformUpgradeRes] = await Promise.all([apiGet<ApiPlatformVersion>('/api/v1/platform/version'), apiGet<ApiList<ApiPlatformRelease>>('/api/v1/platform/available-releases'), apiGet<ApiList<ApiPlatformUpgrade>>('/api/v1/platform/upgrades')]);
       setPlatformVersion(runtime); setPlatformReleases(listItems(platformReleaseRes)); setPlatformUpgrades(listItems(platformUpgradeRes));
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Failed to load component releases');
@@ -59,7 +59,7 @@ export default function UpgradeManagementPage({ isAdmin, toast, refreshPlatformD
       try {
         const [runtime, releaseRes, upgradeRes] = await Promise.all([
           apiGet<ApiPlatformVersion>('/api/v1/platform/version'),
-          apiGet<ApiList<ApiPlatformRelease>>('/api/v1/platform/releases'),
+          apiGet<ApiList<ApiPlatformRelease>>('/api/v1/platform/available-releases'),
           apiGet<ApiList<ApiPlatformUpgrade>>('/api/v1/platform/upgrades'),
         ]);
         if (cancelled) return;
@@ -81,7 +81,11 @@ export default function UpgradeManagementPage({ isAdmin, toast, refreshPlatformD
   const startPlatformUpgrade = async (release: ApiPlatformRelease) => {
     setBusy(`upgrade-${release.id}`);
     try {
-      const precheck = await apiGet<ApiPlatformPrecheck>(`/api/v1/platform/upgrades/precheck?releaseId=${release.id}`);
+      // GitHub is the release catalog. Import the selected immutable manifest
+      // into the local upgrade transaction before running the precheck; the
+      // platform never treats a GitHub tag as a database release ID.
+      const registered = await apiPost<ApiPlatformRelease>('/api/v1/platform/releases', release);
+      const precheck = await apiGet<ApiPlatformPrecheck>(`/api/v1/platform/upgrades/precheck?releaseId=${encodeURIComponent(registered.id)}`);
       const blocked = precheck.checks.filter(check => !check.passed && check.blocking !== false);
       if (blocked.length > 0) {
         const message = blocked.map(check => {
@@ -94,7 +98,7 @@ export default function UpgradeManagementPage({ isAdmin, toast, refreshPlatformD
         toast(message);
         return;
       }
-      await apiPost('/api/v1/platform/upgrades', { releaseId: release.id });
+      await apiPost('/api/v1/platform/upgrades', { releaseId: registered.id });
       toast(`Upgrading the platform to ${release.version}. Management services may be briefly unavailable.`);
       await load();
     } catch (error) {

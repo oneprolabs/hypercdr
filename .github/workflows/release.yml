@@ -221,6 +221,7 @@ jobs:
           files: |
             /tmp/hypercdr-runtime/releases/community/${{ needs.prepare-release.outputs.image_version }}/hypercdr-installer-${{ needs.prepare-release.outputs.image_version }}.tar.gz
             /tmp/hypercdr-runtime/releases/community/${{ needs.prepare-release.outputs.image_version }}/hypercdr-installer-${{ needs.prepare-release.outputs.image_version }}.sha256
+            /tmp/hypercdr-runtime/releases/community/${{ needs.prepare-release.outputs.image_version }}/release-manifest.json
 
   deploy:
     needs: [prepare-release, build-images]
