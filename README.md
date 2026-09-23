@@ -65,14 +65,15 @@ The cluster initiates the connection to the platform, so the control plane does 
 hypercdr/
 ├── backend/                   # Go control-plane API, scheduler, migrations, upgrader
 │   ├── cmd/                   # platform-api, migration, and upgrader entry points
-│   └── internal/              # HTTP, task, store, protocol, and diagnostic implementation
-├── frontend/                  # React + TypeScript + Vite control-plane UI
+│   ├── internal/              # HTTP, task, store, protocol, and diagnostic implementation
+│   └── Dockerfile*            # API and registration-executor runtime images
+├── frontend/                  # React UI and its Nginx runtime Dockerfile
 ├── agent/
-│   └── comm-agent/            # Go cluster communication and execution agent
+│   └── comm-agent/            # Go agent and its runtime Dockerfiles
 ├── bootstrap/                 # Download portal and first-install/uninstall scripts
 ├── charts/                    # Control-plane and cluster Helm assets
 ├── config/                    # Credential-free Registry profiles
-├── docker/                    # Runtime image definitions and Nginx configuration
+├── docker/                    # Shared edge Nginx configuration
 ├── scripts/                   # Development, Registry, build, release, and verification tools
 ├── third_party/
 │   └── velero/                # Pinned HyperCDR Velero source tree

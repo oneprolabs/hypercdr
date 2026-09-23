@@ -8,6 +8,8 @@ installer=scripts/release/install-blue-green.sh
 grep -Fq "needs: publish" "$workflow"
 grep -Fq 'prepare-release:' "$workflow"
 grep -Fq 'publish-core:' "$workflow"
+grep -Fq 'component: [api, frontend, agents, executor]' "$workflow"
+grep -Fq 'HCDR_RELEASE_COMPONENT: ${{ matrix.component }}' "$workflow"
 grep -Fq 'publish-dependencies:' "$workflow"
 grep -Fq 'needs: [prepare-release, publish-core, publish-dependencies]' "$workflow"
 grep -Fq 'HCDR_RELEASE_PHASE: core' "$workflow"
@@ -55,5 +57,8 @@ grep -Fq 'PR_REVIEWER.EXTRA_INSTRUCTIONS' "$review_workflow"
 grep -Fq 'Requirement Coverage' scripts/ci/notify-pr-review.sh
 grep -Fq 'Tests and Verification' scripts/ci/notify-pr-review.sh
 grep -Fq 'mkdir -p "$(dirname "${RELEASE_MANIFEST}")"' scripts/release/release-all.sh
+grep -Fq 'cp "${WORK_DIR}/comm-agent/comm-agent" "${WORK_DIR}/oadp-comm-agent/oadp-comm-agent"' scripts/release/build-release.sh
+grep -Fq 'docker push "${PLATFORM_API_IMAGE}"' scripts/release/build-release.sh
+grep -Fq 'docker push "${REGISTRATION_EXECUTOR_IMAGE}"' scripts/release/build-release.sh
 
 echo "release workflow contract passed"

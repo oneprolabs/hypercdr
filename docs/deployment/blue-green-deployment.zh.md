@@ -1,8 +1,8 @@
 # HyperCDR 蓝绿部署运行手册
 
-本部署使用阿里云 ACR、Docker Compose、稳定 Nginx 边缘代理和 blue/green
-两个 API/前端颜色。生产平台版本只通过 GitHub Actions 发布和部署；开发环境
-仍使用 `docker-compose.dev.yml`。
+本部署使用阿里云 ACR、Docker Compose、Nginx Proxy Manager（NPM）和 blue/green
+两个 API/前端颜色。公网 HTTPS 由 NPM 终止，HyperCDR 容器之间使用 HTTP；生产
+平台版本只通过 GitHub Actions 发布和部署，开发环境仍使用 `docker-compose.dev.yml`。
 
 ACR 和 Docker Hub 使用单仓库、多组件 Tag，例如
 `registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:platform-api-1.0.39.20260916`。
@@ -19,7 +19,7 @@ HCDR_IMAGE_REGISTRY=registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr
 HCDR_SSH_HOST=47.236.253.138
 HCDR_SSH_USER=root
 HCDR_SSH_PORT=22
-HCDR_DEPLOY_PATH=/var/lib/hypercdr
+HCDR_DEPLOY_PATH=/root/hypercdr-deploy
 HCDR_DOMAIN=hypercdr.com
 HCDR_AUTO_DEPLOY=false
 ```
@@ -43,32 +43,37 @@ SSH_PRIVATE_KEY
 hypercdr.com A 47.236.253.138
 ```
 
-安全组开放 80、443；22 只允许管理来源。使用已有有效证书，或在部署前为
-首次部署会在部署目录自动生成自签名证书；如已有正式证书，也可以通过参数显式指定。
-
-服务器当前的 `hypercdr-dev-postgres` 不需要先删除；生产 PostgreSQL 使用
-`/var/lib/hypercdr/data/postgres`，且不发布宿主机端口。
-
-## 手动首次部署
-
-在本地构建并推送版本后，把仓库中的发布脚本和 Compose 文件放到服务器，执行：
+安全组开放 80、443 给 NPM；22 只允许管理来源。证书配置在 NPM 中。
+确认 NPM 和 HyperCDR 使用同一个 Docker 网络。服务器当前网络名是
+`nginx-proxy-manager_default`，可用以下命令核对：
 
 ```bash
-cd /root/hypercdr
-./scripts/release/install-blue-green.sh 1.0.32.20260915 \
-  --base-url https://hypercdr.com \
-  --domain hypercdr.com \
-  --registry registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr \
-  --install-dir /var/lib/hypercdr \
-  --execute
+docker network inspect nginx-proxy-manager_default
 ```
+
+NPM 的 Proxy Host 需设置为 `http://hypercdr-edge:80`，启用 WebSocket 支持。
+HyperCDR Compose 不发布宿主机端口。旧部署迁移时先改好 NPM 转发，再在部署
+目录 `.env` 设置：
+
+```dotenv
+HCDR_PROXY_NETWORK=nginx-proxy-manager_default
+HCDR_NPM_UPSTREAM_READY=true
+```
+
+生产 PostgreSQL 使用部署目录下 `data/postgres`，且不发布宿主机端口。
+
+## 首次部署
+
+Actions 在 Tag 发布后将 Compose 和部署脚本下载到 `HCDR_DEPLOY_PATH`，然后执行
+蓝绿部署。首次切换前先确认 NPM Proxy Host 已指向 `hypercdr-edge:80` 并设置
+`HCDR_NPM_UPSTREAM_READY=true`；部署脚本会在重建入口前检查这两个前置条件。
 
 检查：
 
 ```bash
 docker compose --project-name hypercdr \
-  --env-file /var/lib/hypercdr/.env \
-  -f /var/lib/hypercdr/docker-compose.yaml \
+  --env-file /root/hypercdr-deploy/.env \
+  -f /root/hypercdr-deploy/docker-compose.yaml \
   --profile blue --profile green ps
 curl -fsS https://hypercdr.com/readyz
 ```
@@ -88,7 +93,7 @@ Actions 会构建并推送去掉 `v` 后的 ACR 镜像标签
 `1.0.33.20260916`。启用自动部署后，Actions 会在服务器执行：
 
 ```bash
-/var/lib/hypercdr/deploy-blue-green.sh 1.0.33.20260916
+/root/hypercdr-deploy/deploy-blue-green.sh 1.0.33.20260916
 ```
 
 脚本会拉取非活动颜色、运行迁移、检查 `/readyz`、reload Nginx、观察公网健康
@@ -97,7 +102,7 @@ Actions 会构建并推送去掉 `v` 后的 ACR 镜像标签
 ## 回滚
 
 ```bash
-/var/lib/hypercdr/deploy-blue-green.sh --rollback
+/root/hypercdr-deploy/deploy-blue-green.sh --rollback
 ```
 
 回滚要求旧颜色的镜像和数据库结构仍然兼容。破坏性数据库迁移不能依靠蓝绿
@@ -108,8 +113,8 @@ Actions 会构建并推送去掉 `v` 后的 ACR 镜像标签
 ```bash
 systemctl status hypercdr --no-pager
 systemctl restart hypercdr
-/var/lib/hypercdr/stop-platform.sh
-/var/lib/hypercdr/start-platform.sh
+/root/hypercdr-deploy/stop-platform.sh
+/root/hypercdr-deploy/start-platform.sh
 ```
 
 这些命令不会删除 PostgreSQL 数据卷。
