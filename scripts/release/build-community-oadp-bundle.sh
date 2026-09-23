@@ -92,10 +92,10 @@ grep -q 'version: 1.3.10' "$csv" || { echo "CSV is not OADP 1.3.10" >&2; exit 1;
 bundle_image="$(image_ref "${REGISTRY}" "oadp-bundle" "${release}")"
 docker build --platform linux/amd64 -t "$bundle_image" "$bundle_dir"
 docker_push_with_retry "$bundle_image"
-docker pull --platform linux/amd64 "$bundle_image" >/dev/null
+docker_pull_with_retry "$bundle_image" >/dev/null
 bundle_digest="$(image_digest "$bundle_image")"
 [[ "$bundle_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "bundle digest is unavailable" >&2; exit 1; }
-docker manifest inspect "${bundle_image%@*}@${bundle_digest}" >/dev/null
+docker_manifest_inspect_with_retry "${bundle_image%@*}@${bundle_digest}"
 jq '.bundle={component:"oadp-bundle",version:$version,image:$image,imageDigest:$digest}' \
   --arg version "$release" --arg image "$bundle_image" --arg digest "$bundle_digest" \
   "$RESOLVED_LOCK" >"${RESOLVED_LOCK}.next"
