@@ -1063,7 +1063,6 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   const [authConfig, setAuthConfig] = useState<ApiAuthConfig>({ challengeMode: 'image' });
   const [turnstileToken, setTurnstileToken] = useState('');
   const [turnstileRendered, setTurnstileRendered] = useState(false);
-  const [turnstileMountKey, setTurnstileMountKey] = useState(0);
   const turnstileRef = useRef<HTMLDivElement | null>(null);
   const turnstileWidget = useRef<string | null>(null);
   const [loginError, setLoginError] = useState('');
@@ -1120,8 +1119,18 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       return () => script.removeEventListener('load', render);
     }
     render();
-    return () => { cancelled = true; if (turnstileWidget.current && window.turnstile?.remove) window.turnstile.remove(turnstileWidget.current); turnstileWidget.current = null; setTurnstileToken(''); setTurnstileRendered(false); };
-  }, [authConfig.challengeMode, authConfig.turnstileSiteKey, authFlow, turnstileMountKey, view, passwordChangeCompleted]);
+    return () => {
+      cancelled = true;
+      const widget = turnstileWidget.current;
+      if (widget && window.turnstile?.remove) window.turnstile.remove(widget);
+      turnstileWidget.current = null;
+      // Turnstile owns an iframe inside the mount node. Clear it after remove()
+      // so a remount after logout or a failed login cannot retain a stale frame.
+      if (turnstileRef.current) turnstileRef.current.replaceChildren();
+      setTurnstileToken('');
+      setTurnstileRendered(false);
+    };
+  }, [authConfig.challengeMode, authConfig.turnstileSiteKey, authFlow, view, passwordChangeCompleted]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1443,7 +1452,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       setLoginError(error instanceof Error ? error.message : 'Login failed');
       if (authConfig.challengeMode === 'turnstile') {
         setTurnstileToken('');
-        setTurnstileMountKey(key => key + 1);
+        if (turnstileWidget.current && window.turnstile?.reset) window.turnstile.reset(turnstileWidget.current);
       } else {
         await refreshLoginCaptcha(false);
       }
@@ -1573,7 +1582,6 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     setLoginPassword('');
     setLoginCaptchaCode('');
     setLoginError('');
-    setTurnstileMountKey(key => key + 1);
     setView('login');
   }, [clearTenantResourceState]);
 
@@ -2208,7 +2216,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
                 </label>}
               </div>
               {authFlow === 'reset' && !resetToken && <div className="hbdr-login-error">This password reset link is incomplete. Request a new link and try again.</div>}
-              {authFlow === 'login' && authConfig.challengeMode === 'turnstile' && <div key={turnstileMountKey} className="hbdr-login-turnstile" aria-label="Cloudflare human verification">
+              {authFlow === 'login' && authConfig.challengeMode === 'turnstile' && <div className="hbdr-login-turnstile" aria-label="Cloudflare human verification">
                 <div ref={turnstileRef} />
               </div>}
               {authFlow === 'login' && authConfig.challengeMode !== 'turnstile' && <div className="hbdr-login-captcha-code" aria-label="Verification code">
