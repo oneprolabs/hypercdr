@@ -42,7 +42,7 @@ export default function UpgradeManagementPage({ isAdmin, toast, refreshPlatformD
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [runtime, platformReleaseRes, platformUpgradeRes] = await Promise.all([apiGet<ApiPlatformVersion>('/api/v1/platform/version'), apiGet<ApiList<ApiPlatformRelease>>('/api/v1/platform/releases'), apiGet<ApiList<ApiPlatformUpgrade>>('/api/v1/platform/upgrades')]);
+      const [runtime, platformReleaseRes, platformUpgradeRes] = await Promise.all([apiGet<ApiPlatformVersion>('/api/v1/platform/version'), apiGet<ApiList<ApiPlatformRelease>>('/api/v1/platform/available-releases'), apiGet<ApiList<ApiPlatformUpgrade>>('/api/v1/platform/upgrades')]);
       setPlatformVersion(runtime); setPlatformReleases(listItems(platformReleaseRes)); setPlatformUpgrades(listItems(platformUpgradeRes));
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Failed to load component releases');
@@ -59,7 +59,7 @@ export default function UpgradeManagementPage({ isAdmin, toast, refreshPlatformD
       try {
         const [runtime, releaseRes, upgradeRes] = await Promise.all([
           apiGet<ApiPlatformVersion>('/api/v1/platform/version'),
-          apiGet<ApiList<ApiPlatformRelease>>('/api/v1/platform/releases'),
+          apiGet<ApiList<ApiPlatformRelease>>('/api/v1/platform/available-releases'),
           apiGet<ApiList<ApiPlatformUpgrade>>('/api/v1/platform/upgrades'),
         ]);
         if (cancelled) return;
