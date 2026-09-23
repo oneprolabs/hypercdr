@@ -1098,15 +1098,17 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   }, []);
 
   useEffect(() => {
-    if (authConfig.challengeMode !== 'turnstile' || !authConfig.turnstileSiteKey || authFlow !== 'login' || view !== 'login' || passwordChangeCompleted) return;
+    if (authConfig.challengeMode !== 'turnstile' || !authConfig.turnstileSiteKey || authFlow !== 'login' || view !== 'login' || authSession || passwordChangeCompleted) return;
     let cancelled = false;
+    const container = turnstileRef.current;
+    let script: HTMLScriptElement | null = null;
     const render = () => {
       if (cancelled || !turnstileRef.current || !window.turnstile || turnstileWidget.current) return;
-      const mount = () => { if (!turnstileRef.current || !window.turnstile || turnstileWidget.current) return;
-      turnstileWidget.current = window.turnstile.render(turnstileRef.current, {
+      const mount = () => { if (cancelled || !container || !container.isConnected || !window.turnstile || turnstileWidget.current) return;
+      turnstileWidget.current = window.turnstile.render(container!, {
         language: 'en', size: 'flexible', theme: 'dark',
-        sitekey: authConfig.turnstileSiteKey!, callback: token => { setTurnstileRendered(true); setTurnstileToken(token); },
-        'expired-callback': () => setTurnstileToken(''), 'error-callback': () => setTurnstileToken(''),
+        sitekey: authConfig.turnstileSiteKey!, callback: token => { if (!cancelled) { setTurnstileRendered(true); setTurnstileToken(token); } },
+        'expired-callback': () => { if (!cancelled) setTurnstileToken(''); }, 'error-callback': () => { if (!cancelled) setTurnstileToken(''); },
       });
       // The embedded widget owns its loading UI after rendering begins.
       setTurnstileRendered(true);
@@ -1114,23 +1116,28 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       if (!cancelled) (window.turnstile.ready ? window.turnstile.ready(mount) : mount());
     };
     if (!window.turnstile) {
-      const script = document.createElement('script'); script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'; script.async = false; script.defer = false;
-      script.addEventListener('load', render); document.head.appendChild(script);
-      return () => script.removeEventListener('load', render);
+      script = document.querySelector<HTMLScriptElement>('script[data-hcdr-turnstile]');
+      if (!script) {
+      script = document.createElement('script'); script.dataset.hcdrTurnstile = 'true'; script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'; script.async = false; script.defer = false;
+      document.head.appendChild(script);
+      }
+      script.addEventListener('load', render);
+    } else {
+      render();
     }
-    render();
     return () => {
       cancelled = true;
+      script?.removeEventListener('load', render);
       const widget = turnstileWidget.current;
       if (widget && window.turnstile?.remove) window.turnstile.remove(widget);
       turnstileWidget.current = null;
       // Turnstile owns an iframe inside the mount node. Clear it after remove()
       // so a remount after logout or a failed login cannot retain a stale frame.
-      if (turnstileRef.current) turnstileRef.current.replaceChildren();
+      container?.replaceChildren();
       setTurnstileToken('');
       setTurnstileRendered(false);
     };
-  }, [authConfig.challengeMode, authConfig.turnstileSiteKey, authFlow, view, passwordChangeCompleted]);
+  }, [authConfig.challengeMode, authConfig.turnstileSiteKey, authFlow, view, authSession, passwordChangeCompleted]);
 
   useEffect(() => {
     let cancelled = false;
