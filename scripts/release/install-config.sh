@@ -16,7 +16,7 @@ HCDR_IMAGE_TAG="1.0.23.20260915"
 # (for example Nginx Proxy Manager); HyperCDR services use HTTP on Docker networks.
 HCDR_INSTALL_DIR="/var/lib/hypercdr"
 HCDR_PROXY_NETWORK="" # Optional; defaults to the installed NPM network or nginx-proxy-manager_default.
-HCDR_NPM_UPSTREAM_READY="" # Set true only after NPM forwards to http://hypercdr-edge:80.
+HCDR_NPM_UPSTREAM_READY="" # Set true only after HTTPS forwarding to port 12443 is confirmed.
 
 # Optional public address used as an Agent fallback. Leave empty when unused.
 HCDR_PUBLIC_BASE_URL=""

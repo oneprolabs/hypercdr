@@ -642,8 +642,8 @@ EOF
     fi
     install_ok "Configuration files are prepared"
 
-    install_step 4 7 "Use outer proxy for HTTPS"
-    install_ok "HyperCDR services use HTTP only inside Docker"
+    install_step 4 7 "Prepare HTTPS edge for Nginx Proxy Manager"
+    install_ok "Edge accepts HTTPS on port 12443; application networks use HTTP"
 
     # Cloudflare Turnstile is the default human verification. Fall back to the
     # image captcha (with a warning) when the Turnstile credentials are absent,
@@ -686,6 +686,9 @@ HCDR_DOMAIN=${public_host}
 HCDR_PROXY_NETWORK=${proxy_network}
 HCDR_NPM_UPSTREAM_READY=${npm_upstream_ready}
 HCDR_NGINX_CONFIG_DIR=${install_dir}/nginx/conf.d
+HCDR_HTTPS_PORT=12443
+HCDR_TLS_CERT_FILE=${install_dir}/tls.crt
+HCDR_TLS_KEY_FILE=${install_dir}/tls.key
 HCDR_TLS_ENABLED=${tls_enabled}
 HCDR_REGISTRY_CA_PATH=$([[ "${registry_trust}" == "private-ca" ]] && echo "/etc/hypercdr/registry/ca.crt" || true)
 HCDR_REGISTRY_CA_FILE=$([[ "${registry_trust}" == "private-ca" ]] && echo "${installed_registry_ca_file}" || echo "/dev/null")
@@ -705,7 +708,7 @@ EOF
     local ready="false"
     local attempt
     for attempt in $(seq 1 60); do
-      if docker exec hypercdr-edge wget -q -O /dev/null http://127.0.0.1/readyz >/dev/null 2>&1; then
+      if docker exec hypercdr-edge wget --no-check-certificate -q -O /dev/null https://127.0.0.1/readyz >/dev/null 2>&1; then
         ready="true"
         break
       fi

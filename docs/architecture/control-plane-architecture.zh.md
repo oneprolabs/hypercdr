@@ -70,7 +70,7 @@ Agent 在集群内部执行备份、同步、Drill、存储和恢复等操作，
 
 容器：`hypercdr-platform-frontend`
 
-中控前端提供 React Web 页面并终止外部 TLS 连接。主机端口可配置，默认端口为 `12443`，容器内部端口为 `3002`。
+中控前端通过私有 Docker 网络提供 HTTP 服务。在生产蓝绿 Compose 拓扑中，NPM 终止公网 TLS，并通过 HTTPS 转发到 HyperCDR edge：宿主机端口 `12443` 映射到 edge 容器端口 `443`；edge 再通过私有网络以 HTTP 转发到前端和 API。前端容器本身不发布宿主机端口。
 
 前端负责展示集群、应用、存储、计划、任务、备份、同步和 Drill 等功能，并通过 API 与中控后端交互。
 
@@ -235,7 +235,7 @@ Agent 主动向中控平台建立 WebSocket 连接，完成以下工作：
 - `hypercdr-platform-upgrader`
 - `hypercdr-cluster-registration-executor`
 
-前端默认对外提供 `12443` 端口；API、PostgreSQL、升级器和注册执行器默认通过私有 Compose 网络通信。
+生产 edge 通过宿主机 `12443` 端口接收 NPM 的 HTTPS 流量。前端、API、PostgreSQL、升级器和注册执行器通过私有 Compose 网络通信；只有 edge 接入代理网络。
 
 ## 13. 主要源码和文档参考
 

@@ -112,15 +112,16 @@ For the production blue/green Compose topology used by GitHub Actions, read
 That topology uses GitHub Actions as the sole platform deployment controller
 and is separate from the development Compose stack.
 
-The production edge is HTTP-only inside Docker. Nginx Proxy Manager (NPM) owns
-public ports 80/443 and terminates TLS; it must forward the HyperCDR host to
-`http://hypercdr-edge:80`. Attach HyperCDR to NPM's existing Docker network by
-setting `HCDR_PROXY_NETWORK` (default `nginx-proxy-manager_default`). Do not
-publish HyperCDR edge/frontend/API ports on the host. Before upgrading an
-existing install, update the NPM Proxy Host target and verify the container can
-resolve `hypercdr-edge` on the shared network; otherwise removing old host-port
-bindings will interrupt public access. The deployment script refuses to recreate
-the edge until `HCDR_NPM_UPSTREAM_READY=true` is present in the server `.env`.
+NPM owns public ports 80/443 and the browser-facing certificate. It forwards via
+HTTPS to the server's internal address on port 12443; the edge maps host port
+12443 to container port 443 and uses a local origin certificate. The edge then
+forwards to the blue/green API and frontend over HTTP on private Docker networks.
+Do not publish HyperCDR ports 80/443 or the API/frontend ports on the host.
+Attach HyperCDR to NPM's Docker network by setting `HCDR_PROXY_NETWORK` (default
+`nginx-proxy-manager_default`). Before upgrading, keep the existing NPM target
+and confirm it reaches the server on HTTPS port 12443. The deployment script
+refuses to recreate the edge until `HCDR_NPM_UPSTREAM_READY=true` is present in
+the server `.env`.
 
 For detailed local-package prerequisites, installation, upgrade commands,
 configuration-preservation limitations, backup examples, and verification, read

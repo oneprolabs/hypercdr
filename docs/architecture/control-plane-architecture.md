@@ -65,7 +65,7 @@ The backend does not use Gin, Echo, Fiber, or another Go Web framework. It uses 
 
 ### 3.1 Platform frontend
 
-`hypercdr-platform-frontend` serves the React web application and terminates the externally exposed TLS connection. The host-facing port is configurable (default `12443`) and maps to the container's port `3002`. The frontend proxies or targets the API using the configured platform URLs.
+`hypercdr-platform-frontend` serves the React web application over HTTP on its private Docker network. In the production blue/green Compose topology, Nginx Proxy Manager terminates public TLS and forwards via HTTPS to the HyperCDR edge on host port `12443` (container port `443`); the edge proxies to the frontend and API over HTTP. The frontend container itself does not publish a host port.
 
 ### 3.2 Platform API
 
@@ -190,7 +190,7 @@ The standard Docker Compose topology contains:
 - `hypercdr-platform-upgrader`
 - `hypercdr-cluster-registration-executor`
 
-The frontend exposes the configurable external port (default `12443`), while the API, PostgreSQL, upgrader, and registration executor communicate through the private Compose network unless explicitly configured otherwise.
+The production edge exposes host port `12443` for HTTPS from Nginx Proxy Manager. Frontend, API, PostgreSQL, upgrader, and registration executor communicate through private Compose networks; only the edge is reachable through the proxy network.
 
 ## 12. Source references
 
