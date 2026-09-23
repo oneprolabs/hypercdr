@@ -81,6 +81,8 @@ cp "${RELEASE_SCRIPTS_DIR}/PLATFORM-LIFECYCLE.md" "${package_dir}/PLATFORM-LIFEC
 cp "${RELEASE_SCRIPTS_DIR}/LOCAL-INSTALLATION.md" "${package_dir}/README.md"
 mkdir -p "${package_dir}/templates"
 cp "${RELEASE_SCRIPTS_DIR}/templates/hypercdr.service" "${package_dir}/templates/hypercdr.service"
+cp "${RELEASE_SCRIPTS_DIR}/templates/hypercdr-upgrade-runner.service" "${package_dir}/templates/hypercdr-upgrade-runner.service"
+cp "${RELEASE_SCRIPTS_DIR}/platform-upgrade-runner.sh" "${package_dir}/platform-upgrade-runner.sh"
 mkdir -p "${package_dir}/config" "${package_dir}/scripts/lib"
 cp "${ROOT_DIR}/config/registries.conf" "${package_dir}/config/registries.conf"
 cp "${ROOT_DIR}/scripts/lib/registry-config.sh" "${package_dir}/scripts/lib/registry-config.sh"
