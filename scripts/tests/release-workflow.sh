@@ -2,6 +2,7 @@
 set -euo pipefail
 
 workflow=.github/workflows/release.yml
+pr_workflow=.github/workflows/pr-check.yml
 root=$(pwd)
 review_workflow=.github/workflows/pr_agent.yml
 installer=scripts/release/install-blue-green.sh
@@ -9,10 +10,12 @@ installer=scripts/release/install-blue-green.sh
 ! grep -Fq 'needs.publish.outputs.' "$workflow"
 grep -Fq 'prepare-release:' "$workflow"
 grep -Fq 'build-images:' "$workflow"
-grep -Fq 'test-core:' "$workflow"
+! grep -Fq 'test-core:' "$workflow"
 grep -Fq 'needs: prepare-release' "$workflow"
-grep -Fq 'needs: [prepare-release, test-core]' "$workflow"
-grep -Fq "go-version: '1.25.13'" "$workflow"
+! grep -Fq 'needs: [prepare-release, test-core]' "$workflow"
+grep -Fq 'pull_request:' "$pr_workflow"
+grep -Fq 'go test ./...' "$pr_workflow"
+grep -Fq './scripts/build-frontend.sh' "$pr_workflow"
 for image in platform-api platform-frontend comm-agent oadp-comm-agent cluster-registration-executor; do
   grep -Fq "image_name: ${image}" "$workflow"
 done

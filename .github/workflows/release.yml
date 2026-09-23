@@ -43,44 +43,9 @@ jobs:
           echo "release_date=$(date -u +%Y/%m/%d)" >> "${GITHUB_OUTPUT}"
           echo "git_commit=$(git rev-parse --short HEAD)" >> "${GITHUB_OUTPUT}"
 
-  test-core:
-    needs: prepare-release
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        component: [backend, agent/comm-agent, frontend]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        if: ${{ matrix.component != 'frontend' }}
-        with:
-          go-version: '1.25.13'
-          cache-dependency-path: ${{ matrix.component }}/go.sum
-      - uses: actions/setup-node@v4
-        if: ${{ matrix.component == 'frontend' }}
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - name: Test ${{ matrix.component }}
-        env:
-          HCDR_RUNTIME_ROOT: /tmp/hypercdr-runtime
-        run: |
-          if [ '${{ matrix.component }}' = frontend ]; then
-            cd frontend
-            npm ci
-            npm run test:extensions
-            npm run test:topology
-            npx tsc --noEmit
-          else
-            cd '${{ matrix.component }}'
-            GOTOOLCHAIN=local go test ./...
-          fi
-
   build-images:
     name: build-images (${{ matrix.image_name }})
-    needs: [prepare-release, test-core]
+    needs: prepare-release
     runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
