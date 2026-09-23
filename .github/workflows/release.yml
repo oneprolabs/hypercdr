@@ -48,7 +48,7 @@ jobs:
       - uses: actions/setup-go@v5
         if: ${{ matrix.component != 'frontend' }}
         with:
-          go-version: '1.24.x'
+          go-version: '1.25.x'
           cache-dependency-path: |
             backend/go.sum
             agent/comm-agent/go.sum
