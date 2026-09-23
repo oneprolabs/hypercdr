@@ -219,6 +219,12 @@ rollback_color() {
   target="$(other_color "$current")"
   rollback_version="$(sed -n 's/^ *//p' "${INSTALL_DIR}/.rollback_version" 2>/dev/null | head -1 || true)"
   registry="${HCDR_IMAGE_REGISTRY%/}"
+  local rollback_manifest="${INSTALL_DIR}/releases/${rollback_version}/release-manifest.json"
+  if [[ -n "${HCDR_RELEASE_MANIFEST_PATH:-}" ]]; then
+    [[ -s "$rollback_manifest" ]] || die "rollback manifest is missing for $rollback_version"
+    jq -e --arg version "$rollback_version" '.version == $version' "$rollback_manifest" >/dev/null || die "rollback manifest version mismatch"
+    set_env_value "$ENV_FILE" "HCDR_${target^^}_RELEASE_MANIFEST_PATH" "/deploy/releases/${rollback_version}/release-manifest.json"
+  fi
   if [[ "${rollback_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ ]]; then
     set_env_value "$ENV_FILE" "PLATFORM_API_${target^^}_IMAGE" "$(image_ref "${registry}" "platform-api" "${rollback_version}")"
     set_env_value "$ENV_FILE" "PLATFORM_FRONTEND_${target^^}_IMAGE" "$(image_ref "${registry}" "platform-frontend" "${rollback_version}")"
@@ -227,6 +233,14 @@ rollback_color() {
   log "rolling back from $current to $target"
   start_color "$target" || die "rollback target $target did not become healthy"
   switch_traffic "$current" "$target" || die "Nginx rejected rollback"
+  if ! wait_for_public_ready; then
+    switch_traffic "$target" "$current" || die "rollback health failed and traffic restoration failed"
+    die "rollback health failed; restored $current"
+  fi
+  if [[ -s "$rollback_manifest" ]]; then
+    install -m 0644 "$rollback_manifest" "${INSTALL_DIR}/current-release.json.tmp"
+    mv "${INSTALL_DIR}/current-release.json.tmp" "${INSTALL_DIR}/current-release.json"
+  fi
   printf '%s\n' "$target" > "${INSTALL_DIR}/.active_color"
   log "rollback completed: $target"
 }
