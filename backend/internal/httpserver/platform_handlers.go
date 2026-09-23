@@ -45,7 +45,7 @@ func (r *Router) listPlatformReleases(w http.ResponseWriter, req *http.Request) 
 }
 
 var requiredReleaseComponents = []string{
-	"platform-api", "platform-frontend", "platform-upgrader", "cluster-registration-executor",
+	"platform-api", "platform-frontend", "cluster-registration-executor",
 	"comm-agent", "velero", "velero-plugin-for-aws", "velero-plugin-for-microsoft-azure", "velero-plugin-for-gcp",
 	"oadp-comm-agent", "oadp-operator", "oadp-velero", "oadp-openshift-plugin", "oadp-aws-plugin",
 	"oadp-restore-helper", "oadp-bundle", "oadp-catalog",

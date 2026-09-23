@@ -135,12 +135,17 @@ services:
       hypercdr-postgres:
         condition: service_healthy
     environment:
+      SSL_CERT_DIR: /etc/ssl/certs:/usr/local/share/hypercdr-ca
       HCDR_DATABASE_URL: ${HCDR_DATABASE_URL:?HCDR_DATABASE_URL is required}
       HCDR_REGISTRATION_EXECUTOR_TOKEN: ${HCDR_REGISTRATION_EXECUTOR_TOKEN:?HCDR_REGISTRATION_EXECUTOR_TOKEN is required}
       HCDR_REGISTRATION_SESSION_DIR: /var/lib/hypercdr/registration-sessions
     volumes:
+      # Optional private platform CA; public certificates use system trust.
+      - ${HCDR_PLATFORM_CA_DIR:-./platform-ca}:/usr/local/share/hypercdr-ca:ro
       - hypercdr-registration-sessions:/var/lib/hypercdr/registration-sessions
-    networks: [hypercdr-data]
+    networks:
+      hypercdr-data: {}
+      hypercdr-proxy: {}
     read_only: true
     tmpfs:
       - /tmp:size=32m,noexec,nosuid,nodev
