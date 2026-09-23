@@ -69,6 +69,7 @@ services:
       - hypercdr-registration-sessions:/var/lib/hypercdr/registration-sessions
     networks:
       hypercdr-data: {}
+      hypercdr-egress: {}
       hypercdr-blue:
         aliases: [hypercdr-platform-api]
     command: ["/bin/sh", "-c", "/usr/local/bin/platform-migrate && exec /usr/local/bin/platform-api"]
@@ -88,6 +89,7 @@ services:
     volumes: *platform-api-volumes
     networks:
       hypercdr-data: {}
+      hypercdr-egress: {}
       hypercdr-green:
         aliases: [hypercdr-platform-api]
     command: ["/bin/sh", "-c", "/usr/local/bin/platform-migrate && exec /usr/local/bin/platform-api"]
@@ -156,6 +158,8 @@ networks:
     name: ${HCDR_PROXY_NETWORK:-nginx-proxy-manager_default}
   hypercdr-data:
     internal: true
+  hypercdr-egress:
+    driver: bridge
   hypercdr-blue:
     internal: true
   hypercdr-green:

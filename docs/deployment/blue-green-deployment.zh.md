@@ -47,6 +47,8 @@ hypercdr.com A 47.236.253.138
 在 NPM 中。NPM 保持现有 Proxy Host，通过 HTTPS 转发到服务器内网地址的
 12443 端口；HyperCDR edge 将宿主机 12443 映射到容器 443，并使用本地源站
 证书。edge 到蓝绿 API/前端仍在 Docker 私有网络中使用 HTTP。
+蓝、绿 API 另外接入专用出网 bridge 网络，用于后端访问 Cloudflare
+Turnstile 验证接口；前端、数据库和注册执行器不接入该网络。
 
 确认 NPM 与 HyperCDR edge 使用同一个 Docker 网络。服务器当前网络名是
 `nginx-proxy-manager_default`，可用以下命令核对：

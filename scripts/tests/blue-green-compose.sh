@@ -28,6 +28,8 @@ EOF
 rendered="${RUNTIME_DIR}/compose.yaml"
 docker compose --env-file "${ENV_FILE}" -f "${ROOT_DIR}/docker-compose.yml" \
   --profile blue --profile green config >"${rendered}"
+docker compose --env-file "${ENV_FILE}" -f "${ROOT_DIR}/docker-compose.yml" \
+  --profile blue --profile green config --format json >"${RUNTIME_DIR}/compose.json"
 
 for service in \
   hypercdr-edge hypercdr-postgres \
@@ -53,5 +55,10 @@ grep -Fq 'external: true' "${ROOT_DIR}/docker-compose.yml"
 grep -Fq 'name: ${HCDR_PROXY_NETWORK:-nginx-proxy-manager_default}' "${ROOT_DIR}/docker-compose.yml"
 grep -Fq 'listen 443 ssl default_server;' "${ROOT_DIR}/docker/nginx/edge.conf"
 grep -Fq 'ssl_certificate /etc/hypercdr/tls/tls.crt;' "${ROOT_DIR}/docker/nginx/edge.conf"
+jq -e '.services["hypercdr-platform-api-blue"].networks | has("hypercdr-egress")' "${RUNTIME_DIR}/compose.json" >/dev/null
+jq -e '.services["hypercdr-platform-api-green"].networks | has("hypercdr-egress")' "${RUNTIME_DIR}/compose.json" >/dev/null
+jq -e '(.services["hypercdr-platform-frontend-blue"].networks | has("hypercdr-egress")) | not' "${RUNTIME_DIR}/compose.json" >/dev/null
+jq -e '(.services["hypercdr-platform-frontend-green"].networks | has("hypercdr-egress")) | not' "${RUNTIME_DIR}/compose.json" >/dev/null
+jq -e '.networks["hypercdr-egress"].internal != true' "${RUNTIME_DIR}/compose.json" >/dev/null
 
 echo "blue-green compose contract passed"

@@ -116,6 +116,9 @@ NPM owns public ports 80/443 and the browser-facing certificate. It forwards via
 HTTPS to the server's internal address on port 12443; the edge maps host port
 12443 to container port 443 and uses a local origin certificate. The edge then
 forwards to the blue/green API and frontend over HTTP on private Docker networks.
+The API containers also join a dedicated outbound bridge network so server-side
+Cloudflare Turnstile verification can reach `challenges.cloudflare.com`; the
+frontend, database, and registration executor do not join that network.
 Do not publish HyperCDR ports 80/443 or the API/frontend ports on the host.
 Attach HyperCDR to NPM's Docker network by setting `HCDR_PROXY_NETWORK` (default
 `nginx-proxy-manager_default`). Before upgrading, keep the existing NPM target
