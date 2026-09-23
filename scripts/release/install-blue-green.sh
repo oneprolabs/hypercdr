@@ -166,8 +166,6 @@ install -m 0644 "$SERVICE_TEMPLATE" "$INSTALL_DIR/hypercdr.service.template"
 if [[ -s "${SCRIPT_DIR}/release-manifest.json" ]]; then
   mkdir -p "${INSTALL_DIR}/releases/${VERSION}"
   install -m 0644 "${SCRIPT_DIR}/release-manifest.json" "${INSTALL_DIR}/releases/${VERSION}/release-manifest.json"
-  install -m 0644 "${SCRIPT_DIR}/release-manifest.json" "${INSTALL_DIR}/current-release.json.tmp"
-  mv "${INSTALL_DIR}/current-release.json.tmp" "${INSTALL_DIR}/current-release.json"
 fi
 read_env() {
   local key="$1" file="$INSTALL_DIR/.env"

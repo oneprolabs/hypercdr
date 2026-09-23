@@ -265,6 +265,13 @@ deploy_version() {
   log "deploying version $version to $candidate (current=$current, first_install=$first_install)"
 
   local registry="${HCDR_IMAGE_REGISTRY%/}"
+  local manifest="${INSTALL_DIR}/releases/${version}/release-manifest.json"
+  if [[ -s "$manifest" ]]; then
+    jq -e --arg version "$version" '.version == $version and (.componentManifest | type == "object")' "$manifest" >/dev/null || die "invalid release manifest for $version"
+    set_env_value "$ENV_FILE" "HCDR_${candidate^^}_RELEASE_MANIFEST_PATH" "/deploy/releases/${version}/release-manifest.json"
+  elif [[ -n "${HCDR_RELEASE_MANIFEST_PATH:-}" ]]; then
+    die "missing release manifest for $version"
+  fi
   set_env_value "$ENV_FILE" "PLATFORM_API_${candidate^^}_IMAGE" "$(image_ref "${registry}" "platform-api" "${version}")"
   set_env_value "$ENV_FILE" "PLATFORM_FRONTEND_${candidate^^}_IMAGE" "$(image_ref "${registry}" "platform-frontend" "${version}")"
   set_env_value "$ENV_FILE" RELEASE_VERSION "$version"
@@ -302,6 +309,14 @@ deploy_version() {
   load_runtime_env
   compose pull hypercdr-cluster-registration-executor
   compose up -d hypercdr-cluster-registration-executor
+  if [[ -s "$manifest" ]]; then
+    if [[ -s "${INSTALL_DIR}/current-release.json" ]]; then
+      install -m 0644 "${INSTALL_DIR}/current-release.json" "${INSTALL_DIR}/previous-release.json.tmp"
+      mv "${INSTALL_DIR}/previous-release.json.tmp" "${INSTALL_DIR}/previous-release.json"
+    fi
+    install -m 0644 "$manifest" "${INSTALL_DIR}/current-release.json.tmp"
+    mv "${INSTALL_DIR}/current-release.json.tmp" "${INSTALL_DIR}/current-release.json"
+  fi
   if [[ "$first_install" != true && "$DRAIN_SECONDS" != 0 ]]; then sleep "$DRAIN_SECONDS"; fi
   if [[ "$first_install" != true ]]; then
     compose stop "hypercdr-platform-api-${current}" "hypercdr-platform-frontend-${current}"

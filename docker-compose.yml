@@ -54,7 +54,7 @@ services:
       HCDR_REGISTRY_CA_PATH: ${HCDR_REGISTRY_CA_PATH:-}
       HCDR_SECRET_KEY: ${HCDR_SECRET_KEY:-}
       HCDR_RELEASE_TOKEN: ${HCDR_RELEASE_TOKEN:?HCDR_RELEASE_TOKEN is required}
-      HCDR_RELEASE_MANIFEST_PATH: ${HCDR_RELEASE_MANIFEST_PATH:-/deploy/current-release.json}
+      HCDR_RELEASE_MANIFEST_PATH: ${HCDR_BLUE_RELEASE_MANIFEST_PATH:-${HCDR_RELEASE_MANIFEST_PATH:-/deploy/current-release.json}}
       HCDR_DEPLOY_MODE: docker-compose
       HCDR_DEPLOY_DIR: /deploy
       HCDR_REGISTRATION_EXECUTOR_ENDPOINT: http://hypercdr-cluster-registration-executor:18082
@@ -86,7 +86,9 @@ services:
     depends_on:
       hypercdr-postgres:
         condition: service_healthy
-    environment: *platform-api-env
+    environment:
+      <<: *platform-api-env
+      HCDR_RELEASE_MANIFEST_PATH: ${HCDR_GREEN_RELEASE_MANIFEST_PATH:-${HCDR_RELEASE_MANIFEST_PATH:-/deploy/current-release.json}}
     volumes: *platform-api-volumes
     networks:
       hypercdr-data: {}
