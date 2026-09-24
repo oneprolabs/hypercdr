@@ -44,7 +44,7 @@ func Run(options Options) error {
 	if err := postgresStore.ApplyEditionMigrations(migrationCtx, editionMigrations(options.Migrations)); err != nil {
 		return err
 	}
-	// // GitHub Releases are the sole release catalog. No secondary catalog
+	// GitHub Releases are the sole release catalog. No secondary catalog
 	// synchronizer is started: mixing two catalogs can
 	// overwrite immutable manifest metadata and produce duplicate candidates.
 	if options.DiagnosticSink != nil {
