@@ -1085,6 +1085,11 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   const releaseNotesAdminAudience = authSession?.user.role === 'admin';
 
   useEffect(() => {
+    if (!authSession) {
+      setProductInfo(null);
+      setProductCapabilities({});
+      return;
+    }
     let cancelled = false;
     void apiGet<ApiProductInfo>('/api/v1/product-info')
       .then(info => {
@@ -1100,7 +1105,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
         }
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [authSession]);
 
   useEffect(() => {
     if (authConfig.challengeMode !== 'turnstile' || !authConfig.turnstileSiteKey || authFlow !== 'login' || view !== 'login' || authSession || passwordChangeCompleted) return;
