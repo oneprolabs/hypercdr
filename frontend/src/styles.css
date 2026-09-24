@@ -26248,3 +26248,57 @@ html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-clust
   .premium-app.hbdr-workspace .hbdr-dashboard-design-controls { width: 100%; }
   .premium-app.hbdr-workspace .hbdr-dashboard-design-cluster { flex: 1; min-width: 0; }
 }
+
+/* Dashboard reference proportions: 486px health column beside the topology column. */
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas.hbdr-dashboard-zones {
+  grid-template-columns: 486px minmax(0, 1fr) !important;
+  grid-template-areas: "cluster platform" "operations operations" !important;
+  gap: 16px !important;
+  margin: 0 auto !important;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-cluster,
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-platform {
+  border: 1px solid var(--hc-border) !important;
+  border-radius: 6px !important;
+  background: var(--hc-surface) !important;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 8%) !important;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-head {
+  min-height: 32px;
+  margin-bottom: 14px;
+  padding: 0;
+  border-bottom: 0;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-label h2 {
+  color: var(--hc-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-label p {
+  color: var(--hc-text-3);
+  font-size: 12px;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-card {
+  border: 1px solid var(--hc-border);
+  border-radius: 6px;
+  background: var(--hc-surface);
+  box-shadow: none;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-card header {
+  min-height: 31px;
+  padding: 0 0 10px;
+  border-bottom-color: var(--hc-border);
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-card h3 {
+  color: var(--hc-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-cluster,
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-platform,
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-operations {
+  box-shadow: none !important;
+}
+@media (max-width: 1100px) {
+  .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas.hbdr-dashboard-zones { grid-template-columns: minmax(0, 1fr) !important; grid-template-areas: "cluster" "platform" "operations" !important; }
+}
