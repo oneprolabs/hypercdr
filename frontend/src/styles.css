@@ -26032,3 +26032,68 @@ html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dr-table-card table tb
 html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dr-action-primary {
   color: #fff;
 }
+
+/* Resource cards and workflow stages use the same quiet surfaces as list pages. */
+.premium-app.hbdr-workspace .hbdr-clusters-workspace {
+  color: var(--hc-text);
+}
+.premium-app.hbdr-workspace .hbdr-clusters-card-region {
+  overflow: hidden;
+  border: 1px solid var(--hc-border);
+  border-radius: 6px;
+  background: var(--hc-surface);
+  box-shadow: 0 4px 14px rgb(27 38 55 / 4%);
+}
+.premium-app.hbdr-workspace .hbdr-clusters-card-region .hbdr-section-toolbar {
+  min-height: 58px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--hc-border);
+}
+.premium-app.hbdr-workspace .hbdr-section-toolbar h3 {
+  color: var(--hc-text);
+  font-size: 12px;
+  font-weight: 750;
+}
+.premium-app.hbdr-workspace .hbdr-cluster-card-grid {
+  gap: 10px;
+  padding: 14px;
+}
+.premium-app.hbdr-workspace .cluster-card-premium {
+  border-color: var(--hc-border) !important;
+  border-radius: 6px !important;
+  background: var(--hc-surface) !important;
+  box-shadow: none !important;
+}
+.premium-app.hbdr-workspace .cluster-card-premium:hover {
+  border-color: color-mix(in srgb, var(--hc-accent) 50%, var(--hc-border)) !important;
+  box-shadow: 0 6px 18px rgb(27 38 55 / 8%) !important;
+}
+.premium-app.hbdr-workspace .cluster-card-premium .cluster-card-action-button:hover {
+  background: var(--hc-sunken);
+  color: var(--hc-text);
+}
+.premium-app.hbdr-workspace .hbdr-stage-panel {
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid var(--hc-border);
+  border-radius: 6px;
+  background: var(--hc-surface);
+}
+.premium-app.hbdr-workspace .hbdr-stage-card {
+  border-color: var(--hc-border);
+  border-radius: 5px;
+  background: var(--hc-surface);
+  box-shadow: none;
+}
+.premium-app.hbdr-workspace .hbdr-stage-card:hover,
+.premium-app.hbdr-workspace .hbdr-stage-card.hbdr-dr-stage-active {
+  border-color: color-mix(in srgb, var(--hc-accent) 55%, var(--hc-border));
+  background: color-mix(in srgb, var(--hc-accent) 6%, var(--hc-surface));
+}
+.premium-app.hbdr-workspace .hbdr-dr-stage-copy h4 { color: var(--hc-text); }
+.premium-app.hbdr-workspace .hbdr-dr-stage-copy p,
+.premium-app.hbdr-workspace .hbdr-dr-stage-copy span { color: var(--hc-text-2); }
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-clusters-card-region,
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-stage-panel {
+  box-shadow: none;
+}
