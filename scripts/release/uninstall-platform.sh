@@ -95,6 +95,11 @@ fi
 require_command docker
 
 # Disable boot recovery before removing containers so uninstall is permanent.
+if command -v systemctl >/dev/null 2>&1 && [[ -f /etc/systemd/system/hypercdr-upgrade-runner.service ]]; then
+  systemctl disable --now hypercdr-upgrade-runner.service
+  rm /etc/systemd/system/hypercdr-upgrade-runner.service
+  systemctl daemon-reload
+fi
 if command -v systemctl >/dev/null 2>&1 && [[ -f /etc/systemd/system/hypercdr.service ]]; then
   systemctl disable --now hypercdr.service
   rm /etc/systemd/system/hypercdr.service
