@@ -50,8 +50,13 @@ run_once() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-while true; do
-  run_once || true
-  sleep "${HCDR_UPGRADE_RUNNER_INTERVAL:-15}"
-done
+  # Hold the lock for the process lifetime, including its deployment child.
+  # A second runner must not select the same queued job before status changes.
+  command -v flock >/dev/null || { echo "flock is required" >&2; exit 1; }
+  exec 9>"${INSTALL_DIR}/.upgrade-runner.lock"
+  flock -n 9 || { echo "another upgrade runner is active" >&2; exit 1; }
+  while true; do
+    run_once || true
+    sleep "${HCDR_UPGRADE_RUNNER_INTERVAL:-15}"
+  done
 fi
