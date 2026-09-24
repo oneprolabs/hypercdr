@@ -2158,9 +2158,14 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
         <div className="relative flex min-h-screen items-center justify-center px-10">
           <div className="w-full max-w-md">
             <div className="mb-8">
+              <div className="flex items-center justify-between gap-3">
               <div className="hbdr-login-top-brand" aria-label="HyperCDR">
                 <span className="hbdr-login-brand-one">Hyper</span>
                 <span className="hbdr-login-brand-pro">CDR</span>
+              </div>
+              <button type="button" className="hbdr-theme-toggle" onClick={() => setTheme(current => current === 'light' ? 'dark' : 'light')} aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`} title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}>
+                {theme === 'light' ? <Moon size={15} /> : <Sun size={15} />}
+              </button>
               </div>
             </div>
 
