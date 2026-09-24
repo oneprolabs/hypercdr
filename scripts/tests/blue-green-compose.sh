@@ -28,9 +28,9 @@ EOF
 
 rendered="${RUNTIME_DIR}/compose.yaml"
 docker compose --env-file "${ENV_FILE}" -f "${ROOT_DIR}/docker-compose.yml" \
-  --profile blue --profile green config >"${rendered}"
+  --profile blue --profile green --profile website config >"${rendered}"
 docker compose --env-file "${ENV_FILE}" -f "${ROOT_DIR}/docker-compose.yml" \
-  --profile blue --profile green config --format json >"${RUNTIME_DIR}/compose.json"
+  --profile blue --profile green --profile website config --format json >"${RUNTIME_DIR}/compose.json"
 
 for service in \
   hypercdr-edge hypercdr-postgres \
@@ -45,6 +45,7 @@ grep -Fq 'hypercdr-website:' "${rendered}"
 grep -Fq 'profiles:' "${rendered}"
 grep -Fq 'profiles:' "${rendered}"
 grep -Fq 'published: "12443"' "${rendered}"
+grep -Fq 'published: "12445"' "${rendered}"
 grep -Fq 'target: 443' "${rendered}"
 ! grep -Eq 'published: "(80|443|18080|3002|5432)"' "${rendered}"
 grep -Fq 'hypercdr-edge:' "${rendered}"
