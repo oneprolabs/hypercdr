@@ -70,7 +70,6 @@ hypercdr/
 ├── frontend/                  # React UI and its Nginx runtime Dockerfile
 ├── agent/
 │   └── comm-agent/            # Go agent and its runtime Dockerfiles
-├── bootstrap/                 # Download portal and first-install/uninstall scripts
 ├── charts/                    # Control-plane and cluster Helm assets
 ├── config/                    # Credential-free Registry profiles
 ├── docker/                    # Shared edge Nginx configuration
@@ -89,7 +88,7 @@ Generated binaries, frontend assets, release packages, logs, certificates, datab
 ├── cache/                     # Reusable compiler and package caches
 ├── environments/             # Isolated Community and Enterprise development state
 ├── shared/                    # Shared development certificates and local configuration
-├── services/                 # Bootstrap portal source and runtime data
+├── services/                 # GitHub Release assets source and runtime data
 └── codex/                    # Codex context and generated validation evidence
 ```
 
@@ -142,7 +141,6 @@ Or run components independently:
 cd backend && go test ./...
 cd agent/comm-agent && go test ./...
 cd frontend && npm ci && npm run build
-bash bootstrap/tests/registry-ca-flow.sh
 bash scripts/tests/registry-config.sh
 ```
 
@@ -157,7 +155,6 @@ bash scripts/tests/registry-config.sh
 | `make verify` | Run tests plus shell and repository consistency checks |
 | `./scripts/registry-login.sh` | Log Docker into the active Registry profile |
 | `./scripts/release/release-all.sh <version>` | Build, publish, verify, and package a release |
-| `./bootstrap/deploy-bootstrap.sh --execute` | Deploy or update the installer download portal |
 
 ## Registry Profiles
 
@@ -201,19 +198,13 @@ See [Build, release, and installation flow](docs/deployment/build-release-instal
 
 ## Production Installation
 
-### Bootstrap portal
+### GitHub Release assets
 
-After a release is generated, deploy the small download portal:
-
-```bash
-./bootstrap/deploy-bootstrap.sh --execute
-```
-
-The portal reads the Registry profile embedded in the release. Users only provide the public control-plane address; they do not re-enter the Registry or install a CA when the selected Registry uses a publicly trusted certificate.
+After a release is generated, use the GitHub Release assets with `deploy/online/install.sh`.
 
 ### Standalone host (recommended)
 
-Download the generated package from the Bootstrap portal, then run:
+Download the generated package from the GitHub Release assets, then run:
 
 ```bash
 ./install-platform.sh docker \

@@ -18,7 +18,7 @@ existing installation. There is no separate upgrade archive.
 
 This is a small online-image installer, not a fully offline image bundle. Copy
 the archive to the host; the installer still pulls images from the configured
-registry. Neither Bootstrap nor Release Center, nor a Release Center token, is
+registry. The installer does not require a separate release service or token;
 required for this workflow. Registry authentication, if required, is separate.
 
 The private installer may contain the Cloudflare Turnstile deployment Secret

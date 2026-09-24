@@ -20,12 +20,7 @@ HCDR_REGISTRY_USERNAME=
 # Optional file containing the registry password; never commit this file.
 HCDR_REGISTRY_PASSWORD_FILE=
 
-# Release Center URL used to publish release metadata. Leave empty to skip registration.
-HCDR_RELEASE_CENTER_URL=
 # File containing the token used to authenticate release publication requests.
-HCDR_RELEASE_CENTER_TOKEN_FILE=
-# Optional private CA for Release Center HTTPS. System trust is used otherwise.
-# HCDR_RELEASE_CENTER_CA_FILE=/path/to/release-center-ca.crt
 
 # Build dependency mirrors.
 HCDR_BUILD_GOPROXY=https://goproxy.cn,direct

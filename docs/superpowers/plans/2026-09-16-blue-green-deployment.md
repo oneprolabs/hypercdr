@@ -679,8 +679,8 @@ Run:
 make verify
 ```
 
-Expected: backend, Agent, frontend, release-center, Bootstrap, repository
-hygiene, shell syntax, and new deployment tests all pass.
+Expected: backend, Agent, frontend, repository hygiene, shell syntax, and new
+deployment tests all pass.
 
 - [ ] **Step 5: Review the final diff**
 

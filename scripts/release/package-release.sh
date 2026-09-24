@@ -22,7 +22,7 @@ LEGACY_RELEASE_DIR="${PUBLISH_DIR}/releases/dev"
 
 usage() {
   cat <<'USAGE'
-Build the standalone HyperCDR Bootstrap release package.
+Build the standalone HyperCDR installer release package.
 
 Usage:
   ./release-bootstrap.sh <version>
@@ -61,9 +61,9 @@ done
 
 [[ ! -e "${RELEASE_DIR}" ]] || { echo "release already exists: ${RELEASE_DIR}; use a new version or HCDR_RELEASE_ROOT for validation" >&2; exit 1; }
 [[ ! -e "${WORK_DIR}" ]] || { echo "package work directory already exists: ${WORK_DIR}; use a new version or HCDR_PACKAGE_BUILD_ROOT for validation" >&2; exit 1; }
-mkdir -p "${WORK_DIR}/hypercdr-bootstrap" "${RELEASE_DIR}"
+mkdir -p "${WORK_DIR}/hypercdr-installer" "${RELEASE_DIR}"
 
-package_dir="${WORK_DIR}/hypercdr-bootstrap"
+package_dir="${WORK_DIR}/hypercdr-installer"
 RELEASE_SCRIPTS_DIR="${ROOT_DIR}/scripts/release"
 cp "${RELEASE_SCRIPTS_DIR}/install-platform.sh" "${package_dir}/install-platform.sh"
 cp "${SCRIPT_DIR}/install.sh" "${package_dir}/install.sh"
@@ -133,12 +133,8 @@ sed -i -E "s/(v[0-9]{8}\.[0-9]+|[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8})/${VERSION}/g" 
   "${package_dir}/compose.yaml" \
   "${package_dir}/charts/hypercdr-platform/values.yaml"
 
-# The portal command extracts into a directory it creates first. Archive the
-# package contents at the root so extraction does not create a duplicated
-# hypercdr-bootstrap/hypercdr-bootstrap nesting level.
-tar -C "${package_dir}" -czf "${RELEASE_DIR}/hypercdr-bootstrap.tar.gz" .
-tar -C "${WORK_DIR}" --transform="s,^hypercdr-bootstrap,hypercdr-installer-${VERSION}," -czf "${RELEASE_DIR}/hypercdr-installer-${VERSION}.tar.gz" hypercdr-bootstrap
-chmod 600 "${RELEASE_DIR}/hypercdr-bootstrap.tar.gz" "${RELEASE_DIR}/hypercdr-installer-${VERSION}.tar.gz"
+tar -C "${WORK_DIR}" --transform="s,^hypercdr-installer,hypercdr-installer-${VERSION}," -czf "${RELEASE_DIR}/hypercdr-installer-${VERSION}.tar.gz" hypercdr-installer
+chmod 600 "${RELEASE_DIR}/hypercdr-installer-${VERSION}.tar.gz"
 cp "${RELEASE_MANIFEST}" "${RELEASE_DIR}/release-manifest.json"
 cp "${package_dir}/install-platform.sh" "${RELEASE_DIR}/install-platform.sh"
 cp "${package_dir}/uninstall-platform.sh" "${RELEASE_DIR}/uninstall-platform.sh"
@@ -158,7 +154,6 @@ cat > "${RELEASE_DIR}/manifest.json" <<EOF
   "buildTime": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "artifacts": [
     {"name":"Installer package","file":"hypercdr-installer-${VERSION}.tar.gz","checksum":"hypercdr-installer-${VERSION}.sha256","description":"Versioned installer scripts, Docker Compose template, and Helm chart assets."},
-    {"name":"Bootstrap compatibility package","file":"hypercdr-bootstrap.tar.gz","description":"Compatibility alias used by the development download portal."},
     {"name":"Control plane installer","file":"install-platform.sh","description":"Standalone installer for Kubernetes or Docker Compose."},
     {"name":"Docker Compose template","file":"compose.yaml","description":"Standalone host Docker Compose template."},
     {"name":"Control plane uninstaller","file":"uninstall-platform.sh","description":"Docker Compose uninstaller for the control plane."}
@@ -171,7 +166,7 @@ EOF
 # older portal copies while the UI uses the edition-specific path.
 
 cat <<EOF
-Bootstrap release ${VERSION} created without modifying source files.
+Installer release ${VERSION} created without modifying source files.
 Work directory:
   ${WORK_DIR}
 Release directory:

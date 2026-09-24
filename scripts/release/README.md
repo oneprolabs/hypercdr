@@ -31,7 +31,7 @@ consistent. The private installer embeds the deployment Secret Key so a new
 installation uses Turnstile immediately. Protect the archive as a credential-
 bearing artifact and distribute it only through trusted channels.
 
-`release-all.sh` is the complete release entry point. It builds all control-plane and runtime images, pushes them, mirrors Velero/OADP assets, generates the complete `release-manifest.json`, creates the platform installer archive and SHA256 checksum, and registers the candidate release. Use `--skip-register` for the initial seed release.
+`release-all.sh` is the complete release entry point. It builds all control-plane and runtime images, pushes them, mirrors Velero/OADP assets, generates the complete `release-manifest.json`, creates the platform installer archive and SHA256 checksum, and publishes immutable assets through GitHub Actions. Use `--skip-register` for the initial seed release.
 
 GitHub releases run backend, agent, and frontend checks before publishing images.
 `release.yml` builds the five application images from the Dockerfiles in
@@ -55,7 +55,6 @@ complete entry point.
 | `build-community-oadp-catalog.sh` | Build the OADP Catalog image |
 | `package-release.sh` | Package an installer from an existing manifest; does not build images |
 | `upgrade-local.sh` | Upgrade an existing Docker installation from an extracted local package |
-| `publish-package.sh` | Publish an existing platform installer to Bootstrap |
 | `install-platform.sh` | Install the platform and configure systemd recovery |
 | `deploy-platform.sh` | Render or deploy Compose configuration |
 | `start-platform.sh`, `stop-platform.sh`, `restart-platform.sh` | Platform lifecycle operations |
@@ -82,7 +81,6 @@ publish-package.sh
 └── verifies and distributes the installer already produced by release-all.sh
 ```
 
-The legacy `bootstrap/scripts/package-release.sh` entry point is retained only for compatibility and must not replace `release-all.sh`.
 
 ## Output
 

@@ -24,7 +24,6 @@ HyperCDR 是面向 Kubernetes 的容器容灾平台。中控平台统一管理�
 backend/                  Go 中控后端、调度器、迁移和升级器
 frontend/                 React + TypeScript 中控前端
 agent/comm-agent/         Go 集群通信与任务执行 Agent
-bootstrap/                首次安装门户和独立主机安装器
 charts/                   中控平台和业务集群 Helm Chart
 docker/                   容器镜像定义和运行配置
 scripts/                  开发、构建、Harbor、发布和验证脚本
@@ -69,7 +68,7 @@ cp scripts/release/release.conf.example scripts/release/release.conf
 
 ## 部署方式
 
-- 独立主机：使用 `docker-compose.yml` 和 Bootstrap 安装器。
+- 独立主机：使用 `docker-compose.yml` 和 GitHub Release 安装器。
 - Kubernetes 中控平台：使用 `charts/hypercdr-platform`。
 - 业务集群组件：以平台生成的注册安装器为准；`charts/hypercdr-agent` 暂为未来受支持 Chart 的保留位置。
 

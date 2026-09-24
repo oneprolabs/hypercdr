@@ -16,8 +16,6 @@ DRY_RUN="false"
 RESUME="false"
 PHASE="${HCDR_RELEASE_PHASE:-all}"
 COMPONENT="${HCDR_RELEASE_COMPONENT:-all}"
-RELEASE_CENTER_URL="${HCDR_RELEASE_CENTER_URL:-}"
-RELEASE_CENTER_TOKEN_FILE="${HCDR_RELEASE_CENTER_TOKEN_FILE:-}"
 
 usage() {
   cat <<'USAGE'
@@ -78,8 +76,6 @@ source "${RELEASE_SECRETS_FILE}"
 VERSION="${RELEASE_VERSION:-${VERSION}}"
 
 # shellcheck source=../lib/registry-config.sh
-RELEASE_CENTER_URL="${RELEASE_CENTER_URL:-${HCDR_RELEASE_CENTER_URL:-}}"
-RELEASE_CENTER_TOKEN_FILE="${RELEASE_CENTER_TOKEN_FILE:-${HCDR_RELEASE_CENTER_TOKEN_FILE:-}}"
 source "${ROOT_DIR}/scripts/lib/registry-config.sh"
 load_registry_profile "${REGISTRY_CONFIG_FILE}" "${REGISTRY_PROFILE}"
 
@@ -356,26 +352,7 @@ HCDR_TURNSTILE_SECRET_KEY="${TURNSTILE_SECRET_KEY}" \
 HCDR_TURNSTILE_VERIFY_URL="${TURNSTILE_VERIFY_URL}" \
   "${ROOT_DIR}/scripts/release/package-release.sh" "${VERSION}"
 
-if [[ "${SKIP_REGISTER}" == "true" || -z "${RELEASE_CENTER_URL}" ]]; then
-  log "Release Center registration disabled (no URL configured)"
-else
-  [[ -r "${RELEASE_CENTER_TOKEN_FILE:-}" ]] || die "Release Center token file is not readable: ${RELEASE_CENTER_TOKEN_FILE}"
-  RELEASE_CENTER_TOKEN="$(tr -d '\r\n' < "${RELEASE_CENTER_TOKEN_FILE}")"
-  INSTALLER_ARCHIVE="${HCDR_RELEASE_ROOT:-${RUNTIME_ROOT}/releases/community}/${VERSION}/hypercdr-installer-${VERSION}.tar.gz"
-  [[ -r "${INSTALLER_ARCHIVE}" ]] || die "release installer archive is missing: ${INSTALLER_ARCHIVE}"
-  publish_payload="$(mktemp)"
-  trap 'rm -f "${publish_payload}"' EXIT
-  jq '.' "${RELEASE_MANIFEST}" >"${publish_payload}"
-  curl_args=(-fsS --max-time 30 -X POST "${RELEASE_CENTER_URL%/}/api/v1/releases" -H "Content-Type: application/json" -H "Authorization: Bearer ${RELEASE_CENTER_TOKEN}")
-  if [[ -n "${HCDR_RELEASE_CENTER_CA_FILE:-}" ]]; then
-    curl_args+=(--cacert "${HCDR_RELEASE_CENTER_CA_FILE}")
-  fi
-  curl "${curl_args[@]}" --data-binary "@${publish_payload}" >/dev/null
-  curl_args=(-fsS --max-time 120 -X POST "${RELEASE_CENTER_URL%/}/api/v1/releases/${VERSION}/installer" -H "Content-Type: application/gzip" -H "Authorization: Bearer ${RELEASE_CENTER_TOKEN}")
-  if [[ -n "${HCDR_RELEASE_CENTER_CA_FILE:-}" ]]; then curl_args+=(--cacert "${HCDR_RELEASE_CENTER_CA_FILE}"); fi
-  curl "${curl_args[@]}" --data-binary "@${INSTALLER_ARCHIVE}" >/dev/null
-  log "Release registered with Release Center: ${VERSION}"
-fi
+log "GitHub Actions publishes the manifest and installer assets."
 
 cat <<EOF
 
@@ -386,5 +363,5 @@ Installer:
   ${HCDR_RELEASE_ROOT:-${RUNTIME_ROOT}/releases/community}/${VERSION}/hypercdr-installer-${VERSION}.tar.gz
 
 Next:
-  Install from the bootstrap package; upgrade through the blue/green release pipeline.
+  Install from deploy/online/install.sh; upgrade through the blue/green release pipeline.
 EOF

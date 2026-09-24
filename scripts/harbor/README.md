@@ -110,7 +110,7 @@ When installing the HyperCDR control plane, set the image registry to the Harbor
 project prefix:
 
 ```bash
-/data/hypercdr/bootstrap/install-platform.sh k8s \
+deploy/online/install.sh k8s \
   --public-base-url http://<node-ip>:30080 \
   --registry <harbor-host>:5001/hypercdr \
   --execute
