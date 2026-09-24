@@ -25906,3 +25906,25 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 .premium-app .hbdr-release-notes-content li small { flex:0 0 auto; padding:1px 4px; border-radius:4px; color:#65768a; background:#e9eef3; font-size:8px; font-weight:850; }
 .premium-app .hbdr-release-notes-empty { padding:40px; border:1px dashed #dbe3ec; border-radius:12px; color:#8795a5; text-align:center; font-size:11px; }
 @media (max-width:640px) { .premium-app .hbdr-release-notes-layer { padding:12px; } .premium-app .hbdr-release-notes-version { flex-direction:column; } .premium-app .hbdr-release-notes-version > div:last-child { text-align:left; } }
+
+/* Design-token bridge for the first Light/Dark component pass. */
+html[data-theme='dark'] .premium-app .premium-sidebar,
+html[data-theme='dark'] .premium-app .premium-header,
+html[data-theme='dark'] .premium-app .premium-content,
+html[data-theme='dark'] .premium-app [class*='bg-white'] { background-color: var(--hc-surface) !important; color: var(--hc-text); }
+html[data-theme='dark'] .premium-app [class*='bg-slate-50'],
+html[data-theme='dark'] .premium-app [class*='bg-slate-100'] { background-color: var(--hc-sunken) !important; }
+html[data-theme='dark'] .premium-app [class*='border-slate-'],
+html[data-theme='dark'] .premium-app [class*='border-gray-'] { border-color: var(--hc-border) !important; }
+html[data-theme='dark'] .premium-app [class*='text-slate-900'],
+html[data-theme='dark'] .premium-app [class*='text-slate-800'],
+html[data-theme='dark'] .premium-app [class*='text-slate-700'] { color: var(--hc-text) !important; }
+html[data-theme='dark'] .premium-app [class*='text-slate-600'],
+html[data-theme='dark'] .premium-app [class*='text-slate-500'] { color: var(--hc-text-2) !important; }
+html[data-theme='dark'] .premium-app [class*='text-slate-400'],
+html[data-theme='dark'] .premium-app [class*='text-slate-300'] { color: var(--hc-text-3) !important; }
+html[data-theme='dark'] .premium-app table thead { background: var(--hc-sunken) !important; color: var(--hc-text-2); }
+html[data-theme='dark'] .premium-app table tbody tr { border-color: var(--hc-border) !important; }
+html[data-theme='dark'] .premium-app input,
+html[data-theme='dark'] .premium-app textarea,
+html[data-theme='dark'] .premium-app select { color: var(--hc-text); background: var(--hc-surface); border-color: var(--hc-border-strong); }
