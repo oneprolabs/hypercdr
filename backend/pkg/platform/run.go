@@ -44,9 +44,9 @@ func Run(options Options) error {
 	if err := postgresStore.ApplyEditionMigrations(migrationCtx, editionMigrations(options.Migrations)); err != nil {
 		return err
 	}
-	ctx, cancelSync := context.WithCancel(context.Background())
-	defer cancelSync()
-	startReleaseCatalogSync(ctx, cfg, postgresStore, logger)
+	// GitHub Releases are the sole release catalog. The former releasecenter
+	// synchronizer is intentionally not started: mixing two catalogs can
+	// overwrite immutable manifest metadata and produce duplicate candidates.
 	if options.DiagnosticSink != nil {
 		postgresStore.SetDiagnosticLogWriter(diagnosticWriterAdapter{sink: options.DiagnosticSink})
 	}
