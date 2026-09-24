@@ -21,13 +21,15 @@ update_job() {
 }
 
 run_once() {
-  local job version id
-  job="$(api "${API_URL}/api/v1/platform/upgrades" | jq -c '[.items[] | select(.status == "queued")] | .[0] // empty')"
+  local job version id release manifest_file
+  job="$(api "${API_URL}/api/v1/platform/upgrades" | jq -c '[.items[] | select(.status == "queued")] | .[0] // empty')" || return 1
   [[ -n "$job" ]] || return 0
   id="$(jq -r .id <<<"$job")"; version="$(jq -r .targetVersion <<<"$job")"
-  release="$(api "${API_URL}/api/v1/platform/releases/$(jq -r .releaseId <<<"$job")")"
-  update_job "$id" running preparing 5
-  mkdir -p "${INSTALL_DIR}/releases/${version}"
+  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ ]] || return 1
+  release="$(api "${API_URL}/api/v1/platform/releases/$(jq -r .releaseId <<<"$job")")" || return 1
+  jq -e --arg version "$version" '(.version == $version) and (.componentManifest | type == "object" and length > 0)' <<<"$release" >/dev/null || return 1
+  update_job "$id" running preparing 5 || return 1
+  mkdir -p "${INSTALL_DIR}/releases/${version}" || return 1
   manifest_file="${INSTALL_DIR}/releases/${version}/release-manifest.json"
   if ! jq -n --arg version "$version" --arg schema "$(jq -r '.databaseSchemaVersion // ""' <<<"$release")" \
       --arg apiImage "$(jq -r .apiImage <<<"$release")" --arg apiDigest "$(jq -r .apiImageDigest <<<"$release")" \
@@ -37,8 +39,8 @@ run_once() {
     update_job "$id" failed failed 100 "upgrade manifest is invalid"
     return 1
   fi
-  mv "${manifest_file}.tmp" "$manifest_file"
-  chmod 0644 "$manifest_file"
+  mv "${manifest_file}.tmp" "$manifest_file" || return 1
+  chmod 0644 "$manifest_file" || return 1
   if HCDR_INSTALL_DIR="$INSTALL_DIR" HCDR_COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yaml" "${INSTALL_DIR}/deploy-blue-green.sh" "$version"; then
     update_job "$id" succeeded completed 100
   else
@@ -47,7 +49,9 @@ run_once() {
   fi
 }
 
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
 while true; do
   run_once || true
   sleep "${HCDR_UPGRADE_RUNNER_INTERVAL:-15}"
 done
+fi
