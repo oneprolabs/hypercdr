@@ -112,7 +112,7 @@ if command -v systemctl >/dev/null 2>&1 && [[ -f /etc/systemd/system/hypercdr-pl
 fi
 
 images=()
-for name in hypercdr-edge hypercdr-platform-frontend-blue hypercdr-platform-frontend-green \
+for name in hypercdr-edge hypercdr-website hypercdr-platform-frontend-blue hypercdr-platform-frontend-green \
   hypercdr-platform-api-blue hypercdr-platform-api-green hypercdr-cluster-registration-executor hypercdr-postgres; do
   image="$(container_image "${name}")"
   if [[ -n "${image}" ]]; then
@@ -126,13 +126,13 @@ if [[ -n "${COMPOSE_FILE}" && -f "${COMPOSE_FILE}" ]]; then
   (
     cd "${compose_dir}"
     compose_args=(--project-name hypercdr -f "${compose_name}")
-    [[ -x "${INSTALL_DIR}/deploy-blue-green.sh" ]] && compose_args+=(--profile blue --profile green)
+    [[ -x "${INSTALL_DIR}/deploy-blue-green.sh" ]] && compose_args+=(--profile blue --profile green --profile website)
     down_args=(down --remove-orphans)
     [[ "${PURGE_DATA}" == "true" ]] && down_args+=(--volumes)
     docker compose "${compose_args[@]}" "${down_args[@]}"
   )
 else
-  docker rm -f hypercdr-edge hypercdr-platform-frontend-blue hypercdr-platform-frontend-green \
+  docker rm -f hypercdr-edge hypercdr-website hypercdr-platform-frontend-blue hypercdr-platform-frontend-green \
     hypercdr-platform-api-blue hypercdr-platform-api-green hypercdr-cluster-registration-executor hypercdr-postgres >/dev/null 2>&1 || true
 fi
 

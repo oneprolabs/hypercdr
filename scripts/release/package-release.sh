@@ -93,6 +93,7 @@ cp "${RELEASE_SCRIPTS_DIR}/install-blue-green.sh" "${package_dir}/install-blue-g
 mkdir -p "${package_dir}/nginx"
 cp "${ROOT_DIR}/docker/nginx/edge.conf" "${package_dir}/nginx/edge.conf"
 cp "${ROOT_DIR}/docker/nginx/upstream.conf.default" "${package_dir}/nginx/upstream.conf.default"
+cp "${ROOT_DIR}/docker/nginx/website.conf" "${package_dir}/nginx/website.conf"
 [[ -s "${RELEASE_MANIFEST}" ]] || { echo "complete release manifest is required: ${RELEASE_MANIFEST}" >&2; exit 1; }
 manifest_version="$(jq -er '.version' "${RELEASE_MANIFEST}")"
 [[ "${manifest_version}" == "${VERSION}" ]] || {
@@ -105,6 +106,7 @@ jq -e '.componentManifest as $m | ["platform-api", "platform-frontend", "cluster
 }
 cp "${RELEASE_MANIFEST}" "${package_dir}/release-manifest.json"
 cp -R "${ROOT_DIR}/charts" "${package_dir}/charts"
+cp -R "${ROOT_DIR}/website" "${package_dir}/website"
 chmod +x "${package_dir}"/*.sh
 
 auth_challenge_mode="${HCDR_AUTH_CHALLENGE_MODE:-turnstile}"

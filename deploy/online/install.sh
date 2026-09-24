@@ -4,6 +4,7 @@ set -euo pipefail
 OWNER_REPO="${HCDR_GITHUB_REPOSITORY:-oneprolabs/hypercdr}"
 VERSION=""
 BASE_URL=""
+INSTALL_WEBSITE=false
 PUBLIC_BASE_URL=""
 REGISTRY="registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr"
 INSTALL_DIR="/var/lib/hypercdr"
@@ -39,6 +40,7 @@ while [[ $# -gt 0 ]]; do
     --version) VERSION="${2:?missing value for --version}"; shift 2 ;;
     --base-url) BASE_URL="${2:?missing value for --base-url}"; shift 2 ;;
     --public-base-url) PUBLIC_BASE_URL="${2:?missing value for --public-base-url}"; shift 2 ;;
+    --install-website) INSTALL_WEBSITE=true; shift ;;
     --registry) REGISTRY="${2:?missing value for --registry}"; shift 2 ;;
     --install-dir) INSTALL_DIR="${2:?missing value for --install-dir}"; shift 2 ;;
     --yes) ASSUME_YES="true"; shift ;;
@@ -97,4 +99,5 @@ domain="${BASE_URL#https://}"
 domain="${domain%%/*}"
 domain="${domain%%:*}"
 args=("$VERSION" --base-url "$BASE_URL" --domain "$domain" --registry "$REGISTRY" --install-dir "$INSTALL_DIR" --execute)
+[[ "$INSTALL_WEBSITE" == true ]] && args+=(--install-website)
 exec "${package_dir}/install-blue-green.sh" "${args[@]}"

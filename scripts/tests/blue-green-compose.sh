@@ -41,6 +41,8 @@ for service in \
 done
 
 ! grep -Fq 'hypercdr-platform-upgrader:' "${rendered}"
+grep -Fq 'hypercdr-website:' "${rendered}"
+grep -Fq 'profiles:' "${rendered}"
 grep -Fq 'profiles:' "${rendered}"
 grep -Fq 'published: "12443"' "${rendered}"
 grep -Fq 'target: 443' "${rendered}"

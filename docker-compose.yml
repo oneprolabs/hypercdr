@@ -14,6 +14,19 @@ services:
       driver: local
       options: { max-size: "50m", max-file: "5" }
 
+  hypercdr-website:
+    image: ${HCDR_EDGE_IMAGE:-registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:nginx-1.27-alpine}
+    container_name: hypercdr-website
+    profiles: [website]
+    ports:
+      - "${HCDR_WEBSITE_PORT:-443}:443"
+    volumes:
+      - ${HCDR_INSTALL_DIR:-/var/lib/hypercdr}/website:/usr/share/nginx/html:ro
+      - ${HCDR_WEBSITE_NGINX_CONFIG_FILE:-./nginx/website.conf}:/etc/nginx/conf.d/default.conf:ro
+      - ${HCDR_TLS_CERT_FILE:-./tls.crt}:/etc/hypercdr/tls/tls.crt:ro
+      - ${HCDR_TLS_KEY_FILE:-./tls.key}:/etc/hypercdr/tls/tls.key:ro
+    restart: unless-stopped
+
   hypercdr-postgres:
     image: ${POSTGRES_IMAGE:?POSTGRES_IMAGE is required}
     container_name: hypercdr-postgres

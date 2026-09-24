@@ -8,6 +8,7 @@ if [[ -r "${SCRIPT_DIR}/scripts/lib/registry-config.sh" ]]; then
   COMPOSE_TEMPLATE="${SCRIPT_DIR}/compose.yaml"
   EDGE_CONFIG="${SCRIPT_DIR}/nginx/edge.conf"
   UPSTREAM_CONFIG="${SCRIPT_DIR}/nginx/upstream.conf.default"
+  WEBSITE_CONFIG="${SCRIPT_DIR}/nginx/website.conf"
   DEPLOY_SCRIPT="${SCRIPT_DIR}/deploy-blue-green.sh"
   START_SCRIPT="${SCRIPT_DIR}/start-platform.sh"
   STOP_SCRIPT="${SCRIPT_DIR}/stop-platform.sh"
@@ -21,6 +22,7 @@ else
   COMPOSE_TEMPLATE="${ROOT_DIR}/docker-compose.yml"
   EDGE_CONFIG="${ROOT_DIR}/docker/nginx/edge.conf"
   UPSTREAM_CONFIG="${ROOT_DIR}/docker/nginx/upstream.conf.default"
+  WEBSITE_CONFIG="${ROOT_DIR}/docker/nginx/website.conf"
   DEPLOY_SCRIPT="${ROOT_DIR}/scripts/release/deploy-blue-green.sh"
   START_SCRIPT="${ROOT_DIR}/scripts/release/start-platform.sh"
   STOP_SCRIPT="${ROOT_DIR}/scripts/release/stop-platform.sh"
@@ -36,6 +38,7 @@ REGISTRY=""
 INSTALL_DIR="/var/lib/hypercdr"
 DOMAIN="hypercdr.com"
 EXECUTE=false
+INSTALL_WEBSITE=false
 LEGACY_MIGRATION=false
 LEGACY_BACKUP_DIR=""
 LEGACY_EDGE_NAME=""
@@ -48,7 +51,7 @@ LEGACY_CONTAINERS=(
 usage() {
   cat <<'USAGE'
 Usage: install-blue-green.sh VERSION --base-url https://hypercdr.com --registry REGISTRY \
-  [--install-dir PATH] [--execute]
+  [--install-dir PATH] [--install-website] [--execute]
 USAGE
 }
 
@@ -59,6 +62,7 @@ while [[ $# -gt 0 ]]; do
     --install-dir) INSTALL_DIR="${2:?missing value for --install-dir}"; shift 2 ;;
     --domain) DOMAIN="${2:?missing value for --domain}"; shift 2 ;;
     --execute) EXECUTE=true; shift ;;
+    --install-website) INSTALL_WEBSITE=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) [[ -z "$VERSION" ]] || { echo "unknown argument: $1" >&2; exit 2; }; VERSION="${1#v}"; shift ;;
   esac
@@ -159,6 +163,11 @@ fi
 install -m 0644 "$COMPOSE_TEMPLATE" "$INSTALL_DIR/docker-compose.yaml"
 install -m 0644 "$EDGE_CONFIG" "$INSTALL_DIR/nginx/conf.d/default.conf"
 install -m 0644 "$UPSTREAM_CONFIG" "$INSTALL_DIR/nginx/conf.d/upstream.conf"
+if [[ -d "${SCRIPT_DIR}/website" && -f "${WEBSITE_CONFIG}" ]]; then
+  mkdir -p "$INSTALL_DIR/website"
+  cp -R "${SCRIPT_DIR}/website/." "$INSTALL_DIR/website/"
+  install -m 0644 "$WEBSITE_CONFIG" "$INSTALL_DIR/nginx/website.conf"
+fi
 install -m 0755 "$DEPLOY_SCRIPT" "$INSTALL_DIR/deploy-blue-green.sh"
 install -m 0644 "$REGISTRY_HELPER" "$INSTALL_DIR/registry-config.sh"
 install -m 0755 "$START_SCRIPT" "$INSTALL_DIR/start-platform.sh"
@@ -207,6 +216,8 @@ HCDR_DATABASE_URL=postgres://hypercdr:${POSTGRES_PASSWORD}@hypercdr-postgres:543
 HCDR_INSTALL_DIR=${INSTALL_DIR}
 HCDR_NGINX_CONFIG_DIR=${INSTALL_DIR}/nginx/conf.d
 HCDR_HTTPS_PORT=12443
+HCDR_INSTALL_WEBSITE=${INSTALL_WEBSITE}
+HCDR_WEBSITE_PORT=443
 HCDR_TLS_CERT_FILE=${INSTALL_DIR}/tls.crt
 HCDR_TLS_KEY_FILE=${INSTALL_DIR}/tls.key
 HCDR_SECRET_KEY=${SECRET_KEY}
@@ -225,6 +236,9 @@ mv "${INSTALL_DIR}/.env.tmp" "${INSTALL_DIR}/.env"
 
 if [[ ! -f "${INSTALL_DIR}/.active_color" ]]; then printf 'blue\n' >"${INSTALL_DIR}/.active_color"; fi
 if [[ "$EXECUTE" == true ]]; then
+  if [[ "$INSTALL_WEBSITE" == true ]] && docker inspect nginx-proxy-manager >/dev/null 2>&1; then
+    docker stop nginx-proxy-manager >/dev/null
+  fi
   if ! HCDR_INSTALL_DIR="$INSTALL_DIR" "$INSTALL_DIR/deploy-blue-green.sh" "$VERSION"; then
     rollback_legacy_migration
     exit 1
