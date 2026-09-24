@@ -78,7 +78,9 @@ jobs:
 
   build-images:
     name: build-images (${{ matrix.image_name }})
-    needs: [prepare-release, test-core]
+    # Image publication and source tests run in parallel. The final publish
+    # job waits for both, so a failed test still prevents a Release.
+    needs: prepare-release
     runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
@@ -186,7 +188,7 @@ jobs:
           overwrite: true
 
   publish:
-    needs: [prepare-release, build-images]
+    needs: [prepare-release, test-core, build-images]
     outputs:
       image_version: ${{ needs.prepare-release.outputs.image_version }}
       release_ref: ${{ needs.prepare-release.outputs.release_ref }}
