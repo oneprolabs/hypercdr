@@ -25945,3 +25945,90 @@ html[data-theme='dark'] .premium-login-card .hbdr-login-eula { color: var(--hc-t
 html[data-theme='dark'] .premium-login .hbdr-login-field { background: var(--hc-sunken); border-color: var(--hc-border-strong); color: var(--hc-text-2); }
 html[data-theme='dark'] .premium-login .hbdr-login-field input { color: var(--hc-text); background: transparent; }
 html[data-theme='dark'] .premium-login .hbdr-login-field input::placeholder { color: var(--hc-text-3); }
+
+/* Workspace page treatment: compact, token-driven surfaces shared by list pages. */
+.premium-app.hbdr-workspace .premium-content {
+  background: var(--hc-bg) !important;
+  color: var(--hc-text);
+}
+.premium-app.hbdr-workspace .hbdr-page-hero {
+  min-height: 64px;
+  margin-bottom: 18px;
+}
+.premium-app.hbdr-workspace .hbdr-page-hero h3 {
+  color: var(--hc-text) !important;
+  font-size: 16px !important;
+  font-weight: 750 !important;
+  letter-spacing: .01em !important;
+  text-transform: none;
+}
+.premium-app.hbdr-workspace .hbdr-page-hero p {
+  color: var(--hc-text-2) !important;
+}
+.premium-app.hbdr-workspace .hbdr-page-hero .flex.h-10.w-10 {
+  border-color: var(--hc-border) !important;
+  background: color-mix(in srgb, var(--hc-accent) 10%, var(--hc-surface)) !important;
+  color: var(--hc-accent) !important;
+}
+.premium-app.hbdr-workspace .hbdr-dr-table-card {
+  overflow: hidden;
+  border: 1px solid var(--hc-border);
+  border-radius: 6px;
+  background: var(--hc-surface);
+  box-shadow: 0 4px 14px rgb(27 38 55 / 4%);
+}
+.premium-app.hbdr-workspace .hbdr-dr-table-head {
+  border-bottom: 1px solid var(--hc-border);
+  background: var(--hc-surface);
+}
+.premium-app.hbdr-workspace .hbdr-dr-toolbar {
+  min-height: 58px;
+  padding: 10px 14px;
+  gap: 12px;
+}
+.premium-app.hbdr-workspace .hbdr-dr-action-primary {
+  min-height: 30px;
+  border-radius: 4px;
+  background: var(--hc-accent);
+  box-shadow: none;
+  font-size: 11px;
+  font-weight: 750;
+}
+.premium-app.hbdr-workspace .hbdr-dr-more,
+.premium-app.hbdr-workspace .hbdr-dr-toolbar button {
+  border-radius: 4px;
+}
+.premium-app.hbdr-workspace .hbdr-dr-table-card table thead th {
+  height: 40px;
+  background: var(--hc-sunken);
+  color: var(--hc-text-2);
+  border-bottom-color: var(--hc-border);
+  font-size: 10px;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.premium-app.hbdr-workspace .hbdr-dr-table-card table tbody tr {
+  min-height: 44px;
+  border-bottom-color: var(--hc-border);
+  background: var(--hc-surface);
+}
+.premium-app.hbdr-workspace .hbdr-dr-table-card table tbody tr:hover,
+.premium-app.hbdr-workspace .hbdr-dr-table-card table tbody tr.hbdr-dr-row-selected {
+  background: color-mix(in srgb, var(--hc-accent) 5%, var(--hc-surface));
+}
+.premium-app.hbdr-workspace .hbdr-dr-table-card table tbody td {
+  color: var(--hc-text-2);
+  font-size: 11px;
+}
+
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dr-table-card,
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dr-table-head {
+  box-shadow: none;
+}
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dr-table-card table tbody tr:hover,
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dr-table-card table tbody tr.hbdr-dr-row-selected {
+  background: color-mix(in srgb, var(--hc-accent) 10%, var(--hc-surface));
+}
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dr-action-primary {
+  color: #fff;
+}
