@@ -194,7 +194,7 @@ Run this from the **newly extracted package**, not an old installation directory
   --base-url https://hypercdr.example.com \
   --image-tag 1.0.23.20260915 \
   --install-dir /var/lib/hypercdr \
-  --registry crpi-tne0uo16mzanbvpi.cn-zhangjiakou.personal.cr.aliyuncs.com/hypercdr
+  --registry registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr
 ```
 
 Replace the tag with the exact version in the new package's manifest, keep the

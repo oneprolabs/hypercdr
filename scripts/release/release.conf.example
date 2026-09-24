@@ -12,9 +12,9 @@ HCDR_REGISTRY_CONFIG=/data/hypercdr-main/config/registries.conf
 # Name of the profile in HCDR_REGISTRY_CONFIG to use for this release.
 HCDR_ACTIVE_REGISTRY=aliyun_acr
 # Complete image namespace prefix. It is resolved from the active profile.
-HCDR_IMAGE_REGISTRY=crpi-tne0uo16mzanbvpi.cn-zhangjiakou.personal.cr.aliyuncs.com/hypercdr
+HCDR_IMAGE_REGISTRY=registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr
 # Registry host used by docker login (host[:port], without repository path).
-HCDR_REGISTRY_SERVER=crpi-tne0uo16mzanbvpi.cn-zhangjiakou.personal.cr.aliyuncs.com
+HCDR_REGISTRY_SERVER=registry.cn-beijing.aliyuncs.com
 # Optional registry username; leave empty when Docker credentials are preconfigured.
 HCDR_REGISTRY_USERNAME=
 # Optional file containing the registry password; never commit this file.
