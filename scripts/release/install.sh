@@ -75,8 +75,6 @@ export HCDR_AUTH_CHALLENGE_MODE
 export HCDR_TURNSTILE_SITE_KEY
 export HCDR_TURNSTILE_SECRET_KEY
 export HCDR_TURNSTILE_VERIFY_URL
-export HCDR_PROXY_NETWORK
-export HCDR_NPM_UPSTREAM_READY
 
 if [[ "${HCDR_BASE_URL}" == *"hypercdr.example.com"* ]]; then
   echo "Supply the public HTTPS URL or edit install-config.sh before installation" >&2

@@ -1,14 +1,9 @@
 # Local Package Installation and Upgrade
 
-The packaged blue/green deployment expects Nginx Proxy Manager (NPM) to terminate
-public HTTPS and forward via HTTPS to the existing server address on port
-`12443`. The HyperCDR edge listens on container port `443`, published as host
-port `12443`; it then proxies to the API and frontend over private Docker
-networks using HTTP. Set `HCDR_PROXY_NETWORK` in `install-config.sh` to the
-existing NPM Docker network name. Do not expose HyperCDR ports `80` or `443`, or
-the frontend/API ports, on the host. `--base-url` is the public address used by
-the platform and agents; an HTTPS URL without an explicit port uses standard
-public port `443`.
+The packaged blue/green deployment provides HTTPS directly through HyperCDR edge
+on host port 12443. Compose creates the platform networks; no Nginx Proxy Manager
+installation, external network, or readiness flag is required. An external proxy
+may optionally forward to this HTTPS port. It is managed separately.
 
 ## Scope
 
@@ -62,11 +57,8 @@ temporarily unavailable. Before starting:
 - Ensure Docker is running, the host has sufficient free disk space (the
   installer requires at least 10 GiB and recommends 100 GiB), and registry DNS,
   network connectivity, and certificate trust work.
-- Keep the NPM Proxy Host forwarding via HTTPS to the server on port 12443, and
-  set `HCDR_NPM_UPSTREAM_READY=true` only after confirming that route. NPM owns
-  public ports 80/443; HyperCDR publishes only host port 12443 to edge TLS.
-  If the registry requires credentials, run `docker login REGISTRY_HOST` on
-  this host first.
+- Allow access to the edge HTTPS port. If the registry requires credentials,
+  run `docker login REGISTRY_HOST` on this host first.
 - Enable Docker at boot when automatic recovery after a host restart is needed.
 
 ```bash

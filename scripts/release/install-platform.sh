@@ -509,8 +509,6 @@ run_docker() {
   local tls_enabled="false"
   local installed_registry_ca_file="${install_dir}/certs/registry-ca.crt"
   local target_compose_file="${install_dir}/docker-compose.yaml"
-  local existing_proxy_network="" existing_npm_ready=""
-  local proxy_network="${HCDR_PROXY_NETWORK:-}" npm_upstream_ready="${HCDR_NPM_UPSTREAM_READY:-}"
   local postgres_password=""
   local installed_secret_key=""
   local release_token=""
@@ -521,8 +519,6 @@ run_docker() {
         HCDR_POSTGRES_PASSWORD) postgres_password="${value}" ;;
         HCDR_SECRET_KEY) installed_secret_key="${value}" ;;
         HCDR_REGISTRATION_EXECUTOR_TOKEN) registration_executor_token="${value}" ;;
-        HCDR_PROXY_NETWORK) existing_proxy_network="${value}" ;;
-        HCDR_NPM_UPSTREAM_READY) existing_npm_ready="${value}" ;;
       esac
     done < "${install_dir}/.env"
     # Compatibility with installations created before the password setting was
@@ -557,8 +553,6 @@ run_docker() {
   if [[ "${secret_key}" == "dev-secret-change-me" ]] && command -v openssl >/dev/null 2>&1; then
     secret_key="$(openssl rand -hex 32)"
   fi
-  proxy_network="${proxy_network:-${existing_proxy_network:-nginx-proxy-manager_default}}"
-  npm_upstream_ready="${npm_upstream_ready:-${existing_npm_ready:-false}}"
   if [[ "$base_url" != https://* ]]; then
     echo "Docker Compose deployment requires an https:// public base URL" >&2
     exit 2
@@ -582,7 +576,6 @@ run_docker() {
  Release          ${image_tag}
  Install directory   ${install_dir}
  HTTPS termination  Outer reverse proxy
- Proxy network      ${proxy_network}
 
  Planned stages
    1. Validate host and registry
@@ -683,8 +676,6 @@ HCDR_POSTGRES_PASSWORD=${postgres_password}
 HCDR_DATABASE_URL=postgres://hypercdr:${postgres_password}@hypercdr-postgres:5432/hypercdr?sslmode=disable
 HCDR_INSTALL_DIR=${install_dir}
 HCDR_DOMAIN=${public_host}
-HCDR_PROXY_NETWORK=${proxy_network}
-HCDR_NPM_UPSTREAM_READY=${npm_upstream_ready}
 HCDR_NGINX_CONFIG_DIR=${install_dir}/nginx/conf.d
 HCDR_HTTPS_PORT=12443
 HCDR_TLS_CERT_FILE=${install_dir}/tls.crt

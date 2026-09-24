@@ -13,7 +13,6 @@ HCDR_IMAGE_REGISTRY=registry.example/hypercdr
 HCDR_RELEASE_TOKEN=test-release-token
 HCDR_REGISTRATION_EXECUTOR_TOKEN=test-registration-token
 HCDR_DOMAIN=hypercdr.com
-HCDR_PROXY_NETWORK=nginx-proxy-manager_default
 HCDR_TLS_DIR=/tmp/tls
 HCDR_HTTPS_PORT=12443
 HCDR_INSTALL_DIR=/srv/hypercdr-custom
@@ -53,8 +52,6 @@ grep -Fq 'hypercdr-platform-api-blue:18080' "${ROOT_DIR}/docker/nginx/upstream.c
 grep -Fq 'resolver 127.0.0.11 valid=10s' "${ROOT_DIR}/docker/nginx/edge.conf"
 grep -Fq 'proxy_pass http://$hypercdr_api_active' "${ROOT_DIR}/docker/nginx/edge.conf"
 grep -Fq 'proxy_pass http://$hypercdr_frontend_active' "${ROOT_DIR}/docker/nginx/edge.conf"
-grep -Fq 'external: true' "${ROOT_DIR}/docker-compose.yml"
-grep -Fq 'name: ${HCDR_PROXY_NETWORK:-nginx-proxy-manager_default}' "${ROOT_DIR}/docker-compose.yml"
 grep -Fq 'listen 443 ssl default_server;' "${ROOT_DIR}/docker/nginx/edge.conf"
 grep -Fq 'ssl_certificate /etc/hypercdr/tls/tls.crt;' "${ROOT_DIR}/docker/nginx/edge.conf"
 jq -e '.services["hypercdr-platform-api-blue"].networks | has("hypercdr-egress")' "${RUNTIME_DIR}/compose.json" >/dev/null
@@ -72,3 +69,5 @@ done
 grep -Fxq 'HCDR_RELEASE_MANIFEST_PATH=/deploy/current-release.json' "${ROOT_DIR}/scripts/release/install-blue-green.sh"
 
 echo "blue-green compose contract passed"
+
+! grep -Eq "external: true|nginx-proxy-manager|HCDR_NPM_UPSTREAM_READY" "${ROOT_DIR}/docker-compose.yml"

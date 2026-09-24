@@ -162,8 +162,7 @@ services:
 
 networks:
   hypercdr-proxy:
-    external: true
-    name: ${HCDR_PROXY_NETWORK:-nginx-proxy-manager_default}
+    driver: bridge
   hypercdr-data:
     internal: true
   hypercdr-egress:

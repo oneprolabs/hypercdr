@@ -113,22 +113,13 @@ extracted package or source tree. The installation command still accepts
 
 For the production blue/green Compose topology used by GitHub Actions, read
 [Blue/Green Deployment](../../docs/deployment/blue-green-deployment.zh.md).
-That topology uses GitHub Actions as the sole platform deployment controller
-and is separate from the development Compose stack.
-
-NPM owns public ports 80/443 and the browser-facing certificate. It forwards via
-HTTPS to the server's internal address on port 12443; the edge maps host port
-12443 to container port 443 and uses a local origin certificate. The edge then
-forwards to the blue/green API and frontend over HTTP on private Docker networks.
-The API containers also join a dedicated outbound bridge network so server-side
-Cloudflare Turnstile verification can reach `challenges.cloudflare.com`; the
-frontend, database, and registration executor do not join that network.
-Do not publish HyperCDR ports 80/443 or the API/frontend ports on the host.
-Attach HyperCDR to NPM's Docker network by setting `HCDR_PROXY_NETWORK` (default
-`nginx-proxy-manager_default`). Before upgrading, keep the existing NPM target
-and confirm it reaches the server on HTTPS port 12443. The deployment script
-refuses to recreate the edge until `HCDR_NPM_UPSTREAM_READY=true` is present in
-the server `.env`.
+GitHub Actions publishes releases; installation and upgrades are explicitly triggered.
+HyperCDR edge provides HTTPS directly on host port 12443 and routes requests to
+blue/green API and frontend containers on private networks. Compose manages its
+own edge bridge network. No external proxy or shared proxy network is required.
+API containers retain their outbound network for Cloudflare verification.
+An optional external reverse proxy can forward to the host HTTPS port; HyperCDR
+never installs, configures, or removes that proxy.
 
 For detailed local-package prerequisites, installation, upgrade commands,
 configuration-preservation limitations, backup examples, and verification, read

@@ -30,7 +30,6 @@ render_upstream green "${RUNTIME_DIR}/upstream.conf"
 grep -Fq 'map $host $hypercdr_api_active { default hypercdr-platform-api-green:18080; }' "${RUNTIME_DIR}/upstream.conf"
 grep -Fq 'map $host $hypercdr_frontend_active { default hypercdr-platform-frontend-green:80; }' "${RUNTIME_DIR}/upstream.conf"
 grep -Fq 'wait_for_http "hypercdr-platform-frontend-${color}" 80 /' "${ROOT_DIR}/scripts/release/deploy-blue-green.sh"
-grep -Fq 'docker network inspect "$network"' "${ROOT_DIR}/scripts/release/deploy-blue-green.sh"
 grep -Fq 'ensure_edge_tls' "${ROOT_DIR}/scripts/release/deploy-blue-green.sh"
 grep -Fq 'HCDR_HTTPS_PORT:-12443' "${ROOT_DIR}/docker-compose.yml"
 grep -Fq 'https://127.0.0.1/readyz' "${ROOT_DIR}/scripts/release/deploy-blue-green.sh"
@@ -77,8 +76,6 @@ HCDR_POSTGRES_PASSWORD=test-password
 HCDR_DATABASE_URL=postgres://hypercdr:test-password@hypercdr-postgres:5432/hypercdr?sslmode=disable
 HCDR_RELEASE_TOKEN=test-release-token
 HCDR_REGISTRATION_EXECUTOR_TOKEN=test-registration-token
-HCDR_PROXY_NETWORK=nginx-proxy-manager_default
-HCDR_NPM_UPSTREAM_READY=true
 PLATFORM_API_BLUE_IMAGE=registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:platform-api-1.0.32.20260915
 PLATFORM_FRONTEND_BLUE_IMAGE=registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:platform-frontend-1.0.32.20260915
 PLATFORM_API_GREEN_IMAGE=registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:platform-api-1.0.32.20260915
@@ -86,15 +83,6 @@ PLATFORM_FRONTEND_GREEN_IMAGE=registry.cn-beijing.aliyuncs.com/oneprolabs/hyperc
 REGISTRATION_EXECUTOR_IMAGE=registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:cluster-registration-executor-1.0.32.20260915
 EOF
 touch "${RUNTIME_DIR}/docker-compose.yaml"
-HCDR_INSTALL_DIR="${RUNTIME_DIR}" \
-HCDR_COMPOSE_FILE="${RUNTIME_DIR}/docker-compose.yaml" \
-HCDR_NPM_UPSTREAM_READY=true \
-PATH="${FAKE_BIN}:${PATH}" \
-  check_proxy_network
-if (HCDR_NPM_UPSTREAM_READY=false; check_proxy_network); then
-  echo "deployment did not require Nginx Proxy Manager readiness" >&2
-  exit 1
-fi
 HCDR_INSTALL_DIR="${RUNTIME_DIR}" \
 HCDR_COMPOSE_FILE="${RUNTIME_DIR}/docker-compose.yaml" \
 HCDR_DOMAIN=hypercdr.com \

@@ -82,14 +82,6 @@ compose() {
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --project-name hypercdr "$@"
 }
 
-check_proxy_network() {
-  local network="${HCDR_PROXY_NETWORK:-nginx-proxy-manager_default}"
-  [[ "${HCDR_NPM_UPSTREAM_READY:-false}" == true ]] ||
-    die "confirm Nginx Proxy Manager forwards via HTTPS to the server on port 12443, then set HCDR_NPM_UPSTREAM_READY=true in ${ENV_FILE}"
-  docker network inspect "$network" >/dev/null 2>&1 ||
-    die "shared Nginx Proxy Manager network does not exist: ${network}; set HCDR_PROXY_NETWORK to its exact Docker network name"
-}
-
 ensure_edge_tls() {
   local cert="${HCDR_TLS_CERT_FILE:-${INSTALL_DIR}/tls.crt}"
   local key="${HCDR_TLS_KEY_FILE:-${INSTALL_DIR}/tls.key}"
@@ -247,7 +239,6 @@ rollback_color() {
 
 start_current() {
   validate_runtime
-  check_proxy_network
   ensure_edge_tls
   local current
   current="$(read_active_color)"
@@ -292,7 +283,6 @@ deploy_version() {
   set_env_value "$ENV_FILE" HCDR_IMAGE_TAG "$version"
   load_runtime_env
 
-  check_proxy_network
   ensure_edge_tls
   compose up -d hypercdr-postgres hypercdr-edge
   compose pull "hypercdr-platform-api-${candidate}" "hypercdr-platform-frontend-${candidate}"
