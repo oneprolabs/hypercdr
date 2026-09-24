@@ -26097,3 +26097,34 @@ html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-clusters-card-region,
 html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-stage-panel {
   box-shadow: none;
 }
+
+.premium-app.hbdr-workspace .hbdr-task-ledger-table,
+.premium-app.hbdr-workspace .hbdr-restore-point-table-list {
+  border-color: var(--hc-border);
+  background: var(--hc-surface);
+}
+.premium-app.hbdr-workspace .hbdr-task-ledger-table .hbdr-dr-table-head,
+.premium-app.hbdr-workspace .hbdr-restore-point-table-list .hbdr-dr-table-head {
+  border-bottom-color: var(--hc-border);
+}
+.premium-app.hbdr-workspace .hbdr-task-ledger-table .hbdr-dr-toolbar,
+.premium-app.hbdr-workspace .hbdr-restore-point-table-list .hbdr-dr-toolbar {
+  background: var(--hc-surface);
+}
+.premium-app.hbdr-workspace .hbdr-task-ledger-table .hbdr-dr-task-ok { color: var(--hc-ok); }
+.premium-app.hbdr-workspace .hbdr-task-ledger-table .hbdr-dr-task-warn { color: var(--hc-warn); }
+.premium-app.hbdr-workspace .hbdr-task-ledger-table .hbdr-dr-task-fail { color: var(--hc-crit); }
+.premium-app.hbdr-workspace .hbdr-page-hero + .hbdr-dr-table-card,
+.premium-app.hbdr-workspace .hbdr-page-hero + .hbdr-section-card { margin-top: 0; }
+.premium-app.hbdr-workspace .hbdr-dr-table-card > .hbdr-dr-table-head > div > h3,
+.premium-app.hbdr-workspace .hbdr-section-card > .hbdr-section-toolbar h3 {
+  color: var(--hc-text);
+}
+.premium-app.hbdr-workspace .hbdr-dr-table-card > .hbdr-dr-table-head > div > p,
+.premium-app.hbdr-workspace .hbdr-section-card > .hbdr-section-toolbar p {
+  color: var(--hc-text-2);
+}
+.premium-app.hbdr-workspace .hbdr-dr-table-card .bg-slate-50\/60 {
+  border-color: var(--hc-border) !important;
+  background: var(--hc-sunken) !important;
+}
