@@ -25,13 +25,14 @@ run_once() {
   job="$(api "${API_URL}/api/v1/platform/upgrades" | jq -c '[.items[] | select(.status == "queued")] | .[0] // empty')"
   [[ -n "$job" ]] || return 0
   id="$(jq -r .id <<<"$job")"; version="$(jq -r .targetVersion <<<"$job")"
+  release="$(api "${API_URL}/api/v1/platform/releases/$(jq -r .releaseId <<<"$job")")"
   update_job "$id" running preparing 5
   mkdir -p "${INSTALL_DIR}/releases/${version}"
   manifest_file="${INSTALL_DIR}/releases/${version}/release-manifest.json"
-  if ! jq -n --arg version "$version" --arg schema "$(jq -r '.databaseSchemaVersion // ""' <<<"$job")" \
-      --arg apiImage "$(jq -r .apiImage <<<"$job")" --arg apiDigest "$(jq -r .apiImageDigest <<<"$job")" \
-      --arg frontendImage "$(jq -r .frontendImage <<<"$job")" --arg frontendDigest "$(jq -r .frontendImageDigest <<<"$job")" \
-      --argjson components "$(jq -c '.componentManifest // {}' <<<"$job")" \
+  if ! jq -n --arg version "$version" --arg schema "$(jq -r '.databaseSchemaVersion // ""' <<<"$release")" \
+      --arg apiImage "$(jq -r .apiImage <<<"$release")" --arg apiDigest "$(jq -r .apiImageDigest <<<"$release")" \
+      --arg frontendImage "$(jq -r .frontendImage <<<"$release")" --arg frontendDigest "$(jq -r .frontendImageDigest <<<"$release")" \
+      --argjson components "$(jq -c '.componentManifest // {}' <<<"$release")" \
       '{version:$version,databaseSchemaVersion:$schema,apiImage:$apiImage,apiImageDigest:$apiDigest,frontendImage:$frontendImage,frontendImageDigest:$frontendDigest,componentManifest:$components}' > "${manifest_file}.tmp"; then
     update_job "$id" failed failed 100 "upgrade manifest is invalid"
     return 1

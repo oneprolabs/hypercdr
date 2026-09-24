@@ -7,6 +7,7 @@ func (r *Router) mountPlatformRoutes() {
 	r.mux.HandleFunc("GET /readyz", r.readyz)
 	r.mux.HandleFunc("GET /api/v1/platform/version", r.platformVersion)
 	r.mux.HandleFunc("GET /api/v1/platform/releases", r.listPlatformReleases)
+	r.mux.HandleFunc("GET /api/v1/platform/releases/{id}", r.getPlatformRelease)
 	r.mux.HandleFunc("GET /api/v1/platform/available-releases", r.listAvailableReleases)
 	r.mux.HandleFunc("POST /api/v1/platform/releases", r.createPlatformRelease)
 	r.mux.HandleFunc("GET /api/v1/platform/upgrades", r.listPlatformUpgrades)

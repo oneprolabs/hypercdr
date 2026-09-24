@@ -44,6 +44,21 @@ func (r *Router) listPlatformReleases(w http.ResponseWriter, req *http.Request) 
 	writeJSON(w, 200, map[string]any{"items": nonNilSlice(items)})
 }
 
+func (r *Router) getPlatformRelease(w http.ResponseWriter, req *http.Request) {
+	items, err := r.store.ListPlatformReleases()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_platform_releases_failed"})
+		return
+	}
+	for _, item := range items {
+		if item.ID == req.PathValue("id") {
+			writeJSON(w, http.StatusOK, item)
+			return
+		}
+	}
+	writeJSON(w, http.StatusNotFound, map[string]any{"error": "release_not_found"})
+}
+
 var requiredReleaseComponents = []string{
 	"platform-api", "platform-frontend", "cluster-registration-executor",
 	"comm-agent", "velero", "velero-plugin-for-aws", "velero-plugin-for-microsoft-azure", "velero-plugin-for-gcp",
