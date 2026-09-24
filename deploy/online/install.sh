@@ -16,8 +16,7 @@ usage() {
 HyperCDR online installer
 
 Usage:
-  curl -fsSL https://raw.githubusercontent.com/oneprolabs/hypercdr/main/deploy/online/install.sh \
-    | sudo bash -s -- --base-url https://HOST:12443 [options]
+  curl -fsSL https://raw.githubusercontent.com/oneprolabs/hypercdr/main/deploy/online/install.sh | sudo bash -s -- --base-url https://HOST:12443 [options]
 
 Options:
   --version VERSION          GitHub Release version; default: latest
