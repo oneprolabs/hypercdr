@@ -26176,3 +26176,75 @@ html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-section-card .border-s
 html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-section-card .border-slate-200 {
   border-color: var(--hc-border) !important;
 }
+
+/* Dashboard reference canvas: 1440px design spacing and compact controls. */
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 18px 20px 20px;
+  gap: 16px;
+  background: var(--hc-bg);
+  color: var(--hc-text);
+  font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-design-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 34px;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-design-header h1 {
+  margin: 0;
+  color: var(--hc-text);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -.022em;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-design-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-design-range,
+.premium-app.hbdr-workspace .hbdr-dashboard-design-cluster {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  border: 1px solid var(--hc-border);
+  border-radius: 4px;
+  background: var(--hc-surface);
+  box-shadow: var(--hc-shadow, 0 1px 2px rgb(0 0 0 / 8%));
+  color: var(--hc-text-2);
+  font-size: 12px;
+  font-weight: 500;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-design-range {
+  gap: 6px;
+  padding: 0 10px;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-design-cluster {
+  min-width: 250px;
+  overflow: hidden;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-design-cluster .hbdr-cluster-context {
+  width: 100%;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-cluster {
+  border-radius: 6px;
+}
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-range,
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-cluster {
+  box-shadow: var(--hc-shadow);
+}
+@media (max-width: 760px) {
+  .premium-app.hbdr-workspace .hbdr-dashboard-design-header { align-items: flex-start; flex-direction: column; }
+  .premium-app.hbdr-workspace .hbdr-dashboard-design-controls { width: 100%; }
+  .premium-app.hbdr-workspace .hbdr-dashboard-design-cluster { flex: 1; min-width: 0; }
+}

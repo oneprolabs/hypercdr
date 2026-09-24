@@ -114,15 +114,22 @@ export function OverviewPage(props: {
   const drSiteSubtitle = targetClusterNames.length > 1 ? 'Target Clusters' : 'Target Cluster';
 
   return (
-    <div className="hbdr-dashboard hbdr-dashboard-zones">
+    <div className="hbdr-dashboard hbdr-dashboard-zones hbdr-dashboard-design-canvas">
+      <div className="hbdr-dashboard-design-header">
+        <h1>Overview</h1>
+        <div className="hbdr-dashboard-design-controls">
+          <button type="button" className="hbdr-dashboard-design-range">Last 24 hours <ChevronDown size={13} /></button>
+          <div className="hbdr-dashboard-design-cluster">{clusterContext}</div>
+        </div>
+      </div>
       <div className="hbdr-dashboard-upper">
       <section className="hbdr-dashboard-workspace hbdr-dashboard-zone hbdr-dashboard-zone-cluster">
         <header className="hbdr-dashboard-zone-head">
           <div className="hbdr-dashboard-zone-label">
             <span className="hbdr-dashboard-zone-dot hbdr-dashboard-zone-dot-cluster" aria-hidden="true" />
             <div>
-              <h2>Cluster DR</h2>
-              <p>Updates when you switch the active cluster</p>
+              <h2>Protection health</h2>
+              <p>{totalApps} namespaces</p>
             </div>
           </div>
           <div className="hbdr-dashboard-zone-cluster-picker">{clusterContext}</div>
