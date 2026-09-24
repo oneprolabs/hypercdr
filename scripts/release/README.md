@@ -77,8 +77,6 @@ release-all.sh
 └── package-release.sh
     └── hypercdr-installer-<version>.tar.gz
 
-publish-package.sh
-└── verifies and distributes the installer already produced by release-all.sh
 ```
 
 
