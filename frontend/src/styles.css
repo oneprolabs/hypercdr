@@ -26128,3 +26128,51 @@ html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-stage-panel {
   border-color: var(--hc-border) !important;
   background: var(--hc-sunken) !important;
 }
+
+/* Settings and upgrade pages share the same section rhythm as resource lists. */
+.premium-app.hbdr-workspace .hbdr-section-card {
+  border-color: var(--hc-border);
+  border-radius: 6px;
+  background: var(--hc-surface);
+  box-shadow: 0 4px 14px rgb(27 38 55 / 4%);
+}
+.premium-app.hbdr-workspace .hbdr-section-toolbar {
+  min-height: 56px;
+  padding: 10px 14px;
+  border-bottom-color: var(--hc-border);
+}
+.premium-app.hbdr-workspace .hbdr-section-toolbar h3 {
+  font-size: 12px;
+  font-weight: 750;
+}
+.premium-app.hbdr-workspace .hbdr-section-card input,
+.premium-app.hbdr-workspace .hbdr-section-card select,
+.premium-app.hbdr-workspace .hbdr-section-card textarea {
+  border-color: var(--hc-border);
+  border-radius: 4px;
+  background: var(--hc-surface);
+  color: var(--hc-text);
+}
+.premium-app.hbdr-workspace .hbdr-section-card input:focus,
+.premium-app.hbdr-workspace .hbdr-section-card select:focus,
+.premium-app.hbdr-workspace .hbdr-section-card textarea:focus {
+  border-color: var(--hc-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--hc-accent) 18%, transparent);
+}
+.premium-app.hbdr-workspace .hbdr-section-card .divide-y > * {
+  border-color: var(--hc-border);
+}
+.premium-app.hbdr-workspace .hbdr-section-card .bg-white {
+  background: var(--hc-surface) !important;
+}
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-section-card {
+  box-shadow: none;
+}
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-section-card .bg-slate-50,
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-section-card .bg-slate-100 {
+  background: var(--hc-sunken) !important;
+}
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-section-card .border-slate-100,
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-section-card .border-slate-200 {
+  border-color: var(--hc-border) !important;
+}
