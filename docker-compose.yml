@@ -19,7 +19,7 @@ services:
     container_name: hypercdr-website
     profiles: [website]
     ports:
-      - "${HCDR_WEBSITE_PORT:-443}:443"
+      - "${HCDR_WEBSITE_PORT:-12445}:443"
     volumes:
       - ${HCDR_INSTALL_DIR:-/var/lib/hypercdr}/website:/usr/share/nginx/html:ro
       - ${HCDR_WEBSITE_NGINX_CONFIG_FILE:-./nginx/website.conf}:/etc/nginx/conf.d/default.conf:ro
