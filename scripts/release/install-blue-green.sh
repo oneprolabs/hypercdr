@@ -14,6 +14,7 @@ if [[ -r "${SCRIPT_DIR}/scripts/lib/registry-config.sh" ]]; then
   RESTART_SCRIPT="${SCRIPT_DIR}/restart-platform.sh"
   SERVICE_TEMPLATE="${SCRIPT_DIR}/templates/hypercdr.service"
   UPGRADE_RUNNER_TEMPLATE="${SCRIPT_DIR}/templates/hypercdr-upgrade-runner.service"
+  UPGRADE_RUNNER_SCRIPT="${SCRIPT_DIR}/platform-upgrade-runner.sh"
 else
   ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
   REGISTRY_HELPER="${ROOT_DIR}/scripts/lib/registry-config.sh"
@@ -26,6 +27,7 @@ else
   RESTART_SCRIPT="${ROOT_DIR}/scripts/release/restart-platform.sh"
   SERVICE_TEMPLATE="${ROOT_DIR}/scripts/release/templates/hypercdr.service"
   UPGRADE_RUNNER_TEMPLATE="${ROOT_DIR}/scripts/release/templates/hypercdr-upgrade-runner.service"
+  UPGRADE_RUNNER_SCRIPT="${ROOT_DIR}/scripts/release/platform-upgrade-runner.sh"
 fi
 source "$REGISTRY_HELPER"
 VERSION=""
@@ -163,7 +165,7 @@ install -m 0755 "$START_SCRIPT" "$INSTALL_DIR/start-platform.sh"
 install -m 0755 "$STOP_SCRIPT" "$INSTALL_DIR/stop-platform.sh"
 install -m 0755 "$RESTART_SCRIPT" "$INSTALL_DIR/restart-platform.sh"
 install -m 0644 "$SERVICE_TEMPLATE" "$INSTALL_DIR/hypercdr.service.template"
-install -m 0755 "${ROOT_DIR}/scripts/release/platform-upgrade-runner.sh" "$INSTALL_DIR/platform-upgrade-runner.sh"
+install -m 0755 "$UPGRADE_RUNNER_SCRIPT" "$INSTALL_DIR/platform-upgrade-runner.sh"
 install -m 0644 "$UPGRADE_RUNNER_TEMPLATE" "$INSTALL_DIR/hypercdr-upgrade-runner.service.template"
 # Keep the package manifest in the installation directory. The API uses this
 # immutable, environment-local file as the cluster component source.

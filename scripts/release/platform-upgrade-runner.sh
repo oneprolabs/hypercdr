@@ -26,10 +26,18 @@ run_once() {
   [[ -n "$job" ]] || return 0
   id="$(jq -r .id <<<"$job")"; version="$(jq -r .targetVersion <<<"$job")"
   update_job "$id" running preparing 5
-  if [[ ! -s "${INSTALL_DIR}/releases/${version}/release-manifest.json" ]]; then
-    update_job "$id" failed failed 100 "release manifest is missing for ${version}"
+  mkdir -p "${INSTALL_DIR}/releases/${version}"
+  manifest_file="${INSTALL_DIR}/releases/${version}/release-manifest.json"
+  if ! jq -n --arg version "$version" --arg schema "$(jq -r '.databaseSchemaVersion // ""' <<<"$job")" \
+      --arg apiImage "$(jq -r .apiImage <<<"$job")" --arg apiDigest "$(jq -r .apiImageDigest <<<"$job")" \
+      --arg frontendImage "$(jq -r .frontendImage <<<"$job")" --arg frontendDigest "$(jq -r .frontendImageDigest <<<"$job")" \
+      --argjson components "$(jq -c '.componentManifest // {}' <<<"$job")" \
+      '{version:$version,databaseSchemaVersion:$schema,apiImage:$apiImage,apiImageDigest:$apiDigest,frontendImage:$frontendImage,frontendImageDigest:$frontendDigest,componentManifest:$components}' > "${manifest_file}.tmp"; then
+    update_job "$id" failed failed 100 "upgrade manifest is invalid"
     return 1
   fi
+  mv "${manifest_file}.tmp" "$manifest_file"
+  chmod 0644 "$manifest_file"
   if HCDR_INSTALL_DIR="$INSTALL_DIR" HCDR_COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yaml" "${INSTALL_DIR}/deploy-blue-green.sh" "$version"; then
     update_job "$id" succeeded completed 100
   else
