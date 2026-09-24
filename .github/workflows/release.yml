@@ -7,7 +7,9 @@ on:
       version: {description: 'Release version in MAJOR.MINOR.PATCH.YYYYMMDD format', required: true}
       registry_profile: {description: 'Profile from config/registries.conf', required: true, default: aliyun_acr}
       deploy: {description: 'Deploy the published version to the configured environment', required: true, default: false, type: boolean}
-concurrency: {group: hypercdr-release, cancel-in-progress: false}
+# A newer immutable release supersedes an older queued build. Keeping the
+# newest tag moving prevents a slow dependency mirror from blocking delivery.
+concurrency: {group: hypercdr-release, cancel-in-progress: true}
 permissions: {contents: write}
 jobs:
   prepare-release:
