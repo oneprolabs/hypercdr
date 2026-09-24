@@ -13,6 +13,9 @@ HCDR_DEV_TLS_KEY_FILE=/data/hypercdr-runtime/shared/certs/platform.key
 
 HCDR_IMAGE_REGISTRY=registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr
 HCDR_REGISTRY_CA_PATH=
+# Optional immutable release manifest used by cluster install and upgrade flows.
+# Keep this outside the source tree so development restarts reuse the selected release.
+HCDR_RELEASE_MANIFEST_PATH=${HCDR_RUNTIME_ROOT}/environments/community/release-manifest.json
 
 HCDR_BUILD_GOPROXY=https://goproxy.cn,direct
 HCDR_BUILD_NPM_REGISTRY=https://registry.npmmirror.com
