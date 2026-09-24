@@ -11,6 +11,7 @@ import {
   AlertCircle,
   AlertTriangle,
   ArrowDown,
+  ArrowUpCircle,
   Archive,
   Bell,
   Boxes,
@@ -156,6 +157,7 @@ const lazyWithUpgradeRecovery = <T extends React.ComponentType<any>>(loader: () 
 
 const FailbackPage = lazyWithUpgradeRecovery(() => import('./features/failback/failback-page'));
 const LazyEmailSettingsPage = lazyWithUpgradeRecovery(() => import('./features/settings/email-settings-page'));
+const LazyUpgradeManagementPage = lazyWithUpgradeRecovery(() => import('./features/upgrades/upgrade-management-page'));
 const LazyCommunityUserManagementPage = lazyWithUpgradeRecovery(() => import('./features/users/community-user-management-page'));
 const LazyOperationsCenterPage = lazyWithUpgradeRecovery(() => import('./features/operations/operations-center-page'));
 const LazyActivityLogPage = lazyWithUpgradeRecovery(() => import('./features/operations/activity-log-page'));
@@ -189,6 +191,7 @@ type View =
   | 'users'
   | 'tenants'
   | 'email_settings'
+  | 'upgrades'
   | 'profile'
   | ExtensionViewId;
 
@@ -286,6 +289,7 @@ const locales: Record<LocaleCode, {
       users: ['User Management', 'Create and maintain platform users'],
       tenants: ['Tenant Management', 'Create and maintain isolated tenants'],
       email_settings: ['Email Settings', 'Configure password recovery email delivery'],
+      upgrades: ['Platform Upgrade', 'Check releases and perform a manual blue-green upgrade'],
       profile: ['Basic Information', 'View and update your account'],
       login: ['', ''],
       dashboard: ['', ''],
@@ -388,6 +392,7 @@ const RESTORABLE_VIEWS = new Set<View>([
   'users',
   'tenants',
   'email_settings',
+  'upgrades',
   'profile',
   'operations',
   'activity',
@@ -2016,12 +2021,12 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       items: productCapabilities.advancedIdentity?.enabled
         ? [
             ...visibleExtensionModules.filter(module => module.navigation.group === 'settings').map(module => ({ label: module.navigation.label, desc: module.navigation.description, view: module.view as View, icon: module.navigation.icon })),
-            ...(authSession?.user.systemAdmin ? [{ label: 'Email Settings', desc: 'Configure password recovery email delivery', view: 'email_settings' as View, icon: Settings2 }] : []),
+            ...(authSession?.user.systemAdmin ? [{ label: 'Platform Upgrade', desc: 'Check releases and perform a manual blue-green upgrade', view: 'upgrades' as View, icon: ArrowUpCircle }, { label: 'Email Settings', desc: 'Configure password recovery email delivery', view: 'email_settings' as View, icon: Settings2 }] : []),
           ]
         : [
             ...(authSession?.user.systemAdmin ? [{ label: 'User Management', desc: 'Manage the built-in Community administrator', view: 'users' as View, icon: User }] : []),
             ...visibleExtensionModules.filter(module => module.navigation.group === 'settings').map(module => ({ label: module.navigation.label, desc: module.navigation.description, view: module.view as View, icon: module.navigation.icon })),
-            ...(authSession?.user.systemAdmin ? [{ label: 'Email Settings', desc: 'Configure password recovery email delivery', view: 'email_settings' as View, icon: Settings2 }] : []),
+            ...(authSession?.user.systemAdmin ? [{ label: 'Platform Upgrade', desc: 'Check releases and perform a manual blue-green upgrade', view: 'upgrades' as View, icon: ArrowUpCircle }, { label: 'Email Settings', desc: 'Configure password recovery email delivery', view: 'email_settings' as View, icon: Settings2 }] : []),
           ],
     };
   }, [activeModule, authSession?.user.systemAdmin, hasEnterpriseAuditModule, productCapabilities.advancedAudit?.enabled, productCapabilities.advancedIdentity?.enabled, visibleExtensionModules, view]);
@@ -2641,6 +2646,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
             {view === 'support_bundle' && authSession && <React.Suspense fallback={<PageLoadFallback />}><LazySupportBundlePage toast={setToast} /></React.Suspense>}
             {view === 'tags' && (onboarding !== 'ready' ? onboardingGate : <React.Suspense fallback={<PageLoadFallback />}><LazyTagManagementPage tags={tags} setTags={setTags} clusters={clusters} setClusters={setClusters} toast={setToast} /></React.Suspense>)}
             {view === 'email_settings' && authSession?.user.systemAdmin && <React.Suspense fallback={<PageLoadFallback />}><LazyEmailSettingsPage currentUser={authSession.user} toast={setToast} /></React.Suspense>}
+            {view === 'upgrades' && authSession?.user.systemAdmin && <React.Suspense fallback={<PageLoadFallback />}><LazyUpgradeManagementPage isAdmin={authSession.user.systemAdmin} toast={setToast} refreshPlatformData={() => refreshPlatformData()} /></React.Suspense>}
             {view === 'users' && authSession?.user.systemAdmin && !productCapabilities.advancedIdentity?.enabled && <React.Suspense fallback={<PageLoadFallback />}><LazyCommunityUserManagementPage currentUser={authSession.user} toast={setToast} /></React.Suspense>}
             {view === 'profile' && authSession && <React.Suspense fallback={<PageLoadFallback />}><LazyProfilePage session={authSession} setSession={next => { setAuthSession(next); writeStoredAuthSession(next); }} toast={setToast} /></React.Suspense>}
             {authSession && visibleExtensionModules.map(module => view === module.view ? <React.Suspense key={module.id} fallback={<PageLoadFallback />}><module.component currentUser={authSession.user} clusters={liveApiClusters} toast={setToast} /></React.Suspense> : null)}
