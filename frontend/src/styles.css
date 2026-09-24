@@ -26251,11 +26251,23 @@ html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-clust
 
 /* Dashboard reference proportions: 486px health column beside the topology column. */
 .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas.hbdr-dashboard-zones {
-  grid-template-columns: 486px minmax(0, 1fr) !important;
-  grid-template-areas: "cluster platform" "operations operations" !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-areas: "header" "upper" "operations" !important;
   gap: 16px !important;
   margin: 0 auto !important;
 }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-design-header { grid-area: header; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper {
+  display: grid !important;
+  grid-area: upper;
+  grid-template-columns: 486px minmax(0, 1fr) !important;
+  gap: 16px !important;
+  align-items: stretch;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper > .hbdr-dashboard-zone-cluster { grid-column: 1; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper > .hbdr-dashboard-zone-platform { grid-column: 2; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-operations { grid-area: operations; }
 .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-cluster,
 .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-platform {
   border: 1px solid var(--hc-border) !important;
@@ -26300,5 +26312,7 @@ html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-canva
   box-shadow: none !important;
 }
 @media (max-width: 1100px) {
-  .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas.hbdr-dashboard-zones { grid-template-columns: minmax(0, 1fr) !important; grid-template-areas: "cluster" "platform" "operations" !important; }
+  .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper { grid-template-columns: minmax(0, 1fr) !important; }
+  .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper > .hbdr-dashboard-zone-cluster,
+  .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper > .hbdr-dashboard-zone-platform { grid-column: 1; }
 }
