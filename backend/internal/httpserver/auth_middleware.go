@@ -17,6 +17,7 @@ func (r *Router) withPlatformAuth(next http.Handler) http.Handler {
 		}
 		pipelineReleaseMutation := validReleaseToken(r.cfg.ReleaseToken, req.Header.Get("X-HyperCDR-Release-Token")) &&
 			((req.Method == http.MethodPost && path == "/api/v1/platform/releases") ||
+				(req.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/platform/releases/") && strings.Count(strings.TrimPrefix(path, "/api/v1/platform/releases/"), "/") == 0) ||
 				(strings.HasPrefix(path, "/api/v1/platform/upgrades") && (req.Method == http.MethodGet || req.Method == http.MethodPost)))
 		if pipelineReleaseMutation {
 			pipeline := store.User{Email: "release-pipeline", Role: "admin", Status: "active"}
