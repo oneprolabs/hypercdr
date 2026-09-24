@@ -58,6 +58,7 @@ import {
   ShieldCheck,
   Star,
   Sun,
+  Moon,
   Terminal,
   Trash2,
   User,
@@ -1078,11 +1079,23 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [resetToken, setResetToken] = useState('');
   const [locale, setLocale] = useState<LocaleCode>('en');
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    try {
+      const stored = localStorage.getItem('hypercdr.theme');
+      if (stored === 'light' || stored === 'dark') return stored;
+    } catch { /* use system preference */ }
+    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  });
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [releaseNotesOpen, setReleaseNotesOpen] = useState(false);
   const [releaseNotesUnread, setReleaseNotesUnread] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const releaseNotesAdminAudience = authSession?.user.role === 'admin';
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem('hypercdr.theme', theme); } catch { /* persistence is optional */ }
+  }, [theme]);
 
   useEffect(() => {
     if (!authSession) {
@@ -2360,6 +2373,9 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
           <span className="hbdr-top-tooltip hbdr-language-tooltip" data-tooltip="Switch language">
             <LanguageSwitcher locale={locale} setLocale={setLocale} compact />
           </span>
+          <button type="button" className="hbdr-theme-toggle" onClick={() => setTheme(current => current === 'light' ? 'dark' : 'light')} aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`} title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}>
+            {theme === 'light' ? <Moon size={15} /> : <Sun size={15} />}
+          </button>
           <div className="hbdr-account" ref={accountMenuRef}>
             <button
               type="button"
