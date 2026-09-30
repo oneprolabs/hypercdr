@@ -47,8 +47,7 @@ export function ClusterKubeconfigHelp({ type, mode }: { type: RegistrationType; 
     {type === 'huaweicloud-cce' && <>
       <p>In Huawei Cloud CCE, open <strong>Clusters → target cluster → Cluster Connection / kubectl Access</strong>. Download a cluster-admin kubeconfig.</p>
       {commandMode
-        ? <><p>Step 2. Copy the downloaded file directly into <code>{directory}</code> on the registration host. Run this on the download machine; replace <code>YOUR_USER@YOUR_HOST</code> with the registration host's SSH login.</p>
-          <CommandBlock label="Copy kubeconfig to registration host" command={`scp ./cce-kubeconfig.yaml YOUR_USER@YOUR_HOST:${directory}/cce-kubeconfig.yaml\nssh YOUR_USER@YOUR_HOST 'chmod 600 ${directory}/cce-kubeconfig.yaml'`} /></>
+        ? <p>Step 2. Upload the downloaded kubeconfig from your computer to <code>{directory}</code> on the Linux host where you will run the install command. Name it <code>cce-kubeconfig.yaml</code>, then run <code>chmod 600 {directory}/cce-kubeconfig.yaml</code> on that host. Use whichever file transfer method you normally use.</p>
         : <p>Upload the downloaded YAML file in the next step and select its target context.</p>}
     </>}
     {type === 'openshift' && <>
