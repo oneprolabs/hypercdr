@@ -30,35 +30,38 @@ function CommandBlock({ label, command }: { label: string; command: string }) {
 export function ClusterKubeconfigHelp({ type, mode }: { type: RegistrationType; mode: GuideMode }) {
   const commandMode = mode === 'command';
   return <div className="hbdr-register-kubeconfig-guide">
+    {commandMode && <>
+      <p>Step 1. Create the directory on the host where you will run the installer.</p>
+      <CommandBlock label="Create kubeconfig directory" command={`sudo install -d -m 700 -o "$(id -un)" ${directory}`} />
+    </>}
     {type === 'native-kubernetes' && <>
       <p>On a control-plane or administration host, use a context with cluster-admin permissions.</p>
       <CommandBlock label="Check context and permissions" command={'kubectl config current-context\nkubectl auth can-i create clusterroles.rbac.authorization.k8s.io'} />
       <p>The permission check must print <code>yes</code>.</p>
-      <p>Export the active context to a portable file.</p>
-      <CommandBlock label="Export kubeconfig" command={'kubectl config view --raw --minify --flatten > hypercdr-native-kubeconfig.yaml\nchmod 600 hypercdr-native-kubeconfig.yaml'} />
+      <p>{commandMode ? 'Step 2. Generate the kubeconfig directly in that directory.' : 'Export the active context to a portable file.'}</p>
+      <CommandBlock label="Export kubeconfig" command={commandMode
+        ? `kubectl config view --raw --minify --flatten | install -m 600 /dev/stdin ${directory}/native-kubeconfig.yaml`
+        : 'kubectl config view --raw --minify --flatten > hypercdr-native-kubeconfig.yaml\nchmod 600 hypercdr-native-kubeconfig.yaml'} />
       {!commandMode && <p>Upload <code>hypercdr-native-kubeconfig.yaml</code> in the next step.</p>}
     </>}
     {type === 'huaweicloud-cce' && <>
       <p>In Huawei Cloud CCE, open <strong>Clusters → target cluster → Cluster Connection / kubectl Access</strong>. Download a cluster-admin kubeconfig.</p>
-      {commandMode ? <p>Copy the downloaded file to the Linux host where you will run the installer, and name it <code>cce-kubeconfig.yaml</code>.</p> : <p>Upload the downloaded YAML file in the next step and select its target context.</p>}
+      {commandMode
+        ? <><p>Step 2. Copy the downloaded file directly into <code>{directory}</code> on the registration host. Run this on the download machine; replace <code>YOUR_USER@YOUR_HOST</code> with the registration host's SSH login.</p>
+          <CommandBlock label="Copy kubeconfig to registration host" command={`scp ./cce-kubeconfig.yaml YOUR_USER@YOUR_HOST:${directory}/cce-kubeconfig.yaml\nssh YOUR_USER@YOUR_HOST 'chmod 600 ${directory}/cce-kubeconfig.yaml'`} /></>
+        : <p>Upload the downloaded YAML file in the next step and select its target context.</p>}
     </>}
     {type === 'openshift' && <>
       <p>In the OpenShift Web Console, choose <strong>Copy login command</strong> from the user menu. Run it on a Linux administration host with the <code>oc</code> CLI.</p>
       <CommandBlock label="Check login and permissions" command={'oc whoami\noc auth can-i create clusterroles.rbac.authorization.k8s.io'} />
       <p>The permission check must print <code>yes</code>.</p>
-      <p>Export the active context to a portable file.</p>
-      <CommandBlock label="Export kubeconfig" command={'oc config view --raw --minify --flatten > hypercdr-openshift-kubeconfig.yaml\nchmod 600 hypercdr-openshift-kubeconfig.yaml'} />
+      <p>{commandMode ? 'Step 2. Generate the kubeconfig directly in that directory.' : 'Export the active context to a portable file.'}</p>
+      <CommandBlock label="Export kubeconfig" command={commandMode
+        ? `oc config view --raw --minify --flatten | install -m 600 /dev/stdin ${directory}/openshift-kubeconfig.yaml`
+        : 'oc config view --raw --minify --flatten > hypercdr-openshift-kubeconfig.yaml\nchmod 600 hypercdr-openshift-kubeconfig.yaml'} />
       {!commandMode && <p>Upload <code>hypercdr-openshift-kubeconfig.yaml</code> in the next step.</p>}
     </>}
     {commandMode && <>
-      <p>Create the protected directory on this Linux host.</p>
-      <CommandBlock label="Create kubeconfig directory" command={`sudo install -d -m 700 ${directory}`} />
-      <p>Move the file into that directory with private permissions.</p>
-      <CommandBlock label="Save kubeconfig for registration" command={type === 'huaweicloud-cce'
-        ? `sudo install -m 600 ./cce-kubeconfig.yaml ${directory}/cce-kubeconfig.yaml`
-        : type === 'openshift'
-          ? `sudo install -m 600 ./hypercdr-openshift-kubeconfig.yaml ${directory}/openshift-kubeconfig.yaml`
-          : `sudo install -m 600 ./hypercdr-native-kubeconfig.yaml ${directory}/native-kubeconfig.yaml`} />
       <p>Open a root shell with <code>sudo -i</code>, then run the install command in the next step. It lists the valid files in <code>{directory}</code> so you can choose one; if a file has several contexts, it asks you to choose a context too.</p>
     </>}
     <p className="hbdr-register-kubeconfig-security">Kubeconfig files contain administrator credentials. Keep them private and remove copies you no longer need.</p>
