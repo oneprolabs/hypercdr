@@ -1,9 +1,17 @@
 @import "tailwindcss";
 @source "./";
 
+@font-face { font-family:'IBM Plex Sans'; src:url('./assets/fonts/ibm-plex-sans-latin-400.woff2') format('woff2'); font-style:normal; font-weight:400; font-display:swap; }
+@font-face { font-family:'IBM Plex Sans'; src:url('./assets/fonts/ibm-plex-sans-latin-500.woff2') format('woff2'); font-style:normal; font-weight:500; font-display:swap; }
+@font-face { font-family:'IBM Plex Sans'; src:url('./assets/fonts/ibm-plex-sans-latin-600.woff2') format('woff2'); font-style:normal; font-weight:600; font-display:swap; }
+@font-face { font-family:'IBM Plex Sans'; src:url('./assets/fonts/ibm-plex-sans-latin-700.woff2') format('woff2'); font-style:normal; font-weight:700; font-display:swap; }
+@font-face { font-family:'IBM Plex Mono'; src:url('./assets/fonts/ibm-plex-mono-latin-400.woff2') format('woff2'); font-style:normal; font-weight:400; font-display:swap; }
+@font-face { font-family:'IBM Plex Mono'; src:url('./assets/fonts/ibm-plex-mono-latin-500.woff2') format('woff2'); font-style:normal; font-weight:500; font-display:swap; }
+@font-face { font-family:'IBM Plex Mono'; src:url('./assets/fonts/ibm-plex-mono-latin-600.woff2') format('woff2'); font-style:normal; font-weight:600; font-display:swap; }
+
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
   --font-display: "Space Grotesk", sans-serif;
 }
 
@@ -686,7 +694,7 @@ body {
   flex-direction: column;
   background: var(--hbdr-page) !important;
   color: var(--hbdr-text);
-  font-family: "Inter", "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+  font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
 }
 
 .premium-sidebar {
@@ -1197,7 +1205,7 @@ body {
 .premium-app .hbdr-cluster-detail-drawer-head p {
   margin: 4px 0 0;
   color: #718096;
-  font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  font-family: 'IBM Plex Mono', 'SF Mono', Menlo, monospace;
   font-size: 11px;
   font-weight: 650;
 }
@@ -1418,7 +1426,7 @@ body {
 .premium-app .hbdr-cluster-detail-section-head > span {
   margin: 3px 0 0;
   color: #8994a1;
-  font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  font-family: 'IBM Plex Mono', 'SF Mono', Menlo, monospace;
   font-size: 10px;
   font-weight: 700;
 }
@@ -1676,7 +1684,7 @@ body {
 
 .premium-app .hbdr-hyper-table-cell-code {
   color: #475569;
-  font-family: "JetBrains Mono", monospace;
+  font-family: "IBM Plex Mono", monospace;
   font-size: 11px;
   font-weight: 400;
 }
@@ -2710,13 +2718,13 @@ div.premium-app > aside.premium-sidebar > div:first-child > div:first-child > di
 .hbdr-cluster-picker {
   position: absolute;
   right: 0;
-  top: calc(100% + 8px);
+  top: calc(100% + 4px);
   z-index: 100;
-  width: 390px;
+  width: 260px;
   overflow: hidden;
   border: 1px solid #d5dde6;
   border-radius: 6px;
-  background: #ffffff;
+  background: var(--hc-surface, #ffffff);
   box-shadow: 0 18px 44px rgba(15, 38, 64, 0.18);
 }
 
@@ -3305,6 +3313,64 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 .hbdr-timezone-drawer {
   width: min(440px, calc(100vw - 24px));
 }
+/* Dashboard overlays use the same surface, type scale and borders as the page. */
+.premium-app.hbdr-workspace .hbdr-cluster-picker {
+  border-color: var(--hc-border) !important;
+  border-radius: 6px !important;
+  background: var(--hc-surface) !important;
+  color: var(--hc-text) !important;
+  box-shadow: var(--hc-shadow, 0 14px 30px rgb(15 23 42 / 16%)) !important;
+  font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif !important;
+}
+.premium-app.hbdr-workspace .hbdr-cluster-picker-row:hover,
+.premium-app.hbdr-workspace .hbdr-cluster-picker-row-active { background: var(--hc-surface-2, var(--hc-bg)) !important; }
+.premium-app.hbdr-workspace .hbdr-cluster-picker-footer { border-color: var(--hc-border) !important; background: var(--hc-surface-2, var(--hc-bg)) !important; }
+.premium-app.hbdr-workspace .hbdr-timezone-drawer { background: var(--hc-surface) !important; color: var(--hc-text) !important; border-color: var(--hc-border) !important; font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif !important; }
+.premium-app.hbdr-workspace .hbdr-cluster-picker,
+.premium-app.hbdr-workspace .hbdr-timezone-drawer,
+.premium-app.hbdr-workspace .hbdr-dashboard-range-menu { font-size:12px !important; line-height:1.4 !important; }
+.premium-app.hbdr-workspace .hbdr-cluster-picker-name,
+.premium-app.hbdr-workspace .hbdr-cluster-picker-meta,
+.premium-app.hbdr-workspace .hbdr-timezone-drawer h3,
+.premium-app.hbdr-workspace .hbdr-timezone-drawer p,
+.premium-app.hbdr-workspace .hbdr-timezone-drawer button,
+.premium-app.hbdr-workspace .hbdr-timezone-drawer label { font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif !important; }
+.premium-app.hbdr-workspace .hbdr-timezone-current,
+.premium-app.hbdr-workspace .hbdr-timezone-option { border-color: var(--hc-border) !important; background: var(--hc-surface-2, var(--hc-bg)) !important; color: var(--hc-text) !important; }
+.premium-app.hbdr-workspace .hbdr-timezone-current strong,
+.premium-app.hbdr-workspace .hbdr-timezone-option strong { color: var(--hc-text) !important; }
+.premium-app.hbdr-workspace .hbdr-timezone-current span,
+.premium-app.hbdr-workspace .hbdr-timezone-select-label,
+.premium-app.hbdr-workspace .hbdr-timezone-option small { color: var(--hc-text-3) !important; }
+/* Account, timezone and cluster overlays share the Dashboard type system. */
+.premium-app.hbdr-workspace .hbdr-account-menu {
+  width: 264px;
+  padding: 6px;
+  border: 1px solid var(--hc-border) !important;
+  border-radius: 8px;
+  background: var(--hc-surface) !important;
+  color: var(--hc-text) !important;
+  box-shadow: 0 16px 36px rgb(15 23 42 / 18%), 0 3px 10px rgb(15 23 42 / 8%);
+  font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+}
+.premium-app.hbdr-workspace .hbdr-account-summary { gap: 10px; padding: 10px 10px 11px; border-color: var(--hc-border) !important; }
+.premium-app.hbdr-workspace .hbdr-account-summary > span { width:32px; height:32px; flex-basis:32px; background: color-mix(in srgb, var(--hc-accent) 14%, var(--hc-surface)); color:var(--hc-accent); }
+.premium-app.hbdr-workspace .hbdr-account-summary strong { color:var(--hc-text) !important; font-size:13px; font-weight:600; line-height:1.35; }
+.premium-app.hbdr-workspace .hbdr-account-summary small { color:var(--hc-text-3) !important; font-size:11px; font-weight:500; line-height:1.35; }
+.premium-app.hbdr-workspace .hbdr-account-menu > button { height:36px !important; margin-top:3px !important; border-radius:5px !important; color:var(--hc-text-2) !important; font-size:12px !important; font-weight:500 !important; line-height:1.3; }
+.premium-app.hbdr-workspace .hbdr-account-menu > button:hover,
+.premium-app.hbdr-workspace .hbdr-account-menu > button:focus-visible { background:var(--hc-surface-2, var(--hc-bg)) !important; color:var(--hc-text) !important; }
+.premium-app.hbdr-workspace .hbdr-account-menu > .hbdr-account-signout { color:var(--hc-danger, #c83232) !important; }
+.premium-app.hbdr-workspace .hbdr-account-menu > .hbdr-account-signout:hover { background:color-mix(in srgb, #c83232 10%, var(--hc-surface)) !important; }
+.premium-app.hbdr-workspace .hbdr-timezone-drawer { border-radius:10px !important; box-shadow:0 18px 42px rgb(15 23 42 / 18%) !important; }
+.premium-app.hbdr-workspace .hbdr-timezone-drawer h3 { color:var(--hc-text) !important; font-size:16px !important; font-weight:600 !important; line-height:1.3 !important; letter-spacing:-.01em; }
+.premium-app.hbdr-workspace .hbdr-timezone-drawer p { color:var(--hc-text-3) !important; font-size:12px !important; font-weight:400 !important; line-height:1.45 !important; }
+.premium-app.hbdr-workspace .hbdr-timezone-current span,
+.premium-app.hbdr-workspace .hbdr-timezone-select-label { font-size:10px !important; font-weight:600 !important; letter-spacing:.06em; }
+.premium-app.hbdr-workspace .hbdr-timezone-current strong { font-size:13px !important; font-weight:600 !important; line-height:1.35; }
+.premium-app.hbdr-workspace .hbdr-timezone-option { margin-top:14px; border-radius:6px; }
+.premium-app.hbdr-workspace .hbdr-timezone-option strong { font-size:12px; font-weight:600; }
+.premium-app.hbdr-workspace .hbdr-timezone-option small { font-size:11px; line-height:1.35; }
 
 .hbdr-timezone-current {
   display: flex;
@@ -3557,6 +3623,60 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   background: #f7f7f7 !important;
   padding: 12px 8px !important;
 }
+.premium-app.hbdr-workspace .hbdr-dr-sidebar {
+  width:240px !important;
+  flex:0 0 240px !important;
+  background:var(--hc-surface) !important;
+  border-right:1px solid var(--hc-border) !important;
+}
+.premium-app.hbdr-workspace .hbdr-dr-sidebar .hbdr-secondary-title {
+  height:42px !important;
+  padding:0 10px 0 16px !important;
+  border-bottom:1px solid var(--hc-border) !important;
+  color:var(--hc-text-3) !important;
+  font-size:10.5px !important;
+  font-weight:600 !important;
+  letter-spacing:.09em !important;
+  text-transform:uppercase !important;
+}
+.premium-app.hbdr-workspace .hbdr-dr-sidebar .hbdr-secondary-menu { padding:10px 8px !important; gap:0 !important; }
+.premium-app.hbdr-workspace .hbdr-dr-sidebar .hbdr-dr-nav-group {
+  margin:10px 10px 4px;
+  padding:0;
+  color:var(--hc-text-3);
+  font-size:10.5px;
+  font-weight:600;
+  letter-spacing:.09em;
+  line-height:1.4;
+  text-transform:uppercase;
+}
+.premium-app.hbdr-workspace .hbdr-dr-sidebar .hbdr-secondary-menu button {
+  min-height:38px !important;
+  margin:0 !important;
+  padding:7px 10px !important;
+  border-radius:5px !important;
+  color:var(--hc-text) !important;
+  font-size:12.5px !important;
+  font-weight:500 !important;
+}
+.premium-app.hbdr-workspace .hbdr-dr-sidebar .hbdr-secondary-menu button strong { font-size:12.5px !important; font-weight:500 !important; }
+.premium-app.hbdr-workspace .hbdr-dr-sidebar .hbdr-secondary-menu button small { color:var(--hc-text-3) !important; font-size:10.5px !important; }
+.premium-app.hbdr-workspace .hbdr-dr-sidebar .hbdr-secondary-menu button.hbdr-secondary-active { background:color-mix(in srgb,var(--hc-accent) 9%,var(--hc-surface)) !important; box-shadow:inset 2px 0 0 var(--hc-accent) !important; color:var(--hc-accent-ink,var(--hc-accent)) !important; }
+.premium-app.hbdr-workspace .hbdr-application-stages {
+  min-height:154px !important;
+  align-items:stretch !important;
+  padding:4px 0 !important;
+}
+.premium-app.hbdr-workspace .hbdr-application-stage { min-height:146px !important; padding:16px 18px !important; }
+.premium-app.hbdr-workspace .hbdr-app-workspace-bar { align-items:center !important; min-height:58px !important; margin-bottom:18px !important; }
+.premium-app.hbdr-workspace .hbdr-app-workspace-bar .hbdr-dashboard-design-cluster { align-self:center !important; }
+.premium-app.hbdr-workspace .hbdr-dr-table-card { margin-top:2px !important; }
+.premium-app.hbdr-workspace .hbdr-dr-table-card .hbdr-dr-table-head { font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif !important; }
+.premium-app.hbdr-workspace .hbdr-dr-table-card table,
+.premium-app.hbdr-workspace .hbdr-dr-table-card th,
+.premium-app.hbdr-workspace .hbdr-dr-table-card td { font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif !important; }
+.premium-app.hbdr-workspace .hbdr-dr-table-card th { font-size:10.5px !important; font-weight:600 !important; letter-spacing:.07em !important; text-transform:uppercase !important; }
+.premium-app.hbdr-workspace .hbdr-dr-table-card td { font-size:11.5px !important; font-weight:400 !important; line-height:1.4 !important; }
 
 .premium-app.hbdr-workspace .premium-content {
   flex: 1 1 auto !important;
@@ -5325,6 +5445,17 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 .hbdr-dr-toolbar {
   gap: 10px !important;
 }
+.premium-app.hbdr-workspace > aside.premium-sidebar {
+  border-bottom: 0 !important;
+  box-shadow: 0 1px 4px rgb(15 23 42 / 10%) !important;
+}
+.premium-app.hbdr-workspace > aside.premium-sidebar nav {
+  height: 52px !important;
+  min-height: 52px !important;
+}
+.premium-app.hbdr-workspace > aside.premium-sidebar nav > button {
+  height: 52px !important;
+}
 
 .hbdr-dr-action-primary,
 .hbdr-dr-more,
@@ -6476,7 +6607,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   min-height: 260px;
   max-height: 42vh;
   padding: 12px;
-  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 12px;
   font-weight: 500;
   line-height: 18px;
@@ -7837,7 +7968,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   max-width: 180px;
   overflow: hidden;
   color: #4f6475;
-  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 10px;
   font-style: normal;
   font-weight: 600;
@@ -8057,7 +8188,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 
 .hbdr-dr-score strong {
   color: inherit !important;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 15px !important;
   font-weight: 800 !important;
   letter-spacing: -0.04em;
@@ -8178,7 +8309,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   margin-left: 20px;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 10px;
   font-style: normal;
   font-weight: 600;
@@ -8660,7 +8791,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   margin-top: 3px;
   overflow: hidden;
   color: #6b7280;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 11px;
   font-style: normal;
   text-overflow: ellipsis;
@@ -8827,7 +8958,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   color: #d9534f !important;
 }
 
-.premium-app.hbdr-workspace .premium-content button:not(:disabled):not(.hbdr-stage-card):not(.hbdr-subnav button):not(.hbdr-primary-nav button):not(.hbdr-secondary-menu button):not(.hbdr-overview-summary button):hover {
+.premium-app.hbdr-workspace .premium-content button:not(:disabled):not(.hbdr-stage-card):not(.hbdr-subnav button):not(.hbdr-primary-nav button):not(.hbdr-secondary-menu button):not(.hbdr-overview-summary button):not(.hbdr-cluster-type-tab):not(.hbdr-cluster-method-tab):not(.hbdr-register-regenerate):hover {
   border-color: #4b8dcc !important;
   background: #f5faff !important;
   color: #337ab7 !important;
@@ -9279,6 +9410,181 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   background: #111111 !important;
   font-size: 14px !important;
   font-weight: 400 !important;
+}
+.premium-app.hbdr-workspace > aside.premium-sidebar > div:last-child .hbdr-top-user {
+  width:max-content !important;
+  min-width:0 !important;
+  max-width:none !important;
+  height:26px !important;
+  min-height:26px !important;
+  padding:0 0 0 6px !important;
+  border:0 !important;
+  border-radius:4px !important;
+  background:transparent !important;
+  font-size:12px !important;
+  font-weight:500 !important;
+}
+.premium-app.hbdr-workspace > aside.premium-sidebar > div:last-child .hbdr-timezone-button,
+.premium-app.hbdr-workspace > aside.premium-sidebar > div:last-child .hbdr-timezone-short {
+  color: var(--hc-text) !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+}
+.premium-app.hbdr-workspace > aside.premium-sidebar > div:last-child .hbdr-timezone-button {
+  width: 88px !important;
+  min-width: 88px !important;
+  white-space: nowrap !important;
+}
+.premium-app.hbdr-workspace > aside.premium-sidebar > div:last-child .hbdr-timezone-short {
+  white-space: nowrap !important;
+}
+/* Final Dashboard-only context geometry. The shared picker card is larger on
+   other pages; the Overview control follows the 30px reference control. */
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-cluster .hbdr-cluster-context {
+  display:flex !important;
+  width:100% !important;
+  min-width:0 !important;
+  max-width:none !important;
+  height:34px !important;
+  min-height:34px !important;
+  max-height:30px !important;
+  box-sizing:border-box !important;
+  align-items:center !important;
+  gap:8px !important;
+  padding:0 10px !important;
+  border:0 !important;
+  border-radius:0 !important;
+  overflow:hidden !important;
+  position:relative !important;
+  top:0 !important;
+  transform:none !important;
+  margin:0 !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-cluster .hbdr-cluster-context-wrap {
+  position:absolute !important;
+  inset:0 !important;
+  width:auto !important;
+  height:auto !important;
+  min-height:0 !important;
+  margin:0 !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-cluster {
+  background:transparent !important;
+  border:1px solid color-mix(in srgb, var(--hc-accent) 42%, var(--hc-border)) !important;
+  border-left:3px solid var(--hc-accent) !important;
+  border-radius:6px !important;
+  background:color-mix(in srgb, var(--hc-accent) 5%, var(--hc-surface)) !important;
+  box-shadow:0 2px 8px color-mix(in srgb, var(--hc-accent) 12%, transparent) !important;
+  box-shadow:0 2px 8px color-mix(in srgb, var(--hc-accent) 12%, transparent) !important;
+  padding:0 !important;
+  height:34px !important;
+  min-height:34px !important;
+  box-sizing:border-box !important;
+  position:relative !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-cluster .hbdr-cluster-context { width:100% !important; height:100% !important; min-height:0 !important; box-sizing:border-box !important; }
+.premium-app.hbdr-workspace .hbdr-cluster-picker-name { font-weight:600 !important; }
+.premium-app.hbdr-workspace .hbdr-cluster-picker-meta { font-weight:400 !important; }
+.premium-app.hbdr-workspace .hbdr-cluster-picker-default { font-weight:500 !important; }
+.premium-app.hbdr-workspace .hbdr-timezone-drawer strong { font-weight:500 !important; }
+.premium-app.hbdr-workspace .hbdr-timezone-drawer h3 { font-weight:600 !important; }
+.premium-app.hbdr-workspace .hbdr-timezone-select-label select,
+.premium-app.hbdr-workspace .hbdr-timezone-select-label select option { font-weight:400 !important; font-size:12px !important; line-height:1.4 !important; }
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-cluster::after {
+  content:"";
+  position:absolute;
+  inset:0 0 0 auto;
+  z-index:10;
+  width:1px;
+  background:var(--hc-border-strong, var(--hc-border));
+  pointer-events:none;
+}
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-cluster .hbdr-cluster-context-icon {
+  width:14px !important;
+  height:14px !important;
+  min-width:14px !important;
+  flex:0 0 14px !important;
+  border:0 !important;
+  border-radius:2px !important;
+  background:transparent !important;
+  box-shadow:none !important;
+  color:var(--hc-accent) !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-cluster .hbdr-cluster-context-icon svg {
+  width:14px !important;
+  height:14px !important;
+  min-width:14px !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-cluster .hbdr-cluster-context-title {
+  margin:0 !important;
+  font-family:'IBM Plex Mono',ui-monospace,monospace !important;
+  font-size:12px !important;
+  line-height:14px !important;
+  font-weight:600 !important;
+  white-space:nowrap !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-cluster .hbdr-cluster-default-pill {
+  height:18px !important;
+  min-height:18px !important;
+  padding:1px 5px !important;
+  border-radius:3px !important;
+  font-size:10px !important;
+  line-height:16px !important;
+}
+.premium-app.hbdr-workspace > aside.premium-sidebar > div:last-child {
+  display:flex !important;
+  flex:0 0 auto !important;
+  width:auto !important;
+  min-width:0 !important;
+  margin-right:20px !important;
+  gap:8px !important;
+}
+.premium-app.hbdr-workspace > aside.premium-sidebar > div:last-child > .hbdr-theme-toggle { display:none !important; }
+.premium-app.hbdr-workspace > aside.premium-sidebar > div:last-child .hbdr-language-tooltip {
+  display:inline-flex !important;
+  width:48px !important;
+  min-width:48px !important;
+  max-width:48px !important;
+  padding:0 8px !important;
+  border:1px solid var(--hc-border) !important;
+  border-radius:4px !important;
+  background:var(--hc-surface) !important;
+}
+.premium-app.hbdr-workspace > aside.premium-sidebar > div:last-child .hbdr-language-tooltip .hbdr-language-switch-compact span {
+  display:inline !important;
+  visibility:visible !important;
+  color:var(--hc-text-2) !important;
+  font-size:11px !important;
+}
+.premium-app.hbdr-workspace > aside.premium-sidebar > div:last-child .hbdr-language-tooltip .hbdr-language-switch-compact svg:first-child {
+  display:inline-flex !important;
+  visibility:visible !important;
+  width:14px !important;
+  height:14px !important;
+  flex:0 0 14px !important;
+}
+.premium-app.hbdr-workspace > aside.premium-sidebar > div:last-child .hbdr-language-tooltip .hbdr-language-switch-compact {
+  display:flex !important;
+  width:48px !important;
+  min-width:48px !important;
+  max-width:48px !important;
+  align-items:center !important;
+  justify-content:center !important;
+  gap:4px !important;
+  padding:0 !important;
+}
+.premium-app.hbdr-workspace > aside.premium-sidebar > div:last-child .hbdr-top-user > span:not(.hbdr-top-user-avatar) {
+  display:inline !important;
+  visibility:visible !important;
+  color:var(--hc-text-2) !important;
+}
+.premium-app.hbdr-workspace > aside.premium-sidebar > div:last-child .hbdr-top-user {
+  width:max-content !important;
+  min-width:0 !important;
+  max-width:none !important;
+  padding:0 9px 0 6px !important;
+  color:var(--hc-text-2) !important;
 }
 
 .hbdr-top-status {
@@ -12992,7 +13298,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   overflow: hidden;
   margin: 0;
   color: #33475b !important;
-  font-family: "JetBrains Mono", monospace;
+  font-family: "IBM Plex Mono", monospace;
   font-size: 10px !important;
   font-weight: 680;
   line-height: 1.2;
@@ -13067,7 +13373,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 
 .premium-app .hbdr-velero-version-box small {
   color: #718096;
-  font-family: "JetBrains Mono", monospace;
+  font-family: "IBM Plex Mono", monospace;
   font-size: 10px;
 }
 
@@ -13984,7 +14290,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 /* HyperBDR — global typography (single source of truth) */
 .premium-app,
 .premium-app .premium-content {
-  font-family: "Inter", "Microsoft YaHei", "PingFang SC", Arial, sans-serif !important;
+  font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif !important;
   color: var(--hbdr-text) !important;
   -webkit-font-smoothing: antialiased;
 }
@@ -14283,7 +14589,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 
 /* HyperBDR — login typography (BDR reference) */
 .premium-login {
-  font-family: "Inter", "Microsoft YaHei", "PingFang SC", Arial, sans-serif !important;
+  font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif !important;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -15278,7 +15584,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   margin-left: 20px;
   overflow: hidden;
   color: #4f6475 !important;
-  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace !important;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace !important;
   font-size: 10px !important;
   font-style: normal !important;
   font-weight: 600 !important;
@@ -17199,7 +17505,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   border-radius: 6px;
   background: #ffffff;
   color: #475569;
-  font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  font-family: 'IBM Plex Mono', 'SF Mono', Menlo, monospace;
   font-size: 11px;
   font-weight: 700;
   line-height: 1.2;
@@ -17259,7 +17565,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 }
 .premium-app.hbdr-workspace .premium-content .hbdr-dr-storage-pill-request {
   color: #334155;
-  font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  font-family: 'IBM Plex Mono', 'SF Mono', Menlo, monospace;
   font-size: 11px;
   font-weight: 780;
   font-variant-numeric: tabular-nums;
@@ -17388,7 +17694,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 .premium-app.hbdr-workspace .premium-content .hbdr-dr-resource-summary-chip em {
   flex: 0 0 auto;
   color: #475569;
-  font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  font-family: 'IBM Plex Mono', 'SF Mono', Menlo, monospace;
   font-size: 10px;
   font-style: normal;
   font-weight: 780;
@@ -17452,7 +17758,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   font-size: 11px;
   font-weight: 500;
   color: #64748b;
-  font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  font-family: 'IBM Plex Mono', 'SF Mono', Menlo, monospace;
   letter-spacing: 0.01em;
   font-variant-numeric: tabular-nums;
 }
@@ -17933,13 +18239,13 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 .premium-app.hbdr-workspace .premium-content .hbdr-resource-object-meta code {
   background: #f6f8fb;
   color: #64748b;
-  font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  font-family: 'IBM Plex Mono', 'SF Mono', Menlo, monospace;
   font-weight: 650;
 }
 .premium-app.hbdr-workspace .premium-content .hbdr-resource-object-age {
   background: #ffffff;
   color: #8da0b8;
-  font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  font-family: 'IBM Plex Mono', 'SF Mono', Menlo, monospace;
   font-weight: 800;
 }
 .premium-app.hbdr-workspace .premium-content .hbdr-resource-inventory-section {
@@ -18074,7 +18380,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 }
 .premium-app.hbdr-workspace .premium-content .hbdr-resource-inventory-time {
   color: #64748b;
-  font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  font-family: 'IBM Plex Mono', 'SF Mono', Menlo, monospace;
   font-size: 10.5px;
   font-weight: 750;
   text-align: right;
@@ -18230,7 +18536,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 .premium-app.hbdr-workspace .premium-content .hbdr-resource-detail-row code {
   overflow: hidden;
   color: #475569;
-  font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  font-family: 'IBM Plex Mono', 'SF Mono', Menlo, monospace;
   font-size: 11px;
   font-weight: 650;
   text-overflow: ellipsis;
@@ -18301,7 +18607,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   font-weight: 850;
 }
 .premium-app.hbdr-workspace .premium-content .hbdr-resource-kubectl-row > .hbdr-resource-value-code {
-  font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  font-family: 'IBM Plex Mono', 'SF Mono', Menlo, monospace;
   font-size: 11px;
   color: #475569;
 }
@@ -20854,7 +21160,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
 
 .hbdr-recovery-selected-line code {
   color: #1f5f96;
-  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 11px;
 }
 
@@ -21078,7 +21384,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   margin-top: 0;
   overflow: hidden;
   color: #1f5f96;
-  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 11px;
   font-weight: 700;
   line-height: 16px;
@@ -22303,6 +22609,83 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   }
 }
 
+/* Dark reference surfaces must override the legacy light prototype rules. */
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-stage-panel,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-stage-grid.hbdr-screenshot-stage-grid .hbdr-dr-stage-card,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-dr-table-card,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-dr-table-head {
+  background: var(--hc-surface) !important;
+  border-color: var(--hc-border) !important;
+  color: var(--hc-text) !important;
+  box-shadow: none !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-stage-grid.hbdr-screenshot-stage-grid .hbdr-dr-stage-active {
+  background: color-mix(in srgb, var(--hc-accent) 12%, var(--hc-surface)) !important;
+  border-color: var(--hc-accent) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-stage-grid.hbdr-screenshot-stage-grid .hbdr-dr-stage-copy h4,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-stage-grid.hbdr-screenshot-stage-grid .hbdr-dr-stage-copy p,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-stage-grid.hbdr-screenshot-stage-grid .hbdr-dr-stage-copy span,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-stage-grid.hbdr-screenshot-stage-grid .hbdr-dr-stage-count strong,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-stage-grid.hbdr-screenshot-stage-grid .hbdr-dr-stage-count span {
+  color: var(--hc-text) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-stage-grid.hbdr-screenshot-stage-grid .hbdr-dr-stage-copy p,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-stage-grid.hbdr-screenshot-stage-grid .hbdr-dr-stage-copy span,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-stage-grid.hbdr-screenshot-stage-grid .hbdr-dr-stage-count span {
+  color: var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-secondary-sidebar {
+  background: var(--hc-surface) !important;
+  border-color: var(--hc-border) !important;
+  color: var(--hc-text) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-page-hero h1,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-page-hero p {
+  color: var(--hc-text) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-page-hero p {
+  color: var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-dr-table-head button,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-dr-table-head input,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-dr-table-head select {
+  background: var(--hc-surface) !important;
+  border-color: var(--hc-border) !important;
+  color: var(--hc-text-2) !important;
+}
+
+.premium-app.hbdr-workspace .hbdr-dr-reference-table-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--hc-border);
+  background: var(--hc-surface);
+}
+.premium-app.hbdr-workspace .hbdr-dr-reference-table-title h2 {
+  color: var(--hc-text);
+  font-size: 13.5px;
+  font-weight: 650;
+  letter-spacing: -.008em;
+}
+.premium-app.hbdr-workspace .hbdr-dr-reference-table-title span {
+  display: inline-flex;
+  align-items: center;
+  height: 19px;
+  padding: 0 6px;
+  border-radius: 3px;
+  background: var(--hc-sunken);
+  color: var(--hc-text-2);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+}
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dr-reference-table-title {
+  background: var(--hc-surface);
+  border-color: var(--hc-border);
+}
+
 @media (max-width: 820px) {
   .hbdr-recovery-card-grid,
   .hbdr-recovery-card-grid-target,
@@ -23187,7 +23570,7 @@ div.premium-app > aside.premium-sidebar nav.hidden {
   display: grid;
   margin-top: 11px;
   padding-left: 4px;
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
 }
 .hbdr-task-detail-events .hbdr-timeline-item {
   --timeline-marker-size: 12px;
@@ -26179,9 +26562,10 @@ html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-section-card .border-s
 
 /* Dashboard reference canvas: 1440px design spacing and compact controls. */
 .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas {
-  max-width: 1440px;
-  margin: 0 auto;
-  padding: 18px 20px 20px;
+  width: 100%;
+  max-width: none;
+  margin: 0 !important;
+  padding: 18px 16px 20px;
   gap: 16px;
   background: var(--hc-bg);
   color: var(--hc-text);
@@ -26210,7 +26594,7 @@ html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-section-card .border-s
 .premium-app.hbdr-workspace .hbdr-dashboard-design-cluster {
   display: flex;
   align-items: center;
-  min-height: 30px;
+  min-height: 34px;
   border: 1px solid var(--hc-border);
   border-radius: 4px;
   background: var(--hc-surface);
@@ -26222,23 +26606,79 @@ html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-section-card .border-s
 .premium-app.hbdr-workspace .hbdr-dashboard-design-range {
   gap: 6px;
   padding: 0 10px;
+  height: 34px;
+  min-height: 34px;
+  border-color: var(--hc-border-strong, var(--hc-border)) !important;
+  cursor: pointer;
 }
+.hbdr-dashboard-range-wrap { position: relative; }
+.hbdr-dashboard-range-menu { position:absolute; top:calc(100% + 4px); right:0; z-index:120; min-width:150px; padding:5px; border:1px solid var(--hc-border-strong, var(--hc-border)); border-radius:6px; background:var(--hc-surface); box-shadow:0 14px 30px rgb(15 23 42 / 16%); font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif; }
+.hbdr-dashboard-range-menu button { display:block; width:100%; padding:8px 10px; border:0; border-radius:4px; background:transparent; color:var(--hc-text-2); font-size:12px; font-weight:500; text-align:left; cursor:pointer; }
+.hbdr-dashboard-range-menu button:hover, .hbdr-dashboard-range-menu button.is-active { background:var(--hc-surface-2, var(--hc-bg)); color:var(--hc-text); }
 .premium-app.hbdr-workspace .hbdr-dashboard-design-cluster {
-  min-width: 250px;
-  overflow: hidden;
+  width: fit-content;
+  min-width: 220px;
+  max-width: min(380px, 42vw);
+  flex: 0 1 auto;
+  overflow: visible;
 }
 .premium-app.hbdr-workspace .hbdr-dashboard-design-cluster .hbdr-cluster-context {
   width: 100%;
-  min-height: 30px;
+  min-height: 34px;
+  height: 34px;
   padding: 0 10px;
   border: 0;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
 }
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-cluster .hbdr-cluster-context {
+  background: var(--hc-surface) !important;
+  color: var(--hc-text) !important;
+  border-color: var(--hc-border) !important;
+}
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-cluster .hbdr-cluster-context-title { color: var(--hc-text) !important; }
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-cluster .hbdr-cluster-context-chevron { color: var(--hc-text-3) !important; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-cluster .hbdr-cluster-context-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--hc-accent);
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-design-cluster .hbdr-cluster-context-icon svg { width: 14px; height: 14px; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-cluster .hbdr-cluster-context-kicker { display: none; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-cluster .hbdr-cluster-context-title {
+  margin: 0;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.1;
+  font-weight: 500;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-design-cluster .hbdr-cluster-context-meta {
+  display: none;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-design-cluster .hbdr-cluster-default-pill {
+  height: 18px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+}
 .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-cluster {
   border-radius: 6px;
 }
+.premium-app.hbdr-workspace .hbdr-dashboard-zone-cluster .hbdr-dashboard-zone-head {
+  align-items: center !important;
+  margin-bottom: 16px !important;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-zone-cluster .hbdr-dashboard-zone-label { align-items:baseline !important; }
+.premium-app.hbdr-workspace .hbdr-dashboard-zone-cluster .hbdr-dashboard-zone-label > div { display:flex; align-items:baseline; gap:9px; }
+.premium-app.hbdr-workspace .hbdr-dashboard-zone-cluster .hbdr-dashboard-zone-label p { margin:0 !important; }
+.premium-app.hbdr-workspace .hbdr-dashboard-zone-cluster .hbdr-dashboard-zone-label p strong { color:var(--hc-text-2); font-weight:500; }
+.hbdr-dashboard-health-filter { display:flex; align-items:center; height:26px; padding:2px; border-radius:5px; background:var(--hc-sunken, var(--hc-bg)); }
+.hbdr-dashboard-health-filter button { height:22px; padding:0 10px; border:0; border-radius:4px; background:transparent; color:var(--hc-text-2); font-size:11px; font-weight:500; cursor:pointer; }
+.hbdr-dashboard-health-filter button.is-active { background:var(--hc-surface); color:var(--hc-text); font-weight:600; box-shadow:var(--hc-shadow, 0 1px 2px rgb(0 0 0 / 8%)); }
 html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-range,
 html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-cluster {
   box-shadow: var(--hc-shadow);
@@ -26266,7 +26706,8 @@ html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-clust
   align-items: stretch;
 }
 .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper > .hbdr-dashboard-zone-cluster { grid-column: 1; }
-.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper > .hbdr-dashboard-zone-platform { grid-column: 2; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper > .hbdr-dashboard-zone-topology { grid-column: 2 !important; grid-row: 1 !important; min-width: 0 !important; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper > .hbdr-dashboard-zone-platform { grid-column: 1 / -1 !important; grid-row: 2 !important; min-width: 0 !important; }
 .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-operations { grid-area: operations; }
 .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-cluster,
 .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-platform {
@@ -26274,7 +26715,59 @@ html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-clust
   border-radius: 6px !important;
   background: var(--hc-surface) !important;
   box-shadow: 0 1px 2px rgb(0 0 0 / 8%) !important;
+  min-width: 0 !important;
+  overflow: hidden;
 }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-cluster-body,
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-flow,
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-cards {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-flow {
+  grid-template-columns: minmax(0, 1fr) minmax(42px, .65fr) minmax(0, 1fr) minmax(42px, .65fr) minmax(0, 1fr) !important;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-cards {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-health-issues {
+  margin: 0 0 2px;
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--hc-border);
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-health-kicker {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--hc-text-3);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-health-issue-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr) 1px minmax(0, 1fr);
+  align-items: stretch;
+  gap: 10px;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-health-issue-grid > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.premium-app.hbdr-workspace .hbdr-dashboard-health-issue-grid > div strong { color: var(--hc-text); font-size: 25px; font-weight: 600; line-height: 1; letter-spacing: -.03em; }
+.premium-app.hbdr-workspace .hbdr-dashboard-health-issue-grid > div strong.is-critical { color: var(--hc-crit, #dc3d45); }
+.premium-app.hbdr-workspace .hbdr-dashboard-health-issue-grid > div strong.is-warning { color: var(--hc-warn, #d28a16); }
+.premium-app.hbdr-workspace .hbdr-dashboard-health-issue-grid > div span { color: var(--hc-text-3); font-size: 11.5px; white-space: nowrap; }
+.premium-app.hbdr-workspace .hbdr-dashboard-health-issue-grid > i { width: 1px; background: var(--hc-border); }
+.premium-app.hbdr-workspace .hbdr-dashboard-health-summary { display: flex; align-items: center; gap: 22px; margin: 16px 0 14px; }
+.premium-app.hbdr-workspace .hbdr-dashboard-protection-ring { display: flex; position: relative; width: 116px; height: 116px; flex: none; align-items: center; justify-content: center; flex-direction: column; border-radius: 50%; background: conic-gradient(var(--hc-ok, #29ae56) var(--hbdr-protection-rate), var(--hc-border) 0); }
+.premium-app.hbdr-workspace .hbdr-dashboard-protection-ring::before { content: ''; position: absolute; inset: 11px; border-radius: 50%; background: var(--hc-surface); }
+.premium-app.hbdr-workspace .hbdr-dashboard-protection-ring > * { position: relative; z-index: 1; }
+.premium-app.hbdr-workspace .hbdr-dashboard-protection-ring strong { color: var(--hc-text); font-size: 30px; font-weight: 600; line-height: 1; }
+.premium-app.hbdr-workspace .hbdr-dashboard-protection-ring strong small { font-size: 16px; }
+.premium-app.hbdr-workspace .hbdr-dashboard-protection-ring span { margin-top: 3px; color: var(--hc-text-3); font-size: 10px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; }
+.premium-app.hbdr-workspace .hbdr-dashboard-health-legend { display: flex; flex: 1; flex-direction: column; gap: 0; min-width: 0; }
+.premium-app.hbdr-workspace .hbdr-dashboard-health-legend .hbdr-dashboard-legend { padding: 7px 0; border-bottom: 1px solid var(--hc-border); }
+.premium-app.hbdr-workspace .hbdr-dashboard-oldest-point { display: flex; justify-content: space-between; gap: 8px; padding-top: 9px; color: var(--hc-text-3); font-size: 11px; }
+.premium-app.hbdr-workspace .hbdr-dashboard-oldest-point strong { color: var(--hc-text-2); font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; font-weight: 500; }
 .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-head {
   min-height: 32px;
   margin-bottom: 14px;
@@ -26315,4 +26808,1414 @@ html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-canva
   .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper { grid-template-columns: minmax(0, 1fr) !important; }
   .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper > .hbdr-dashboard-zone-cluster,
   .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper > .hbdr-dashboard-zone-platform { grid-column: 1; }
+}
+
+/* Final top-bar overrides are intentionally last so the reference tokens win
+   over the legacy prototype compatibility layer above. */
+.premium-app.hbdr-workspace > .premium-sidebar { height:52px !important; min-height:52px !important; flex:0 0 52px !important; background:var(--hc-surface) !important; border-bottom:1px solid var(--hc-border) !important; box-shadow:none !important; color:var(--hc-text) !important; font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif !important; }
+.premium-app.hbdr-workspace > .premium-sidebar > div:first-child { align-items:stretch !important; gap:0 !important; padding-left:20px !important; }
+.premium-app.hbdr-workspace > .premium-sidebar > div:first-child > div:first-child { width:176px !important; min-width:176px !important; gap:9px !important; background:transparent !important; }
+.premium-app.hbdr-workspace > .premium-sidebar > div:first-child > div:first-child > div { width:21px !important; min-width:21px !important; height:21px !important; }
+.premium-app.hbdr-workspace > .premium-sidebar > div:first-child > div:first-child svg { color:var(--hc-accent) !important; }
+.premium-app.hbdr-workspace > .premium-sidebar h1 { color:var(--hc-text) !important; font-size:15px !important; font-weight:600 !important; letter-spacing:-.015em !important; line-height:52px !important; }
+.premium-app.hbdr-workspace > .premium-sidebar nav { height:52px !important; align-items:stretch !important; }
+.premium-app.hbdr-workspace > .premium-sidebar nav > button { min-width:auto !important; height:52px !important; padding:0 15px !important; border-radius:0 !important; border:0 !important; background:transparent !important; color:var(--hc-text-2) !important; font-size:13px !important; font-weight:500 !important; box-shadow:none !important; }
+.premium-app.hbdr-workspace > .premium-sidebar nav > button[class*="bg-blue-50"] { background:transparent !important; color:var(--hc-accent) !important; box-shadow:inset 0 -2px 0 var(--hc-accent) !important; }
+.premium-app.hbdr-workspace > .premium-sidebar nav > button:hover { background:var(--hc-sunken) !important; color:var(--hc-text) !important; }
+.premium-app.hbdr-workspace > .premium-sidebar > div:last-child { align-items:center !important; gap:8px !important; margin:0 20px 0 0 !important; color:var(--hc-text-2) !important; }
+.premium-app.hbdr-workspace > .premium-sidebar .hbdr-timezone-button { height:26px !important; padding:0 9px !important; border:1px solid var(--hc-border) !important; border-radius:4px !important; background:var(--hc-surface) !important; color:var(--hc-text-2) !important; font-family:'IBM Plex Mono',ui-monospace,monospace !important; font-size:11px !important; }
+.premium-app.hbdr-workspace > .premium-sidebar .hbdr-language-tooltip { display:inline-flex !important; align-items:center !important; height:26px !important; padding:0 9px !important; border:1px solid var(--hc-border) !important; border-radius:4px !important; background:var(--hc-surface) !important; font-family:'IBM Plex Sans',ui-sans-serif,sans-serif !important; font-size:11px !important; }
+.premium-app.hbdr-workspace > .premium-sidebar .hbdr-language-tooltip button { color:var(--hc-text-2) !important; }
+.premium-app.hbdr-workspace > .premium-sidebar .hbdr-theme-toggle { width:30px !important; height:30px !important; border-color:var(--hc-border) !important; background:var(--hc-sunken) !important; }
+.premium-app.hbdr-workspace > .premium-sidebar .hbdr-top-user { display:inline-flex !important; align-items:center !important; gap:7px !important; height:26px !important; padding:0 9px !important; border:0 !important; background:transparent !important; color:var(--hc-text-2) !important; font-family:'IBM Plex Sans',ui-sans-serif,sans-serif !important; font-size:12px !important; font-weight:500 !important; }
+.premium-app.hbdr-workspace > .premium-sidebar .hbdr-top-user-avatar { width:24px !important; height:24px !important; border-radius:4px !important; background:color-mix(in srgb,var(--hc-accent) 12%,var(--hc-surface)) !important; color:var(--hc-accent) !important; }
+.premium-app.hbdr-workspace > aside.premium-sidebar h1 { font-size:15px !important; line-height:52px !important; color:var(--hc-text) !important; }
+html[data-theme='dark'] .premium-app.hbdr-workspace > aside.premium-sidebar h1 { color:var(--hc-text) !important; }
+html[data-theme='light'] .premium-app.hbdr-workspace > aside.premium-sidebar h1,
+html:not([data-theme]) .premium-app.hbdr-workspace > aside.premium-sidebar h1 { font-size:15px !important; line-height:52px !important; color:var(--hc-text) !important; font-weight:600 !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace > aside.premium-sidebar h1,
+html[data-theme='light'] #root .premium-app.hbdr-workspace > aside.premium-sidebar h1,
+html:not([data-theme]) #root .premium-app.hbdr-workspace > aside.premium-sidebar h1 { font-size:15px !important; line-height:52px !important; color:var(--hc-text) !important; font-weight:600 !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace > aside.premium-sidebar,
+html[data-theme='light'] #root .premium-app.hbdr-workspace > aside.premium-sidebar,
+html:not([data-theme]) #root .premium-app.hbdr-workspace > aside.premium-sidebar { height:52px !important; min-height:52px !important; flex-basis:52px !important; background:var(--hc-surface) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace > aside.premium-sidebar nav > button,
+html[data-theme='light'] #root .premium-app.hbdr-workspace > aside.premium-sidebar nav > button,
+html:not([data-theme]) #root .premium-app.hbdr-workspace > aside.premium-sidebar nav > button { height:52px !important; min-width:auto !important; padding:0 15px !important; font-size:13px !important; font-weight:500 !important; color:var(--hc-text-2) !important; background:transparent !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace > aside.premium-sidebar nav > button[class*='bg-blue-50'],
+html[data-theme='light'] #root .premium-app.hbdr-workspace > aside.premium-sidebar nav > button[class*='bg-blue-50'],
+html:not([data-theme]) #root .premium-app.hbdr-workspace > aside.premium-sidebar nav > button[class*='bg-blue-50'] { color:var(--hc-accent) !important; box-shadow:inset 0 -2px 0 var(--hc-accent) !important; }
+html[data-theme='light'] #root .premium-app.hbdr-workspace > aside.premium-sidebar > div:first-child,
+html:not([data-theme]) #root .premium-app.hbdr-workspace > aside.premium-sidebar > div:first-child,
+html[data-theme='light'] #root .premium-app.hbdr-workspace > aside.premium-sidebar nav,
+html:not([data-theme]) #root .premium-app.hbdr-workspace > aside.premium-sidebar nav { background:var(--hc-surface) !important; }
+html[data-theme='light'] #root .premium-app.hbdr-workspace > aside.premium-sidebar h1,
+html:not([data-theme]) #root .premium-app.hbdr-workspace > aside.premium-sidebar h1 { color:var(--hc-text) !important; }
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone,
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-card {
+  background: var(--hc-surface) !important;
+  color: var(--hc-text) !important;
+  border-color: var(--hc-border) !important;
+  box-shadow: none !important;
+}
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-card h3,
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone h2,
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone strong { color: var(--hc-text) !important; }
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone p,
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone span { color: var(--hc-text-2); }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-topology { min-height: 380px !important; align-self: stretch !important; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-cluster .hbdr-dashboard-flow,
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-cluster .hbdr-dashboard-cards { display: none !important; }
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-flow { background: var(--hc-sunken) !important; border-color: var(--hc-border) !important; }
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-flow strong,
+html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-flow span { color: var(--hc-text-2) !important; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-topology { align-self: stretch !important; }
+.premium-app.hbdr-workspace .hbdr-dashboard-topology-body { flex: 1; display: flex; min-height: 212px; flex-direction: column; justify-content: center; gap: 12px; }
+.premium-app.hbdr-workspace .hbdr-dashboard-topology-empty { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 120px; color: var(--hc-text-3); font-size: 12px; }
+.premium-app.hbdr-workspace .hbdr-dashboard-topology-pair { display: grid; grid-template-columns: minmax(0,1fr) minmax(120px,.6fr) minmax(0,1fr); align-items: center; gap: 14px; }
+.premium-app.hbdr-workspace .hbdr-dashboard-topology-pair > div { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--hc-border); border-radius: 6px; background: var(--hc-sunken); }
+.premium-app.hbdr-workspace .hbdr-dashboard-topology-pair strong { color: var(--hc-text); font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; }
+.premium-app.hbdr-workspace .hbdr-dashboard-topology-pair small { color: var(--hc-text-3); font-size: 11px; }
+.premium-app.hbdr-workspace .hbdr-dashboard-topology-pair i { width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--hc-ok); }
+.premium-app.hbdr-workspace .hbdr-dashboard-topology-link { position: relative; display: flex; align-items: center; justify-content: center; color: var(--hc-text-2); font-size: 11px; }
+.premium-app.hbdr-workspace .hbdr-dashboard-topology-link::before { content: ''; position: absolute; left: 0; right: 0; z-index: -1; height: 1px; background: var(--hc-border-strong); }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-operations { display: contents !important; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-operations > .hbdr-dashboard-zone-head { display: none !important; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-operations-row { display: contents !important; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-monitor { display: none !important; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-events { grid-area: operations-events !important; min-height: 260px; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-alert { grid-area: operations-alerts !important; min-height: 260px; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper > .hbdr-dashboard-zone-platform { grid-area: operations-platform !important; min-height: 260px !important; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas.hbdr-dashboard-zones { grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) !important; grid-template-areas:"header header header" "cluster topology topology" "metrics metrics metrics" "operations-events operations-alerts operations-platform" !important; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper > .hbdr-dashboard-zone-cluster { grid-area:cluster !important; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper > .hbdr-dashboard-zone-topology { grid-area:topology !important; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper > .hbdr-dashboard-zone-platform { grid-area:operations-platform !important; }
+.premium-app.hbdr-workspace .hbdr-dashboard-reference-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
+.premium-app.hbdr-workspace .hbdr-dashboard-reference-metrics > .hbdr-dashboard-card { min-width:0; min-height:240px; }
+.premium-app.hbdr-workspace .hbdr-dashboard-reference-stat-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:4px; padding-bottom:16px; border-bottom:1px solid var(--hc-border); }
+.premium-app.hbdr-workspace .hbdr-dashboard-reference-stat-grid > div { display:flex; flex-direction:column; gap:3px; min-width:0; }
+.premium-app.hbdr-workspace .hbdr-dashboard-reference-stat-grid strong { color:var(--hc-text); font-size:27px; font-weight:600; line-height:1; }
+.premium-app.hbdr-workspace .hbdr-dashboard-reference-stat-grid span { color:var(--hc-text-3); font-size:11px; }
+.premium-app.hbdr-workspace .hbdr-dashboard-reference-stat-grid .is-success strong { color:var(--hc-ok); }
+.premium-app.hbdr-workspace .hbdr-dashboard-reference-stat-grid .is-critical strong { color:var(--hc-crit); }
+.premium-app.hbdr-workspace .hbdr-dashboard-reference-stat-grid .is-info strong { color:var(--hc-accent); }
+.premium-app.hbdr-workspace .hbdr-dashboard-reference-empty { display:flex; flex-direction:column; gap:8px; margin-top:17px; color:var(--hc-text-3); font-size:10.5px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; }
+.premium-app.hbdr-workspace .hbdr-dashboard-reference-empty small { color:var(--hc-text-2); font-size:11px; font-weight:400; letter-spacing:0; text-transform:none; }
+/* Flatten the legacy upper wrapper so reference rows can be ordered without
+   duplicating data or changing route behaviour. */
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas.hbdr-dashboard-zones {
+  grid-template-columns: 486px minmax(0, 1fr) !important;
+  grid-template-areas: "header header" "cluster topology" "metrics metrics" "platform platform" "operations operations" !important;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper { display: contents !important; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper > .hbdr-dashboard-zone-cluster { grid-area: cluster !important; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper > .hbdr-dashboard-zone-topology { grid-area: topology !important; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper > .hbdr-dashboard-zone-platform { grid-area: platform !important; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-reference-metrics { grid-area: metrics !important; }
+.premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-operations { grid-area: operations !important; }
+
+/* Dashboard reference row ordering: final cascade override. */
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas.hbdr-dashboard-zones {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) !important;
+  grid-template-areas: "header header header" "cluster topology topology" "metrics metrics metrics" "operations-events operations-alerts operations-platform" !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper,
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-operations,
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-operations-row { display: contents !important; }
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper > .hbdr-dashboard-zone-cluster { grid-area: cluster !important; }
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper > .hbdr-dashboard-zone-topology { grid-area: topology !important; }
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-upper > .hbdr-dashboard-zone-platform { grid-area: operations-platform !important; min-height: 260px !important; }
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-design-header { grid-area: header !important; }
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-reference-metrics { grid-area: metrics !important; }
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-operations > .hbdr-dashboard-zone-head,
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-monitor { display: none !important; }
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-events { grid-area: operations-events !important; min-height: 260px !important; }
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-alert { grid-area: operations-alerts !important; min-height: 260px !important; }
+html[data-theme='light'] #root .premium-app.hbdr-workspace > aside.premium-sidebar,
+html:not([data-theme]) #root .premium-app.hbdr-workspace > aside.premium-sidebar,
+html[data-theme='light'] #root .premium-app.hbdr-workspace > aside.premium-sidebar > div,
+html:not([data-theme]) #root .premium-app.hbdr-workspace > aside.premium-sidebar > div,
+html[data-theme='light'] #root .premium-app.hbdr-workspace > aside.premium-sidebar > div:first-child > div:first-child,
+html:not([data-theme]) #root .premium-app.hbdr-workspace > aside.premium-sidebar > div:first-child > div:first-child { background:var(--hc-surface) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace > aside.premium-sidebar,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace > aside.premium-sidebar > div,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace > aside.premium-sidebar > div:first-child,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace > aside.premium-sidebar nav { background:var(--hc-surface) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace > aside.premium-sidebar > div:first-child > div:first-child,
+html[data-theme='light'] #root .premium-app.hbdr-workspace > aside.premium-sidebar > div:first-child > div:first-child,
+html:not([data-theme]) #root .premium-app.hbdr-workspace > aside.premium-sidebar > div:first-child > div:first-child { background:var(--hc-surface) !important; }
+html[data-theme='light'] #root .premium-app.hbdr-workspace > aside.premium-sidebar .hbdr-timezone-button,
+html:not([data-theme]) #root .premium-app.hbdr-workspace > aside.premium-sidebar .hbdr-timezone-button { background:var(--hc-surface) !important; color:var(--hc-text-2) !important; }
+
+/* Compact platform summary from the reference, backed by persisted metadata. */
+#root .hbdr-dashboard-design-canvas .hbdr-dashboard-upper > .hbdr-dashboard-zone-platform {
+  display: block !important;
+  height: auto !important;
+  min-height: 260px !important;
+}
+#root .hbdr-dashboard-design-canvas .hbdr-platform-summary { margin: 0; }
+#root .hbdr-dashboard-design-canvas .hbdr-platform-summary > div { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--hc-border); }
+#root .hbdr-dashboard-design-canvas .hbdr-platform-summary dt { color: var(--hc-text-2); font-size: 12.5px; }
+#root .hbdr-dashboard-design-canvas .hbdr-platform-summary dd { display: flex; gap: 6px; align-items: baseline; margin: 0; }
+#root .hbdr-dashboard-design-canvas .hbdr-platform-summary strong { color: var(--hc-text); font-size: 12px; font-family: 'IBM Plex Mono', monospace; }
+#root .hbdr-dashboard-design-canvas .hbdr-platform-summary small { color: var(--hc-ok); font-size: 11px; }
+#root .hbdr-dashboard-design-canvas .hbdr-platform-license-summary { display: flex; gap: 12px; align-items: center; padding-top: 16px; }
+#root .hbdr-dashboard-design-canvas .hbdr-platform-license-summary strong { color: var(--hc-text); font-size: 12px; }
+#root .hbdr-dashboard-design-canvas .hbdr-platform-license-summary p { color: var(--hc-text-3); font-size: 11px; margin-top: 4px; }
+
+/* Topology is a card with its own header, not the legacy side-column grid. */
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-topology {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  padding: 16px 18px 18px !important;
+  border: 1px solid var(--hc-border) !important;
+  border-radius: 6px !important;
+  background: var(--hc-surface) !important;
+}
+#root .hbdr-dashboard-design-canvas .hbdr-dashboard-zone-topology > header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px;
+  flex: 0 0 auto;
+  height: auto !important;
+  min-height: 28px !important;
+  margin: 0 0 14px !important;
+}
+#root .hbdr-dashboard-design-canvas .hbdr-dashboard-topology-statuses { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; color: var(--hc-text-2); }
+#root .hbdr-dashboard-design-canvas .hbdr-dashboard-topology-statuses span { display: inline-flex; align-items: center; gap: 5px; }
+#root .hbdr-dashboard-design-canvas .hbdr-dashboard-topology-statuses i { width: 7px; height: 7px; background: var(--hc-ok); }
+#root .hbdr-dashboard-design-canvas .hbdr-dashboard-topology-statuses .is-warning { background: var(--hc-warn); }
+#root .hbdr-dashboard-design-canvas .hbdr-dashboard-topology-statuses .is-critical { background: var(--hc-crit); }
+@media (max-width: 1100px) {
+  #root .premium-app.hbdr-workspace .hbdr-dashboard-design-canvas.hbdr-dashboard-zones {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-areas: "header" "cluster" "topology" "metrics" "operations-events" "operations-alerts" "operations-platform" !important;
+  }
+  #root .hbdr-dashboard-design-canvas .hbdr-dashboard-reference-metrics { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Application protection stages: one flow layout for both reference themes. */
+#root .hbdr-app-page .hbdr-application-stages { display:grid; grid-template-columns:minmax(0,1fr) 36px minmax(0,1fr) 36px minmax(0,1fr); align-items:stretch; margin-bottom:16px; }
+#root .hbdr-app-page .hbdr-application-stage { position:relative; display:flex; flex-direction:column; gap:12px; min-width:0; padding:14px 16px; background:var(--hc-surface); border:1px solid var(--hc-border); border-radius:6px; color:var(--hc-text); text-align:left; box-shadow:0 1px 2px rgb(23 27 36 / 4%); }
+#root .hbdr-app-page .hbdr-application-stage[aria-pressed='true'] { border-color:var(--hc-accent); background:color-mix(in srgb,var(--hc-accent) 5%,var(--hc-surface)) !important; box-shadow:0 0 0 3px color-mix(in srgb,var(--hc-accent) 11%,transparent); }
+#root .hbdr-app-page .hbdr-application-stage:focus-visible { outline:2px solid var(--hc-accent); outline-offset:4px; }
+#root .hbdr-app-page .hbdr-application-stage-heading { display:flex; align-items:flex-start; gap:12px; flex:1; }
+#root .hbdr-app-page .hbdr-application-stage-heading > div { flex:1; min-width:0; }
+#root .hbdr-app-page .hbdr-application-stage-icon { display:flex; align-items:center; justify-content:center; width:34px; height:34px; flex:none; border-radius:6px; background:var(--hc-sunken); color:var(--hc-text-2); }
+#root .hbdr-app-page .is-config .hbdr-application-stage-icon { color:var(--hc-warn); background:color-mix(in srgb,var(--hc-warn) 12%,var(--hc-surface)); }
+#root .hbdr-app-page .is-run .hbdr-application-stage-icon { background:var(--hc-ok); color:white; }
+#root .hbdr-app-page .hbdr-application-stage h4 { display:flex; align-items:baseline; gap:8px; margin:0; padding-right:12px; font-size:14px; font-weight:600; letter-spacing:-.012em; line-height:1.45; }
+#root .hbdr-app-page .hbdr-application-stage h4 small { font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--hc-text-3); }
+#root .hbdr-app-page .hbdr-application-stage p { margin:3px 0 0; font-size:12px; font-weight:400; line-height:1.45; color:var(--hc-text-3); }
+#root .hbdr-app-page .hbdr-application-stage-selected { position:absolute; top:12px; right:14px; display:flex; align-items:center; justify-content:center; width:19px; height:19px; border-radius:50%; background:var(--hc-accent); color:white; }
+#root .hbdr-app-page .hbdr-application-stage-metric { display:flex; align-items:baseline; gap:8px; padding-top:12px; border-top:1px solid var(--hc-border); }
+#root .hbdr-app-page .hbdr-application-stage-metric strong { font-size:24px; font-weight:600; line-height:1; letter-spacing:-.03em; color:var(--hc-text-2); }
+#root .hbdr-app-page .is-config .hbdr-application-stage-metric strong { color:var(--hc-warn); }
+#root .hbdr-app-page .is-run .hbdr-application-stage-metric strong { color:var(--hc-ok); }
+#root .hbdr-app-page .hbdr-application-stage-metric span { font-size:10.5px; font-weight:500; letter-spacing:.07em; text-transform:uppercase; color:var(--hc-text-3); }
+#root .hbdr-app-page .hbdr-application-stage-arrow { align-self:center; justify-self:center; color:var(--hc-border-strong); }
+#root .premium-app.hbdr-workspace .hbdr-app-workspace-title { font-size:20px !important; font-weight:600 !important; color:var(--hc-text) !important; }
+#root .premium-app.hbdr-workspace .hbdr-app-workspace-desc { font-size:12.5px !important; color:var(--hc-text-3) !important; }
+html[data-theme='dark'] #root .hbdr-secondary-title,
+html[data-theme='dark'] #root .hbdr-secondary-menu button { color:var(--hc-text-2) !important; }
+html[data-theme='dark'] #root .hbdr-secondary-menu .hbdr-secondary-active { color:var(--hc-accent) !important; background:color-mix(in srgb,var(--hc-accent) 12%,var(--hc-surface)) !important; }
+/* HyperTable renders div cells, not native table elements. */
+html[data-theme='dark'] #root .hbdr-app-page .hbdr-hyper-table,
+html[data-theme='dark'] #root .hbdr-app-page .hbdr-hyper-table-scroll,
+html[data-theme='dark'] #root .hbdr-app-page .hbdr-hyper-table-inner,
+html[data-theme='dark'] #root .hbdr-app-page .hbdr-hyper-table-body,
+html[data-theme='dark'] #root .hbdr-app-page .hbdr-hyper-table-row,
+html[data-theme='dark'] #root .hbdr-app-page .hbdr-hyper-table-body-cell,
+html[data-theme='dark'] #root .hbdr-app-page .hbdr-hyper-table-pagination { background:var(--hc-surface) !important; color:var(--hc-text-2) !important; border-color:var(--hc-border) !important; }
+html[data-theme='dark'] #root .hbdr-app-page .hbdr-hyper-table-head-cell { background:var(--hc-sunken) !important; color:var(--hc-text-2) !important; border-color:var(--hc-border) !important; }
+html[data-theme='dark'] #root .hbdr-app-page .hbdr-hyper-table-head-cell button,
+html[data-theme='dark'] #root .hbdr-app-page .hbdr-hyper-table-cell-primary p { color:var(--hc-text) !important; }
+@media(max-width:900px) {
+  #root .hbdr-app-page .hbdr-application-stages { grid-template-columns:minmax(0,1fr); gap:12px; }
+  #root .hbdr-app-page .hbdr-application-stage-arrow { display:none; }
+}
+#root .premium-app.hbdr-workspace .hbdr-app-page .hbdr-application-stage h4 { color:var(--hc-text) !important; }
+#root .premium-app.hbdr-workspace .hbdr-app-page .hbdr-application-stage p { color:var(--hc-text-2) !important; }
+/* DR reference header breathing room; keep the three stage cards at reference density. */
+#root .premium-app.hbdr-workspace .hbdr-app-page .hbdr-app-workspace-bar {
+  min-height:58px !important;
+  margin-bottom:6px !important;
+  padding:4px 0 4px !important;
+  align-items:center !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-app-page {
+  box-sizing:border-box !important;
+  width:100% !important;
+  min-height:100% !important;
+  padding:10px 20px 14px !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-app-page .hbdr-application-stages {
+  min-height:0 !important;
+  padding:0 !important;
+  margin-bottom:6px !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-app-page .hbdr-application-stage {
+  min-height:0 !important;
+  padding:14px 16px !important;
+}
+/* Keep the DR table controls compact so the data grid gets the available height. */
+#root .premium-app.hbdr-workspace .hbdr-app-page .hbdr-dr-table-head {
+  padding:8px 14px !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-app-page .hbdr-dr-toolbar {
+  min-height:44px !important;
+  padding:6px 14px !important;
+}
+/* Application DR table typography follows the AppDR reference: IBM Plex Sans
+   for controls and cells, with compact uppercase table headings. */
+#root .premium-app.hbdr-workspace .hbdr-app-page .hbdr-dr-table-card,
+#root .premium-app.hbdr-workspace .hbdr-app-page .hbdr-dr-table-card button,
+#root .premium-app.hbdr-workspace .hbdr-app-page .hbdr-hyper-table {
+  font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-app-page .hbdr-hyper-table-head-cell {
+  font-size:10.5px !important;
+  font-weight:600 !important;
+  line-height:1.3 !important;
+  letter-spacing:.07em !important;
+  text-transform:uppercase !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-app-page .hbdr-hyper-table-body-cell {
+  font-size:11.5px !important;
+  font-weight:400 !important;
+  line-height:1.45 !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-app-page .hbdr-dr-app-name,
+#root .premium-app.hbdr-workspace .hbdr-app-page .hbdr-dr-main-table strong {
+  font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif !important;
+  font-size:12.5px !important;
+  font-weight:600 !important;
+  line-height:1.35 !important;
+  letter-spacing:-.012em !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-app-page .hbdr-dr-toolbar button {
+  font-size:12.5px !important;
+  font-weight:500 !important;
+}
+/* All workspace data tables use one readable product typeface. */
+#root .premium-app.hbdr-workspace .hbdr-hyper-table,
+#root .premium-app.hbdr-workspace .hbdr-hyper-table *,
+#root .premium-app.hbdr-workspace .hbdr-dr-table-card,
+#root .premium-app.hbdr-workspace .hbdr-dr-table-card * {
+  font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif !important;
+}
+/* Shared cluster switcher: grow with the real cluster name without destabilizing the header. */
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-cluster,
+#root .premium-app.hbdr-workspace .hbdr-app-page .hbdr-dashboard-design-cluster {
+  width:fit-content !important;
+  min-width:220px !important;
+  max-width:min(380px, 42vw) !important;
+  flex:0 1 auto !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-cluster .hbdr-cluster-context-title {
+  min-width:0 !important;
+  overflow:hidden !important;
+  text-overflow:ellipsis !important;
+  white-space:nowrap !important;
+  font-size:12px !important;
+  font-weight:600 !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-cluster .hbdr-cluster-context {
+  gap:9px !important;
+  padding-left:11px !important;
+  padding-right:9px !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-cluster .hbdr-cluster-context-icon {
+  width:16px !important;
+  height:16px !important;
+  flex-basis:16px !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-dashboard-design-cluster .hbdr-cluster-context-icon svg {
+  width:16px !important;
+  height:16px !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-app-page .hbdr-dr-app-name { color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .hbdr-hyper-table-pagination button,
+html[data-theme='dark'] #root .hbdr-hyper-table-pagination select { background:var(--hc-surface) !important; color:var(--hc-text-2) !important; border-color:var(--hc-border) !important; color-scheme:dark; }
+html[data-theme='dark'] #root .hbdr-hyper-table-pagination button:disabled { color:var(--hc-text-3) !important; background:var(--hc-sunken) !important; }
+
+/* Login follows the selected application theme while retaining the reference composition. */
+html[data-theme='light'] #root .premium-login {
+  background:
+    radial-gradient(circle at 9% 8%, rgba(69, 141, 182, 0.18), transparent 24rem),
+    radial-gradient(circle at 72% 38%, rgba(140, 72, 163, 0.12), transparent 28rem),
+    linear-gradient(135deg, #f7fafc 0%, #eef3f8 52%, #f8f1f7 100%) !important;
+}
+html[data-theme='light'] #root .premium-login .premium-login-card {
+  background: rgba(255, 255, 255, 0.92) !important;
+  border-color: #d8e0ea !important;
+  box-shadow: 0 22px 64px rgba(39, 61, 86, 0.16) !important;
+}
+html[data-theme='light'] #root .premium-login .hbdr-login-hero { color: #172033; }
+html[data-theme='light'] #root .premium-login .hbdr-login-hero-copy { text-shadow: none; }
+html[data-theme='light'] #root .premium-login .hbdr-login-brand-one { color: #172033; }
+html[data-theme='light'] #root .premium-login .premium-login-card h2,
+html[data-theme='light'] #root .premium-login .premium-login-card label { color: #172033 !important; }
+html[data-theme='light'] #root .premium-login .premium-login-card h2 > span { color: #172033 !important; }
+html[data-theme='light'] #root .premium-login .hbdr-login-hero-title span { color: #172033 !important; }
+html[data-theme='light'] #root .premium-login .hbdr-login-hero-title { color: #172033 !important; }
+html[data-theme='light'] #root .premium-login .hbdr-login-hero-subtitle { color: #334155 !important; }
+
+/* Dashboard reference controls and standalone topology state. */
+.premium-app.hbdr-workspace > .premium-sidebar .hbdr-timezone-short {
+  display: inline !important;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+}
+.premium-app.hbdr-workspace > .premium-sidebar .hbdr-language-switch-compact span {
+  display: inline !important;
+  font-size: 11px;
+  font-weight: 500;
+}
+.premium-app.hbdr-workspace > .premium-sidebar .hbdr-language-switch-compact strong,
+.premium-app.hbdr-workspace > .premium-sidebar .hbdr-language-switch-compact svg:last-child { display: none !important; }
+.premium-app.hbdr-workspace > .premium-sidebar .hbdr-top-user > span:not(.hbdr-top-user-avatar) {
+  display: inline !important;
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.premium-app.hbdr-workspace > .premium-sidebar > div:last-child .hbdr-timezone-button {
+  display:inline-flex !important;
+  align-items:center !important;
+  height:26px !important;
+  min-width:76px !important;
+  justify-content:center !important;
+  border:1px solid var(--hc-border) !important;
+  border-radius:4px !important;
+  background:var(--hc-surface) !important;
+}
+.premium-app.hbdr-workspace > .premium-sidebar > div:last-child .hbdr-language-tooltip {
+  height:26px !important;
+  min-width:48px !important;
+  justify-content:center !important;
+  padding:0 7px !important;
+}
+.premium-app.hbdr-workspace > .premium-sidebar > div:last-child .hbdr-top-user {
+  min-width:136px !important;
+  justify-content:flex-start !important;
+}
+.premium-app.hbdr-workspace > aside.premium-sidebar > div:last-child > .hbdr-timezone-button {
+  width:76px !important;
+  min-width:76px !important;
+  max-width:76px !important;
+  height:26px !important;
+  min-height:26px !important;
+  padding:0 8px !important;
+  border:1px solid var(--hc-border) !important;
+  border-radius:4px !important;
+  background:var(--hc-surface) !important;
+  color:var(--hc-text-2) !important;
+}
+.premium-app.hbdr-workspace .hbdr-dashboard-design-cluster,
+.premium-app.hbdr-workspace .hbdr-dashboard-design-cluster .hbdr-cluster-context-wrap {
+  height:30px !important;
+  min-height:30px !important;
+}
+.hbdr-dashboard-topology-single { display:flex; align-items:center; justify-content:center; height:100%; min-height:180px; }
+.hbdr-dashboard-topology-node { display:flex; flex-direction:column; align-items:center; gap:5px; min-width:220px; padding:18px 24px; border:1px solid var(--hc-border); border-radius:6px; background:var(--hc-sunken); text-align:center; }
+.hbdr-dashboard-topology-node i { width:10px; height:10px; border-radius:50%; background:var(--hc-ok); box-shadow:0 0 0 4px color-mix(in srgb,var(--hc-ok) 16%,transparent); }
+.hbdr-dashboard-topology-node strong { color:var(--hc-text); font-family:'IBM Plex Mono',ui-monospace,monospace; font-size:13px; }
+.hbdr-dashboard-topology-node small,.hbdr-dashboard-topology-node span { color:var(--hc-text-2); font-size:11px; }
+.premium-app.hbdr-workspace > main.flex > .premium-content {
+  width:100% !important;
+  max-width:none !important;
+  margin:0 !important;
+  padding:0 !important;
+}
+html[data-theme='light'] #root .premium-login .premium-login-card input {
+  background: #f8fafc !important;
+  border-color: #d8e0ea !important;
+  color: #172033 !important;
+}
+html[data-theme='light'] #root .premium-login .premium-login-card input::placeholder { color: #8792a4 !important; }
+html[data-theme='light'] #root .premium-login .hbdr-login-tagline { color: #4f5ee8 !important; }
+html[data-theme='dark'] #root .hbdr-app-page .hbdr-task-ledger-range,
+html[data-theme='dark'] #root .hbdr-app-page .hbdr-task-ledger-summary,
+html[data-theme='dark'] #root .hbdr-app-page .hbdr-task-ledger-summary section {
+  background:var(--hc-surface) !important;
+  border-color:var(--hc-border) !important;
+  color:var(--hc-text) !important;
+}
+html[data-theme='dark'] #root .hbdr-app-page .hbdr-task-ledger-summary section span { color:var(--hc-text-2) !important; }
+html[data-theme='dark'] #root .hbdr-app-page .hbdr-task-ledger-summary section strong { color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .hbdr-app-page .hbdr-task-ledger-summary section:nth-child(4) strong { color:var(--hc-accent) !important; }
+html[data-theme='dark'] #root .hbdr-app-page .hbdr-task-ledger-summary section:nth-child(5) strong { color:var(--hc-ok) !important; }
+html[data-theme='dark'] #root .hbdr-app-page .hbdr-task-ledger-summary section:nth-child(6) strong { color:var(--hc-crit) !important; }
+html[data-theme='dark'] #root .operations-center-page .hbdr-page-hero,
+html[data-theme='dark'] #root .operations-center-page .hbdr-dr-table-card,
+html[data-theme='dark'] #root .operations-center-page .operations-center-page > section,
+html[data-theme='dark'] #root .operations-center-page > .grid > button {
+  background:var(--hc-surface) !important;
+  border-color:var(--hc-border) !important;
+  color:var(--hc-text) !important;
+  box-shadow:none !important;
+}
+html[data-theme='dark'] #root .operations-center-page .hbdr-page-hero h3,
+html[data-theme='dark'] #root .operations-center-page .hbdr-page-hero p,
+html[data-theme='dark'] #root .operations-center-page .hbdr-dr-table-head h3,
+html[data-theme='dark'] #root .operations-center-page .hbdr-dr-table-head p { color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .operations-center-page .hbdr-dr-table-head p { color:var(--hc-text-2) !important; }
+html[data-theme='dark'] #root .operations-center-page .hbdr-hyper-table,
+html[data-theme='dark'] #root .operations-center-page .hbdr-hyper-table-scroll,
+html[data-theme='dark'] #root .operations-center-page .hbdr-hyper-table-inner,
+html[data-theme='dark'] #root .operations-center-page .hbdr-hyper-table-body,
+html[data-theme='dark'] #root .operations-center-page .hbdr-hyper-table-row,
+html[data-theme='dark'] #root .operations-center-page .hbdr-hyper-table-cell,
+html[data-theme='dark'] #root .operations-center-page .hbdr-hyper-table-pagination { background:var(--hc-surface) !important; color:var(--hc-text-2) !important; border-color:var(--hc-border) !important; }
+html[data-theme='dark'] #root .operations-center-page .hbdr-hyper-table-head-cell { background:var(--hc-sunken) !important; color:var(--hc-text-2) !important; border-color:var(--hc-border) !important; }
+html[data-theme='dark'] #root .operations-center-page .hbdr-hyper-table-cell-primary,
+html[data-theme='dark'] #root .operations-center-page .hbdr-hyper-table-cell-primary p { color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .operations-center-page .hbdr-page-hero button,
+html[data-theme='dark'] #root .operations-center-page > .grid > button { color:var(--hc-text-2) !important; }
+html[data-theme='dark'] #root .operations-center-page [class*='bg-slate-50'] { background:var(--hc-sunken) !important; border-color:var(--hc-border) !important; color:var(--hc-text-2) !important; }
+html[data-theme='dark'] #root .settings-user-page .hbdr-page-hero,
+html[data-theme='dark'] #root .settings-user-page .hbdr-dr-table-card,
+html[data-theme='dark'] #root .settings-user-page .hbdr-hyper-table,
+html[data-theme='dark'] #root .settings-user-page .hbdr-hyper-table-scroll,
+html[data-theme='dark'] #root .settings-user-page .hbdr-hyper-table-inner,
+html[data-theme='dark'] #root .settings-user-page .hbdr-hyper-table-body,
+html[data-theme='dark'] #root .settings-user-page .hbdr-hyper-table-row,
+html[data-theme='dark'] #root .settings-user-page .hbdr-hyper-table-cell,
+html[data-theme='dark'] #root .settings-user-page .hbdr-hyper-table-pagination { background:var(--hc-surface) !important; color:var(--hc-text-2) !important; border-color:var(--hc-border) !important; }
+html[data-theme='dark'] #root .settings-user-page .hbdr-hyper-table-head-cell { background:var(--hc-sunken) !important; color:var(--hc-text-2) !important; border-color:var(--hc-border) !important; }
+html[data-theme='dark'] #root .settings-user-page .hbdr-hyper-table-cell-primary,
+html[data-theme='dark'] #root .settings-user-page .hbdr-hyper-table-cell-primary p,
+html[data-theme='dark'] #root .settings-user-page .hbdr-page-hero h3 { color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .settings-user-page .hbdr-page-hero p { color:var(--hc-text-2) !important; }
+html[data-theme='dark'] #root .upgrade-management-page .hbdr-section-card,
+html[data-theme='dark'] #root .upgrade-management-page .hbdr-section-toolbar,
+html[data-theme='dark'] #root .upgrade-management-page .upgrade-management-page > section { background:var(--hc-surface) !important; border-color:var(--hc-border) !important; color:var(--hc-text) !important; box-shadow:none !important; }
+html[data-theme='dark'] #root .upgrade-management-page .hbdr-section-toolbar h3,
+html[data-theme='dark'] #root .upgrade-management-page .hbdr-section-toolbar p,
+html[data-theme='dark'] #root .upgrade-management-page strong { color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .upgrade-management-page .hbdr-section-toolbar p,
+html[data-theme='dark'] #root .upgrade-management-page [class*='text-slate-'] { color:var(--hc-text-2) !important; }
+html[data-theme='dark'] #root .upgrade-management-page [class*='divide-slate-'] > *,
+html[data-theme='dark'] #root .upgrade-management-page [class*='border-slate-'] { border-color:var(--hc-border) !important; }
+html[data-theme='dark'] #root .upgrade-management-page [class*='bg-white'],
+html[data-theme='dark'] #root .upgrade-management-page [class*='bg-slate-50'] { background:var(--hc-sunken) !important; }
+html[data-theme='dark'] #root .upgrade-management-page .hbdr-page-hero h3 { color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .hbdr-clusters-page .hbdr-section-card,
+html[data-theme='dark'] #root .hbdr-clusters-page .hbdr-clusters-card-region,
+html[data-theme='dark'] #root .hbdr-clusters-page .hbdr-cluster-card-premium,
+html[data-theme='dark'] #root .hbdr-clusters-page .hbdr-cluster-task-dock { background:var(--hc-surface) !important; border-color:var(--hc-border) !important; color:var(--hc-text) !important; box-shadow:none !important; }
+html[data-theme='dark'] #root .hbdr-clusters-page .hbdr-section-toolbar h3,
+html[data-theme='dark'] #root .hbdr-clusters-page .cluster-card-premium h3,
+html[data-theme='dark'] #root .hbdr-clusters-page .cluster-card-premium strong,
+html[data-theme='dark'] #root .hbdr-clusters-page .cluster-card-premium p { color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .hbdr-clusters-page .cluster-card-premium [class*='bg-white'],
+html[data-theme='dark'] #root .hbdr-clusters-page .cluster-card-premium [class*='bg-slate-50'] { background:var(--hc-sunken) !important; border-color:var(--hc-border) !important; }
+html[data-theme='dark'] #root .hbdr-clusters-page .hbdr-cluster-card-grid,
+html[data-theme='dark'] #root .hbdr-clusters-page .cluster-card-premium,
+html[data-theme='dark'] #root .hbdr-clusters-page .hbdr-cluster-task-dock table,
+html[data-theme='dark'] #root .hbdr-clusters-page .hbdr-cluster-task-dock thead,
+html[data-theme='dark'] #root .hbdr-clusters-page .hbdr-cluster-task-dock tbody,
+html[data-theme='dark'] #root .hbdr-clusters-page .hbdr-cluster-task-dock tr { background:var(--hc-surface) !important; color:var(--hc-text-2) !important; border-color:var(--hc-border) !important; }
+html[data-theme='dark'] #root .storage-page .hbdr-page-hero,
+html[data-theme='dark'] #root .storage-page .hbdr-dr-table-card,
+html[data-theme='dark'] #root .storage-page .hbdr-hyper-table,
+html[data-theme='dark'] #root .storage-page .hbdr-hyper-table-scroll,
+html[data-theme='dark'] #root .storage-page .hbdr-hyper-table-inner,
+html[data-theme='dark'] #root .storage-page .hbdr-hyper-table-body,
+html[data-theme='dark'] #root .storage-page .hbdr-hyper-table-row,
+html[data-theme='dark'] #root .storage-page .hbdr-hyper-table-cell,
+html[data-theme='dark'] #root .storage-page .hbdr-hyper-table-pagination { background:var(--hc-surface) !important; color:var(--hc-text-2) !important; border-color:var(--hc-border) !important; }
+html[data-theme='dark'] #root .storage-page .hbdr-hyper-table-head-cell { background:var(--hc-sunken) !important; color:var(--hc-text-2) !important; border-color:var(--hc-border) !important; }
+html[data-theme='dark'] #root .storage-page .hbdr-page-hero h3 { color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .storage-page .hbdr-page-hero p { color:var(--hc-text-2) !important; }
+html[data-theme='dark'] #root .policies-page .hbdr-page-hero,
+html[data-theme='dark'] #root .policies-page .hbdr-dr-table-card,
+html[data-theme='dark'] #root .policies-page .hbdr-hyper-table,
+html[data-theme='dark'] #root .policies-page .hbdr-hyper-table-scroll,
+html[data-theme='dark'] #root .policies-page .hbdr-hyper-table-inner,
+html[data-theme='dark'] #root .policies-page .hbdr-hyper-table-body,
+html[data-theme='dark'] #root .policies-page .hbdr-hyper-table-row,
+html[data-theme='dark'] #root .policies-page .hbdr-hyper-table-cell,
+html[data-theme='dark'] #root .policies-page .hbdr-hyper-table-pagination { background:var(--hc-surface) !important; color:var(--hc-text-2) !important; border-color:var(--hc-border) !important; }
+html[data-theme='dark'] #root .policies-page .hbdr-hyper-table-head-cell { background:var(--hc-sunken) !important; color:var(--hc-text-2) !important; border-color:var(--hc-border) !important; }
+html[data-theme='dark'] #root .policies-page .hbdr-page-hero h3 { color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .policies-page .hbdr-page-hero p { color:var(--hc-text-2) !important; }
+html[data-theme='dark'] #root .tags-page .hbdr-page-hero,
+html[data-theme='dark'] #root .tags-page .hbdr-dr-table-card,
+html[data-theme='dark'] #root .tags-page .hbdr-hyper-table,
+html[data-theme='dark'] #root .tags-page .hbdr-hyper-table-scroll,
+html[data-theme='dark'] #root .tags-page .hbdr-hyper-table-inner,
+html[data-theme='dark'] #root .tags-page .hbdr-hyper-table-body,
+html[data-theme='dark'] #root .tags-page .hbdr-hyper-table-row,
+html[data-theme='dark'] #root .tags-page .hbdr-hyper-table-cell,
+html[data-theme='dark'] #root .tags-page .hbdr-hyper-table-pagination { background:var(--hc-surface) !important; color:var(--hc-text-2) !important; border-color:var(--hc-border) !important; }
+html[data-theme='dark'] #root .tags-page .hbdr-hyper-table-head-cell { background:var(--hc-sunken) !important; color:var(--hc-text-2) !important; border-color:var(--hc-border) !important; }
+html[data-theme='dark'] #root .tags-page .hbdr-page-hero h3 { color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .tags-page .hbdr-page-hero p { color:var(--hc-text-2) !important; }
+
+/* Shared resource headers: transparent surface and DR-aligned outer gutters. */
+#root .premium-app.hbdr-workspace .premium-content .hbdr-page-hero {
+  min-height:58px !important;
+  margin:10px 20px 6px !important;
+  padding:4px 0 !important;
+  width:auto !important;
+  border:0 !important;
+  border-radius:0 !important;
+  background:transparent !important;
+  box-shadow:none !important;
+  box-sizing:border-box !important;
+}
+#root .premium-app.hbdr-workspace .premium-content .hbdr-page-hero h3 {
+  margin:0 !important;
+  font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif !important;
+  color:var(--hc-text) !important;
+  font-size:20px !important;
+  font-weight:600 !important;
+  line-height:30px !important;
+  letter-spacing:-.022em !important;
+  text-transform:none !important;
+}
+#root .premium-app.hbdr-workspace .premium-content .hbdr-page-hero p {
+  margin:0 !important;
+  font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif !important;
+  color:var(--hc-text-3) !important;
+  font-size:12.5px !important;
+  line-height:18px !important;
+  font-weight:400 !important;
+}
+/* Resource page roots own gutters, keeping headings and every data panel aligned. */
+#root .premium-app.hbdr-workspace .premium-content > :is(.storage-page,.policies-page,.tags-page,.settings-user-page,.operations-center-page,.upgrade-management-page,.hbdr-clusters-page,.space-y-5) {
+  padding:10px 20px 14px !important;
+  box-sizing:border-box !important;
+  min-width:0;
+}
+#root .premium-app.hbdr-workspace .premium-content > :is(.storage-page,.policies-page,.tags-page,.settings-user-page,.operations-center-page,.upgrade-management-page,.hbdr-clusters-page,.space-y-5) .hbdr-page-hero {
+  margin:0 0 6px !important;
+}
+#root .premium-app.hbdr-workspace .premium-content > :not(.hbdr-app-page) .hbdr-dr-toolbar {
+  min-height:44px !important;
+  padding:6px 14px !important;
+}
+#root .premium-app.hbdr-workspace .premium-content > :not(.hbdr-app-page) .hbdr-dr-table-head {
+  padding:8px 14px !important;
+}
+
+/* Keep resource page headings on the same grid and type scale as Application DR. */
+#root .premium-app.hbdr-workspace .premium-content .hbdr-page-hero {
+  min-height:60.75px !important;
+}
+#root .premium-app.hbdr-workspace .premium-content .hbdr-page-hero .flex.h-10.w-10 {
+  display:none !important;
+}
+#root .premium-app.hbdr-workspace .premium-content .hbdr-page-hero h3,
+#root .premium-app.hbdr-workspace .premium-content .hbdr-page-hero p {
+  font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif !important;
+}
+
+/* The title bar is one shared surface across every top-level page. */
+#root .premium-app.hbdr-workspace .premium-content .hbdr-app-workspace-bar {
+  min-height:60.75px !important;
+  height:60.75px !important;
+  margin:0 0 6px !important;
+  padding:4px 0 !important;
+  box-sizing:border-box !important;
+  align-items:center !important;
+}
+#root .premium-app.hbdr-workspace .premium-content .hbdr-app-workspace-bar > .min-w-0 {
+  align-self:flex-start !important;
+}
+#root .premium-app.hbdr-workspace .premium-content .hbdr-app-workspace-title {
+  margin:0 !important;
+  font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif !important;
+  font-size:20px !important;
+  font-weight:600 !important;
+  line-height:30px !important;
+  letter-spacing:-.022em !important;
+}
+#root .premium-app.hbdr-workspace .premium-content .hbdr-app-workspace-desc {
+  margin:0 !important;
+  font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif !important;
+  font-size:12.5px !important;
+  font-weight:400 !important;
+  line-height:18px !important;
+}
+
+/* One title bar component for every primary page. */
+#root .premium-app.hbdr-workspace .premium-content .hbdr-page-title-bar {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  box-sizing:border-box;
+  width:100%;
+  height:70px;
+  min-height:70px;
+  margin:0 0 8px;
+  padding:4px 0;
+  border:0;
+  border-radius:0;
+  background:transparent;
+  box-shadow:none;
+}
+#root .premium-app.hbdr-workspace .premium-content .hbdr-page-title-bar .flex.h-10.w-10 { display:none; }
+#root .premium-app.hbdr-workspace .premium-content .hbdr-page-title-bar h3 {
+  margin:0;
+  color:var(--hc-text);
+  font:600 20px/30px 'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif;
+  letter-spacing:-.022em;
+  text-transform:none;
+}
+#root .premium-app.hbdr-workspace .premium-content .hbdr-page-title-bar p:not(.hbdr-cluster-context-kicker):not(.hbdr-cluster-context-meta) {
+  margin:0;
+  color:var(--hc-text-3);
+  font:400 12.5px/18px 'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif;
+}
+#root .premium-app.hbdr-workspace .premium-content .hbdr-page-title-bar > :first-child { align-self:flex-start; }
+
+/* Flex page roots already add a 14px row gap; cancel it after the title bar. */
+#root .premium-app.hbdr-workspace .premium-content :is(.hbdr-app-page,.hbdr-clusters-workspace) { row-gap:0 !important; }
+#root .premium-app.hbdr-workspace .premium-content :is(.hbdr-app-page,.hbdr-clusters-workspace) > .hbdr-page-title-bar { margin-bottom:8px; }
+#root .premium-app.hbdr-workspace .premium-content .hbdr-page-title-bar + .hbdr-restore-point-table-list {
+  margin-top:0;
+}
+
+/* Protect applications guided flow, based on the supplied Policy reference. */
+.hbdr-protect-wizard-backdrop { position:fixed; inset:0; z-index:100; display:grid; place-items:center; padding:16px; background:rgba(15,23,42,.62); }
+.hbdr-protect-wizard { display:flex; flex-direction:column; width:min(1400px,calc(100vw - 32px)); height:min(900px,calc(100vh - 32px)); overflow:hidden; border:1px solid var(--hc-border); border-radius:10px; background:var(--hc-surface); box-shadow:0 30px 90px rgba(0,0,0,.3); color:var(--hc-text); font-family:'IBM Plex Sans',ui-sans-serif,sans-serif; }
+.hbdr-protect-wizard-header { display:flex; align-items:center; gap:18px; min-height:94px; padding:18px 28px; border-bottom:1px solid var(--hc-border); }
+.hbdr-protect-wizard-mark { display:grid; place-items:center; width:50px; height:50px; flex:none; border-radius:9px; background:color-mix(in srgb,var(--hc-accent) 10%,var(--hc-surface)); color:var(--hc-accent); }
+.hbdr-protect-wizard-header h2 { margin:0; font-size:22px; font-weight:600; }
+.hbdr-protect-wizard-header p { margin:2px 0 0; color:var(--hc-text-3); font:12px/1.4 'IBM Plex Mono',monospace; }
+.hbdr-protect-wizard-header > button { margin-left:auto; border:0; background:none; color:var(--hc-text-3); cursor:pointer; }
+.hbdr-protect-wizard-body { display:grid; grid-template-columns:260px minmax(0,1fr); min-height:0; flex:1; }
+.hbdr-protect-wizard-steps { display:flex; flex-direction:column; padding:20px 0; overflow:auto; border-right:1px solid var(--hc-border); background:var(--hc-sunken); }
+.hbdr-protect-wizard-steps button { display:flex; align-items:flex-start; gap:18px; width:100%; min-height:78px; padding:12px 24px; border:0; border-left:3px solid transparent; background:transparent; color:var(--hc-text-3); text-align:left; cursor:pointer; }
+.hbdr-protect-wizard-steps button.is-current { border-left-color:var(--hc-accent); background:var(--hc-surface); color:var(--hc-text); }
+.hbdr-protect-wizard-steps button:disabled { cursor:default; }
+.hbdr-protect-wizard-steps button > span:first-child { display:grid; place-items:center; width:32px; height:32px; flex:none; border:1px solid var(--hc-border-strong); border-radius:50%; font:600 13px 'IBM Plex Mono',monospace; }
+.hbdr-protect-wizard-steps button.is-current > span:first-child { border-color:var(--hc-accent); background:var(--hc-accent); color:white; }
+.hbdr-protect-wizard-steps button > span.is-done { border-color:var(--hc-ok); background:var(--hc-ok); color:white; }
+.hbdr-protect-wizard-steps strong,.hbdr-protect-wizard-steps small { display:block; }
+.hbdr-protect-wizard-steps strong { font-size:14px; font-weight:600; }
+.hbdr-protect-wizard-steps small { margin-top:3px; font-size:12px; font-weight:400; color:var(--hc-text-3); }
+.hbdr-protect-wizard-content { position:relative; min-width:0; overflow:auto; padding:28px 32px; }
+.hbdr-protect-wizard-content > section:has(.hbdr-protect-wizard-pagination) { display:flex; flex-direction:column; min-height:100%; }
+.hbdr-protect-wizard-content h3 { margin:0; font-size:21px; font-weight:600; }
+.hbdr-protect-wizard-content section > p { margin:5px 0 20px; color:var(--hc-text-3); font-size:13px; }
+.hbdr-protect-wizard-options { display:grid; gap:12px; }
+.hbdr-protect-wizard-options > p { margin:0; padding:28px 18px; border:1px dashed var(--hc-border); border-radius:6px; color:var(--hc-text-3); text-align:center; font-size:13px; }
+.hbdr-protect-wizard-options label { display:flex; align-items:center; gap:14px; min-height:86px; padding:12px 16px; border:1px solid var(--hc-border); border-radius:6px; background:var(--hc-surface); cursor:pointer; }
+.hbdr-protect-wizard-options label > span { min-width:0; }
+.hbdr-protect-wizard-options .hbdr-protect-wizard-card-copy { display:block; flex:1; min-width:0; }
+.hbdr-protect-wizard-card-heading { display:flex; align-items:center; min-width:0; gap:8px; }
+.hbdr-protect-wizard-card-heading strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hbdr-protect-wizard-options .hbdr-protect-wizard-card-copy > small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hbdr-protect-wizard-options label.is-selected { border-color:var(--hc-accent); background:color-mix(in srgb,var(--hc-accent) 9%,var(--hc-surface)); outline:3px solid color-mix(in srgb,var(--hc-accent) 12%,transparent); }
+.hbdr-protect-wizard-options input { width:20px; height:20px; accent-color:var(--hc-accent); }
+.hbdr-protect-wizard-options strong { font:600 15px 'IBM Plex Mono',monospace; }
+.hbdr-protect-wizard-options small { display:block; margin-top:5px; color:var(--hc-text-3); font-size:12px; overflow-wrap:anywhere; }
+.hbdr-protect-wizard-options em { margin-left:10px; padding:4px 8px; border-radius:3px; background:var(--hc-sunken); color:var(--hc-text-2); font-size:11px; font-style:normal; }
+.hbdr-protect-wizard-policy-tools,.hbdr-protect-wizard-selection-tools { display:flex; gap:12px; margin-bottom:16px; }
+.hbdr-protect-wizard-policy-tools label,.hbdr-protect-wizard-selection-tools > label { display:flex; align-items:center; gap:10px; flex:1; height:42px; padding:0 14px; border:1px solid var(--hc-border); border-radius:5px; color:var(--hc-text-3); }
+.hbdr-protect-wizard-selection-tools > div { display:flex; gap:8px; }
+.hbdr-protect-wizard-selection-tools { min-width:0; }
+.hbdr-protect-wizard-selection-tools > label { min-width:0; }
+.hbdr-protect-wizard-selection-tools button { display:inline-flex; align-items:center; gap:7px; height:42px; padding:0 14px; border:1px solid var(--hc-border-strong); border-radius:5px; background:var(--hc-surface); color:var(--hc-text); font:500 12.5px 'IBM Plex Sans',sans-serif; cursor:pointer; white-space:nowrap; }
+.hbdr-protect-wizard-policy-tools button { min-height:42px; font-weight:500; font-size:12.5px; white-space:nowrap; }
+.hbdr-protect-wizard-selection-tools input::placeholder,.hbdr-protect-wizard-policy-tools input::placeholder { color:var(--hc-text-3); }
+.hbdr-protect-wizard-policy-tools input,.hbdr-protect-wizard-selection-tools input { width:100%; border:0; outline:0; background:transparent; color:var(--hc-text); font:inherit; }
+.hbdr-protect-wizard-actions { display:flex; justify-content:flex-end; margin-bottom:18px; }
+.hbdr-protect-wizard-actions button,.hbdr-protect-wizard-policy-tools button { display:inline-flex; align-items:center; gap:7px; padding:0 16px; border:1px solid var(--hc-border-strong); border-radius:5px; background:var(--hc-surface); color:var(--hc-text); font:600 13px 'IBM Plex Sans',sans-serif; cursor:pointer; }
+.hbdr-protect-wizard-pagination { display:flex; justify-content:space-between; align-items:center; margin-top:auto; padding-top:32px; color:var(--hc-text-3); font-size:13px; }
+.hbdr-protect-wizard-pagination > div { display:flex; align-items:center; gap:12px; }
+.hbdr-protect-wizard-pagination button { display:grid; place-items:center; width:38px; height:38px; border:1px solid var(--hc-border); border-radius:5px; background:var(--hc-surface); color:var(--hc-text-2); }
+.hbdr-protect-wizard-footer { display:flex; justify-content:space-between; align-items:center; min-height:90px; padding:16px 28px; border-top:1px solid var(--hc-border); background:var(--hc-sunken); color:var(--hc-text-3); font-size:13px; }
+.hbdr-protect-wizard-footer > div { display:flex; gap:12px; }
+.hbdr-protect-wizard-footer button { display:inline-flex; align-items:center; gap:7px; min-height:44px; padding:0 20px; border:1px solid var(--hc-border); border-radius:5px; background:var(--hc-surface); color:var(--hc-text); cursor:pointer; }
+.hbdr-protect-wizard-footer button.is-primary { border-color:var(--hc-accent); background:var(--hc-accent); color:white; }
+.hbdr-protect-wizard-footer button:disabled { cursor:default; opacity:.45; }
+.hbdr-protect-wizard-summary,.hbdr-protect-wizard-review { padding:20px; border:1px solid var(--hc-border); border-radius:6px; background:var(--hc-sunken); }
+.hbdr-protect-wizard-summary span { display:block; margin-top:8px; font-family:'IBM Plex Mono',monospace; }
+.hbdr-protect-wizard-scope-summary { display:grid; gap:14px; max-width:760px; }
+.hbdr-protect-wizard-scope-mode { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:0; padding:0; border:0; }
+.hbdr-protect-wizard-scope-mode legend { margin-bottom:8px; color:var(--hc-text-3); font-size:12px; }
+.hbdr-protect-wizard-scope-mode label { display:flex; align-items:flex-start; gap:10px; min-height:72px; padding:12px 14px; border:1px solid var(--hc-border); border-radius:6px; background:var(--hc-surface); cursor:pointer; }
+.hbdr-protect-wizard-scope-mode label:has(input:checked) { border-color:var(--hc-accent); background:color-mix(in srgb,var(--hc-accent) 9%,var(--hc-surface)); }
+.hbdr-protect-wizard-scope-mode input { margin-top:3px; accent-color:var(--hc-accent); }
+.hbdr-protect-wizard-scope-mode strong,.hbdr-protect-wizard-scope-mode small { display:block; }
+.hbdr-protect-wizard-scope-mode small { margin-top:5px; color:var(--hc-text-3); font-size:12px; line-height:1.4; }
+.hbdr-protect-wizard-review div { display:flex; justify-content:space-between; gap:16px; padding:13px 0; border-bottom:1px solid var(--hc-border); }
+.hbdr-protect-wizard-review div:last-child { border:0; }
+.hbdr-protect-wizard-review dt { color:var(--hc-text-3); }
+.hbdr-protect-wizard-review dd { margin:0; font-family:'IBM Plex Mono',monospace; }
+.hbdr-protect-wizard-inline { position:absolute; inset:0 0 0 auto; width:min(760px,100%); padding:28px; border-left:1px solid var(--hc-border); background:var(--hc-surface); box-shadow:-12px 0 30px rgba(0,0,0,.1); }
+.hbdr-protect-wizard-inline { overflow-y:auto; z-index:2; }
+.hbdr-protect-wizard-inline > strong { display:block; margin-bottom:4px; font-size:17px; font-weight:600; color:var(--hc-text); }
+.hbdr-protect-wizard-inline > button { float:right; border:0; background:transparent; color:var(--hc-text-3); cursor:pointer; }
+.hbdr-protect-wizard-inline p { margin:20px 0; color:var(--hc-text-3); font-size:13px; line-height:1.5; }
+.hbdr-protect-wizard-inline pre { max-height:180px; overflow:auto; padding:12px; border:1px solid var(--hc-border); border-radius:5px; background:var(--hc-sunken); white-space:pre-wrap; overflow-wrap:anywhere; font:11px/1.5 'IBM Plex Mono',monospace; }
+.hbdr-protect-wizard-inline .hbdr-cluster-register-command { max-height:none; margin:0; padding:0; border:0; border-radius:0; background:transparent; color:#93c5fd; overflow:visible; }
+.hbdr-protect-wizard-inline .hbdr-register-command-compact { display:grid; gap:12px; }
+.hbdr-protect-wizard-inline .hbdr-register-command-compact > p { display:flex; align-items:center; gap:6px; margin:0; color:var(--hc-text-3); font-size:12px; }
+.hbdr-protect-wizard-inline .hbdr-register-command-compact section { min-width:0; overflow:hidden; border:1px solid var(--hc-border); border-radius:7px; background:var(--hc-surface); }
+.hbdr-protect-wizard-inline .hbdr-register-command-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border-bottom:1px solid var(--hc-border); }
+.hbdr-protect-wizard-inline .hbdr-register-command-head strong { font-size:13px; font-weight:600; }
+.hbdr-protect-wizard-inline .hbdr-register-command-head button { min-height:28px; padding:0 10px; font-size:11px; }
+.hbdr-protect-wizard-inline .hbdr-register-command-compact pre { max-height:170px; margin:0; padding:13px; border:0; border-radius:0; background:#0f172a; color:#bfdbfe; overflow:auto; overflow-wrap:anywhere; font:12px/1.55 'IBM Plex Mono',monospace; }
+.hbdr-protect-wizard-inline .hbdr-register-command-compact section > p[role="alert"] { margin:0; padding:12px; color:var(--hc-danger); }
+.hbdr-protect-wizard-inline .hbdr-policy-form-fields .hbdr-advanced-filter-section:first-child .hbdr-policy-form-box > span:first-child { display:none; }
+.hbdr-resource-create-layer { position:fixed; inset:0; z-index:400; }
+.hbdr-resource-create-layer .hbdr-filter-drawer-backdrop { z-index:0; }
+.premium-app .hbdr-resource-create-layer .hbdr-resource-create-drawer { z-index:1; width:min(760px,100vw); }
+.hbdr-resource-create-layer .hbdr-resource-create-body { min-height:0; }
+.hbdr-resource-create-layer .hbdr-resource-create-actions { flex:none; padding:14px 24px; border-top:1px solid var(--hc-border); }
+.hbdr-resource-create-layer .hbdr-resource-create-actions button { display:inline-flex; align-items:center; justify-content:center; min-height:38px; padding:0 14px; border:1px solid var(--hc-border-strong); border-radius:5px; background:var(--hc-surface); color:var(--hc-text); font:500 12px 'IBM Plex Sans',sans-serif; }
+.hbdr-resource-create-layer .hbdr-resource-create-actions button:first-child:not(:last-child) { border-color:var(--hc-accent); background:var(--hc-accent); color:#fff; }
+.hbdr-resource-create-layer .hbdr-resource-create-actions button:last-child { border:1px solid var(--hc-border-strong); background:var(--hc-surface); color:var(--hc-text); }
+.hbdr-resource-create-layer .hbdr-resource-create-actions button.is-primary { border-color:var(--hc-accent); background:var(--hc-accent); color:#fff; }
+.hbdr-resource-create-layer .hbdr-resource-create-actions button:disabled { opacity:.45; cursor:not-allowed; }
+.hbdr-resource-create-layer .hbdr-policy-form-fields .hbdr-filter-drawer-body { overflow:visible; padding:0; }
+.hbdr-resource-create-layer .hbdr-policy-form-fields .hbdr-policy-drawer-body { display:block; }
+.hbdr-resource-create-layer .hbdr-resource-create-cluster .hbdr-register-command-compact { display:grid; gap:12px; }
+.hbdr-resource-create-layer .hbdr-resource-create-cluster .hbdr-register-command-compact section { min-width:0; overflow:hidden; border:1px solid var(--hc-border); border-radius:7px; }
+.hbdr-resource-create-layer .hbdr-resource-create-cluster .hbdr-register-command-compact .hbdr-register-command-head { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; }
+.hbdr-resource-create-cluster .hbdr-register-command-tools { display:flex; align-items:center; gap:8px; }
+.hbdr-resource-create-cluster .hbdr-register-command-tools .hbdr-register-regenerate { display:inline-flex; align-items:center; gap:5px; min-height:28px; padding:0 5px; border:0; background:transparent; color:var(--hc-text-3); font-size:11px; font-weight:500; cursor:pointer; }
+.hbdr-resource-create-cluster .hbdr-register-command-tools .hbdr-register-regenerate:hover { background:transparent; color:var(--hc-accent); }
+.hbdr-resource-create-cluster .hbdr-register-command-tools .hbdr-register-regenerate:disabled { opacity:.5; cursor:wait; }
+.hbdr-resource-create-layer .hbdr-resource-create-cluster .hbdr-register-command-compact pre { max-height:170px; margin:0; padding:13px; background:#0f172a; color:#bfdbfe; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.55 'IBM Plex Mono',monospace; }
+.hbdr-kubeconfig-guide { position:fixed; inset:0; z-index:510; }
+.hbdr-kubeconfig-guide .hbdr-filter-drawer-backdrop { z-index:0; }
+.hbdr-kubeconfig-guide .hbdr-filter-drawer { z-index:1; width:min(760px,100vw); }
+.hbdr-kubeconfig-guide-body { display:block; color:var(--hc-text-2); font:13px/1.55 'IBM Plex Sans',sans-serif; }
+.hbdr-kubeconfig-guide-body > p { margin:0 0 16px; }
+.hbdr-kubeconfig-guide-body ol { display:grid; gap:18px; margin:0; padding-left:20px; }
+.hbdr-kubeconfig-guide-body li { padding-left:4px; }
+.hbdr-kubeconfig-guide-body pre { margin:9px 0 0; padding:12px; border-radius:6px; background:#0f172a; color:#bfdbfe; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font:11px/1.6 'IBM Plex Mono',monospace; }
+.hbdr-kubeconfig-guide-body .hbdr-kubeconfig-guide-security { margin:20px 0 0; padding:12px; border:1px solid var(--hc-border); border-radius:6px; background:var(--hc-sunken); font-size:12px; }
+.hbdr-cluster-type-panel { overflow:hidden; border:1px solid var(--hc-border); border-radius:8px; background:var(--hc-surface); }
+.hbdr-cluster-type-section { padding:0 16px; }
+.hbdr-cluster-type-section > .mb-2 { margin:0; padding:13px 0 7px; }
+.hbdr-cluster-type-tabs { gap:0; border-bottom:1px solid var(--hc-border); }
+.hbdr-cluster-type-tabs .hbdr-cluster-type-tab { position:relative; display:flex; align-items:center; gap:9px; min-width:0; min-height:54px; padding:8px 12px; border:0; border-bottom:2px solid transparent; background:transparent; color:var(--hc-text-2); text-align:left; cursor:pointer; }
+.hbdr-cluster-type-tabs .hbdr-cluster-type-tab:hover { background:var(--hc-sunken); }
+.hbdr-cluster-type-tabs .hbdr-cluster-type-tab.is-active { border-bottom-color:var(--hc-accent); background:color-mix(in srgb,var(--hc-accent) 6%,var(--hc-surface)); color:var(--hc-accent); }
+.hbdr-cluster-type-tabs .hbdr-cluster-type-tab > span:first-child { padding:6px; }
+.hbdr-cluster-type-tabs .hbdr-cluster-type-tab strong { padding-right:14px; font-size:12px; font-weight:600; }
+.hbdr-cluster-type-tabs .hbdr-cluster-type-tab > svg:last-child { right:8px; top:10px; }
+.hbdr-cluster-method-section { padding:0 16px 13px; }
+.hbdr-cluster-method-section > .mb-2 { margin:0; padding:14px 0 8px; }
+.hbdr-cluster-method-section > p:last-child { margin:9px 0 0; }
+.hbdr-cluster-method-tabs { gap:0; border:1px solid var(--hc-border); border-radius:6px; background:var(--hc-sunken); overflow:hidden; }
+.hbdr-cluster-method-tabs .hbdr-cluster-method-tab { min-height:40px; padding:8px 12px; border:0; border-bottom:2px solid transparent; background:transparent; text-align:center; cursor:pointer; }
+.hbdr-cluster-method-tabs .hbdr-cluster-method-tab + .hbdr-cluster-method-tab { border-left:1px solid var(--hc-border); }
+.hbdr-cluster-method-tabs .hbdr-cluster-method-tab.is-active { border-bottom-color:var(--hc-accent); background:var(--hc-surface); }
+.hbdr-cluster-method-tabs .hbdr-cluster-method-tab span { font-size:12px; font-weight:600; }
+.hbdr-resource-create-cluster .hbdr-resource-create-body { gap:0; }
+.hbdr-resource-create-cluster .hbdr-cluster-type-panel { border-bottom:0; border-radius:8px 8px 0 0; }
+.hbdr-resource-create-cluster .hbdr-cluster-type-panel + div { padding:16px; border:1px solid var(--hc-border); border-top:0; border-radius:0 0 8px 8px; }
+@media(max-width:640px) { .hbdr-cluster-type-tabs { grid-template-columns:1fr; } .hbdr-cluster-type-tabs .hbdr-cluster-type-tab { min-height:44px; } }
+.hbdr-protect-wizard-inline button:not([aria-label]) { min-height:38px; padding:0 12px; border:1px solid var(--hc-border-strong); border-radius:5px; background:var(--hc-surface); color:var(--hc-text); cursor:pointer; }
+.hbdr-protect-wizard-create-fields { display:grid; gap:14px; margin-top:20px; }
+.hbdr-protect-wizard-create-fields > .hbdr-policy-form-fields { min-width:0; }
+.hbdr-protect-wizard-inline .hbdr-policy-form-fields .hbdr-filter-drawer-body { overflow:visible; padding:0; }
+.hbdr-protect-wizard-inline .hbdr-policy-form-fields .hbdr-advanced-filter-section { margin-bottom:12px; }
+.hbdr-protect-wizard-inline .hbdr-policy-form-fields .hbdr-policy-composition-card { min-width:0; }
+.hbdr-protect-wizard-inline .hbdr-policy-form-fields .grid { min-width:0; }
+.hbdr-protect-wizard-inline .hbdr-policy-form-fields .grid-cols-3 { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.hbdr-protect-wizard-inline .hbdr-policy-form-fields :is(input,select) { max-width:100%; }
+.hbdr-protect-wizard-inline .hbdr-storage-field-stack { min-width:0; }
+.hbdr-protect-wizard-inline .hbdr-storage-field-stack .grid { min-width:0; }
+.hbdr-protect-wizard-inline .hbdr-protect-wizard-create-fields [role="radiogroup"] button { width:100%; height:auto; min-height:68px; padding:10px; border:1px solid var(--hc-border); border-radius:7px; background:var(--hc-surface); color:var(--hc-text-2); text-align:left; white-space:normal; }
+.hbdr-protect-wizard-inline .hbdr-protect-wizard-create-fields [role="radiogroup"] button[aria-checked="true"] { border-color:var(--hc-accent); background:color-mix(in srgb,var(--hc-accent) 8%,var(--hc-surface)); color:var(--hc-text); }
+.hbdr-protect-wizard-inline .hbdr-protect-wizard-create-fields [role="radiogroup"] button > span { min-width:0; }
+.hbdr-protect-wizard-inline .hbdr-protect-wizard-create-fields [role="radiogroup"] button strong { white-space:normal; }
+.hbdr-protect-wizard-create-fields label { display:grid; gap:5px; color:var(--hc-text-2); font-size:12px; }
+.hbdr-protect-wizard-create-fields button { justify-self:start; }
+.hbdr-protect-wizard-test-result { margin:0 !important; padding:9px 11px; border:1px solid var(--hc-border); border-radius:5px; }
+.hbdr-protect-wizard-test-result.is-ok { color:var(--hc-ok) !important; }
+.hbdr-protect-wizard-test-result.is-fail { color:var(--hc-danger) !important; }
+.hbdr-protect-wizard-review { max-width:760px; }
+.hbdr-protect-wizard-review dd { max-width:65%; overflow-wrap:anywhere; text-align:right; }
+@media(max-width:680px) { .hbdr-protect-wizard { width:calc(100vw - 20px); height:calc(100vh - 20px); } .hbdr-protect-wizard-body { grid-template-columns:84px minmax(0,1fr); } .hbdr-protect-wizard-steps button { justify-content:center; } .hbdr-protect-wizard-steps button > span:last-child { display:none; } .hbdr-protect-wizard-selection-tools,.hbdr-protect-wizard-policy-tools { flex-wrap:wrap; } .hbdr-protect-wizard-selection-tools > label,.hbdr-protect-wizard-policy-tools label { flex-basis:100%; } .hbdr-protect-wizard-scope-mode { grid-template-columns:1fr; } .hbdr-protect-wizard-content { padding:18px; } }
+.hbdr-protect-wizard-create-fields input,.hbdr-protect-wizard-create-fields select { min-height:38px; padding:0 10px; border:1px solid var(--hc-border); border-radius:5px; outline-color:var(--hc-accent); background:var(--hc-surface); color:var(--hc-text); font:13px 'IBM Plex Sans',sans-serif; }
+@media(max-width:850px) { .hbdr-protect-wizard-body { grid-template-columns:130px minmax(0,1fr); } .hbdr-protect-wizard-steps button { gap:8px; padding:10px 8px; } .hbdr-protect-wizard-steps small { display:none; } .hbdr-protect-wizard-content { padding:20px; } }
+
+html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-content h3,
+html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-inline strong { color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-steps button,
+html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-pagination button,
+html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-footer button,
+html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-policy-tools button,
+html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-actions button,
+html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-selection-tools button,
+html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-inline button:not([aria-label]) { background:var(--hc-surface) !important; border-color:var(--hc-border) !important; color:var(--hc-text-2) !important; }
+html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-steps button.is-current { background:var(--hc-surface) !important; color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-footer button.is-primary { background:var(--hc-accent) !important; border-color:var(--hc-accent) !important; color:white !important; }
+html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-policy-tools input,
+html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-selection-tools input,
+html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-create-fields input,
+html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-create-fields select { background:var(--hc-surface) !important; border-color:var(--hc-border) !important; color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-options input { background:transparent !important; accent-color:var(--hc-accent) !important; }
+html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-inline [role="radiogroup"] button[aria-checked="true"] { border-color:var(--hc-accent) !important; background:color-mix(in srgb,var(--hc-accent) 12%,var(--hc-surface)) !important; color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-inline :where([class*="bg-white"],[class*="bg-slate-50"],[class*="bg-blue-50"],[class*="bg-indigo-50"],[class*="bg-emerald-50"]) { background:var(--hc-surface) !important; }
+html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-inline :where([class*="text-slate-800"],[class*="text-slate-700"],[class*="text-slate-600"],[class*="text-indigo-900"],[class*="text-indigo-950"]) { color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-inline :where([class*="text-slate-500"],[class*="text-slate-400"]) { color:var(--hc-text-3) !important; }
+html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-inline :where([class*="border-slate-100"],[class*="border-slate-200"],[class*="border-blue-200"]) { border-color:var(--hc-border) !important; }
+html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-inline :where(input,select,textarea) { background:var(--hc-surface) !important; color:var(--hc-text) !important; border-color:var(--hc-border) !important; }
+html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-inline [role="radiogroup"] button { background:var(--hc-surface) !important; border-color:var(--hc-border) !important; color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-inline [role="radiogroup"] button[aria-checked="true"] { background:color-mix(in srgb,var(--hc-accent) 14%,var(--hc-surface)) !important; border-color:var(--hc-accent) !important; }
+
+/* One navigation scale for DR, Configuration, Operations and Settings. */
+#root .premium-app.hbdr-workspace .hbdr-secondary-sidebar .hbdr-secondary-title {
+  box-sizing:border-box !important;
+  height:42px !important;
+  min-height:42px !important;
+  margin:0 !important;
+  padding:0 10px 0 16px !important;
+  border-bottom:1px solid var(--hc-border) !important;
+  color:var(--hc-text-3) !important;
+  font:650 11.5px/1.2 'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif !important;
+  letter-spacing:.09em !important;
+  text-transform:uppercase !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-secondary-sidebar .hbdr-secondary-toggle {
+  border-color:var(--hc-border) !important;
+  background:var(--hc-surface) !important;
+  color:var(--hc-text-3) !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-secondary-sidebar .hbdr-secondary-toggle:hover {
+  background:var(--hc-sunken) !important;
+  color:var(--hc-accent) !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-secondary-sidebar .hbdr-secondary-menu {
+  gap:2px !important;
+  padding:10px 8px !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-secondary-sidebar .hbdr-secondary-menu button {
+  box-sizing:border-box !important;
+  min-height:42px !important;
+  height:42px !important;
+  gap:10px !important;
+  padding:0 10px !important;
+  border-radius:5px !important;
+  background:transparent !important;
+  color:var(--hc-text-2) !important;
+  font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-secondary-sidebar .hbdr-secondary-menu button strong {
+  font:500 12.5px/18px 'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-secondary-sidebar .hbdr-secondary-menu button > .hbdr-secondary-icon {
+  display:inline-flex !important;
+  align-items:center;
+  justify-content:center;
+  width:26px;
+  height:26px;
+  flex:0 0 26px;
+  border-radius:5px;
+  background:var(--hc-sunken);
+  color:var(--hc-text-2);
+}
+#root .premium-app.hbdr-workspace .hbdr-secondary-sidebar .hbdr-secondary-menu button > .hbdr-secondary-icon svg {
+  width:16px;
+  height:16px;
+  margin:0 !important;
+  stroke-width:1.8;
+}
+#root .premium-app.hbdr-workspace .hbdr-secondary-sidebar .hbdr-secondary-menu button:hover {
+  background:var(--hc-sunken) !important;
+  color:var(--hc-text) !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-secondary-sidebar .hbdr-secondary-menu button.hbdr-secondary-active {
+  background:color-mix(in srgb,var(--hc-accent) 9%,var(--hc-surface)) !important;
+  color:var(--hc-accent-ink,var(--hc-accent)) !important;
+  box-shadow:inset 2px 0 0 var(--hc-accent) !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-secondary-sidebar .hbdr-secondary-menu button.hbdr-secondary-active > .hbdr-secondary-icon {
+  background:color-mix(in srgb,var(--hc-accent) 14%,var(--hc-surface));
+  color:var(--hc-accent);
+}
+#root .premium-app.hbdr-workspace .hbdr-secondary-sidebar.is-collapsed .hbdr-secondary-menu button > .hbdr-secondary-icon {
+  display:inline-flex !important;
+}
+
+/* Table hierarchy: selection is not a data column; only the first data value is emphasized. */
+#root .premium-app.hbdr-workspace .hbdr-hyper-table-body .hbdr-table-other-data,
+#root .premium-app.hbdr-workspace .hbdr-hyper-table-body .hbdr-table-other-data :is(strong,b,em,button,span,p) {
+  font-weight:400 !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-hyper-table-body .hbdr-table-first-data :is(strong,b,button,span,p) {
+  font-weight:600 !important;
+}
+#root .premium-app.hbdr-workspace .premium-content table tbody td,
+#root .premium-app.hbdr-workspace .premium-content table tbody td :is(strong,b,span,p,button) {
+  font-weight:400 !important;
+}
+#root .premium-app.hbdr-workspace .premium-content table tbody tr > td:first-child:not(:has(input[type="checkbox"],input[type="radio"])) :is(strong,b,span,p,button),
+#root .premium-app.hbdr-workspace .premium-content table tbody tr > td:first-child:has(input[type="checkbox"],input[type="radio"]) + td :is(strong,b,span,p,button) {
+  font-weight:600 !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-dr-support-badge {
+  min-height:0 !important;
+  padding:0 !important;
+  border:0 !important;
+  border-radius:0 !important;
+  background:transparent !important;
+  font-size:11.5px !important;
+  font-weight:400 !important;
+  line-height:1.35 !important;
+}
+
+/* Keep page chrome and content on the typography reference face. */
+#root .premium-app.hbdr-workspace :is(.premium-sidebar,.hbdr-secondary-sidebar,.premium-content),
+#root .premium-app.hbdr-workspace :is(.premium-sidebar,.hbdr-secondary-sidebar,.premium-content) :is(h1,h2,h3,h4,h5,h6,p,span,strong,small,em,label,button,input,select,textarea) {
+  font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif !important;
+}
+#root .premium-app.hbdr-workspace :is(.premium-sidebar,.hbdr-secondary-sidebar,.premium-content) :is(code,pre,.font-mono,.hbdr-cluster-context-title) {
+  font-family:'IBM Plex Mono',ui-monospace,monospace !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-secondary-sidebar .hbdr-secondary-title,
+#root .premium-app.hbdr-workspace .hbdr-secondary-sidebar .hbdr-secondary-menu button,
+#root .premium-app.hbdr-workspace .hbdr-secondary-sidebar .hbdr-secondary-menu button strong {
+  font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif !important;
+}
+
+/* Cluster cards use the same type hierarchy as the design reference:
+   identity is emphasized, operational metadata stays quiet, and technical
+   values retain the mono face only where they benefit from alignment. */
+#root .premium-app.hbdr-workspace .cluster-card-premium,
+#root .premium-app.hbdr-workspace .cluster-card-premium button,
+#root .premium-app.hbdr-workspace .cluster-card-premium p,
+#root .premium-app.hbdr-workspace .cluster-card-premium span {
+  font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif !important;
+}
+#root .premium-app.hbdr-workspace .cluster-card-premium .cluster-card-title {
+  font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif !important;
+  font-size:16px !important;
+  font-weight:600 !important;
+  letter-spacing:-.012em !important;
+}
+#root .premium-app.hbdr-workspace .cluster-card-premium .cluster-card-meta {
+  font-size:11px !important;
+  font-weight:400 !important;
+  line-height:16px !important;
+}
+#root .premium-app.hbdr-workspace .cluster-card-premium .cluster-agent-panel,
+#root .premium-app.hbdr-workspace .cluster-card-premium .cluster-agent-panel strong {
+  font-size:11px !important;
+  font-weight:400 !important;
+}
+#root .premium-app.hbdr-workspace .cluster-card-premium .cluster-agent-panel :is(span,p,strong) {
+  font-weight:400 !important;
+}
+#root .premium-app.hbdr-workspace .cluster-card-premium .cluster-agent-panel .cluster-component-row > span:first-child,
+#root .premium-app.hbdr-workspace .cluster-card-premium .cluster-agent-panel .cluster-runtime-cell span {
+  color:var(--hc-text-2) !important;
+}
+#root .premium-app.hbdr-workspace .cluster-card-premium .cluster-agent-panel .cluster-component-version,
+#root .premium-app.hbdr-workspace .cluster-card-premium .cluster-agent-panel .cluster-runtime-cell p {
+  color:var(--hc-text) !important;
+}
+#root .premium-app.hbdr-workspace .cluster-card-premium .cluster-agent-panel .cluster-component-state.is-current {
+  color:var(--hc-ok) !important;
+}
+#root .premium-app.hbdr-workspace .cluster-card-premium .hbdr-cluster-role-badges span {
+  font-size:10px !important;
+  font-weight:500 !important;
+}
+#root .premium-app.hbdr-workspace .cluster-card-premium .cluster-card-action-button {
+  font-weight:400 !important;
+}
+
+/* Resource detail: one strong identity per row, quiet supporting fields. */
+#root .premium-app.hbdr-workspace .hbdr-resource-drawer,
+#root .premium-app.hbdr-workspace .hbdr-resource-drawer :is(button,span,em,strong,p,h3) {
+  font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-resource-drawer :is(code,pre) {
+  font-family:'IBM Plex Mono',ui-monospace,monospace !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-resource-modal-title h3 { font-weight:600 !important; }
+#root .premium-app.hbdr-workspace .hbdr-resource-modal-title p,
+#root .premium-app.hbdr-workspace .hbdr-resource-modal-meta em { font-weight:400 !important; }
+#root .premium-app.hbdr-workspace .hbdr-resource-modal-meta strong,
+#root .premium-app.hbdr-workspace .hbdr-resource-overview-strip strong { font-weight:600 !important; }
+#root .premium-app.hbdr-workspace .hbdr-resource-overview-strip em,
+#root .premium-app.hbdr-workspace .hbdr-resource-inventory-divider em,
+#root .premium-app.hbdr-workspace .hbdr-resource-inventory-columns span,
+#root .premium-app.hbdr-workspace .hbdr-resource-kind-badge { font-weight:400 !important; }
+#root .premium-app.hbdr-workspace .hbdr-resource-inventory-divider > span { font-weight:600 !important; }
+#root .premium-app.hbdr-workspace .hbdr-resource-inventory-resource strong { font-weight:600 !important; }
+#root .premium-app.hbdr-workspace .hbdr-resource-inventory-resource em,
+#root .premium-app.hbdr-workspace .hbdr-resource-inventory-type,
+#root .premium-app.hbdr-workspace .hbdr-resource-inventory-detail-text,
+#root .premium-app.hbdr-workspace .hbdr-resource-inventory-count-row,
+#root .premium-app.hbdr-workspace .hbdr-resource-inventory-count-row strong { font-weight:400 !important; }
+#root .premium-app.hbdr-workspace .hbdr-resource-refresh-note {
+  padding:4px 1px;
+  font:400 11px/1.5 'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif;
+  color:var(--hc-text-3);
+}
+#root .premium-app.hbdr-workspace .hbdr-resource-refresh-note.is-error { color:var(--hc-crit); }
+
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-clusters-card-region .hbdr-section-toolbar {
+  background:var(--hc-surface) !important;
+  border-color:var(--hc-border) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-clusters-page .hbdr-page-hero h3,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-clusters-page .hbdr-section-toolbar h3,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-premium .cluster-card-title {
+  color:var(--hc-text) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-premium .cluster-card-meta,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-premium .cluster-card-id {
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-premium .cluster-agent-panel,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-premium .cluster-metric-tile,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-premium .cluster-entry-bar {
+  background:var(--hc-sunken) !important;
+  border-color:var(--hc-border) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-premium .cluster-metric-tile p:first-child { color:var(--hc-text-3) !important; font-weight:400 !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-premium .cluster-metric-tile p:last-child { color:var(--hc-text) !important; font-weight:600 !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-page-title-bar h3 { color:var(--hc-text) !important; }
+
+/* Dark theme surface audit: neutral controls and compact status chips must
+   follow the dark surface instead of retaining light utility styles. */
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-dashboard-filters button,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-dashboard-monitor header button,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-dr-action-secondary {
+  background:var(--hc-surface) !important;
+  border-color:var(--hc-border-strong) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-dashboard-filters button:hover,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-dashboard-monitor header button:hover,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-dr-action-secondary:hover {
+  background:var(--hc-surface-2) !important;
+  color:var(--hc-text) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-hyper-table [class*='bg-white'],
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-hyper-table [class*='bg-slate-50'],
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-hyper-table [class*='bg-slate-100'] {
+  background:var(--hc-sunken) !important;
+  border-color:var(--hc-border) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace [class*='bg-white'] {
+  background:var(--hc-surface) !important;
+  border-color:var(--hc-border) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace [class*='bg-slate-50'] {
+  background:var(--hc-sunken) !important;
+  border-color:var(--hc-border) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-dr-search,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-dr-search input {
+  background:var(--hc-surface) !important;
+  border-color:var(--hc-border-strong) !important;
+  color:var(--hc-text) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-default-pill,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-status-pill {
+  background:var(--hc-sunken) !important;
+  border-color:var(--hc-border-strong) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .upgrade-management-page [class*='bg-emerald-50'],
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .upgrade-management-page [class*='bg-blue-50'],
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .upgrade-management-page [class*='bg-slate-100'] {
+  background:var(--hc-sunken) !important;
+  border-color:var(--hc-border) !important;
+}
+
+.premium-app.hbdr-workspace .hbdr-account-theme-options {
+  padding:8px 10px 10px;
+  border-top:1px solid var(--hc-border);
+  border-bottom:1px solid var(--hc-border);
+}
+.premium-app.hbdr-workspace .hbdr-account-theme-label {
+  display:block;
+  margin-bottom:6px;
+  color:var(--hc-text-3);
+  font:500 10px/1.4 'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif;
+}
+.premium-app.hbdr-workspace .hbdr-account-theme-options > div { display:flex; gap:5px; }
+.premium-app.hbdr-workspace .hbdr-account-theme-options button {
+  display:flex;
+  flex:1;
+  align-items:center;
+  justify-content:center;
+  gap:5px;
+  min-height:30px;
+  border:1px solid var(--hc-border);
+  border-radius:5px;
+  background:var(--hc-surface);
+  color:var(--hc-text-2);
+  font:500 11px 'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif;
+  cursor:pointer;
+}
+.premium-app.hbdr-workspace .hbdr-account-theme-options button[aria-checked='true'] {
+  border-color:var(--hc-accent);
+  background:color-mix(in srgb,var(--hc-accent) 9%,var(--hc-surface));
+  color:var(--hc-accent);
+}
+.premium-app.hbdr-workspace .hbdr-account-theme-options button:disabled { cursor:wait; opacity:.7; }
+
+/* Task ledger follows the same table geometry and type hierarchy as other lists. */
+#root .premium-app.hbdr-workspace .hbdr-task-ledger-table .hbdr-hyper-table-head-cell {
+  font-size:10.5px !important;
+  font-weight:600 !important;
+  letter-spacing:.07em !important;
+  text-transform:uppercase !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-task-ledger-table .hbdr-hyper-table-body-cell {
+  font-size:11.5px !important;
+  line-height:1.45 !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-task-ledger-table .hbdr-hyper-table-body .hbdr-hyper-table-row {
+  border-bottom:1px solid var(--hc-border) !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-task-ledger-op i {
+  width:18px;
+  height:18px;
+  flex-basis:18px;
+  border:0;
+  background:transparent;
+  color:var(--hc-accent);
+}
+#root .premium-app.hbdr-workspace .hbdr-task-ledger-op strong {
+  color:var(--hc-text) !important;
+  font-size:12.5px !important;
+  font-weight:600 !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-task-ledger-point strong,
+#root .premium-app.hbdr-workspace .hbdr-task-ledger-point em {
+  color:var(--hc-text-2) !important;
+  font-size:11.5px !important;
+  font-weight:400 !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-task-ledger-status {
+  display:inline-flex;
+  justify-content:flex-start;
+  gap:6px;
+  height:auto;
+  padding:0;
+  border:0;
+  background:transparent;
+  font-size:11.5px;
+  font-weight:400;
+  line-height:1.4;
+}
+#root .premium-app.hbdr-workspace .hbdr-task-ledger-status.is-ok { color:var(--hc-ok); }
+#root .premium-app.hbdr-workspace .hbdr-task-ledger-status.is-fail { color:var(--hc-crit); }
+#root .premium-app.hbdr-workspace .hbdr-task-ledger-status.is-running { color:var(--hc-accent); }
+#root .premium-app.hbdr-workspace .hbdr-task-ledger-status.is-muted { color:var(--hc-text-3); }
+
+/* Clusters Recent Tasks uses HyperTable's div grid, not native table elements. */
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-dock .hbdr-cluster-task-dock-toggle,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-dock .hbdr-cluster-task-dock-body,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-dock .hbdr-hyper-table,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-dock .hbdr-hyper-table-scroll,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-dock .hbdr-hyper-table-inner,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-dock .hbdr-hyper-table-body,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-dock .hbdr-hyper-table-body .hbdr-hyper-table-row,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-dock .hbdr-hyper-table-body-cell,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-dock .hbdr-hyper-table-pagination {
+  background:var(--hc-surface) !important;
+  border-color:var(--hc-border) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-dock .hbdr-cluster-task-dock-toggle:hover,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-dock .hbdr-hyper-table-body .hbdr-hyper-table-row:hover,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-dock .hbdr-hyper-table-body .hbdr-hyper-table-row.hbdr-dr-row-selected {
+  background:var(--hc-surface-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-dock .hbdr-hyper-table-head,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-dock .hbdr-hyper-table-head-cell {
+  background:var(--hc-sunken) !important;
+  border-color:var(--hc-border) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-dock .hbdr-cluster-task-dock-title,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-dock .hbdr-hyper-table-body-cell .text-slate-700 {
+  color:var(--hc-text) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-dock .hbdr-cluster-task-dock-title em,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-dock .hbdr-hyper-table-body-cell .bg-slate-100 {
+  background:var(--hc-sunken) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-dock .hbdr-hyper-table-body-cell :where(.text-slate-400,.text-slate-500,.text-slate-600) {
+  color:var(--hc-text-3) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-dock .hbdr-hyper-table-expanded-row,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-dock .hbdr-hyper-table-expanded-row .bg-white {
+  background:var(--hc-sunken) !important;
+  border-color:var(--hc-border) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-dock .hbdr-hyper-table-pagination-controls :where(button,select) {
+  background:var(--hc-sunken) !important;
+  border-color:var(--hc-border-strong) !important;
+  color:var(--hc-text-2) !important;
+}
+/* Keep pagination controls dark even when the page shell class is absent. */
+html[data-theme='dark'] #root .hbdr-cluster-task-dock .hbdr-hyper-table-pagination-controls select,
+html[data-theme='dark'] #root .hbdr-cluster-task-dock .hbdr-hyper-table-pagination-controls button,
+html[data-theme='dark'] #root .hbdr-cluster-task-dock .hbdr-hyper-table-pagination-controls button:disabled {
+  background-color:var(--hc-sunken) !important;
+  background-image:none !important;
+  border-color:var(--hc-border-strong) !important;
+  color:var(--hc-text-2) !important;
+  box-shadow:none !important;
+}
+
+/* Shared table surfaces: page-specific light styles must not leak into dark mode. */
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-hyper-table :where(.hbdr-hyper-table-scroll,.hbdr-hyper-table-inner,.hbdr-hyper-table-body,.hbdr-hyper-table-body .hbdr-hyper-table-row,.hbdr-hyper-table-body-cell,.hbdr-hyper-table-empty),
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-hyper-table-pagination {
+  background:var(--hc-surface) !important;
+  border-color:var(--hc-border) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-hyper-table :where(.hbdr-hyper-table-head,.hbdr-hyper-table-head .hbdr-hyper-table-row,.hbdr-hyper-table-head-cell) {
+  background:var(--hc-sunken) !important;
+  border-color:var(--hc-border) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-hyper-table .hbdr-hyper-table-head-cell button { color:var(--hc-text-2) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-hyper-table .hbdr-hyper-table-body .hbdr-hyper-table-row:hover,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-hyper-table .hbdr-hyper-table-body .hbdr-hyper-table-row:is(.hbdr-dr-row-selected,.is-selected) { background:var(--hc-surface-2) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-hyper-table :where(.hbdr-hyper-table-cell-primary,.hbdr-table-first-data) { color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-hyper-table-pagination-controls :where(button,select) { background:var(--hc-sunken) !important; border-color:var(--hc-border-strong) !important; color:var(--hc-text-2) !important; color-scheme:dark; }
+
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-restore-quick-filter,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-restore-quick-filter button,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-history-date-field,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-history-date-field input,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-topology-trigger {
+  background:var(--hc-surface) !important;
+  border-color:var(--hc-border-strong) !important;
+  color:var(--hc-text-2) !important;
+  color-scheme:dark;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-restore-quick-filter button:hover,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-topology-trigger:hover { background:var(--hc-surface-2) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-dr-action-primary {
+  background:var(--hc-accent) !important;
+  border-color:var(--hc-accent) !important;
+  color:#fff !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-dr-action-primary:hover:not(:disabled) { filter:brightness(1.12); }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-support-bundle-page :where(textarea,input:not([type='file'])) {
+  background:var(--hc-sunken) !important;
+  border-color:var(--hc-border-strong) !important;
+  color:var(--hc-text) !important;
+  color-scheme:dark;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-support-bundle-page :where(textarea,input)::placeholder { color:var(--hc-text-3) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-support-bundle-page :where(.text-slate-900,.text-slate-800,.text-slate-700) { color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-support-bundle-page :where(.text-slate-500,.text-slate-400,.text-slate-600) { color:var(--hc-text-2) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-support-bundle-page :where(.border-slate-100,.border-slate-200) { border-color:var(--hc-border) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-page-title-action {
+  background:var(--hc-accent) !important;
+  border-color:var(--hc-accent) !important;
+  color:#fff !important;
+}
+
+/* Shared drawer shell and neutral copy, including drawers rendered in portals. */
+html[data-theme='dark'] .premium-app .hbdr-filter-drawer,
+html[data-theme='dark'] .premium-app .hbdr-filter-drawer-head,
+html[data-theme='dark'] .premium-app .hbdr-filter-drawer-actions {
+  background:var(--hc-surface) !important;
+  border-color:var(--hc-border) !important;
+  color:var(--hc-text) !important;
+}
+html[data-theme='dark'] .premium-app .hbdr-filter-drawer-body {
+  background:var(--hc-bg) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] .premium-app .hbdr-filter-drawer-head :where(strong,h3) { color:var(--hc-text) !important; }
+html[data-theme='dark'] .premium-app .hbdr-filter-drawer-head :where(p,span) { color:var(--hc-text-2) !important; }
+html[data-theme='dark'] .premium-app .hbdr-filter-drawer-head > button,
+html[data-theme='dark'] .premium-app .hbdr-filter-drawer-actions > button {
+  background:var(--hc-sunken) !important;
+  border-color:var(--hc-border-strong) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] .premium-app .hbdr-filter-drawer :where(.text-slate-900,.text-slate-800,.text-slate-700) { color:var(--hc-text) !important; }
+html[data-theme='dark'] .premium-app .hbdr-filter-drawer :where(.text-slate-600,.text-slate-500,.text-slate-400) { color:var(--hc-text-2) !important; }
+html[data-theme='dark'] .premium-app .hbdr-filter-drawer :where(.border-slate-100,.border-slate-200,.border-slate-300) { border-color:var(--hc-border) !important; }
+html[data-theme='dark'] .premium-app .hbdr-filter-drawer :where(input,select,textarea) { color-scheme:dark; }
+html[data-theme='dark'] .premium-app .hbdr-filter-drawer :where(input,select,textarea):not([type='checkbox']):not([type='radio']):not([type='file']) {
+  background:var(--hc-sunken) !important;
+  color:var(--hc-text) !important;
+  border-color:var(--hc-border-strong) !important;
+}
+
+html[data-theme='dark'] .premium-app .hbdr-topology-drawer .hbdr-dr-topology,
+html[data-theme='dark'] .premium-app .hbdr-topology-drawer .hbdr-dr-node,
+html[data-theme='dark'] .premium-app .hbdr-topology-drawer .hbdr-dr-topology-head,
+html[data-theme='dark'] .premium-app .hbdr-topology-drawer .hbdr-dr-topology-empty {
+  background:var(--hc-surface) !important;
+  border-color:var(--hc-border) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] .premium-app .hbdr-topology-drawer .hbdr-dr-topology-canvas {
+  background:radial-gradient(circle at 1px 1px,var(--hc-border) 1px,transparent 1px) !important;
+  background-size:24px 24px !important;
+}
+html[data-theme='dark'] .premium-app .hbdr-topology-drawer :where(.hbdr-dr-topology-head h3,.hbdr-dr-node-title,.hbdr-dr-topology-empty strong) { color:var(--hc-text) !important; }
+html[data-theme='dark'] .premium-app .hbdr-topology-drawer :where(.hbdr-dr-topology-head p,.hbdr-dr-node > span:nth-child(2),.hbdr-dr-topology-empty span) { color:var(--hc-text-2) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-resource-create-cluster :is(.text-slate-900,.text-slate-800,.text-slate-700,h3,.hbdr-cluster-type-tab strong) {
+  color:var(--hc-text) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-resource-create-cluster :is(.text-slate-600,.text-slate-500,.text-slate-400,.hbdr-cluster-method-section p) {
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-resource-create-cluster .hbdr-cluster-method-tab.is-active span,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-resource-create-cluster .hbdr-cluster-type-tab.is-active strong {
+  color:var(--hc-accent) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-resource-create-drawer :where(.hbdr-advanced-filter-box,.hbdr-advanced-filter-section,.hbdr-storage-type-select-box,.hbdr-storage-config-box) {
+  background:var(--hc-surface) !important;
+  border-color:var(--hc-border) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-resource-create-drawer :where(.hbdr-advanced-filter-box,.hbdr-advanced-filter-section) :where(h3,h4,strong,label,.text-slate-900,.text-slate-800,.text-slate-700) {
+  color:var(--hc-text) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-resource-create-drawer :where(.hbdr-policy-composition-card,.hbdr-storage-test-button,[class*='bg-indigo-50'],[class*='bg-slate-50']) {
+  background:var(--hc-sunken) !important;
+  border-color:var(--hc-border-strong) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-resource-create-policy .hbdr-policy-composition-card[aria-pressed='true'],
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-resource-create-policy [class*='border-indigo-600'] {
+  border-color:var(--hc-accent) !important;
+  background:color-mix(in srgb,var(--hc-accent) 12%,var(--hc-surface)) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-resource-create-storage .hbdr-storage-url-style-option.bg-blue-50 {
+  background:color-mix(in srgb,var(--hc-accent) 14%,var(--hc-surface)) !important;
+  color:var(--hc-accent) !important;
+  box-shadow:inset 0 0 0 1px var(--hc-accent) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-resource-create-policy [class*='border-indigo-600'] .text-indigo-900 {
+  color:var(--hc-text) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-profile-page :where(.text-slate-900,.text-slate-800,.text-slate-700) {
+  color:var(--hc-text) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-profile-page :where(.text-slate-600,.text-slate-500,.text-slate-400) {
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-profile-page :where(.border-slate-100,.border-slate-200) {
+  border-color:var(--hc-border) !important;
 }

@@ -233,7 +233,7 @@ func NewMemoryStore() *MemoryStore {
 		logCoverage:             map[string]ClusterLogCoverage{},
 		auditLogs:               []AuditLog{},
 		tenants:                 map[string]Tenant{DefaultTenantID: {ID: DefaultTenantID, Name: "Admin", Status: "active", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}},
-		users:                   map[string]memoryUser{DefaultAdminEmail: {User: User{ID: "00000000-0000-0000-0000-00000000a001", TenantID: DefaultTenantID, Email: DefaultAdminEmail, Role: "admin", Status: "active", AuthProvider: "password", SystemAdmin: true, MustChangePassword: true}, Password: DefaultAdminPassword}},
+		users:                   map[string]memoryUser{DefaultAdminEmail: {User: User{ID: "00000000-0000-0000-0000-00000000a001", TenantID: DefaultTenantID, Email: DefaultAdminEmail, Role: "admin", Status: "active", AuthProvider: "password", Theme: "light", SystemAdmin: true, MustChangePassword: true}, Password: DefaultAdminPassword}},
 		resetTokens:             map[string]memoryResetToken{},
 		platformSessions:        map[string]PlatformSession{},
 		platformReleases:        map[string]PlatformRelease{},
@@ -548,7 +548,7 @@ func (s *MemoryStore) CreateUser(tenantID, email, password string) (User, error)
 	if tenant, ok := s.tenants[tenantID]; !ok || tenant.Status != "active" {
 		return User{}, errors.New("tenant is not active")
 	}
-	u := User{ID: newID(), TenantID: tenantID, Email: email, Role: "operator", Status: "active", AuthProvider: "password", MustChangePassword: true}
+	u := User{ID: newID(), TenantID: tenantID, Email: email, Role: "operator", Status: "active", AuthProvider: "password", Theme: "light", MustChangePassword: true}
 	s.users[email] = memoryUser{User: u, Password: password}
 	return u, nil
 }
@@ -598,6 +598,24 @@ func (s *MemoryStore) UpdateUser(input UserUpdateInput) (User, bool, error) {
 		}
 		item.TimeZone = strings.TrimSpace(input.TimeZone)
 		s.users[item.Email] = item
+		user := item.User
+		user.TenantName = s.tenants[user.TenantID].Name
+		return user, true, nil
+	}
+	return User{}, false, nil
+}
+func (s *MemoryStore) SetUserTheme(id, theme string) (User, bool, error) {
+	if theme != "light" && theme != "dark" {
+		return User{}, false, ErrInvalidTheme
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, item := range s.users {
+		if item.ID != id {
+			continue
+		}
+		item.Theme = theme
+		s.users[key] = item
 		user := item.User
 		user.TenantName = s.tenants[user.TenantID].Name
 		return user, true, nil

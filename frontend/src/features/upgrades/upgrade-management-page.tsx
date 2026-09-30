@@ -125,7 +125,7 @@ export default function UpgradeManagementPage({ isAdmin, toast, refreshPlatformD
   ];
 
   return (
-    <motion.div key="upgrades" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
+    <motion.div key="upgrades" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="upgrade-management-page space-y-5">
       <SearchBar title="Upgrade" desc="Check versions, start upgrades, and follow their progress." action="Refresh" onAction={() => void load()} />
       <section className="hbdr-section-card overflow-hidden">
         <div className="hbdr-section-toolbar"><div><h3>Platform</h3><p>HyperCDR management platform</p></div>{isAdmin && <button type="button" className="hbdr-dr-action-secondary" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen(value => !value)}>{advancedOpen ? 'Hide Release Management' : 'Release Management'}</button>}</div>

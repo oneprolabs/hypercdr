@@ -1,7 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ClusterRegistrationChoices } from './cluster-registration-choices';
+import { ResourceCreateDrawer } from '../../components/resource-create-drawer';
+import { ClusterPlatformRegistrationFields } from './cluster-platform-registration-fields';
+import { ClusterKubeconfigGuide } from './cluster-kubeconfig-guide';
+import { ClusterCommandRegistrationFields } from './cluster-command-registration-fields';
+import { uploadRegistrationKubeconfig, inspectRegistrationCluster, startRegistrationTask, cancelRegistrationTask } from './cluster-registration-service';
 import { AlertTriangle, Check, CheckCircle2, ChevronRight, Cloud, Edit2, Eye, GitBranch, MoreVertical, Plus, PlusCircle, RefreshCw, Server, Star, Trash2, Upload, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ApiRequestError, apiGet, apiHeaders, apiPatch, apiPost, ensureApiResponse } from '../../api/client';
+import { ApiRequestError, apiGet, apiHeaders, apiPatch, apiPost } from '../../api/client';
 import { SearchBar } from '../../components/search-bar';
 import { HyperTable, type HyperTableColumn } from '../../components/table';
 import ClusterActivityPanel from './cluster-activity-panel';
@@ -97,7 +103,7 @@ export default function ClusterPage(props: {
   const { clusters, loading, protectionPlans, onLoadTopology, canUpgrade, defaultClusterId, clusterMenuId, setClusterMenuId, setSelectedCluster, setDefaultCluster, unregisterCluster, onRenameCluster, onUpgradeCluster, onUpgradeVelero, onRegisterCluster, onRefreshRegistration, clusterTaskLogs, getAgentTokenForRegistration, prefetchAgentToken, openDashboard, registrationAllowed = true, openLicenseManagement, toast } = props;
   const [registerOpen, setRegisterOpen] = useState(false);
   const [licenseGuideOpen, setLicenseGuideOpen] = useState(false);
-  const [openshiftKubeconfigGuideOpen, setOpenshiftKubeconfigGuideOpen] = useState(false);
+  const [kubeconfigGuideType, setKubeconfigGuideType] = useState<ClusterRegistrationType | null>(null);
   const [registrationType, setRegistrationType] = useState<ClusterRegistrationType>('native-kubernetes');
   const [cceRegistrationMode, setCCERegistrationMode] = useState<CCERegistrationMode>('platform-direct');
   const [cceUpload, setCCEUpload] = useState<CCEKubeconfigUpload | null>(null);
@@ -117,7 +123,6 @@ export default function ClusterPage(props: {
   const [installLoading, setInstallLoading] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
   const [registrationBaseline, setRegistrationBaseline] = useState<string[]>([]);
-  const [registrationWaiting, setRegistrationWaiting] = useState(false);
   const [upgradeTarget, setUpgradeTarget] = useState<Cluster | null>(null);
   const [veleroUpgradeTarget, setVeleroUpgradeTarget] = useState<Cluster | null>(null);
   const [unregisterTarget, setUnregisterTarget] = useState<Cluster | null>(null);
@@ -340,8 +345,11 @@ export default function ClusterPage(props: {
 
   const loadRegistrationCommand = async (clusterType: ClusterRegistrationType) => {
     setRegistrationType(clusterType);
+    setRegisterStep(1);
+    setCopied(false);
     setInstallLoading(true);
     setInstallError(null);
+    setInstallCommand('');
     setPrepareNodeCommand('');
     try {
       const token = await getAgentTokenForRegistration(clusterType);
@@ -368,7 +376,6 @@ export default function ClusterPage(props: {
     setCopied(false);
     setInstallError(null);
     setRegistrationBaseline(clusters.map(cluster => cluster.id));
-    setRegistrationWaiting(false);
     setRegisterOpen(true);
     await loadRegistrationCommand('native-kubernetes');
   };
@@ -393,7 +400,6 @@ export default function ClusterPage(props: {
     setRegisterStep(1);
     setCopied(false);
     setCaCopied(false);
-    setRegistrationWaiting(false);
     resetDirectRegistration();
   };
 
@@ -402,7 +408,7 @@ export default function ClusterPage(props: {
     setCCEInspectionLoading(true);
     setCCEUploadError('');
     try {
-      const inspection = await apiPost<CCEInspection>('/api/v1/cluster-registrations/inspections', { sessionId: cceUpload.id, context: cceContext, clusterType: registrationType });
+      const inspection = await inspectRegistrationCluster<CCEInspection>(cceUpload.id, cceContext, registrationType);
       setCCEInspection(inspection);
       setCCEStorageClass(inspection.defaultStorageClass || (inspection.storageClasses.length === 1 ? inspection.storageClasses[0] : ''));
     } catch (error) {
@@ -418,7 +424,7 @@ export default function ClusterPage(props: {
     try {
       const key = cceIdempotencyKey || `cce-${crypto.randomUUID()}`;
       setCCEIdempotencyKey(key);
-      setCCERegistrationTask(await apiPost<ApiTask>('/api/v1/cluster-registrations/tasks', { sessionId: cceUpload.id, context: cceContext, storageClass: cceStorageClass, idempotencyKey: key, clusterType: registrationType }));
+      setCCERegistrationTask(await startRegistrationTask<ApiTask>(cceUpload.id, cceContext, cceStorageClass, registrationType, key));
     } catch (error) {
       setCCEUploadError(error instanceof Error ? error.message : 'Cluster registration could not be started.');
     } finally { setCCEInspectionLoading(false); }
@@ -428,8 +434,7 @@ export default function ClusterPage(props: {
     if (!cceRegistrationTask) return;
     setCCEInspectionLoading(true);
     try {
-      const response = await apiPost<{task: ApiTask}>(`/api/v1/tasks/${encodeURIComponent(cceRegistrationTask.id)}/cancel`, {});
-      setCCERegistrationTask(response.task);
+      setCCERegistrationTask(await cancelRegistrationTask<ApiTask>(cceRegistrationTask.id));
     } catch (error) {
       setCCEUploadError(error instanceof Error ? error.message : 'Registration cancellation failed.');
     } finally { setCCEInspectionLoading(false); }
@@ -469,11 +474,7 @@ export default function ClusterPage(props: {
     setCCERegistrationTask(null);
     setCCEIdempotencyKey('');
     try {
-      const body = new FormData();
-      body.append('kubeconfig', file);
-      body.append('clusterType', registrationType);
-      const response = await ensureApiResponse(await fetch('/api/v1/cluster-registrations/kubeconfigs', { method: 'POST', headers: apiHeaders(), body }), '/api/v1/cluster-registrations/kubeconfigs');
-      const upload = await response.json() as CCEKubeconfigUpload;
+      const upload = await uploadRegistrationKubeconfig<CCEKubeconfigUpload>(file, registrationType);
       if (cceUpload?.id && cceUpload.id !== upload.id) void fetch(`/api/v1/cluster-registrations/kubeconfigs/${encodeURIComponent(cceUpload.id)}`, { method: 'DELETE', headers: apiHeaders() });
       setCCEUpload(upload);
       const current = upload.contexts.find(context => context.isCurrent)?.name || (upload.contexts.length === 1 ? upload.contexts[0].name : '');
@@ -597,7 +598,6 @@ export default function ClusterPage(props: {
   useEffect(() => {
     if (!registerOpen || registerStep !== 3) return;
     let cancelled = false;
-    setRegistrationWaiting(true);
     const poll = async () => {
       try {
         const nextClusters = await onRefreshRegistration();
@@ -1126,27 +1126,7 @@ export default function ClusterPage(props: {
         })()}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {openshiftKubeconfigGuideOpen && (
-          <div className="fixed inset-0 z-[245]">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setOpenshiftKubeconfigGuideOpen(false)} className="absolute inset-0 bg-slate-900/15" />
-            <motion.aside initial={{ opacity: 0, x: 34 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 34 }} className="hbdr-filter-drawer" role="dialog" aria-modal="true" aria-labelledby="openshift-kubeconfig-guide-title">
-              <div className="hbdr-filter-drawer-head"><div><strong id="openshift-kubeconfig-guide-title">Get an OpenShift kubeconfig</strong><span>Create a self-contained credential from an OpenShift administrator session.</span></div><button onClick={() => setOpenshiftKubeconfigGuideOpen(false)} aria-label="Close kubeconfig guide"><X size={18} /></button></div>
-              <div className="hbdr-filter-drawer-body space-y-4 text-sm leading-6 text-slate-600">
-                <ol className="space-y-4">
-                  <li><p className="text-xs font-bold uppercase tracking-wide text-slate-500">1. Get the login command</p><p className="mt-1">Sign in to the OpenShift Web Console. Open the user menu in the top-right, select <strong>Copy login command</strong>, authenticate again if prompted, then select <strong>Display Token</strong> and copy the complete <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">oc login</code> command.</p></li>
-                  <li><p className="text-xs font-bold uppercase tracking-wide text-slate-500">2. Log in from a Linux administration host</p><p className="mt-1">Use a host that has the <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">oc</code> CLI and can reach the OpenShift API. Run the copied command. If this lab cluster uses an untrusted certificate, add the option shown below.</p><pre className="mt-2 whitespace-pre-wrap break-all rounded-lg bg-slate-900 p-3 font-mono text-xs leading-5 text-blue-200">oc login --token=&lt;token&gt; --server=https://api.&lt;cluster-domain&gt;:6443 --insecure-skip-tls-verify=true</pre></li>
-                  <li><p className="text-xs font-bold uppercase tracking-wide text-slate-500">3. Verify the active administrator session</p><pre className="mt-2 whitespace-pre-wrap break-all rounded-lg bg-slate-900 p-3 font-mono text-xs leading-5 text-blue-200">oc whoami{`\n`}oc get nodes{`\n`}oc auth can-i create clusterroles.rbac.authorization.k8s.io</pre><p className="mt-1 text-xs">The final command must return <strong>yes</strong>. Use a cluster-admin account; project-only credentials cannot install OADP and HyperCDR.</p></li>
-                  <li><p className="text-xs font-bold uppercase tracking-wide text-slate-500">4. Export a self-contained kubeconfig</p><pre className="mt-2 whitespace-pre-wrap break-all rounded-lg bg-slate-900 p-3 font-mono text-xs leading-5 text-blue-200">oc config view --raw --minify --flatten &gt; hypercdr-openshift-kubeconfig.yaml{`\n`}chmod 600 hypercdr-openshift-kubeconfig.yaml</pre><p className="mt-1 text-xs">The file is created in the current directory. For example, when run as <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">core</code> from its home directory, the path is <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">/home/core/hypercdr-openshift-kubeconfig.yaml</code>.</p></li>
-                  <li><p className="text-xs font-bold uppercase tracking-wide text-slate-500">5. Verify and upload</p><pre className="mt-2 whitespace-pre-wrap break-all rounded-lg bg-slate-900 p-3 font-mono text-xs leading-5 text-blue-200">oc --kubeconfig ./hypercdr-openshift-kubeconfig.yaml whoami{`\n`}oc --kubeconfig ./hypercdr-openshift-kubeconfig.yaml get nodes</pre><p className="mt-1">Copy the YAML file to your workstation if necessary, then upload it in the registration panel and select the displayed context.</p></li>
-                </ol>
-                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">This file contains an administrator token. Store it securely and delete local copies after registration. A token-based kubeconfig stops working when its OpenShift token expires or is revoked.</p>
-              </div>
-              <div className="hbdr-filter-drawer-actions"><button onClick={() => setOpenshiftKubeconfigGuideOpen(false)}>Done</button></div>
-            </motion.aside>
-          </div>
-        )}
-      </AnimatePresence>
+      {kubeconfigGuideType && <ClusterKubeconfigGuide type={kubeconfigGuideType} onClose={() => setKubeconfigGuideType(null)} />}
 
       <AnimatePresence>
         {licenseGuideOpen && (
@@ -1161,187 +1141,11 @@ export default function ClusterPage(props: {
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {registerOpen && (
-          <div className="fixed inset-0 z-[230]">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={closeRegister} className="absolute inset-0 bg-slate-900/15" />
-            <motion.aside initial={{ opacity: 0, x: 34 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 34 }} transition={{ duration: 0.18, ease: 'easeOut' }} className="hbdr-filter-drawer hbdr-cluster-register-drawer" role="dialog" aria-modal="true" aria-label="Register New Cluster">
-              <div className="hbdr-filter-drawer-head">
-                <div>
-                    <strong className="flex items-center gap-2 text-xl tracking-tight"><PlusCircle className="text-blue-600" />Register New Cluster</strong>
-                    <span>Follow the steps below to connect a Kubernetes cluster to HyperCDR.</span>
-                </div>
-                <button onClick={closeRegister} aria-label="Close registration"><X size={18} /></button>
-              </div>
-              <div className="hbdr-filter-drawer-body hbdr-cluster-register-drawer-body">
-                <div className="space-y-4">
-                  <section>
-                    <div className="mb-2"><strong className="text-xs uppercase tracking-wide text-slate-500">1. Cluster type</strong><p className="mt-1 text-[11px] text-slate-500">Select the Kubernetes environment you want to register.</p></div>
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Cluster type">
-                    {([
-                      ['native-kubernetes', 'Native Kubernetes', 'Self-managed Kubernetes cluster', Server],
-                      ['huaweicloud-cce', 'Huawei Cloud CCE', 'Huawei-managed Kubernetes service', Cloud],
-                      ['openshift', 'OpenShift', 'Red Hat OpenShift 4.14 or 4.15 with OADP', Cloud],
-                    ] as const).map(([value, label, description, Icon]) => <button key={value} type="button" role="radio" aria-checked={registrationType === value} disabled={installLoading} onClick={() => { if (registrationType !== value) resetDirectRegistration(); void loadRegistrationCommand(value); }} className={`relative flex min-h-20 items-start gap-3 rounded-xl border p-3 text-left transition ${registrationType === value ? 'border-blue-300 bg-blue-50/70 ring-1 ring-blue-100' : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-slate-50'}`}>
-                      <span className={`mt-0.5 rounded-lg p-2 ${registrationType === value ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}><Icon size={16} /></span>
-                      <span className="min-w-0"><strong className="block text-sm text-slate-800">{label}</strong><span className="mt-1 block text-[11px] leading-4 text-slate-500">{description}</span></span>
-                      {registrationType === value && <CheckCircle2 size={15} className="absolute right-3 top-3 text-blue-600" />}
-                    </button>)}
-                    </div>
-                  </section>
-                  <section>
-                  <div className="mb-2"><strong className="text-xs uppercase tracking-wide text-slate-500">2. Registration method</strong><p className="mt-1 text-[11px] text-slate-500">Choose who will run the Agent installation.</p></div>
-                  <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-1.5" role="radiogroup" aria-label="Registration method">
-                    {([
-                      ['platform-direct', 'Platform direct install', 'Upload a temporary kubeconfig'],
-                      ['command', 'Run installation command', registrationType === 'native-kubernetes' ? 'Run on the control-plane node' : 'Use a Linux administration host'],
-                    ] as const).map(([value, label, description]) => <button key={value} type="button" role="radio" aria-checked={cceRegistrationMode === value} onClick={() => setCCERegistrationMode(value)} className={`rounded-lg border px-3 py-2.5 text-left transition ${cceRegistrationMode === value ? 'border-blue-200 bg-white shadow-sm ring-1 ring-blue-100' : 'border-transparent text-slate-500 hover:bg-white/70'}`}>
-                      <span className={`block text-sm font-bold ${cceRegistrationMode === value ? 'text-blue-700' : 'text-slate-700'}`}>{label}</span>
-                      <span className="mt-0.5 block text-[11px] leading-4">{description}</span>
-                    </button>)}
-                  </div>
-                  </section>
-                  {cceRegistrationMode === 'platform-direct' && <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                    {registrationType === 'native-kubernetes' && <RegistrationStep number={1} title="Export an administrator kubeconfig" description="Run this on the control-plane node. It exports only the current context into a self-contained file.">
-                      <pre className="whitespace-pre-wrap break-all rounded-lg bg-slate-900 p-3 font-mono text-[11px] leading-5 text-blue-200">kubectl config view --raw --minify --flatten &gt; hypercdr-native-kubeconfig.yaml</pre>
-                    </RegistrationStep>}
-                    <RegistrationStep number={registrationType === 'native-kubernetes' ? 2 : 1} title={registrationType === 'huaweicloud-cce' ? 'Upload CCE kubeconfig' : registrationType === 'openshift' ? 'Upload OpenShift kubeconfig' : 'Upload exported kubeconfig'} description="The credential is encrypted in transit and used only for this registration attempt.">
-                      <div className="mb-3 flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] leading-4 text-emerald-800">
-                        <CheckCircle2 size={14} className="mt-0.5 shrink-0" />
-                        <span><strong className="block">Temporary file · automatically deleted</strong>The uploaded kubeconfig is permanently deleted when registration succeeds or fails, when you cancel, or when the temporary session expires. No manual cleanup is required.</span>
-                      </div>
-                      <label className={`flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed px-4 text-center transition ${cceUploadLoading ? 'cursor-wait border-blue-200 bg-blue-50' : 'border-slate-300 bg-slate-50 hover:border-blue-300 hover:bg-blue-50/40'}`}>
-                        <Upload size={20} className={cceUploadLoading ? 'animate-pulse text-blue-600' : 'text-slate-400'} />
-                        <span className="mt-2 text-xs font-bold text-slate-700">{cceUploadLoading ? 'Validating kubeconfig…' : cceUpload ? 'Replace kubeconfig' : 'Choose YAML or JSON kubeconfig'}</span>
-                        <span className="mt-1 text-[11px] text-slate-500">Maximum 1 MiB. External credential plugins are not executed.</span>
-                        <input type="file" className="sr-only" accept=".yaml,.yml,.json,application/yaml,application/json" disabled={cceUploadLoading} onChange={event => void uploadCCEKubeconfig(event.target.files?.[0])} />
-                      </label>
-                      {registrationType === 'openshift' && <button type="button" onClick={() => setOpenshiftKubeconfigGuideOpen(true)} className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-blue-700 underline decoration-blue-200 underline-offset-4 hover:text-blue-800">How do I get an OpenShift kubeconfig?</button>}
-                      {cceUploadError && <p role="alert" className="mt-3 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-medium leading-5 text-rose-700">{cceUploadError}</p>}
-                    </RegistrationStep>
-                    <RegistrationStep number={registrationType === 'native-kubernetes' ? 3 : 2} title="Select Kubernetes context" description="Confirm the exact cluster that HyperCDR may inspect. No cluster resources are changed at this stage.">
-                      {cceUpload ? <>
-                        <select value={cceContext} onChange={event => setCCEContext(event.target.value)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
-                          <option value="" disabled>Select a context</option>
-                          {cceUpload.contexts.map(context => <option key={context.name} value={context.name}>{context.name} · {context.apiServer}</option>)}
-                        </select>
-                        <div className="mt-3 grid grid-cols-2 gap-3 rounded-lg bg-slate-50 p-3 text-[11px] text-slate-500">
-                          <div><span className="block font-bold uppercase tracking-wide text-slate-400">Credential fingerprint</span><span className="mt-1 block truncate font-mono text-slate-700" title={cceUpload.fingerprint}>{cceUpload.fingerprint}</span></div>
-                          <div><span className="block font-bold uppercase tracking-wide text-slate-400">Session expires</span><span className="mt-1 block text-slate-700">{new Date(cceUpload.expiresAt).toLocaleTimeString()}</span></div>
-                        </div>
-                      </> : <div className="flex min-h-10 items-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-400">Upload a kubeconfig to discover its available contexts.</div>}
-                    </RegistrationStep>
-                    <RegistrationStep number={registrationType === 'native-kubernetes' ? 4 : 3} title="Inspect and register" description="Inspect identity, version, permissions, capacity, and StorageClass. After confirmation, an isolated preflight verifies network and image pulls before installation.">
-                      <button type="button" onClick={() => void inspectCCECluster()} disabled={!cceContext || cceUploadLoading || cceInspectionLoading} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300">{cceInspectionLoading && <RefreshCw size={13} className="animate-spin" />}{cceInspectionLoading ? 'Inspecting cluster…' : 'Inspect cluster'}</button>
-                      {cceInspection && <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl border border-emerald-100 bg-emerald-50/60 p-3 text-xs">
-                        <div><span className="block text-[10px] font-bold uppercase tracking-wide text-emerald-600">Cluster</span><strong className="mt-0.5 block text-slate-800">{cceInspection.clusterName}</strong></div>
-                        <div><span className="block text-[10px] font-bold uppercase tracking-wide text-emerald-600">Kubernetes</span><strong className="mt-0.5 block text-slate-800">{cceInspection.serverVersion}</strong></div>
-                        <div><span className="block text-[10px] font-bold uppercase tracking-wide text-emerald-600">Worker nodes</span><strong className="mt-0.5 block text-slate-800">{cceInspection.nodeCount}</strong></div>
-                        <div><span className="block text-[10px] font-bold uppercase tracking-wide text-emerald-600">StorageClass</span><strong className="mt-0.5 block text-slate-800">{cceInspection.defaultStorageClass || 'Selection required'}</strong></div>
-                      </div>}
-                      {cceInspection?.gates?.length > 0 && <div className="mt-3 divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white px-3">
-                        {cceInspection.gates.map(gate => <div key={gate.id} className="flex items-start gap-2.5 py-2.5">
-                          <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${gate.status === 'passed' ? 'bg-emerald-500' : gate.status === 'warning' ? 'bg-amber-500' : 'bg-blue-400'}`} />
-                          <div className="min-w-0"><strong className="block text-xs text-slate-800">{gate.label}</strong><span className="mt-0.5 block text-[11px] leading-4 text-slate-500">{gate.detail}</span></div>
-                        </div>)}
-                      </div>}
-                      {cceInspection && !cceRegistrationTask && <div className="mt-3 flex items-end gap-3">
-                        <label className="min-w-0 flex-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">StorageClass
-                          <select value={cceStorageClass} onChange={event => setCCEStorageClass(event.target.value)} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold normal-case tracking-normal text-slate-800 outline-none focus:border-blue-500">
-                            <option value="" disabled>Select a StorageClass</option>
-                            {cceInspection.storageClasses.map(name => <option key={name} value={name}>{name}{name === cceInspection.defaultStorageClass ? ' (default)' : ''}</option>)}
-                          </select>
-                        </label>
-                        <button type="button" onClick={() => void startCCEDirectRegistration()} disabled={!cceStorageClass || cceInspectionLoading} className="h-9 rounded-lg bg-emerald-600 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">Register cluster</button>
-                      </div>}
-                      {cceRegistrationTask && <div className={`mt-3 rounded-xl border px-3 py-3 text-xs ${cceRegistrationTask.status === 'failed' ? 'border-rose-100 bg-rose-50 text-rose-700' : cceRegistrationTask.status === 'succeeded' ? 'border-emerald-100 bg-emerald-50 text-emerald-700' : cceRegistrationTask.status === 'canceled' ? 'border-slate-200 bg-slate-50 text-slate-600' : 'border-blue-100 bg-blue-50 text-blue-700'}`}>
-                        <div className="flex items-center justify-between gap-3"><strong>{cceRegistrationTask.status === 'succeeded' ? 'Registration completed' : cceRegistrationTask.status === 'failed' ? 'Registration failed' : cceRegistrationTask.status === 'canceled' ? 'Registration canceled' : 'Registration in progress'}</strong><span className="tabular-nums">{cceRegistrationTask.status === 'succeeded' ? '100%' : cceRegistrationTask.status === 'failed' ? 'Stopped' : cceRegistrationTask.status === 'canceled' ? 'Canceled' : `${cceRegistrationTask.progress || 0}%`}</span></div>
-                        <p className="mt-1 leading-5">{cceRegistrationTask.status === 'failed' ? cceRegistrationTask.errorMessage || 'The executor reported a registration failure.' : cceRegistrationTask.status === 'succeeded' ? 'Agent registration was confirmed and the temporary kubeconfig was destroyed.' : cceRegistrationTask.status === 'canceled' ? 'Installation stopped, rollback completed, and the temporary kubeconfig was destroyed.' : 'Preflight, installation, and agent readiness are being verified. You may keep this drawer open.'}</p>
-                        {['queued', 'running', 'accepted', 'dispatched', 'canceling'].includes(cceRegistrationTask.status) && <button type="button" onClick={() => void cancelCCEDirectRegistration()} disabled={cceInspectionLoading || cceRegistrationTask.status === 'canceling'} className="mt-2 rounded-lg border border-current px-3 py-1.5 text-[11px] font-bold transition hover:bg-white/60 disabled:cursor-wait disabled:opacity-60">{cceRegistrationTask.status === 'canceling' ? 'Canceling and rolling back…' : 'Cancel registration'}</button>}
-                      </div>}
-                    </RegistrationStep>
-                  </div>}
-                  {cceRegistrationMode === 'command' && <>
-                  <div className="space-y-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                  {(() => {
-                    let step = 0;
-                    const nextStep = () => ++step;
-                    return <>
-                  {registrationType === 'huaweicloud-cce' && <>
-                    <RegistrationStep number={nextStep()} title="Install kubectl" description="Install kubectl on the Linux host that will run the registration command." />
-                    <RegistrationStep number={nextStep()} title="Download the CCE kubeconfig" description="Download the cluster credential from Huawei Cloud CCE and save it as ~/.kube/hypercdr-cce.yaml. The installer will detect it automatically." />
-                  </>}
-                  {prepareNodeCommand && <RegistrationStep number={nextStep()} title="Install the registry CA" description="Run this command on every Kubernetes node to trust the private image registry.">
-                  <div className="relative">
-                    <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900 p-4 font-mono text-[11px] leading-5 text-blue-300 shadow-inner">
-                      <div className="mb-2 flex items-center gap-2 border-b border-white/10 pb-2 opacity-50">
-                        <span className="h-2 w-2 rounded-full bg-red-500" />
-                        <span className="h-2 w-2 rounded-full bg-amber-500" />
-                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                        <span className="ml-2 font-sans tracking-wide">Terminal - prepare node</span>
-                      </div>
-                      <div className="flex items-start gap-2">
-                        <span className="text-white/30">$</span>
-                        <pre className="hbdr-cluster-register-command min-w-0 flex-1 cursor-text whitespace-pre-wrap break-all font-mono text-[11px] leading-5 text-blue-300" aria-label="Registry CA command" onClick={event=>selectCommandText(event.currentTarget)}>{prepareNodeCommand}</pre>
-                        <textarea ref={registryCACommandRef} readOnly value={prepareNodeCommand} className="sr-only" tabIndex={-1} aria-hidden="true" />
-                      </div>
-                    </div>
-                    <button onClick={copyRegistryCACommand} className="absolute right-3 top-3 flex items-center gap-2 rounded-lg bg-white/20 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white backdrop-blur transition-all hover:bg-white/30 active:scale-95">
-                      {caCopied ? <CheckCircle2 size={12} /> : <Check size={12} />}
-                      {caCopied ? 'Copied' : 'Copy'}
-                    </button>
-                  </div>
-                  </RegistrationStep>}
-
-                  <RegistrationStep
-                    number={nextStep()}
-                    title="Install HyperCDR agent"
-                    description={registrationType === 'huaweicloud-cce' ? 'Run this command on the host with access to the CCE cluster. The installer will verify the kubeconfig before making changes.' : registrationType === 'openshift' ? 'Run this command on a Linux administration host with cluster-admin access to OpenShift. Do not modify RHCOS nodes.' : 'Log in to the Kubernetes control-plane node and run this command.'}
-                  >
-                  {!installError && <div className="relative">
-                    <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900 p-4 font-mono text-[11px] leading-5 text-blue-300 shadow-inner">
-                      <div className="mb-2 flex items-center gap-2 border-b border-white/10 pb-2 opacity-50">
-                        <span className="h-2 w-2 rounded-full bg-red-500" />
-                        <span className="h-2 w-2 rounded-full bg-amber-500" />
-                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                        <span className="ml-2 font-sans tracking-wide">Terminal - install agent</span>
-                      </div>
-                      <div className="flex items-start gap-2">
-                        <span className="text-white/30">$</span>
-                        <pre className="hbdr-cluster-register-command min-w-0 flex-1 cursor-text whitespace-pre-wrap break-all font-mono text-[11px] leading-5 text-blue-300" aria-label="Install command" onClick={event=>selectCommandText(event.currentTarget)}>{installLoading ? 'Generating install command...' : installCommand}</pre>
-                        <textarea ref={installCommandRef} readOnly value={installCommand} className="sr-only" tabIndex={-1} aria-hidden="true" />
-                      </div>
-                    </div>
-                    <button disabled={installLoading || !installCommand} onClick={copyInstallCommand} className="absolute right-3 top-3 flex items-center gap-2 rounded-lg bg-white/20 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white backdrop-blur transition-all hover:bg-white/30 active:scale-95 disabled:cursor-wait disabled:opacity-60">
-                      {copied ? <CheckCircle2 size={12} /> : <Check size={12} />}
-                      {copied ? 'Copied' : 'Copy'}
-                    </button>
-                  </div>}
-                  {installError && <p className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-xs font-medium text-rose-700">{installError}</p>}
-                  </RegistrationStep>
-
-                  <RegistrationStep number={nextStep()} title="Wait for connection" description={registrationWaiting ? 'Detecting the cluster connection. It will appear in the cluster list as soon as the agent registers.' : 'Connection monitoring starts after you copy the install command.'}>
-                    {registrationWaiting && <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700"><RefreshCw size={14} className="animate-spin" />Waiting for cluster connection...</div>}
-                  </RegistrationStep>
-                  </>;
-                  })()}
-                  </div>
-                  </>}
-
-                  <div className="flex justify-end gap-3 pt-1">
-					{cceRegistrationMode === 'command' ? <>
-					  <button onClick={closeRegister} className="rounded-xl px-5 py-2 font-medium text-slate-600 transition-colors hover:bg-slate-50">Cancel</button>
-					  <button onClick={finishRegisterCluster} className="rounded-xl bg-emerald-600 px-6 py-2 font-bold text-white shadow-lg shadow-emerald-200 transition-all hover:bg-emerald-700 active:scale-95">Continue in Background</button>
-					</> : cceRegistrationTask && ['succeeded', 'failed', 'canceled'].includes(cceRegistrationTask.status) ?
-					  <button onClick={closeRegister} className="rounded-xl bg-emerald-600 px-6 py-2 font-bold text-white shadow-lg shadow-emerald-200 transition-all hover:bg-emerald-700 active:scale-95">Done</button> :
-					  <button onClick={closeRegister} className="rounded-xl px-5 py-2 font-medium text-slate-600 transition-colors hover:bg-slate-50">Cancel</button>}
-                  </div>
-                </div>
-              </div>
-            </motion.aside>
-          </div>
-        )}
-      </AnimatePresence>
+      {registerOpen && <ResourceCreateDrawer title="Register New Cluster" kind="cluster" onClose={closeRegister} actions={cceRegistrationMode === 'command' ? <><button type="button" className="is-primary" onClick={finishRegisterCluster}>Continue in Background</button><button type="button" onClick={closeRegister}>Cancel</button></> : <button type="button" onClick={closeRegister}>{cceRegistrationTask && ['succeeded', 'failed', 'canceled'].includes(cceRegistrationTask.status) ? 'Done' : 'Cancel'}</button>}>
+        <ClusterRegistrationChoices registrationType={registrationType} registrationMode={cceRegistrationMode} installLoading={installLoading} onTypeChange={value => { resetDirectRegistration(); void loadRegistrationCommand(value); }} onModeChange={value => { setRegisterStep(1); setCopied(false); setCCERegistrationMode(value); }} />
+        {cceRegistrationMode === 'platform-direct' && <ClusterPlatformRegistrationFields registrationType={registrationType} cceUpload={cceUpload} cceContext={cceContext} cceUploadLoading={cceUploadLoading} cceUploadError={cceUploadError} cceInspection={cceInspection} cceInspectionLoading={cceInspectionLoading} cceStorageClass={cceStorageClass} cceRegistrationTask={cceRegistrationTask} onOpenGuide={() => setKubeconfigGuideType(registrationType)} onUpload={file => void uploadCCEKubeconfig(file)} onContextChange={setCCEContext} onInspect={() => void inspectCCECluster()} onStorageClassChange={setCCEStorageClass} onRegister={() => void startCCEDirectRegistration()} onCancel={() => void cancelCCEDirectRegistration()} />}
+        {cceRegistrationMode === 'command' && <ClusterCommandRegistrationFields registrationType={registrationType} prepareNodeCommand={prepareNodeCommand} installCommand={installCommand} installLoading={installLoading} installError={installError} copied={copied} caCopied={caCopied} registryCACommandRef={registryCACommandRef} installCommandRef={installCommandRef} onCopyCA={() => void copyRegistryCACommand()} onCopyInstall={() => void copyInstallCommand()} onRegenerate={() => void loadRegistrationCommand(registrationType)} />}
+      </ResourceCreateDrawer>}
 
       <AnimatePresence>
         {upgradeTarget && (

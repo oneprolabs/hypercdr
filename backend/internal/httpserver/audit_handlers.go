@@ -107,7 +107,7 @@ func auditOperation(req *http.Request) (string, string, string, bool) {
 		resourceID = parts[3]
 	}
 	action := map[string]string{
-		"POST /api/v1/auth/logout": "Sign Out", "PATCH /api/v1/auth/me": "Update Profile", "POST /api/v1/auth/change-password": "Change Password",
+		"POST /api/v1/auth/logout": "Sign Out", "PATCH /api/v1/auth/me": "Update Profile", "PATCH /api/v1/auth/me/theme": "Update Appearance", "POST /api/v1/auth/change-password": "Change Password",
 		"POST /api/v1/users": "Create User", "PATCH /api/v1/users": "Update User", "DELETE /api/v1/users": "Delete User", "POST /api/v1/users/password": "Reset User Password",
 		"PATCH /api/v1/clusters": "Update Cluster", "DELETE /api/v1/clusters": "Delete Cluster", "POST /api/v1/clusters/default": "Set Default Cluster", "POST /api/v1/clusters/force-cleanup": "Force Clean Cluster", "POST /api/v1/clusters/unregister": "Unregister Cluster", "POST /api/v1/clusters/agent/upgrade": "Upgrade Comm Agent", "POST /api/v1/clusters/velero/upgrade": "Upgrade Velero Agent", "POST /api/v1/clusters/inventory/request": "Refresh Cluster Inventory",
 		"PATCH /api/v1/applications": "Update Application", "PUT /api/v1/applications/tags": "Update Application Tags",

@@ -60,7 +60,7 @@ export default function ProfilePage({
       key="profile"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="space-y-5"
+      className="hbdr-profile-page space-y-5"
     >
       <SearchBar
         title="Basic Information"

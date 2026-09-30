@@ -228,6 +228,31 @@ func (r *Router) updateCurrentUser(w http.ResponseWriter, req *http.Request) {
 	}
 	writeJSON(w, 200, updated)
 }
+
+func (r *Router) updateCurrentUserTheme(w http.ResponseWriter, req *http.Request) {
+	u, ok := requestUser(req)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "authentication_required"})
+		return
+	}
+	var body struct {
+		Theme string `json:"theme"`
+	}
+	if decodeJSON(req, &body) != nil || (body.Theme != "light" && body.Theme != "dark") {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_theme"})
+		return
+	}
+	updated, found, err := r.store.SetUserTheme(u.ID, body.Theme)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "theme_update_failed"})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "user_not_found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, identityFromStore(updated))
+}
 func (r *Router) changeOwnPassword(w http.ResponseWriter, req *http.Request) {
 	u, ok := requestUser(req)
 	if !ok {

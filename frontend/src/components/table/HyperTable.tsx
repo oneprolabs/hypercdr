@@ -165,13 +165,14 @@ export function HyperTable<TData>(props: HyperTableProps<TData>) {
                   className={`hbdr-hyper-table-row ${getRowClassName?.(row.original) || ''}`}
                   onClick={() => onRowClick?.(row.original)}
                 >
-                  {row.getVisibleCells().map(cell => {
+                  {row.getVisibleCells().map((cell, index) => {
                     const meta = cell.column.columnDef.meta as HyperColumnMeta<TData> | undefined;
                     const title = meta?.title?.(row.original);
+                    const firstDataIndex = /^(select|selection|checkbox)$/.test(row.getVisibleCells()[0]?.column.id || '') ? 1 : 0;
                     return (
                       <div
                         key={cell.id}
-                        className={`hbdr-hyper-table-cell hbdr-hyper-table-body-cell hbdr-hyper-table-cell-${meta?.kind || 'default'} hbdr-hyper-table-align-${meta?.align || 'left'} ${meta?.className || ''}`}
+                        className={`hbdr-hyper-table-cell hbdr-hyper-table-body-cell ${index === firstDataIndex ? 'hbdr-table-first-data' : 'hbdr-table-other-data'} hbdr-hyper-table-cell-${meta?.kind || 'default'} hbdr-hyper-table-align-${meta?.align || 'left'} ${meta?.className || ''}`}
                         style={{ width: cell.column.getSize() }}
                         title={title}
                       >

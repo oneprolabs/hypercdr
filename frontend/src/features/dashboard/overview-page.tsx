@@ -2,20 +2,21 @@ import React from 'react';
 import { AlertCircle, CheckCircle2, ChevronDown, Cloud, Database, History, Lock, RefreshCw, Server } from 'lucide-react';
 import { motion } from 'motion/react';
 import type { AppItem, Cluster } from '../clusters/types';
+import { buildDRTopology } from '../clusters/dr-topology';
 import { formatDateTime } from '../../lib/date-time';
 
 type StorageRepo={status:string};
 type ApiTask={id:string;clusterId:string;type:string;status:string;errorCode?:string;errorMessage?:string;createdAt?:string;completedAt?:string};
 type ApiRestorePointView={id:string;sourceClusterId:string;status:string;time?:string;sourceNamespace?:string;includedNamespaces?:string[];appId?:string;protectionPlanId?:string};
 type ApiPolicy={id:string;scheduleType:string;intervalValue?:number;intervalUnit?:string;boundCount:number};
-type ApiProtectionPlan={id:string;appId?:string;appIds?:string[];policyId?:string};
+import type { ApiProtectionPlan } from '../recovery/types';
 type ApiApplication={id:string;clusterId:string;namespace:string};
 type ProductInfo={product?:string;edition?:string;license?:{mode?:string;status?:string;detail?:string}};
 const isActiveTaskStatus=(status?:string)=>['queued','dispatched','accepted','running','canceling'].includes(status||'');
 const isSucceededStatus=(status?:string)=>status==='succeeded'||status==='completed';
 const isFailedStatus=(status?:string)=>['failed','canceled','cancelled','error','timeout','timed_out'].includes(status||'');
 const taskStatusLabel=(status?:string)=>isSucceededStatus(status)?'Succeeded':isFailedStatus(status)?'Failed':isActiveTaskStatus(status)?'Running':status||'Unknown';
-const resolveRecoveryCluster=(cluster:Cluster|null,clusters:Cluster[])=>{if(!cluster)return null;const names=[...new Set(cluster.apps.filter(app=>app.isProtected&&app.targetCluster).map(app=>app.targetCluster!))];return(names.length?clusters.find(item=>names.includes(item.name)):undefined)??clusters.find(item=>item.id!==cluster.id)??null};
+const resolveRecoveryCluster=(cluster:Cluster|null,clusters:Cluster[])=>{if(!cluster)return null;const names=[...new Set(cluster.apps.filter(app=>app.isProtected&&app.targetCluster).map(app=>app.targetCluster!))];return(names.length?clusters.find(item=>names.includes(item.name)):undefined)??null};
 const policyIntervalMs=(policy?:ApiPolicy)=>{if(!policy||policy.scheduleType!=='interval'||!policy.intervalValue)return null;const unit=(policy.intervalUnit||'').toLowerCase();return policy.intervalValue*(unit.startsWith('minute')?60000:unit.startsWith('day')?86400000:3600000)};
 const planIncludesNamespace=(plan:ApiProtectionPlan,app:AppItem,apps:ApiApplication[])=>{const ids=new Set([plan.appId,...(plan.appIds||[])].filter(Boolean));return Boolean(app.apiId&&ids.has(app.apiId))||Boolean(app.clusterId&&apps.some(item=>ids.has(item.id)&&item.clusterId===app.clusterId&&item.namespace===(app.namespace||app.name)))};
 const restorePointMatchesApp=(point:ApiRestorePointView,app:AppItem)=>{const namespace=app.namespace||app.name;if(app.protectionPlanId&&point.protectionPlanId&&point.includedNamespaces?.length)return point.protectionPlanId===app.protectionPlanId&&point.includedNamespaces.includes(namespace);if(app.apiId&&point.appId)return point.appId===app.apiId;if(app.protectionPlanId&&point.protectionPlanId)return point.protectionPlanId===app.protectionPlanId;return Boolean(app.clusterId&&point.sourceClusterId===app.clusterId&&point.sourceNamespace===namespace)};
@@ -42,6 +43,9 @@ export function OverviewPage(props: {
   clusterContext: React.ReactNode;
 }) {
   const { cluster, clusters, storage, protectedApps, restorePointCount, tasks, restorePoints, policies, protectionPlans, applications, defaultClusterId, productInfo, openDr, openOperations, clusterContext } = props;
+  const [rangeOpen, setRangeOpen] = React.useState(false);
+  const [timeRange, setTimeRange] = React.useState('Last 24 hours');
+  const [healthFilter, setHealthFilter] = React.useState<'All' | 'At risk' | 'Healthy'>('All');
   const clusterApps = cluster?.apps ?? [];
   const clusterTasks = cluster ? tasks.filter(task => task.clusterId === cluster.id) : [];
   const clusterRestorePoints = cluster ? restorePoints.filter(point => point.sourceClusterId === cluster.id && point.status === 'available') : [];
@@ -78,6 +82,11 @@ export function OverviewPage(props: {
   const syncNotStarted = Math.max(syncConfiguredApps.length - syncCompleted - activeBackupTasks.length - failedBackupTasks.length, 0);
   const syncRate = syncConfiguredApps.length > 0 ? Math.round((syncCompleted / syncConfiguredApps.length) * 100) : 0;
   const restoreTasks = clusterTasks.filter(task => ['restore', 'drill', 'takeover'].includes(task.type));
+  const recoveryTasks30d = recentTasks(restoreTasks, 30);
+  const finishedRecoveryTasks30d = recoveryTasks30d.filter(task => isSucceededStatus(task.status) || isFailedStatus(task.status));
+  const recoverySuccessRate = finishedRecoveryTasks30d.length
+    ? `${Math.round(100 * finishedRecoveryTasks30d.filter(task => isSucceededStatus(task.status)).length / finishedRecoveryTasks30d.length)}%`
+    : 'N/A';
   const restoreInProgress = restoreTasks.filter(task => isActiveTaskStatus(task.status)).length;
   const restoreFailed = restoreTasks.filter(task => isFailedStatus(task.status)).length;
   const drillTasks30d = recentTasks(clusterTasks.filter(task => task.type === 'drill'), 30);
@@ -112,13 +121,40 @@ export function OverviewPage(props: {
     ? `${targetClusterNames.length} Targets`
     : (recoveryCluster?.name ?? 'N/A');
   const drSiteSubtitle = targetClusterNames.length > 1 ? 'Target Clusters' : 'Target Cluster';
+  const topology = buildDRTopology(clusters, protectionPlans);
+  const topologyPairs = topology.relationships.length;
+  const topologyStatuses = topology.relationships.reduce((counts, relationship) => {
+    counts[relationship.status] = (counts[relationship.status] || 0) + 1;
+    return counts;
+  }, {} as Record<string, number>);
+  const protectedRate = totalApps > 0 ? Math.round((protectedApps / totalApps) * 100) : 0;
+  const oldestRestorePoint = clusterRestorePoints
+    .map(point => point.time ? Date.parse(point.time) : NaN)
+    .filter(value => Number.isFinite(value))
+    .sort((a, b) => a - b)[0];
+  const oldestRestorePointLabel = oldestRestorePoint
+    ? `${Math.max(0, Math.floor((now - oldestRestorePoint) / 86400000))}d ago`
+    : 'N/A';
 
   return (
     <div className="hbdr-dashboard hbdr-dashboard-zones hbdr-dashboard-design-canvas">
       <div className="hbdr-dashboard-design-header">
         <h1>Overview</h1>
         <div className="hbdr-dashboard-design-controls">
-          <button type="button" className="hbdr-dashboard-design-range">Last 24 hours <ChevronDown size={13} /></button>
+          <div className="hbdr-dashboard-range-wrap">
+            <button type="button" className={`hbdr-dashboard-design-range ${rangeOpen ? 'is-open' : ''}`} onClick={() => setRangeOpen(open => !open)} aria-haspopup="listbox" aria-expanded={rangeOpen}>
+              {timeRange} <ChevronDown size={13} className={rangeOpen ? 'rotate-180' : ''} />
+            </button>
+            {rangeOpen && (
+              <div className="hbdr-dashboard-range-menu" role="listbox" aria-label="Time range">
+                {['Last 24 hours', 'Last 7 days', 'Last 30 days'].map(option => (
+                  <button key={option} type="button" role="option" aria-selected={timeRange === option} className={timeRange === option ? 'is-active' : ''} onClick={() => { setTimeRange(option); setRangeOpen(false); }}>
+                    {option}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="hbdr-dashboard-design-cluster">{clusterContext}</div>
         </div>
       </div>
@@ -129,10 +165,14 @@ export function OverviewPage(props: {
             <span className="hbdr-dashboard-zone-dot hbdr-dashboard-zone-dot-cluster" aria-hidden="true" />
             <div>
               <h2>Protection health</h2>
-              <p>{totalApps} namespaces</p>
+              <p><strong>{totalApps}</strong> namespaces</p>
             </div>
           </div>
-          <div className="hbdr-dashboard-zone-cluster-picker">{clusterContext}</div>
+          <div className="hbdr-dashboard-health-filter" role="tablist" aria-label="Protection health filter">
+            {(['All', 'At risk', 'Healthy'] as const).map(option => (
+              <button key={option} type="button" role="tab" aria-selected={healthFilter === option} className={healthFilter === option ? 'is-active' : ''} onClick={() => setHealthFilter(option)}>{option}</button>
+            ))}
+          </div>
         </header>
         <motion.div
           key={clusterZoneKey}
@@ -141,6 +181,28 @@ export function OverviewPage(props: {
           animate={{ opacity: 1 }}
           transition={{ duration: 0.22 }}
         >
+        <div className="hbdr-dashboard-health-issues" aria-label="Active issues">
+          <span className="hbdr-dashboard-health-kicker">Active issues</span>
+          <div className="hbdr-dashboard-health-issue-grid">
+            <div><strong className="is-critical">{offlineClusters}</strong><span>Cluster offline</span></div>
+            <i aria-hidden="true" />
+            <div><strong>{storageUnavailable}</strong><span>Storage unreachable</span></div>
+            <i aria-hidden="true" />
+            <div><strong className="is-warning">{failedRecentTasks}</strong><span>Failed tasks</span></div>
+          </div>
+        </div>
+        <div className="hbdr-dashboard-health-summary">
+          <div className="hbdr-dashboard-protection-ring" style={{ '--hbdr-protection-rate': `${protectedRate}%` } as React.CSSProperties}>
+            <strong>{protectedRate}<small>%</small></strong>
+            <span>Protected</span>
+          </div>
+          <div className="hbdr-dashboard-health-legend">
+            <DashboardLegend color="green" label="Protected" value={protectedApps} />
+            <DashboardLegend color="red" label="Unprotected" value={notConfigured} />
+            <DashboardLegend color="gray" label="At RPO risk" value={rpoStats.risk} />
+            <div className="hbdr-dashboard-oldest-point"><span>Oldest restore point</span><strong>{oldestRestorePointLabel}</strong></div>
+          </div>
+        </div>
         <div className="hbdr-dashboard-flow">
           <div className="hbdr-dashboard-flow-node">
             <div className="hbdr-dashboard-prod-icon"><Server size={44} /></div>
@@ -222,46 +284,65 @@ export function OverviewPage(props: {
         </motion.div>
       </section>
 
-      <aside className="hbdr-dashboard-side hbdr-dashboard-zone hbdr-dashboard-zone-platform">
+      <section className="hbdr-dashboard-side hbdr-dashboard-zone hbdr-dashboard-zone-topology">
         <header className="hbdr-dashboard-zone-head hbdr-dashboard-zone-head-static">
           <div className="hbdr-dashboard-zone-label">
             <span className="hbdr-dashboard-zone-dot hbdr-dashboard-zone-dot-platform" aria-hidden="true" />
             <div>
-              <h2>Platform Overview</h2>
-              <p>Shared resources across all clusters</p>
+              <h2>DR topology</h2>
+              <p>{topologyPairs} replication pair{topologyPairs === 1 ? '' : 's'} across {clusters.length} cluster{clusters.length === 1 ? '' : 's'}</p>
             </div>
           </div>
+          <div className="hbdr-dashboard-topology-statuses">
+            <span><i className="is-healthy" />{topologyStatuses.healthy || 0} Healthy</span>
+            <span><i className="is-warning" />{topologyStatuses.warning || 0} Degraded</span>
+            <span><i className="is-critical" />{topologyStatuses.failed || 0} Failed</span>
+          </div>
         </header>
-        <div className="hbdr-dashboard-platform-body">
-        <div className="hbdr-dashboard-side-cards hbdr-platform-grid">
-        <DashboardPanel className="hbdr-platform-card-compact" title="Storage Repositories">
-          <div className="hbdr-dashboard-big-number">
-            <strong>{storage.length}</strong>
-            <span>Repositories</span>
-          </div>
-          <DashboardLegend color="green" label="Connected" value={connectedStorage} />
-          <DashboardLegend color="gray" label="Unavailable" value={storage.length - connectedStorage} />
-        </DashboardPanel>
-        <DashboardPanel className="hbdr-platform-card-compact" title="DR Policy">
-          <div className="hbdr-dashboard-big-number">
-            <strong>{plansInUse}</strong>
-            <span>Protection Plans</span>
-          </div>
-          <DashboardLegend color="green" label="In Use" value={policiesInUse} />
-          <DashboardLegend color="gray" label="Available" value={policiesAvailable} />
-        </DashboardPanel>
-        <PlatformLicenseCard productInfo={productInfo} />
-        <DashboardPanel className="hbdr-platform-card-wide hbdr-platform-clusters-card" title="Registered Clusters">
-          <div className="hbdr-dashboard-big-number">
-            <strong>{registeredClusters}</strong>
-            <span>Clusters</span>
-          </div>
-          <DashboardLegend color="blue" label="Default" value={defaultClusterCount} />
-          <DashboardLegend color="green" label="Registered" value={registeredClusters} />
-        </DashboardPanel>
+        <div className="hbdr-dashboard-topology-body">
+          {topology.relationships.length > 0 ? topology.relationships.slice(0, 4).map(relationship => {
+            const source = clusters.find(item => item.id === relationship.sourceClusterId);
+            const target = clusters.find(item => item.id === relationship.targetClusterId);
+            return <div className={`hbdr-dashboard-topology-pair is-${relationship.status}`} key={relationship.id}>
+              <div><i /><strong>{source?.name || relationship.sourceClusterId}</strong><small>{source?.applications || 0} namespaces · {source?.nodes || 0} nodes · {source?.version || 'N/A'}</small></div>
+              <span className="hbdr-dashboard-topology-link">{relationship.appIds.length} namespaces</span>
+              <div><i /><strong>{target?.name || relationship.targetClusterId}</strong><small>{target?.applications || 0} namespaces · {target?.nodes || 0} nodes · {target?.version || 'N/A'}</small></div>
+            </div>;
+          }) : clusters.length === 1 ? <div className="hbdr-dashboard-topology-single">
+            <div className="hbdr-dashboard-topology-node"><i /><strong>{clusters[0].name}</strong><small>{clusters[0].applications} namespaces · {clusters[0].nodes} nodes · {clusters[0].version}</small><span>Standalone cluster · no replication relationship</span></div>
+          </div> : <div className="hbdr-dashboard-topology-empty"><History size={18} /><span>No replication relationships configured</span></div>}
         </div>
+      </section>
+      <aside className="hbdr-dashboard-side hbdr-dashboard-zone hbdr-dashboard-zone-platform">
+        <header className="hbdr-dashboard-zone-head hbdr-dashboard-zone-head-static">
+          <div className="hbdr-dashboard-zone-label"><span className="hbdr-dashboard-zone-dot hbdr-dashboard-zone-dot-platform" aria-hidden="true" /><div><h2>Platform</h2><p>Shared resources across all clusters</p></div></div>
+        </header>
+        <dl className="hbdr-platform-summary">
+          <div><dt>Registered clusters</dt><dd><strong>{registeredClusters}</strong><small>{clusters.filter(item => item.connectionStatus === 'online').length} online</small></dd></div>
+          <div><dt>Protection plans</dt><dd><strong>{plansInUse}</strong></dd></div>
+          <div><dt>Agent version</dt><dd><strong>{cluster?.agentVersion || 'N/A'}</strong></dd></div>
+        </dl>
+        <div className="hbdr-platform-license-summary">
+          <Lock size={18} aria-hidden="true" />
+          <div><strong>{productInfo?.edition || 'Edition unavailable'} · {productInfo?.license?.status?.replace(/-/g, ' ') || 'License status unavailable'}</strong>
+          <p>{productInfo?.license?.detail || productInfo?.license?.mode || 'No license metadata available'}</p></div>
         </div>
       </aside>
+      </div>
+
+      <div className="hbdr-dashboard-reference-metrics">
+        <DashboardPanel title="Synchronization">
+          <div className="hbdr-dashboard-reference-stat-grid"><div><strong>{clusterTasks.filter(task => task.type === 'backup').length}</strong><span>Total runs</span></div><div className="is-success"><strong>{clusterTasks.filter(task => task.type === 'backup' && isSucceededStatus(task.status)).length}</strong><span>Succeeded</span></div><div className="is-critical"><strong>{clusterTasks.filter(task => task.type === 'backup' && isFailedStatus(task.status)).length}</strong><span>Failed</span></div></div>
+          <div className="hbdr-dashboard-reference-empty"><span>Runs per 2h</span><small>Task history is available from Operations</small></div>
+        </DashboardPanel>
+        <DashboardPanel title="Recovery & drills">
+          <div className="hbdr-dashboard-reference-stat-grid"><div><strong>{recentTasks(restoreTasks, 30).length}</strong><span>Last 30 days</span></div><div className="is-info"><strong>{restoreInProgress}</strong><span>Running now</span></div><div className="is-success"><strong>{recoverySuccessRate}</strong><span>Success rate</span></div></div>
+          <div className="hbdr-dashboard-reference-empty"><span>By operation</span><small>Drill {recoveryTasks30d.filter(task => task.type === 'drill').length} · Restore {recoveryTasks30d.filter(task => task.type === 'restore').length} · Takeover {recoveryTasks30d.filter(task => task.type === 'takeover').length}</small></div>
+        </DashboardPanel>
+        <DashboardPanel title="Storage & retention">
+          <div className="hbdr-dashboard-reference-stat-grid"><div><strong>{clusterRestorePoints.length}</strong><span>Restore points</span></div><div className="is-success"><strong>{connectedStorage}</strong><span>Repos online</span></div><div><strong>N/A</strong><span>Capacity reduction</span></div></div>
+          <div className="hbdr-dashboard-reference-empty"><span>Repositories</span><small>{storage.length ? `${connectedStorage} connected · ${storageUnavailable} unavailable` : 'No storage repositories configured'}</small></div>
+        </DashboardPanel>
       </div>
 
       <section className="hbdr-dashboard-zone hbdr-dashboard-zone-operations">
@@ -303,8 +384,8 @@ export function OverviewPage(props: {
 
           <section className="hbdr-dashboard-card hbdr-dashboard-events">
             <header>
-              <h3>Events</h3>
-              <button>Logs &gt;</button>
+              <h3>Recent activity</h3>
+              <button onClick={openOperations}>Logs &gt;</button>
             </header>
             {recentEventTasks.length > 0 ? recentEventTasks.map(task => (
               <div key={task.id} className="hbdr-dashboard-event">
@@ -320,7 +401,7 @@ export function OverviewPage(props: {
             )}
           </section>
 
-          <DashboardPanel className="hbdr-dashboard-zone-alert" title="Alert">
+          <DashboardPanel className="hbdr-dashboard-zone-alert" title="Alerts">
             <div className="hbdr-dashboard-alert-metrics">
               <div><strong>{criticalAlerts}</strong><span>Critical</span></div>
               <div><strong>{urgentAlerts}</strong><span>Urgent</span></div>

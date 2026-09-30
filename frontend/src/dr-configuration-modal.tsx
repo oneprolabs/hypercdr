@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { ScopedResourceSelector, type ScopedResourceOption, type ScopedResourceSelection } from './components/scoped-resource-selector';
 
-type ProtectWizardStep = 1 | 2 | 3 | 4 | 5 | 6;
+export type ProtectWizardStep = 1 | 2 | 3 | 4 | 5 | 6;
 
 type ExcludeRule = {
   group: string;
@@ -75,6 +75,7 @@ type PolicyOption = {
   desc: string;
   status: string;
   hasRetention: boolean;
+  bound?: number;
 };
 
 type TargetClusterOption = {
@@ -83,13 +84,16 @@ type TargetClusterOption = {
   region: string;
   version: string;
   nodes: number;
+  namespaces?: number;
   applications: number;
+  clusterType?: string;
   isCurrent: boolean;
   compatible: boolean;
+  connectionStatus?: string;
   incompatibilityReason?: string;
 };
 
-type ProtectConfig = {
+export type ProtectConfig = {
   scope: string;
   labels: string;
   labelConditions: LabelCondition[];
@@ -112,7 +116,7 @@ type ProtectConfig = {
   postScripts: ScriptFile[];
 };
 
-type Props = {
+export type Props = {
   open: boolean;
   step: ProtectWizardStep;
   setStep: (step: ProtectWizardStep) => void;

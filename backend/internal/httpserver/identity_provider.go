@@ -17,11 +17,11 @@ func (s storeAuditSink) RecordAudit(_ context.Context, event EditionAuditEvent) 
 }
 
 func identityFromStore(user store.User) EditionIdentity {
-	return EditionIdentity{ID: user.ID, TenantID: user.TenantID, TenantName: user.TenantName, Email: user.Email, DisplayName: user.DisplayName, Role: user.Role, Status: user.Status, AuthProvider: user.AuthProvider, TimeZone: user.TimeZone, SystemAdmin: user.SystemAdmin, MustChangePassword: user.MustChangePassword}
+	return EditionIdentity{ID: user.ID, TenantID: user.TenantID, TenantName: user.TenantName, Email: user.Email, DisplayName: user.DisplayName, Role: user.Role, Status: user.Status, AuthProvider: user.AuthProvider, TimeZone: user.TimeZone, Theme: user.Theme, SystemAdmin: user.SystemAdmin, MustChangePassword: user.MustChangePassword}
 }
 
 func storeUserFromIdentity(user EditionIdentity) store.User {
-	return store.User{ID: user.ID, TenantID: user.TenantID, TenantName: user.TenantName, Email: user.Email, DisplayName: user.DisplayName, Role: user.Role, Status: user.Status, AuthProvider: user.AuthProvider, TimeZone: user.TimeZone, SystemAdmin: user.SystemAdmin, MustChangePassword: user.MustChangePassword}
+	return store.User{ID: user.ID, TenantID: user.TenantID, TenantName: user.TenantName, Email: user.Email, DisplayName: user.DisplayName, Role: user.Role, Status: user.Status, AuthProvider: user.AuthProvider, TimeZone: user.TimeZone, Theme: user.Theme, SystemAdmin: user.SystemAdmin, MustChangePassword: user.MustChangePassword}
 }
 
 func (p storeIdentityProvider) Authenticate(_ context.Context, email, password string) (EditionIdentity, bool, error) {

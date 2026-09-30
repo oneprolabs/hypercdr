@@ -463,13 +463,13 @@ func (s *PostgresStore) AuthenticateUser(input UserAuthInput) (User, bool, error
 		return User{}, false, nil
 	}
 	row := s.db.QueryRow(`
-		select u.id,u.tenant_id,t.name,u.email,coalesce(u.display_name,''),u.password_hash,u.role,u.status,u.auth_provider,coalesce(u.time_zone,''),u.is_system_admin,u.must_change_password
+		select u.id,u.tenant_id,t.name,u.email,coalesce(u.display_name,''),u.password_hash,u.role,u.status,u.auth_provider,coalesce(u.time_zone,''),u.theme,u.is_system_admin,u.must_change_password
 		from users u join resource_scopes t on t.id=u.tenant_id
 		where lower(u.email)=$1 and u.status='active' and (u.is_system_admin or t.status='active')
 	`, email)
 	var user User
 	var passwordHash string
-	if err := row.Scan(&user.ID, &user.TenantID, &user.TenantName, &user.Email, &user.DisplayName, &passwordHash, &user.Role, &user.Status, &user.AuthProvider, &user.TimeZone, &user.SystemAdmin, &user.MustChangePassword); err != nil {
+	if err := row.Scan(&user.ID, &user.TenantID, &user.TenantName, &user.Email, &user.DisplayName, &passwordHash, &user.Role, &user.Status, &user.AuthProvider, &user.TimeZone, &user.Theme, &user.SystemAdmin, &user.MustChangePassword); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, false, nil
 		}
@@ -499,7 +499,7 @@ func (s *PostgresStore) CreateUser(tenantID, email, password string) (User, erro
 }
 
 func (s *PostgresStore) ListUsers() ([]User, error) {
-	rows, err := s.db.Query(`select u.id,u.tenant_id,t.name,u.email,coalesce(u.display_name,''),u.role,u.status,u.auth_provider,coalesce(u.time_zone,''),u.is_system_admin,u.must_change_password from users u join resource_scopes t on t.id=u.tenant_id order by case when u.is_system_admin then 0 else 1 end, u.email`)
+	rows, err := s.db.Query(`select u.id,u.tenant_id,t.name,u.email,coalesce(u.display_name,''),u.role,u.status,u.auth_provider,coalesce(u.time_zone,''),u.theme,u.is_system_admin,u.must_change_password from users u join resource_scopes t on t.id=u.tenant_id order by case when u.is_system_admin then 0 else 1 end, u.email`)
 	if err != nil {
 		return nil, err
 	}
@@ -507,7 +507,7 @@ func (s *PostgresStore) ListUsers() ([]User, error) {
 	var users []User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.TenantID, &u.TenantName, &u.Email, &u.DisplayName, &u.Role, &u.Status, &u.AuthProvider, &u.TimeZone, &u.SystemAdmin, &u.MustChangePassword); err != nil {
+		if err := rows.Scan(&u.ID, &u.TenantID, &u.TenantName, &u.Email, &u.DisplayName, &u.Role, &u.Status, &u.AuthProvider, &u.TimeZone, &u.Theme, &u.SystemAdmin, &u.MustChangePassword); err != nil {
 			return nil, err
 		}
 		users = append(users, u)
@@ -517,7 +517,7 @@ func (s *PostgresStore) ListUsers() ([]User, error) {
 
 func (s *PostgresStore) GetUser(id string) (User, bool, error) {
 	var u User
-	err := s.db.QueryRow(`select u.id,u.tenant_id,t.name,u.email,coalesce(u.display_name,''),u.role,u.status,u.auth_provider,coalesce(u.time_zone,''),u.is_system_admin,u.must_change_password from users u join resource_scopes t on t.id=u.tenant_id where u.id=$1`, id).Scan(&u.ID, &u.TenantID, &u.TenantName, &u.Email, &u.DisplayName, &u.Role, &u.Status, &u.AuthProvider, &u.TimeZone, &u.SystemAdmin, &u.MustChangePassword)
+	err := s.db.QueryRow(`select u.id,u.tenant_id,t.name,u.email,coalesce(u.display_name,''),u.role,u.status,u.auth_provider,coalesce(u.time_zone,''),u.theme,u.is_system_admin,u.must_change_password from users u join resource_scopes t on t.id=u.tenant_id where u.id=$1`, id).Scan(&u.ID, &u.TenantID, &u.TenantName, &u.Email, &u.DisplayName, &u.Role, &u.Status, &u.AuthProvider, &u.TimeZone, &u.Theme, &u.SystemAdmin, &u.MustChangePassword)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, false, nil
 	}
@@ -534,6 +534,21 @@ func (s *PostgresStore) UpdateUser(input UserUpdateInput) (User, bool, error) {
 		return User{}, false, nil
 	}
 	return s.GetUser(input.ID)
+}
+
+func (s *PostgresStore) SetUserTheme(id, theme string) (User, bool, error) {
+	if theme != "light" && theme != "dark" {
+		return User{}, false, ErrInvalidTheme
+	}
+	result, err := s.db.Exec(`update users set theme=$2,updated_at=now() where id=$1`, id, theme)
+	if err != nil {
+		return User{}, false, err
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return User{}, false, nil
+	}
+	return s.GetUser(id)
 }
 
 func (s *PostgresStore) DeleteUser(id string) (bool, error) {
@@ -599,7 +614,7 @@ func (s *PostgresStore) CreatePlatformSession(userID string, ttl time.Duration) 
 
 func (s *PostgresStore) AuthenticatePlatformSession(token string) (User, bool, error) {
 	var u User
-	err := s.db.QueryRow(`select u.id,u.tenant_id,t.name,u.email,coalesce(u.display_name,''),u.role,u.status,u.auth_provider,coalesce(u.time_zone,''),u.is_system_admin,u.must_change_password from platform_sessions s join users u on u.id=s.user_id join resource_scopes t on t.id=u.tenant_id where s.token_hash=$1 and s.expires_at>now() and u.status='active' and (u.is_system_admin or t.status='active')`, resetTokenDigest(token)).Scan(&u.ID, &u.TenantID, &u.TenantName, &u.Email, &u.DisplayName, &u.Role, &u.Status, &u.AuthProvider, &u.TimeZone, &u.SystemAdmin, &u.MustChangePassword)
+	err := s.db.QueryRow(`select u.id,u.tenant_id,t.name,u.email,coalesce(u.display_name,''),u.role,u.status,u.auth_provider,coalesce(u.time_zone,''),u.theme,u.is_system_admin,u.must_change_password from platform_sessions s join users u on u.id=s.user_id join resource_scopes t on t.id=u.tenant_id where s.token_hash=$1 and s.expires_at>now() and u.status='active' and (u.is_system_admin or t.status='active')`, resetTokenDigest(token)).Scan(&u.ID, &u.TenantID, &u.TenantName, &u.Email, &u.DisplayName, &u.Role, &u.Status, &u.AuthProvider, &u.TimeZone, &u.Theme, &u.SystemAdmin, &u.MustChangePassword)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, false, nil
 	}
@@ -659,7 +674,7 @@ func resetTokenDigest(token string) string { return fmt.Sprintf("%x", sha256.Sum
 func (s *PostgresStore) FindOrCreateGoogleUser(email string) (User, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	var u User
-	err := s.db.QueryRow(`select id,tenant_id,email,role,status,coalesce(time_zone,'') from users where tenant_id=$1 and email=$2`, DefaultTenantID, email).Scan(&u.ID, &u.TenantID, &u.Email, &u.Role, &u.Status, &u.TimeZone)
+	err := s.db.QueryRow(`select id,tenant_id,email,role,status,coalesce(time_zone,''),theme from users where tenant_id=$1 and email=$2`, DefaultTenantID, email).Scan(&u.ID, &u.TenantID, &u.Email, &u.Role, &u.Status, &u.TimeZone, &u.Theme)
 	if err == nil {
 		return u, nil
 	}

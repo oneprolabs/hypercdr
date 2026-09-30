@@ -1,5 +1,6 @@
+import PageTitleBar from '../../components/page-title-bar';
 import React, { useMemo, useState } from 'react';
-import { Archive, ChevronDown, Edit2, Trash2 } from 'lucide-react';
+import { Archive, ChevronDown, Plus, Edit2, Trash2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { apiDelete, apiPatch, apiPost } from '../../api/client';
 import { EditField } from '../../components/edit-field';
@@ -173,8 +174,8 @@ export default function TagManagementPage<T extends TagCluster>({
   };
 
   return (
-    <motion.div key="tags" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
-      <div className="hbdr-page-hero">
+    <motion.div key="tags" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="tags-page space-y-5">
+      <PageTitleBar>
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-blue-600 shadow-sm"><Archive size={18} /></div>
@@ -183,15 +184,14 @@ export default function TagManagementPage<T extends TagCluster>({
               <p className="mt-0.5 text-[11px] font-medium text-slate-400">Create tags and attach them to application DR resources.</p>
             </div>
           </div>
-          <button type="button" className="hbdr-dr-action-primary" onClick={openCreateTag}>New Tag</button>
         </div>
-      </div>
+      </PageTitleBar>
 
       <div className="hbdr-dr-table-card hbdr-tag-table-list">
         <div className="hbdr-dr-table-head">
           <div className="hbdr-dr-toolbar">
             <div className="hbdr-dr-action-group">
-              <button type="button" className="hbdr-dr-action-primary" onClick={openCreateTag}>New Tag</button>
+              <button type="button" className="hbdr-dr-action-primary" onClick={openCreateTag}><Plus size={14} />New Tag</button>
               <div className="relative">
                 <button type="button" disabled={selectedTags.length === 0} onClick={() => setTagBulkMenuOpen(prev => !prev)} className="hbdr-dr-more">
                   More <ChevronDown size={15} className={tagBulkMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />

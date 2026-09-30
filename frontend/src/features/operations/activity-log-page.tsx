@@ -1,3 +1,4 @@
+import PageTitleBar from '../../components/page-title-bar';
 import { useEffect, useState } from 'react';
 import { History, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
@@ -55,7 +56,7 @@ export default function ActivityLogPage() {
 
   return (
     <motion.div key="activity-log" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
-      <div className="hbdr-page-hero">
+      <PageTitleBar>
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-blue-600 shadow-sm"><History size={18} /></div>
@@ -66,7 +67,7 @@ export default function ActivityLogPage() {
           </div>
           <div />
         </div>
-      </div>
+      </PageTitleBar>
 
       <div className="hbdr-dr-table-card hbdr-history-table-list">
         <div className="hbdr-dr-table-head">

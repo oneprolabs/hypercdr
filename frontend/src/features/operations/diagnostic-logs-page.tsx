@@ -1,3 +1,4 @@
+import PageTitleBar from '../../components/page-title-bar';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Boxes, Search, Server, Terminal, Upload, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
@@ -125,7 +126,7 @@ export default function DiagnosticLogsPage({ currentUser, toast, advancedTenancy
   ], [advancedTenancy, currentUser.systemAdmin, tenants]);
 
   return <motion.div key="diagnostic-logs" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
-    <div className="hbdr-page-hero"><div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-blue-600"><Terminal size={18} /></div><div><h3 className="text-sm font-black text-slate-900">Diagnostic Logs</h3><p className="mt-1 text-[11px] text-slate-400">Trace platform requests, task stages, and managed-cluster component failures.</p></div></div></div>
+    <PageTitleBar><div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-blue-600"><Terminal size={18} /></div><div><h3 className="text-sm font-black text-slate-900">Diagnostic Logs</h3><p className="mt-1 text-[11px] text-slate-400">Trace platform requests, task stages, and managed-cluster component failures.</p></div></div></PageTitleBar>
     <section className="hbdr-dr-table-card overflow-hidden">
       <div className="flex border-b border-slate-200 bg-white px-4 pt-3" role="tablist" aria-label="Log source">
         <button type="button" role="tab" aria-selected={source === 'platform'} onClick={() => { setSource('platform'); setSelected(null); setCollectionStatus({ state: 'idle', message: '' }); }} className={`border-b-2 px-5 py-3 text-xs font-bold ${source === 'platform' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500'}`}><Server size={15} className="mr-2 inline" />Platform Logs</button>

@@ -136,6 +136,7 @@ type EditionIdentity struct {
 	Status             string `json:"status"`
 	AuthProvider       string `json:"authProvider"`
 	TimeZone           string `json:"timeZone,omitempty"`
+	Theme              string `json:"theme,omitempty"`
 	SystemAdmin        bool   `json:"systemAdmin,omitempty"`
 	MustChangePassword bool   `json:"mustChangePassword"`
 }

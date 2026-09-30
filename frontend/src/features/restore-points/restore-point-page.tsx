@@ -1,3 +1,4 @@
+import PageTitleBar from '../../components/page-title-bar';
 import React, { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { AlertCircle, Check, CheckCircle2, ChevronDown, Clock, DatabaseBackup, Eye, Filter, HardDrive, History, Layers, MoreVertical, Play, RefreshCw, Search, Server, Trash2, X } from 'lucide-react';
@@ -633,13 +634,13 @@ export default function RealRestorePointPage({
 
   return (
     <motion.div key="restore" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="hbdr-app-page">
-      <div className="hbdr-app-workspace-bar">
+      <PageTitleBar>
         <div className="min-w-0">
           <h3 className="hbdr-app-workspace-title">Restore Points</h3>
           <p className="hbdr-app-workspace-desc">Browse recovery points and launch drill or takeover.</p>
         </div>
-        {clusterContext && <div className="hbdr-app-workspace-cluster">{clusterContext}</div>}
-      </div>
+        {clusterContext && <div className="hbdr-dashboard-design-cluster">{clusterContext}</div>}
+      </PageTitleBar>
       <div className="hbdr-dr-table-card hbdr-restore-point-table-list">
         {namespaceOptions.length > 0 && (
           <div className="hbdr-restore-quick-filter">

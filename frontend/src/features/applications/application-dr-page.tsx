@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
-  AlertCircle, AlertTriangle, Archive, Check, CheckCircle2, ChevronDown, ChevronRight,
+  AlertCircle, AlertTriangle, Archive, ArrowLeft, Check, CheckCircle2, ChevronDown, ChevronRight,
   Clock, Database, DatabaseBackup, Edit2, Eye, FileCode, Filter, Grid3X3, HardDrive,
   History, Layers, ListChecks, MoreVertical, Play, Plus, RefreshCw, Search, Server,
-  Settings2, ShieldCheck, ShieldOff, Trash2, Upload, X, Zap,
+  ShieldCheck, ShieldOff, Trash2, Upload, X, Zap,
 } from 'lucide-react';
-import { DrConfigurationModal } from '../../dr-configuration-modal';
+import { DrConfigurationModal, type Props as DrWizardProps } from '../../dr-configuration-modal';
+import { ProtectApplicationsWizard } from '../../protect-applications-wizard';
 import { RecoveryWizardModal, type BackupContentResource, type RecoveryWizardConfig } from '../../recovery-wizard-modal';
 import { HyperTable, type HyperTableColumn } from '../../components/table';
 import { SearchBar } from '../../components/search-bar';
@@ -88,6 +89,7 @@ export default function ApplicationDrPage(props: {
   const [protectedAppNames, setProtectedAppNames] = useState<string[]>(() => apps.filter(app => app.stage === 'run').map(app => app.name));
   const [appUiOverrides, setAppUiOverrides] = useState<Record<string, Partial<AppItem>>>({});
   const [protectWizardOpen, setProtectWizardOpen] = useState(false);
+  const [guidedProtectWizard, setGuidedProtectWizard] = useState(false);
   const [protectWizardMode, setProtectWizardMode] = useState<'create' | 'modify'>('create');
   const [protectWizardStep, setProtectWizardStep] = useState<1 | 2 | 3 | 4 | 5 | 6>(1);
   const [protectConfig, setProtectConfig] = useState({
@@ -321,6 +323,7 @@ export default function ApplicationDrPage(props: {
       : `${formatPolicyComposition(policy.composition)} · ${policy.status}`,
     status: policy.status,
     hasRetention: policy.composition !== 'manual' && policy.composition !== 'schedule',
+    bound: policy.bound,
   }));
   const wizardPolicyKeyword = wizardPolicySearchQuery.trim().toLowerCase();
   const filteredPolicyOptions = policyOptions.filter(policy => {
@@ -345,10 +348,12 @@ export default function ApplicationDrPage(props: {
     region: cluster.region,
     version: cluster.version,
     nodes: cluster.nodes,
+    namespaces: cluster.namespaces,
     applications: cluster.applications,
     isCurrent: currentCluster?.id === cluster.id,
     clusterType: cluster.clusterType,
     compatible: clustersAreDRCompatible(currentCluster?.clusterType, cluster.clusterType),
+    connectionStatus: cluster.connectionStatus,
     incompatibilityReason: clusterCompatibilityMessage(currentCluster?.clusterType),
   }));
   const displayApps = apps.map(app => ({ ...app, ...(appUiOverrides[appOverrideKey(app)] || {}) }));
@@ -774,7 +779,7 @@ export default function ApplicationDrPage(props: {
   };
   const drSupportMetaForApp = (app: AppItem) => {
     if (isAgentNamespace(app)) {
-      return { label: 'System namespace', tone: 'unsupported' as const, sort: 0, title: 'The HyperCDR Agent namespace is managed by the platform and cannot be protected as an application.' };
+      return { label: 'System', tone: 'unsupported' as const, sort: 0, title: 'The HyperCDR Agent namespace is managed by the platform and cannot be protected as an application.' };
     }
     const unsupported = unitMembers(app).filter(member => drSupportStatus(member) === 'unsupported');
     if (unsupported.length > 0) {
@@ -860,16 +865,10 @@ export default function ApplicationDrPage(props: {
     );
     return (
       <span className="hbdr-dr-support-wrap">
-        {meta.tone === 'unsupported' ? (
-          <span className={`hbdr-dr-support-badge hbdr-dr-support-${meta.tone}`} aria-label={meta.title}>
-            {badgeContent}
-          </span>
-        ) : (
-          <span className={`hbdr-dr-support-badge hbdr-dr-support-${meta.tone}`} aria-label={meta.title}>
-            {badgeContent}
-          </span>
-        )}
-        {meta.tone === 'unsupported' && (
+        <span className={`hbdr-dr-support-badge hbdr-dr-support-${meta.tone}`} aria-label={meta.title}>
+          {badgeContent}
+        </span>
+        {meta.tone === 'unsupported' && !isAgentNamespace(app) && (
           <span className="hbdr-dr-support-error-popover" role="tooltip">
             <strong><AlertTriangle size={15} /> DR is not supported</strong>
             <em>This application does not meet the requirements for DR.</em>
@@ -931,9 +930,9 @@ export default function ApplicationDrPage(props: {
   const visibleNamespaceRows = namespaceRows.filter(matchesQuery);
   const visibleProtectedRows = protectedRows.filter(matchesQuery);
   const stageCards = [
-    { key: 'select' as const, title: 'Select Application', desc: 'Add namespaces to the platform for protection.', list: 'List - Unconfigured application resources', count: selectRows.filter(app => !isDRUnsupported(app)).length, metric: 'Eligible Apps', icon: Layers, tone: 'blue' },
-    { key: 'config' as const, title: 'Setup DR', desc: 'Configure DR strategy for the application.', list: 'List - Application resources to be configured', count: pendingCount, metric: 'Pending Configuration', icon: ShieldCheck, tone: 'orange' },
-    { key: 'run' as const, title: 'Start DR', desc: 'Operate the configured applications.', list: 'List - Application resources have been configured', count: protectedCount, metric: 'Protected', icon: Play, tone: 'green' },
+    { key: 'select' as const, title: 'Select application', desc: 'Pick namespaces from the source cluster and bring them onto the platform.', list: 'List - Unconfigured application resources', count: selectRows.filter(app => !isDRUnsupported(app)).length, metric: 'Eligible', icon: Layers, tone: 'blue' },
+    { key: 'config' as const, title: 'Set up DR', desc: 'Run the backup wizard: scope, target cluster, storage, policy, hooks.', list: 'List - Application resources to be configured', count: pendingCount, metric: 'Pending setup', icon: ShieldCheck, tone: 'orange' },
+    { key: 'run' as const, title: 'Run DR', desc: 'Synchronize on schedule, drill the recovery, take over when needed.', list: 'List - Application resources have been configured', count: protectedCount, metric: 'Protected', icon: Play, tone: 'green' },
   ];
   const activeStage = stageCards.find(card => card.key === stage) || stageCards[0];
   const isRunStage = stage === 'run';
@@ -1044,6 +1043,7 @@ export default function ApplicationDrPage(props: {
             aria-label={resourceCategoryTitle(app, category)}
             onClick={event => {
               event.stopPropagation();
+              setResourceRefreshStatus(null);
               setResourceDetail({ app });
             }}
           >
@@ -2768,28 +2768,73 @@ export default function ApplicationDrPage(props: {
     });
   };
 
+  const protectWizardProps: DrWizardProps = {
+    open: protectWizardOpen,
+    step: protectWizardStep,
+    setStep: setProtectWizardStep,
+    onClose: () => setProtectWizardOpen(false),
+    onFinish: finishProtectWizard,
+    submitting: protectSubmitting,
+    targetSummary: wizardTargetSummary,
+    targetCount: wizardTargetNames.length,
+    targetNames: wizardTargetNames,
+    protectConfig,
+    setProtectConfig,
+    showAddRuleForm,
+    setShowAddRuleForm,
+    newExcludeRule,
+    setNewExcludeRule,
+    editingRuleIndex,
+    resetExcludeRuleForm,
+    saveExcludeRule,
+    editExcludeRule,
+    storage,
+    policyOptions,
+    filteredPolicyOptions,
+    paginatedPolicyOptions,
+    wizardPolicySearchQuery,
+    setWizardPolicySearchQuery,
+    setWizardPolicyPage,
+    wizardPolicyPage,
+    wizardPolicyTotalPages,
+    wizardPolicyPageSize,
+    targetClusterOptions,
+    labelOptions: wizardLabelOptions,
+    namespaceResourceOptions: discoveredResourceOptions.namespaceScoped,
+    customResourcesLoaded: resourceCatalogLoaded,
+    onRequestCustomResources: loadWizardCustomResources,
+    preScriptRef,
+    postScriptRef,
+    handleFileUpload,
+    saveScript,
+    removeScript,
+    setEntryScript,
+    onCreateStorage: openStorage,
+    onRegisterCluster: openClusters,
+    onCreatePolicy: openPolicies,
+  };
+
   return (
     <>
-      <div className="hbdr-stage-panel">
-      <div className="hbdr-stage-grid hbdr-screenshot-stage-grid">
+      <div className="hbdr-application-stages" aria-label="Application protection stages">
         {stageCards.map((card, index) => (
           <React.Fragment key={card.key}>
-            <button onClick={() => setStage(card.key)} className={`hbdr-stage-card hbdr-dr-stage-card hbdr-dr-stage-${card.tone} ${stage === card.key ? 'hbdr-dr-stage-active' : ''}`}>
-              <div className="hbdr-dr-stage-icon"><card.icon size={32} /></div>
-              <div className="hbdr-dr-stage-copy">
-                <h4>{index + 1}. {card.title}</h4>
-                <p>{card.desc}</p>
-                <span>{card.list}</span>
+            <button type="button" onClick={() => setStage(card.key)}
+              aria-pressed={stage === card.key}
+              className={`hbdr-application-stage is-${card.key}`}>
+              <div className="hbdr-application-stage-heading">
+                <span className="hbdr-application-stage-icon"><card.icon size={18} /></span>
+                <div>
+                  <h4><small>{String(index + 1).padStart(2, '0')}</small>{card.title}</h4>
+                  <p>{card.desc}</p>
+                </div>
               </div>
-              <div className="hbdr-dr-stage-check">{stage === card.key ? <Check size={17} /> : null}</div>
-              <div className="hbdr-dr-stage-count">
-                <strong>{card.count}</strong>
-              </div>
+              {stage === card.key && <span className="hbdr-application-stage-selected"><Check size={11} /></span>}
+              <div className="hbdr-application-stage-metric"><strong>{card.count}</strong><span>{card.metric}</span></div>
             </button>
-            {index < stageCards.length - 1 && <div className="hbdr-stage-arrow"><ChevronRight size={28} /></div>}
+            {index < stageCards.length - 1 && <ChevronRight className="hbdr-application-stage-arrow" size={17} aria-hidden="true" />}
           </React.Fragment>
         ))}
-      </div>
       </div>
 
       <div className="hbdr-dr-table-card">
@@ -2824,16 +2869,16 @@ export default function ApplicationDrPage(props: {
                   disabled={selectedConfigApps.length === 0}
                   className="hbdr-dr-action-primary hbdr-dr-action-ghost"
                 >
-                  Move Back
+                  <ArrowLeft size={15} />Move Back
                 </button>
-                <button onClick={handlePrimaryAction} disabled={primaryDisabled || resourceCatalogLoading} className="hbdr-dr-action-primary">{resourceCatalogLoading ? 'Loading resources…' : 'DR Configuration'}</button>
+                <button onClick={() => { setGuidedProtectWizard(true); void handlePrimaryAction(); }} disabled={primaryDisabled || resourceCatalogLoading} className="hbdr-dr-action-primary"><ShieldCheck size={15} />Protect applications</button>
               </>
             )}
             {isRunStage && (
               <>
-                <button onClick={handlePrimaryAction} disabled={!canStartSync} className="hbdr-dr-action-primary">{syncSubmitting ? 'Submitting…' : 'Start Sync'}</button>
-                <button disabled={!canRestoreAction} title={hasSelectedRunActiveRecoveryTask ? 'A recovery task is already running' : undefined} onClick={() => openRestoreAction('drill')} className="hbdr-dr-action-primary hbdr-dr-action-ghost">Drill</button>
-                <button disabled={!canRestoreAction} title={hasSelectedRunActiveRecoveryTask ? 'A recovery task is already running' : undefined} onClick={() => openRestoreAction('takeover')} className="hbdr-dr-action-danger">Takeover</button>
+                <button onClick={handlePrimaryAction} disabled={!canStartSync} className="hbdr-dr-action-primary"><Play size={14} />{syncSubmitting ? 'Submitting…' : 'Start Sync'}</button>
+                <button disabled={!canRestoreAction} title={hasSelectedRunActiveRecoveryTask ? 'A recovery task is already running' : undefined} onClick={() => openRestoreAction('drill')} className="hbdr-dr-action-primary hbdr-dr-action-ghost"><History size={14} />Drill</button>
+                <button disabled={!canRestoreAction} title={hasSelectedRunActiveRecoveryTask ? 'A recovery task is already running' : undefined} onClick={() => openRestoreAction('takeover')} className="hbdr-dr-action-danger"><AlertTriangle size={14} />Takeover</button>
               </>
             )}
             <div className="relative">
@@ -3064,7 +3109,7 @@ export default function ApplicationDrPage(props: {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               className="hbdr-filter-drawer-backdrop"
-              onClick={() => setResourceDetail(null)}
+              onClick={() => { setResourceRefreshStatus(null); setResourceDetail(null); }}
             />
             <motion.div
               initial={{ opacity: 0, x: 32 }}
@@ -3105,14 +3150,13 @@ export default function ApplicationDrPage(props: {
                   >
                     <RefreshCw size={18} className={isRefreshing ? 'animate-spin' : ''} />
                   </button>
-                  <button type="button" onClick={() => setResourceDetail(null)} aria-label="Close resource details"><X size={18} /></button>
+              <button type="button" onClick={() => { setResourceRefreshStatus(null); setResourceDetail(null); }} aria-label="Close resource details"><X size={18} /></button>
                 </div>
               </div>
               <div className="hbdr-filter-drawer-body hbdr-resource-detail">
-                {refreshState && (
-                  <div className={`hbdr-sync-detail-message ${refreshState.status === 'failed' || refreshState.status === 'timeout' ? 'is-warning' : ''}`}>
-                    <strong>{refreshState.status === 'succeeded' ? 'Inventory refreshed' : refreshState.status === 'pending' ? 'Refreshing inventory' : 'Inventory refresh needs attention'}</strong>
-                    <p>{refreshState.message || refreshState.status}</p>
+                {refreshState && refreshState.status !== 'succeeded' && (
+                  <div className={`hbdr-resource-refresh-note ${refreshState.status === 'pending' ? 'is-pending' : 'is-error'}`} role="status">
+                    {refreshState.status === 'pending' ? 'Refreshing inventory…' : (refreshState.message || 'Inventory refresh failed.')}
                   </div>
                 )}
                 {resourceDetailGroups.length > 0 ? (
@@ -3330,51 +3374,10 @@ export default function ApplicationDrPage(props: {
         )}
       </AnimatePresence>
 
-      <DrConfigurationModal
-        open={protectWizardOpen}
-        step={protectWizardStep}
-        setStep={setProtectWizardStep}
-        onClose={() => setProtectWizardOpen(false)}
-        onFinish={finishProtectWizard}
-        submitting={protectSubmitting}
-        targetSummary={wizardTargetSummary}
-        targetCount={wizardTargetNames.length}
-        targetNames={wizardTargetNames}
-        protectConfig={protectConfig}
-        setProtectConfig={setProtectConfig}
-        showAddRuleForm={showAddRuleForm}
-        setShowAddRuleForm={setShowAddRuleForm}
-        newExcludeRule={newExcludeRule}
-        setNewExcludeRule={setNewExcludeRule}
-        editingRuleIndex={editingRuleIndex}
-        resetExcludeRuleForm={resetExcludeRuleForm}
-        saveExcludeRule={saveExcludeRule}
-        editExcludeRule={editExcludeRule}
-        storage={storage}
-        policyOptions={policyOptions}
-        filteredPolicyOptions={filteredPolicyOptions}
-        paginatedPolicyOptions={paginatedPolicyOptions}
-        wizardPolicySearchQuery={wizardPolicySearchQuery}
-        setWizardPolicySearchQuery={setWizardPolicySearchQuery}
-        setWizardPolicyPage={setWizardPolicyPage}
-        wizardPolicyPage={wizardPolicyPage}
-        wizardPolicyTotalPages={wizardPolicyTotalPages}
-        wizardPolicyPageSize={wizardPolicyPageSize}
-        targetClusterOptions={targetClusterOptions}
-        labelOptions={wizardLabelOptions}
-        namespaceResourceOptions={discoveredResourceOptions.namespaceScoped}
-        customResourcesLoaded={resourceCatalogLoaded}
-        onRequestCustomResources={loadWizardCustomResources}
-        preScriptRef={preScriptRef}
-        postScriptRef={postScriptRef}
-        handleFileUpload={handleFileUpload}
-        saveScript={saveScript}
-        removeScript={removeScript}
-        setEntryScript={setEntryScript}
-        onCreateStorage={openStorage}
-        onRegisterCluster={openClusters}
-        onCreatePolicy={openPolicies}
-      />
+      {guidedProtectWizard
+        ? <ProtectApplicationsWizard {...protectWizardProps} onResourcesChanged={refreshPlatformData} />
+        : <DrConfigurationModal {...protectWizardProps} />}
+
       <AnimatePresence>
         {selectedDetailApp && (() => {
           const detailProfile = profileOf(selectedDetailApp);

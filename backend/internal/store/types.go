@@ -20,6 +20,7 @@ var (
 	ErrTokenExpired            = errors.New("install token is expired")
 	ErrTokenUsed               = errors.New("install token is already used")
 	ErrUserExists              = errors.New("user already exists")
+	ErrInvalidTheme            = errors.New("invalid theme")
 	ErrResetInvalid            = errors.New("password reset token is invalid or expired")
 	ErrEmailSettingsNameExists = errors.New("SMTP configuration name already exists")
 	ErrDefaultClusterRequired  = errors.New("a tenant with registered clusters must have a default cluster")
@@ -56,6 +57,7 @@ type Store interface {
 	ListUsers() ([]User, error)
 	GetUser(id string) (User, bool, error)
 	UpdateUser(input UserUpdateInput) (User, bool, error)
+	SetUserTheme(id, theme string) (User, bool, error)
 	DeleteUser(id string) (bool, error)
 	SetUserPassword(id string, password string, mustChangePassword bool) (User, bool, error)
 	GetAdminRecoveryEmail(userID string) (string, bool, error)
@@ -344,6 +346,7 @@ type User struct {
 	Status             string `json:"status"`
 	AuthProvider       string `json:"authProvider"`
 	TimeZone           string `json:"timeZone,omitempty"`
+	Theme              string `json:"theme,omitempty"`
 	SystemAdmin        bool   `json:"systemAdmin,omitempty"`
 	MustChangePassword bool   `json:"mustChangePassword"`
 	RecoveryEmail      string `json:"recoveryEmail,omitempty"`

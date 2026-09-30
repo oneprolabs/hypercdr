@@ -1,4 +1,5 @@
-﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import PageTitleBar from './components/page-title-bar';
+﻿import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { DrConfigurationModal } from './dr-configuration-modal';
 import { RecoveryWizardModal, type RecoveryWizardConfig } from './recovery-wizard-modal';
 import { HyperTable, type HyperTableColumn } from './components/table';
@@ -60,6 +61,7 @@ import {
   Sun,
   Moon,
   Terminal,
+  Tags,
   Trash2,
   User,
   X,
@@ -1079,23 +1081,17 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [resetToken, setResetToken] = useState('');
   const [locale, setLocale] = useState<LocaleCode>('en');
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    try {
-      const stored = localStorage.getItem('hypercdr.theme');
-      if (stored === 'light' || stored === 'dark') return stored;
-    } catch { /* use system preference */ }
-    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  });
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => readStoredAuthSession()?.user.theme === 'dark' ? 'dark' : 'light');
+  const [savingTheme, setSavingTheme] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [releaseNotesOpen, setReleaseNotesOpen] = useState(false);
   const [releaseNotesUnread, setReleaseNotesUnread] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const releaseNotesAdminAudience = authSession?.user.role === 'admin';
 
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    try { localStorage.setItem('hypercdr.theme', theme); } catch { /* persistence is optional */ }
-  }, [theme]);
+  useLayoutEffect(() => {
+    document.documentElement.dataset.theme = view === 'login' || !authSession ? 'dark' : theme;
+  }, [authSession, theme, view]);
 
   useEffect(() => {
     if (!authSession) {
@@ -1212,6 +1208,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       });
       setTimeZonePreference(user.timeZone || '');
       setDraftTimeZone(user.timeZone || '');
+      setTheme(user.theme === 'dark' ? 'dark' : 'light');
     }).catch(() => {
       // The shared API client handles expired sessions. Keep the cached session
       // for transient network failures and refresh it on the next page load.
@@ -1473,6 +1470,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       };
       setAuthSession(nextSession);
       writeStoredAuthSession(nextSession);
+      setTheme(nextSession.user.theme === 'dark' ? 'dark' : 'light');
       clearStoredView();
       if (!nextSession.user.mustChangePassword) {
         writeStoredView('dashboard');
@@ -1614,6 +1612,23 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     setLoginError('');
     setView('login');
   }, [clearTenantResourceState]);
+
+  const saveTheme = async (nextTheme: 'light' | 'dark') => {
+    if (!authSession || savingTheme || theme === nextTheme) return;
+    setSavingTheme(true);
+    try {
+      const user = await apiPatch<AuthSession['user']>('/api/v1/auth/me/theme', { theme: nextTheme });
+      const nextSession = { ...authSession, user };
+      setAuthSession(nextSession);
+      writeStoredAuthSession(nextSession);
+      setTheme(user.theme === 'dark' ? 'dark' : 'light');
+      setAccountMenuOpen(false);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : 'Could not save appearance preference');
+    } finally {
+      setSavingTheme(false);
+    }
+  };
 
   useEffect(() => {
     const expireSession = () => {
@@ -2006,8 +2021,8 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
         title: 'DR',
         items: [
           { label: 'Application DR', desc: 'Select applications, configure policies, and start DR', view: 'applications' as View, icon: Layers },
-          { label: 'Restore Points', desc: 'Browse recovery points and launch drill or takeover', view: 'restore_points' as View, icon: Clock },
-          { label: 'Backup & Recovery Tasks', desc: 'Audit backup, drill, takeover, and restore task records', view: 'dr_tasks' as View, icon: History },
+          { label: 'Restore Points', desc: 'Browse recovery points and launch drill or takeover', view: 'restore_points' as View, icon: DatabaseBackup },
+          { label: 'Backup & Recovery Tasks', desc: 'Audit backup, drill, takeover, and restore task records', view: 'dr_tasks' as View, icon: ListChecks },
         ],
       };
     }
@@ -2016,9 +2031,9 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
         title: 'Configuration',
         items: [
           { label: 'Clusters', desc: 'Registration, default cluster, and agent status', view: 'clusters' as View, icon: Server },
-          { label: 'Storage', desc: 'Maintain shared restore-point repositories across clusters', view: 'storage' as View, icon: Database },
+          { label: 'Storage', desc: 'Maintain shared restore-point repositories across clusters', view: 'storage' as View, icon: HardDrive },
           { label: 'Policies', desc: 'Maintain application protection plans and recovery targets', view: 'policies' as View, icon: ShieldCheck },
-          { label: 'Tag Management', desc: 'Create tags and reuse them in DR lists', view: 'tags' as View, icon: Archive },
+          { label: 'Tag Management', desc: 'Create tags and reuse them in DR lists', view: 'tags' as View, icon: Tags },
         ],
       };
     }
@@ -2027,7 +2042,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
         title: 'Operations',
         items: [
           { label: 'Operations Center', desc: 'Platform health, active operations, and current issues', view: 'operations' as View, icon: Activity },
-          ...(!hasEnterpriseAuditModule && !productCapabilities.advancedAudit?.enabled ? [{ label: 'Activity Log', desc: 'Review administrator actions and results', view: 'activity' as View, icon: History }] : []),
+          ...(!hasEnterpriseAuditModule && !productCapabilities.advancedAudit?.enabled ? [{ label: 'Activity Log', desc: 'Review administrator actions and results', view: 'activity' as View, icon: ClipboardList }] : []),
           ...visibleExtensionModules.filter(module => module.navigation.group === 'operations').map(module => ({ label: module.navigation.label, desc: module.navigation.description, view: module.view as View, icon: module.navigation.icon })),
           { label: 'Diagnostic Logs', desc: 'Search platform and managed-cluster logs', view: 'logs' as View, icon: Terminal },
           { label: 'Support Bundle', desc: 'Collect a comprehensive troubleshooting package', view: 'support_bundle' as View, icon: FileArchive },
@@ -2039,12 +2054,12 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       items: productCapabilities.advancedIdentity?.enabled
         ? [
             ...visibleExtensionModules.filter(module => module.navigation.group === 'settings').map(module => ({ label: module.navigation.label, desc: module.navigation.description, view: module.view as View, icon: module.navigation.icon })),
-            ...(authSession?.user.systemAdmin ? [{ label: 'Platform Upgrade', desc: 'Check releases and perform a manual blue-green upgrade', view: 'upgrades' as View, icon: ArrowUpCircle }, { label: 'Email Settings', desc: 'Configure password recovery email delivery', view: 'email_settings' as View, icon: Settings2 }] : []),
+            ...(authSession?.user.systemAdmin ? [{ label: 'Platform Upgrade', desc: 'Check releases and perform a manual blue-green upgrade', view: 'upgrades' as View, icon: ArrowUpCircle }, { label: 'Email Settings', desc: 'Configure password recovery email delivery', view: 'email_settings' as View, icon: Mail }] : []),
           ]
         : [
             ...(authSession?.user.systemAdmin ? [{ label: 'User Management', desc: 'Manage the built-in Community administrator', view: 'users' as View, icon: User }] : []),
             ...visibleExtensionModules.filter(module => module.navigation.group === 'settings').map(module => ({ label: module.navigation.label, desc: module.navigation.description, view: module.view as View, icon: module.navigation.icon })),
-            ...(authSession?.user.systemAdmin ? [{ label: 'Platform Upgrade', desc: 'Check releases and perform a manual blue-green upgrade', view: 'upgrades' as View, icon: ArrowUpCircle }, { label: 'Email Settings', desc: 'Configure password recovery email delivery', view: 'email_settings' as View, icon: Settings2 }] : []),
+            ...(authSession?.user.systemAdmin ? [{ label: 'Platform Upgrade', desc: 'Check releases and perform a manual blue-green upgrade', view: 'upgrades' as View, icon: ArrowUpCircle }, { label: 'Email Settings', desc: 'Configure password recovery email delivery', view: 'email_settings' as View, icon: Mail }] : []),
           ],
     };
   }, [activeModule, authSession?.user.systemAdmin, hasEnterpriseAuditModule, productCapabilities.advancedAudit?.enabled, productCapabilities.advancedIdentity?.enabled, visibleExtensionModules, view]);
@@ -2163,9 +2178,6 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
                 <span className="hbdr-login-brand-one">Hyper</span>
                 <span className="hbdr-login-brand-pro">CDR</span>
               </div>
-              <button type="button" className="hbdr-theme-toggle" onClick={() => setTheme(current => current === 'light' ? 'dark' : 'light')} aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`} title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}>
-                {theme === 'light' ? <Moon size={15} /> : <Sun size={15} />}
-              </button>
               </div>
             </div>
 
@@ -2374,13 +2386,10 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
           </nav>
         </div>
         <div>
-          <button type="button" onClick={() => { setDraftTimeZone(timeZonePreference); setTimeZoneDrawerOpen(true); }} className="hbdr-timezone-button hbdr-top-tooltip" data-tooltip={`Timezone · ${timeZoneLabel}`} aria-label={`Current timezone: ${timeZoneLabel}`}>{timeZoneLabel}</button>
+          <button type="button" onClick={() => { setDraftTimeZone(timeZonePreference); setTimeZoneDrawerOpen(true); }} className="hbdr-timezone-button hbdr-top-tooltip" data-tooltip={`Timezone · ${timeZoneLabel}`} aria-label={`Current timezone: ${timeZoneLabel}`}><span className="hbdr-timezone-short">{timeZoneOptionLabel(userTimeZone).match(/\(([^)]+)\)/)?.[1] || 'UTC+00:00'}</span></button>
           <span className="hbdr-top-tooltip hbdr-language-tooltip" data-tooltip="Switch language">
             <LanguageSwitcher locale={locale} setLocale={setLocale} compact />
           </span>
-          <button type="button" className="hbdr-theme-toggle" onClick={() => setTheme(current => current === 'light' ? 'dark' : 'light')} aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`} title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}>
-            {theme === 'light' ? <Moon size={15} /> : <Sun size={15} />}
-          </button>
           <div className="hbdr-account" ref={accountMenuRef}>
             <button
               type="button"
@@ -2407,6 +2416,13 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
                   <Settings size={16} />
                   <span>Basic Information</span>
                 </button>
+                <div className="hbdr-account-theme-options" role="group" aria-label="Appearance">
+                  <span className="hbdr-account-theme-label">Appearance</span>
+                  <div>
+                    <button type="button" role="menuitemradio" aria-checked={theme === 'light'} disabled={savingTheme} onClick={() => void saveTheme('light')}><Sun size={14} />Light{theme === 'light' && <Check size={13} />}</button>
+                    <button type="button" role="menuitemradio" aria-checked={theme === 'dark'} disabled={savingTheme} onClick={() => void saveTheme('dark')}><Moon size={14} />Dark{theme === 'dark' && <Check size={13} />}</button>
+                  </div>
+                </div>
                 <button type="button" role="menuitem" onClick={() => {
                   setAccountMenuOpen(false);
                   setReleaseNotesOpen(true);
@@ -2429,9 +2445,9 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
 
       <main className="flex flex-1 overflow-hidden">
         {secondaryNav && (
-          <aside className={`hbdr-secondary-sidebar ${secondaryCollapsed ? 'is-collapsed' : ''}`}>
+          <aside className={`hbdr-secondary-sidebar ${activeModule === 'dr' ? 'hbdr-dr-sidebar' : ''} ${secondaryCollapsed ? 'is-collapsed' : ''}`}>
             <div className="hbdr-secondary-title">
-              <span>{language.secondaryTitles[activeModule]}</span>
+              <span>{activeModule === 'dr' ? 'Disaster Recovery' : language.secondaryTitles[activeModule]}</span>
               <button
                 type="button"
                 className="hbdr-secondary-toggle"
@@ -2450,12 +2466,13 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
                 return (
                   <button
                     key={item.view}
+                    data-view={item.view}
                     onClick={() => { if (disabled) { setToast(onboardingMessage); openView('clusters'); return; } openView(item.view); }}
                     disabled={disabled}
                     title={disabled ? onboardingMessage : item.label}
                     className={`${view === item.view ? 'hbdr-secondary-active' : ''} ${disabled ? 'cursor-not-allowed opacity-50 hover:bg-transparent' : ''}`}
                   >
-                    <item.icon size={16} />
+                    <span className="hbdr-secondary-icon" aria-hidden="true"><item.icon size={16} strokeWidth={1.8} /></span>
                     <span>
                       <strong>{item.label}</strong>
                       <small>{item.desc}</small>
@@ -2505,12 +2522,12 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
 
             {view === 'applications' && (onboarding !== 'ready' ? onboardingGate : (
               <motion.div key="applications" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="hbdr-app-page">
-                <div className="hbdr-app-workspace-bar">
+                <PageTitleBar>
                   <div className="min-w-0">
                     <h3 className="hbdr-app-workspace-title">Application DR</h3>
                     <p className="hbdr-app-workspace-desc">Select applications, configure policies, and start DR.</p>
                   </div>
-                  <div className="hbdr-app-workspace-cluster">
+                  <div className="hbdr-dashboard-design-cluster">
                     <ClusterContextCard
                       compact
                       cluster={drWorkspaceCluster}
@@ -2523,7 +2540,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
                       openClusters={() => openView('clusters')}
                     />
                   </div>
-                </div>
+                </PageTitleBar>
                 <React.Suspense fallback={<PageLoadFallback />}><LazyApplicationDrPage
                   key={drWorkspaceCluster?.id || 'no-dr-cluster'}
                   apps={drActiveApps}
@@ -2740,7 +2757,7 @@ function ClusterContextCard(props: {
         onClick={() => setPickerOpen(!pickerOpen)}
         className={`hbdr-cluster-context ${compact ? 'hbdr-cluster-context-compact' : ''} ${cluster ? 'hbdr-cluster-context-active' : 'hbdr-cluster-context-empty'} ${isClusterOffline ? 'hbdr-cluster-context-offline' : ''}`}
       >
-        <div className="hbdr-cluster-context-icon"><Server size={18} /></div>
+        <div className="hbdr-cluster-context-icon"><DashboardClusterIcon /></div>
         <div className="min-w-0 flex-1 text-left">
           <p className="hbdr-cluster-context-kicker">DR Workspace</p>
           <h4 className="hbdr-cluster-context-title">{cluster ? cluster.name : 'No default cluster selected'}</h4>
@@ -2942,6 +2959,17 @@ function OnboardingGate({ onboarding, openClusters, children }: { onboarding: 'r
 }
 
 type ApiPlatformUser = ApiLoginResponse['user'];
+
+function DashboardClusterIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2" y="2" width="20" height="8" rx="2" />
+      <rect x="2" y="14" width="20" height="8" rx="2" />
+      <path d="M6 6h.01" />
+      <path d="M6 18h.01" />
+    </svg>
+  );
+}
 
 function HyperCDRLogoMark({ className = '' }: { className?: string }) {
   return (

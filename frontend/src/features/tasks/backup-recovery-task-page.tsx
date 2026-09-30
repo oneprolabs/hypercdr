@@ -1,3 +1,4 @@
+import PageTitleBar from '../../components/page-title-bar';
 import React, { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { AlertCircle, Archive, ArrowDown, CheckCircle2, ChevronDown, Clock, DatabaseBackup, Eye, Filter, HardDrive, History, MoreVertical, Play, RefreshCw, Search, Server, X, Zap } from 'lucide-react';
@@ -77,6 +78,7 @@ export default function BackupRecoveryTaskPage({
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const [visibleColumns, setVisibleColumns] = useState<string[]>(['namespace', 'repository', 'restorePoint', 'createdAt', 'completedAt']);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   const [selectedTaskEvents, setSelectedTaskEvents] = useState<ApiTaskEvent[]>([]);
   const [timeWindow, setTimeWindow] = useState<'24h' | '7d' | '30d' | 'all'>('7d');
 
@@ -326,10 +328,11 @@ export default function BackupRecoveryTaskPage({
 
   const renderTaskStatus = (row: Row) => {
     const tone = isSucceededStatus(row.status) ? 'ok' : isFailedStatus(row.status) ? 'fail' : isActiveTaskStatus(row.status) ? 'running' : 'muted';
+    const StatusIcon = tone === 'ok' ? CheckCircle2 : tone === 'fail' ? AlertCircle : tone === 'running' ? RefreshCw : Clock;
     const title = isFailedStatus(row.status)
       ? (row.task.errorMessage || row.task.errorCode || 'Task failed')
       : taskStatusLabel(row.status);
-    return <span className={`hbdr-task-ledger-status is-${tone}`} title={title}>{taskStatusLabel(row.status)}</span>;
+    return <span className={`hbdr-task-ledger-status is-${tone}`} title={title}><StatusIcon size={14} aria-hidden="true" />{taskStatusLabel(row.status)}</span>;
   };
 
   const renderPointState = (row: Row) => {
@@ -344,14 +347,14 @@ export default function BackupRecoveryTaskPage({
   };
 
   const renderTaskType = (row: Row) => {
-    const Icon = row.taskType === 'backup' ? Archive
+    const Icon = row.taskType === 'backup' ? DatabaseBackup
       : row.taskType === 'drill' ? Play
         : row.taskType === 'takeover' || row.taskType === 'failover' ? Zap
           : row.taskType === 'failback' ? ArrowDown
             : RefreshCw;
     return (
       <span className={`hbdr-task-ledger-op is-${row.taskType}`}>
-        <i aria-hidden="true"><Icon size={14} /></i>
+        <i aria-hidden="true"><Icon size={16} strokeWidth={1.8} /></i>
         <strong>{row.operation}</strong>
       </span>
     );
@@ -371,6 +374,7 @@ export default function BackupRecoveryTaskPage({
   };
 
   const columns = useMemo<HyperTableColumn<Row>[]>(() => [
+    { id: 'select', header: () => <input type="checkbox" aria-label="Select all filtered tasks" checked={filteredRows.length > 0 && filteredRows.every(row => selectedTaskIds.includes(row.id))} onChange={event => setSelectedTaskIds(event.target.checked ? filteredRows.map(row => row.id) : [])} onClick={event => event.stopPropagation()} />, size: 42, minSize: 42, maxSize: 54, enableSorting: false, enableResizing: false, cell: info => <input type="checkbox" aria-label={`Select ${info.row.original.operation} task`} checked={selectedTaskIds.includes(info.row.original.id)} onClick={event => event.stopPropagation()} onChange={() => setSelectedTaskIds(ids => ids.includes(info.row.original.id) ? ids.filter(id => id !== info.row.original.id) : [...ids, info.row.original.id])} />, meta: { align: 'center' } },
     { id: 'operation', header: 'Task Type', accessorFn: row => row.operation, size: 145, minSize: 125, cell: info => renderTaskType(info.row.original), meta: { title: row => row.id } },
     ...(visibleColumns.includes('namespace') ? [{ id: 'namespace', header: 'Namespace', accessorFn: (row: Row) => row.namespace, size: 190, minSize: 150, maxSize: 320, cell: (info: any) => <span>{info.row.original.namespace}</span>, meta: { kind: 'primary', title: (row: Row) => row.namespace } }] : []),
     ...(visibleColumns.includes('cluster') ? [{ id: 'cluster', header: 'Cluster', accessorFn: (row: Row) => row.cluster, size: 160, minSize: 130, maxSize: 260, cell: (info: any) => <span>{info.row.original.cluster}</span>, meta: { kind: 'secondary', title: (row: Row) => row.cluster } }] : []),
@@ -379,17 +383,17 @@ export default function BackupRecoveryTaskPage({
     ...(visibleColumns.includes('restorePoint') ? [{ id: 'restorePoint', header: 'Restore Point', accessorFn: (row: Row) => row.restorePointLabel, size: 220, minSize: 170, maxSize: 360, cell: (info: any) => renderPointState(info.row.original), meta: { title: (row: Row) => row.point ? `${row.restorePointLabel} / ${row.restorePointName}` : row.restorePointLabel } }] : []),
     ...(visibleColumns.includes('createdAt') ? [{ id: 'createdAt', header: 'Started', accessorFn: (row: Row) => row.createdAt, size: 170, minSize: 140, maxSize: 230, cell: (info: any) => <span>{info.row.original.createdAt || '-'}</span>, meta: { kind: 'secondary', title: (row: Row) => row.createdAt } }] : []),
     ...(visibleColumns.includes('completedAt') ? [{ id: 'completedAt', header: 'Completed', accessorFn: (row: Row) => row.completedAt, size: 170, minSize: 140, maxSize: 230, cell: (info: any) => <span>{info.row.original.completedAt || '-'}</span>, meta: { kind: 'secondary', title: (row: Row) => row.completedAt } }] : []),
-  ], [visibleColumns]);
+  ], [visibleColumns, selectedTaskIds, filteredRows]);
 
   return (
     <motion.div key="dr-tasks" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="hbdr-app-page">
-      <div className="hbdr-app-workspace-bar">
+      <PageTitleBar>
         <div className="min-w-0">
           <h3 className="hbdr-app-workspace-title">Backup & Recovery Tasks</h3>
           <p className="hbdr-app-workspace-desc">Audit backup, drill, takeover, and restore tasks across outcomes. Default view shows recent tasks.</p>
         </div>
-        {clusterContext && <div className="hbdr-app-workspace-cluster">{clusterContext}</div>}
-      </div>
+        {clusterContext && <div className="hbdr-dashboard-design-cluster">{clusterContext}</div>}
+      </PageTitleBar>
       <div className="hbdr-task-ledger-range">
         <div className="hbdr-task-ledger-range-options">
           {timeWindowOptions.map(option => (
@@ -450,8 +454,8 @@ export default function BackupRecoveryTaskPage({
           data={filteredRows}
           getRowId={row => row.id}
           onRowClick={row => setSelectedTaskId(row.id)}
-          getRowClassName={row => selectedTaskId === row.id ? 'hbdr-dr-row-selected' : ''}
-          selectedCount={selectedRow ? 1 : 0}
+          getRowClassName={row => selectedTaskId === row.id || selectedTaskIds.includes(row.id) ? 'hbdr-dr-row-selected' : ''}
+          selectedCount={selectedTaskIds.length}
           resetPageOnDataChange={false}
           emptyMessage={query || activeFilters.length ? 'No tasks match the current search.' : `No backup or recovery tasks in ${timeWindowLabel.toLowerCase()}.`}
           className="hbdr-dr-main-table"

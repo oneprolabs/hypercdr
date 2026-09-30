@@ -91,6 +91,33 @@ func TestMemoryStoreGoogleUserLinksExistingEmail(t *testing.T) {
 	}
 }
 
+func TestUserThemeIsAccountScopedAndSurvivesProfileUpdate(t *testing.T) {
+	repo := NewMemoryStore()
+	admin, found, err := repo.GetUser("00000000-0000-0000-0000-00000000a001")
+	if err != nil || !found || admin.Theme != "light" {
+		t.Fatalf("default admin theme: %#v, found=%v err=%v", admin, found, err)
+	}
+	other, err := repo.CreateUser(DefaultTenantID, "other@example.com", "password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed, found, err := repo.SetUserTheme(admin.ID, "dark")
+	if err != nil || !found || changed.Theme != "dark" {
+		t.Fatalf("save theme: %#v, %v, %v", changed, found, err)
+	}
+	if _, _, err := repo.SetUserTheme(admin.ID, "system"); !errors.Is(err, ErrInvalidTheme) {
+		t.Fatalf("invalid theme accepted: %v", err)
+	}
+	updated, found, err := repo.UpdateUser(UserUpdateInput{ID: admin.ID, TenantID: admin.TenantID, Email: admin.Email, DisplayName: "Admin", Role: admin.Role, Status: admin.Status})
+	if err != nil || !found || updated.Theme != "dark" {
+		t.Fatalf("profile update lost theme: %#v, %v, %v", updated, found, err)
+	}
+	separate, found, err := repo.GetUser(other.ID)
+	if err != nil || !found || separate.Theme != "light" {
+		t.Fatalf("other account inherited theme: %#v, %v, %v", separate, found, err)
+	}
+}
+
 func TestTenantAndSystemAdminMetadataStayConsistent(t *testing.T) {
 	repo := NewMemoryStore()
 

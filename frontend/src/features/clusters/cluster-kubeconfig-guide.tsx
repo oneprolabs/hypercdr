@@ -1,0 +1,39 @@
+import { X } from 'lucide-react';
+import type { RegistrationType } from './cluster-registration-choices';
+
+const titles: Record<RegistrationType, string> = {
+  'native-kubernetes': 'Get a Native Kubernetes kubeconfig',
+  'huaweicloud-cce': 'Get a Huawei Cloud CCE kubeconfig',
+  openshift: 'Get an OpenShift kubeconfig',
+};
+
+export function ClusterKubeconfigGuide({ type, onClose }: { type: RegistrationType; onClose: () => void }) {
+  return <div className="hbdr-kubeconfig-guide">
+    <div className="hbdr-filter-drawer-backdrop" onClick={onClose} />
+    <aside className="hbdr-filter-drawer" role="dialog" aria-modal="true" aria-label={titles[type]}>
+      <div className="hbdr-filter-drawer-head"><strong>{titles[type]}</strong><button type="button" onClick={onClose} aria-label="Close kubeconfig guide"><X size={18} /></button></div>
+      <div className="hbdr-filter-drawer-body hbdr-kubeconfig-guide-body">
+        {type === 'native-kubernetes' && <>
+          <p>On a control-plane host, use a cluster-admin context that can install the HyperCDR agent.</p>
+          <ol><li>Confirm the active context and permissions:<pre>kubectl config current-context{'\n'}kubectl auth can-i create clusterroles.rbac.authorization.k8s.io</pre></li>
+          <li>Export only that context to a portable file:<pre>kubectl config view --raw --minify --flatten &gt; hypercdr-native-kubeconfig.yaml{'\n'}chmod 600 hypercdr-native-kubeconfig.yaml</pre></li>
+          <li>Copy the file to your workstation and upload it in the registration panel.</li></ol>
+        </>}
+        {type === 'huaweicloud-cce' && <>
+          <p>Use an account with permission to manage the target CCE cluster.</p>
+          <ol><li>In the Huawei Cloud console, open <strong>Cloud Container Engine → Clusters</strong> and select the cluster.</li>
+          <li>Download its kubeconfig from the cluster connection or kubectl access page. Choose credentials with cluster administrator permissions.</li>
+          <li>If the downloaded configuration contains several contexts, keep the target context selected. Upload the YAML file, then confirm the context shown by HyperCDR.</li></ol>
+        </>}
+        {type === 'openshift' && <>
+          <p>Use a Linux administration host with the <code>oc</code> CLI and cluster-admin access.</p>
+          <ol><li>In the OpenShift Web Console, open the user menu and choose <strong>Copy login command</strong>. Run the complete <code>oc login</code> command on the administration host.</li>
+          <li>Verify the session:<pre>oc whoami{'\n'}oc get nodes{'\n'}oc auth can-i create clusterroles.rbac.authorization.k8s.io</pre>The permission check must return <strong>yes</strong>.</li>
+          <li>Export and upload the active context:<pre>oc config view --raw --minify --flatten &gt; hypercdr-openshift-kubeconfig.yaml{'\n'}chmod 600 hypercdr-openshift-kubeconfig.yaml</pre></li></ol>
+        </>}
+        <p className="hbdr-kubeconfig-guide-security">The file contains administrator credentials. Keep local copies secure and remove them after registration. HyperCDR deletes the uploaded temporary file when registration ends or expires.</p>
+      </div>
+      <div className="hbdr-filter-drawer-actions"><button type="button" onClick={onClose}>Done</button></div>
+    </aside>
+  </div>;
+}

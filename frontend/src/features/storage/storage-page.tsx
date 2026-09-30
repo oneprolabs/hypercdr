@@ -1,20 +1,23 @@
+import PageTitleBar from '../../components/page-title-bar';
+import { StorageFormFields } from './storage-form-fields';
+import { StorageCreateFields } from './storage-create-fields';
+import { ResourceCreateDrawer } from '../../components/resource-create-drawer';
+import { buildStorageRepositoryInput, createStorageDraft, createStorageRepository, isS3CompatibleType, storageReady, testStorageDraft } from './storage-form-model';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Activity, Archive, ChevronDown, Cloud, Database, Eye, Grid3X3, Lock, MoreVertical, Settings, ShieldCheck, Trash2, X } from 'lucide-react';
+import { Activity, Archive, ChevronDown, Plus, Cloud, Database, Eye, Grid3X3, Lock, MoreVertical, Settings, ShieldCheck, Trash2, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { apiDelete, apiPatch, apiPost } from '../../api/client';
+import { apiDelete, apiGet, apiPatch, apiPost } from '../../api/client';
 import { EditField } from '../../components/edit-field';
 import ListToolbarControls, { listToolbarQueryFields, matchesColumnFilterToken, parseColumnFilterToken } from '../../components/list-toolbar-controls';
 import { ModalFrame } from '../../components/modal-frame';
 import { HyperTable, type HyperTableColumn } from '../../components/table';
 import { formatDateTime } from '../../lib/date-time';
+import { listItems, type ApiList } from '../recovery/types';
 
 type Cluster={id:string;name:string};
 type StorageRepo={id:string;name:string;type:string;endpoint:string;bucket:string;region:string;useTls:boolean;status:'connected'|'warning'|'unknown';updatedAt:string;lastValidatedAt?:string;config?:Record<string,string|boolean>;urlStyle?:string};
 type ApiStorageRepo={id:string;name:string;type:string;endpoint?:string;bucket?:string;region?:string;tlsEnabled:boolean;status:string;updatedAt?:string;createdAt?:string;lastValidatedAt?:string;config?:Record<string,unknown>};
 type ApiTask={id:string;status:string;progress:number};
-type StorageRepositoryInput={name:string;type:string;endpoint:string;bucket:string;region:string;tlsEnabled:boolean;config:Record<string,string|boolean>;accessKey?:string;secretKey?:string;accountName?:string;accountKey?:string;serviceAccountKey?:string};
-const isS3CompatibleType=(type:string)=>['s3-compatible','s3 compatible'].includes(type.toLowerCase());
-const buildStorageRepositoryInput=(repo:StorageRepo):StorageRepositoryInput=>{const config=repo.config||{};const compatible=isS3CompatibleType(repo.type);const azure=repo.type==='Azure';const gcs=repo.type==='Google Cloud'||repo.type==='GCS';const domain=String(config.blobDomain||'blob.core.windows.net').replace(/^https?:\/\//,'');const endpoint=String(azure?`${String(config.accountName||'')}.${domain}`:config.endpoint||repo.endpoint||'');const bucket=String(azure?config.container||repo.bucket||'':config.bucket||repo.bucket||'');const rawRegion=String(config.region||repo.region||'').trim();const region=['n/a','na','-'].includes(rawRegion.toLowerCase())?'':rawRegion;const payloadConfig:Record<string,string|boolean>={};if(config.urlStyle)payloadConfig.urlStyle=String(config.urlStyle);if(config.prefix)payloadConfig.prefix=String(config.prefix);if(azure&&config.accountName)payloadConfig.storageAccount=String(config.accountName);return{name:repo.name,type:repo.type,endpoint,bucket,region,tlsEnabled:Boolean(config.useSsl??repo.useTls),config:payloadConfig,accessKey:String(config.accessKey||''),secretKey:String(config.secretKey||''),accountName:azure?String(config.accountName||''):undefined,accountKey:azure?String(config.accountKey||''):undefined,serviceAccountKey:gcs?String(config.serviceAccountKey||''):undefined}};
 const mapStorageRepo=(repo:ApiStorageRepo):StorageRepo=>{const raw=(repo.status||'').toLowerCase();const status:StorageRepo['status']=['connected','ready','active'].includes(raw)?'connected':raw==='warning'?'warning':'unknown';const cfg=(repo.config||{}) as Record<string,unknown>;const lastValidatedAt=repo.lastValidatedAt&&new Date(repo.lastValidatedAt).getUTCFullYear()>1?repo.lastValidatedAt:undefined;return{id:repo.id,name:repo.name,type:repo.type||'S3',endpoint:repo.endpoint||'',bucket:repo.bucket||'',region:repo.region||'',useTls:repo.tlsEnabled,status,updatedAt:repo.updatedAt||repo.createdAt||'',lastValidatedAt,urlStyle:typeof cfg.urlStyle==='string'?cfg.urlStyle:'path'}};
 function Info({label,value}:{label:string;value:string}){return <div className="rounded bg-slate-50 p-3"><p className="text-[10px] font-black uppercase tracking-wider text-slate-400">{label}</p><p className="mt-1 truncate text-xs font-bold text-slate-700">{value}</p></div>}
 
@@ -68,54 +71,11 @@ export default function StoragePage({ storage, clusters, onStorageCreated }: { s
     { type: 'Google Cloud', title: 'Google Cloud', icon: Cloud, color: 'bg-rose-50 text-rose-600 border-rose-100' },
   ];
 
-  const createStorageDraft = (type: string): StorageRepo => {
-    const base = {
-      id: 'repo-' + Date.now(),
-      name: '',
-      type,
-      endpoint: '',
-      bucket: '',
-      region: type === 'NFS' ? 'local' : '',
-      useTls: type !== 'NFS',
-      status: 'warning' as const,
-      updatedAt: new Date().toISOString(),
-    };
-    if (type === 'S3') return { ...base, config: { bucket: '', region: '', accessKey: '', secretKey: '' } };
-    if (type === 'S3-Compatible') return { ...base, config: { bucket: '', region: '', endpoint: '', accessKey: '', secretKey: '', useSsl: true, urlStyle: 'path' } };
-    if (type === 'Azure') return { ...base, region: '', config: { accountName: '', accountKey: '', container: '', blobDomain: 'blob.core.windows.net' } };
-    if (type === 'Google Cloud') return { ...base, config: { bucket: '', region: '', serviceAccountKey: '' } };
-    return { ...base, useTls: false, config: { nfsServer: '', nfsPath: '' } };
-  };
 
-  const storageConfigValue = (key: string) => String(editingRepo?.config?.[key] ?? '');
 
-  const updateEditingConfig = (key: string, value: string | boolean) => {
-    if (!editingRepo) return;
-    const config = { ...(editingRepo.config || {}), [key]: value };
-    const patch: Partial<StorageRepo> = { config };
-    if (key === 'bucket' || key === 'container' || key === 'nfsPath') patch.bucket = String(value);
-    if (key === 'region') patch.region = String(value || '');
-    if (key === 'endpoint' || key === 'blobDomain') patch.endpoint = String(value);
-    if (key === 'useSsl') patch.useTls = Boolean(value);
-    if (key === 'nfsServer' || key === 'nfsPath') {
-      const server = String(key === 'nfsServer' ? value : config.nfsServer || '');
-      const nfsPath = String(key === 'nfsPath' ? value : config.nfsPath || '');
-      patch.endpoint = server && nfsPath ? 'nfs://' + server + ':' + nfsPath : server;
-    }
-    setEditingRepo({ ...editingRepo, ...patch });
-  };
 
-  const storageReady = (repo: StorageRepo | null) => {
-    if (!repo?.name.trim()) return false;
-    const c = repo.config || {};
-    const alreadySaved = Boolean(repo.id && !repo.id.startsWith('repo-'));
-    if (repo.type === 'S3') return Boolean(c.bucket && c.region && (alreadySaved || c.accessKey && c.secretKey));
-		if (isS3CompatibleType(repo.type)) return Boolean(c.bucket && c.endpoint && (alreadySaved || c.accessKey && c.secretKey));
-    if (repo.type === 'Azure') return Boolean(c.accountName && c.accountKey && c.container);
-    if (repo.type === 'Google Cloud') return Boolean(c.bucket && c.serviceAccountKey);
-    if (repo.type === 'NFS') return Boolean(c.nfsServer && c.nfsPath);
-    return false;
-  };
+
+
 
   const storageQueryValue = (repo: StorageRepo, field: string) => {
     if (field === 'type') return repo.type;
@@ -330,9 +290,10 @@ export default function StoragePage({ storage, clusters, onStorageCreated }: { s
 		setSavingStorage(true);
 		setStorageError(null);
 		try {
-			const created = await apiPost<ApiStorageRepo>('/api/v1/storage-repositories', buildStorageRepositoryInput(editingRepo));
+			const created = await createStorageRepository<ApiStorageRepo>(editingRepo);
 			const saved = normalizeStorageRepo(mapStorageRepo(created));
-			setRepos(prev => prev.some(repo => repo.id === saved.id) ? prev.map(repo => repo.id === saved.id ? saved : repo) : [saved, ...prev]);
+			const current = await apiGet<ApiList<ApiStorageRepo>>('/api/v1/storage-repositories');
+			setRepos(listItems(current).map(repo => normalizeStorageRepo(mapStorageRepo(repo))));
 			onStorageCreated?.(saved);
 			closeStorageWizard();
 		} catch (error) {
@@ -456,147 +417,15 @@ export default function StoragePage({ storage, clusters, onStorageCreated }: { s
     return 'bg-slate-50 text-slate-600 border-slate-200';
   }
 
-  const renderStorageFields = (allowTypeChange: boolean) => {
-    if (!editingRepo) return null;
-    return (
-      <div className="space-y-3">
-        <div className={allowTypeChange ? 'grid grid-cols-1 gap-4' : 'grid grid-cols-1 gap-4 md:grid-cols-2'}>
-          <EditField label="Name" value={editingRepo.name} placeholder="My Backup Repo" onChange={value => setEditingRepo({ ...editingRepo, name: value })} />
-          {!allowTypeChange && (
-            <label className="flex flex-col gap-1.5 text-xs font-semibold tracking-normal text-slate-600">
-              Type
-              <div className="flex h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-3.5 text-xs font-bold uppercase text-slate-600">
-                <span>{editingRepo.type}</span>
-              </div>
-            </label>
-          )}
-        </div>
-
-		{(editingRepo.type === 'S3' || isS3CompatibleType(editingRepo.type)) && (
-          <div className="hbdr-storage-field-stack">
-            {isS3CompatibleType(editingRepo.type) && (
-              <EditField label="Endpoint (ENDPOINT)" value={storageConfigValue('endpoint')} placeholder="http://minio:9000" onChange={value => updateEditingConfig('endpoint', value)} />
-            )}
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <EditField label="ACCESS KEY ID (AK)" value={storageConfigValue('accessKey')} placeholder="AKIA..." onChange={value => updateEditingConfig('accessKey', value)} />
-              <EditField label="SECRET ACCESS KEY (SK)" type="password" value={storageConfigValue('secretKey')} placeholder="Enter secret access key" onChange={value => updateEditingConfig('secretKey', value)} />
-            </div>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <EditField label="Bucket Name" value={storageConfigValue('bucket')} placeholder="Enter bucket name" onChange={value => updateEditingConfig('bucket', value)} />
-              <EditField label="Region (REGION)" value={storageConfigValue('region')} placeholder="us-west-2" onChange={value => updateEditingConfig('region', value)} />
-            </div>
-            {isS3CompatibleType(editingRepo.type) && (() => {
-              const ssl = Boolean(editingRepo.config?.useSsl ?? editingRepo.useTls);
-              const urlStyle = storageConfigValue('urlStyle') || 'path';
-              return (
-                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                  <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3.5 py-2.5">
-                    <div className="flex items-center gap-2.5">
-                      <span className={'flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition-colors ' + (ssl ? 'border-emerald-100 bg-emerald-50 text-emerald-600' : 'border-slate-200 bg-slate-50 text-slate-400')}>
-                        <ShieldCheck size={13} />
-                      </span>
-                      <div>
-                        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-700">SSL/TLS</p>
-                        <p className={'text-[10px] font-semibold ' + (ssl ? 'text-emerald-600' : 'text-slate-400')}>{ssl ? 'Encrypted' : 'Disabled'}</p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={ssl}
-                      onClick={() => updateEditingConfig('useSsl', !ssl)}
-                      className={
-                        'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 ' +
-                        (ssl ? 'border-emerald-500 bg-emerald-500' : 'border-slate-200 bg-slate-200')
-                      }
-                    >
-                      <span className={'inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ' + (ssl ? 'translate-x-4' : 'translate-x-0.5')} />
-                    </button>
-                  </div>
-                  <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2">
-                    <p className="shrink-0 text-[11px] font-bold uppercase tracking-wider text-slate-700">URL Style</p>
-                    <div className="grid flex-1 grid-cols-2 gap-1">
-                      {[
-                        { value: 'path', label: 'Path' },
-                        { value: 'virtual', label: 'Virtual-host' },
-                      ].map(opt => {
-                        const active = urlStyle === opt.value;
-                        return (
-                          <button
-                            type="button"
-                            key={opt.value}
-                            onClick={() => updateEditingConfig('urlStyle', opt.value)}
-                            className={
-                              'rounded-md px-2 py-1 text-[11px] font-bold transition-all ' +
-                              (active
-                                ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-200'
-                                : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700')
-                            }
-                          >
-                            {opt.label}
-                        </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
-        )}
-
-        {editingRepo.type === 'Azure' && (
-          <div className="hbdr-storage-field-stack">
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <EditField label="Storage Account Name" value={storageConfigValue('accountName')} placeholder="mystorageaccount" onChange={value => updateEditingConfig('accountName', value)} />
-              <EditField label="Account Key" type="password" value={storageConfigValue('accountKey')} placeholder="Azure Storage Account Key" onChange={value => updateEditingConfig('accountKey', value)} />
-            </div>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <EditField label="Container Name" value={storageConfigValue('container')} placeholder="my-backups" onChange={value => updateEditingConfig('container', value)} />
-              <EditField label="Endpoint Suffix" value={storageConfigValue('blobDomain')} placeholder="blob.core.windows.net" onChange={value => updateEditingConfig('blobDomain', value)} />
-            </div>
-          </div>
-        )}
-
-        {editingRepo.type === 'Google Cloud' && (
-          <div className="hbdr-storage-field-stack">
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <EditField label="Bucket Name" value={storageConfigValue('bucket')} placeholder="Enter bucket name" onChange={value => updateEditingConfig('bucket', value)} />
-              <EditField label="Region" value={storageConfigValue('region')} placeholder="us-central1" onChange={value => updateEditingConfig('region', value)} />
-            </div>
-            <label className="flex flex-col gap-1.5 text-xs font-semibold tracking-normal text-slate-600">
-              SERVICE ACCOUNT KEY
-              <textarea value={storageConfigValue('serviceAccountKey')} onChange={event => updateEditingConfig('serviceAccountKey', event.target.value)} placeholder={'{ "type": "service_account", ... }'} rows={4} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-xs text-slate-700 outline-none transition-all focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
-            </label>
-          </div>
-        )}
-
-        {editingRepo.type === 'NFS' && (
-          <div className="grid grid-cols-1 gap-4">
-            <EditField label="NFS Server Address" value={storageConfigValue('nfsServer')} placeholder="192.168.1.100" onChange={value => updateEditingConfig('nfsServer', value)} />
-            <EditField label="Mount Path" value={storageConfigValue('nfsPath')} placeholder="/mnt/backups" onChange={value => updateEditingConfig('nfsPath', value)} />
-          </div>
-        )}
-      </div>
-    );
-  };
 
   const handleStorageConnectionTest = async () => {
     if (!editingRepo) return;
     const isDraft = !editingRepo.id || editingRepo.id.startsWith('repo-');
     if (isDraft) {
-      if (!editingRepo.endpoint || !editingRepo.bucket) {
-        setStorageTestMessage({ tone: 'fail', text: 'Enter endpoint and bucket first.' });
-        return;
-      }
       setSyncingStorage(true);
       setStorageTestMessage(null);
       try {
-        const input = buildStorageRepositoryInput(editingRepo);
-        const result = await apiPost<{ status: string; detail: string }>('/api/v1/storage-repositories/test', input);
-        setStorageTestMessage(result.status === 'connected'
-          ? { tone: 'ok', text: `Reachability OK: ${result.detail}` }
-          : { tone: 'fail', text: result.detail || 'Reachability test failed' });
+        setStorageTestMessage(await testStorageDraft(editingRepo));
       } catch (e) {
         setStorageTestMessage({ tone: 'fail', text: e instanceof Error ? e.message : 'Test connection failed' });
       } finally {
@@ -617,8 +446,8 @@ export default function StoragePage({ storage, clusters, onStorageCreated }: { s
   };
 
   return (
-    <motion.div key="storage" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
-      <div className="hbdr-page-hero">
+    <motion.div key="storage" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="storage-page space-y-5">
+      <PageTitleBar>
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-blue-600 shadow-sm"><Archive size={18} /></div>
@@ -629,13 +458,13 @@ export default function StoragePage({ storage, clusters, onStorageCreated }: { s
           </div>
           <div />
         </div>
-      </div>
+      </PageTitleBar>
 
       <div className="hbdr-dr-table-card hbdr-storage-table-list">
         <div className="hbdr-dr-table-head">
             <div className="hbdr-dr-toolbar">
               <div className="hbdr-dr-action-group">
-                <button aria-label="Create storage repository" title="Create storage repository" onClick={() => { setEditingRepo(createStorageDraft('S3-Compatible')); setStorageTestMessage(null); setStorageError(null); setStorageTypeOpen(true); }} className="hbdr-dr-action-primary">New</button>
+                <button aria-label="Create storage repository" title="Create storage repository" onClick={() => { setEditingRepo(createStorageDraft('S3-Compatible')); setStorageTestMessage(null); setStorageError(null); setStorageTypeOpen(true); }} className="hbdr-dr-action-primary"><Plus size={14} />New</button>
               <div className="relative">
                 <button disabled={selectedRepos.length === 0} onClick={() => setStorageBulkMenuOpen(prev => !prev)} className="hbdr-dr-more">
                   More <ChevronDown size={15} className={storageBulkMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
@@ -753,72 +582,7 @@ export default function StoragePage({ storage, clusters, onStorageCreated }: { s
       </div>
 
       <AnimatePresence>
-        {storageTypeOpen && (
-          <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="hbdr-filter-drawer-backdrop" onClick={closeStorageWizard} />
-            <motion.div initial={{ opacity: 0, x: 34 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 34 }} transition={{ duration: 0.18, ease: 'easeOut' }} className="hbdr-filter-drawer hbdr-storage-drawer">
-              <div className="hbdr-filter-drawer-head">
-                <div>
-                  <strong>New Storage Repository</strong>
-                  <span>Create a repository for Velero backup and restore data.</span>
-                </div>
-                <button type="button" onClick={closeStorageWizard} aria-label="Close storage drawer"><X size={18} /></button>
-              </div>
-              <div className="hbdr-filter-drawer-body hbdr-storage-drawer-body">
-                <section className="hbdr-advanced-filter-section">
-                  <h4>Repository Type</h4>
-                  {(() => {
-                    const currentType = editingRepo?.type ?? 'S3-Compatible';
-                    return (
-                      <div className="hbdr-advanced-filter-box hbdr-storage-type-select-box">
-                        <label>
-                          <span>Type</span>
-                          <select
-                            value={currentType}
-                            onChange={event => {
-                              const draft = createStorageDraft(event.target.value);
-                              draft.name = editingRepo?.name ?? '';
-                              setEditingRepo(draft);
-                            }}
-                          >
-                            {storageTypeOptions.map(option => (
-                              <option key={option.type} value={option.type}>{option.title}</option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-                    );
-                  })()}
-                </section>
-
-                {editingRepo && (
-                  <section className="hbdr-advanced-filter-section">
-                    <h4>Configuration</h4>
-                    <div className="hbdr-advanced-filter-box hbdr-storage-config-box">{renderStorageFields(true)}</div>
-                    <div className="hbdr-storage-connection-check">
-                      {storageTestMessage && (
-                        <div className={`hbdr-storage-test-result ${storageTestMessage.tone === 'ok' ? 'is-ok' : 'is-fail'}`}>
-                          {storageTestMessage.text}
-                        </div>
-                      )}
-                      <button type="button" onClick={handleStorageConnectionTest} disabled={syncingStorage} className="hbdr-storage-test-button">
-                        <Activity size={14} />{syncingStorage ? 'Testing...' : 'Test Connection'}
-                      </button>
-                    </div>
-                  </section>
-                )}
-              </div>
-              {editingRepo && (
-                <div className="hbdr-storage-drawer-footer">
-                  <div className="hbdr-filter-drawer-actions hbdr-storage-drawer-actions">
-                    <button type="button" onClick={saveStorage} disabled={!storageReady(editingRepo) || savingStorage}>{savingStorage ? "Saving..." : "Save Storage"}</button>
-                    <button type="button" onClick={closeStorageWizard}>Cancel</button>
-                  </div>
-                </div>
-              )}
-            </motion.div>
-          </>
-        )}
+        {storageTypeOpen && editingRepo && <ResourceCreateDrawer title="New Storage Repository" kind="storage" onClose={closeStorageWizard} actions={<><button type="button" onClick={() => void saveStorage()} disabled={!storageReady(editingRepo) || savingStorage}>{savingStorage ? 'Saving...' : 'Save Storage'}</button><button type="button" onClick={closeStorageWizard}>Cancel</button></>}><StorageCreateFields draft={editingRepo} setDraft={setEditingRepo} testResult={storageTestMessage} testing={syncingStorage} onTest={() => void handleStorageConnectionTest()} />{storageError && <p role="alert">{storageError}</p>}</ResourceCreateDrawer>}
 
         {detailRepo && (
           <ModalFrame title="Storage Repository Details" onClose={() => setDetailRepo(null)}>
@@ -853,7 +617,7 @@ export default function StoragePage({ storage, clusters, onStorageCreated }: { s
               <div className="hbdr-filter-drawer-body hbdr-storage-drawer-body">
                 <section className="hbdr-advanced-filter-section">
                   <h4>Configuration</h4>
-                  <div className="hbdr-advanced-filter-box hbdr-storage-config-box">{renderStorageFields(false)}</div>
+                  <div className="hbdr-advanced-filter-box hbdr-storage-config-box"><StorageFormFields editingRepo={editingRepo} setEditingRepo={setEditingRepo} allowTypeChange={false} /></div>
                   <div className="hbdr-storage-connection-check">
                     {storageTestMessage && (
                       <div className={`hbdr-storage-test-result ${storageTestMessage.tone === 'ok' ? 'is-ok' : 'is-fail'}`}>

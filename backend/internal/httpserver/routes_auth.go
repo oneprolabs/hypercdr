@@ -10,5 +10,6 @@ func (r *Router) mountAuthRoutes() {
 	r.mux.HandleFunc("POST /api/v1/auth/logout", r.logout)
 	r.mux.HandleFunc("GET /api/v1/auth/me", r.currentUser)
 	r.mux.HandleFunc("PATCH /api/v1/auth/me", r.updateCurrentUser)
+	r.mux.HandleFunc("PATCH /api/v1/auth/me/theme", r.updateCurrentUserTheme)
 	r.mux.HandleFunc("POST /api/v1/auth/change-password", r.changeOwnPassword)
 }

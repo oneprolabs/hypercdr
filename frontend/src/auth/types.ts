@@ -7,6 +7,7 @@ export type ApiLoginResponse = {
     status: string;
     authProvider?: string;
     timeZone?: string;
+    theme?: 'light' | 'dark';
     tenantId: string;
     tenantName: string;
     systemAdmin?: boolean;
