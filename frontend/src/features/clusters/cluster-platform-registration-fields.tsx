@@ -17,7 +17,8 @@ type Inspection={clusterName:string;serverVersion?:string;nodeCount?:number;defa
 type RegistrationTask={status:string;progress?:number;errorMessage?:string};
 export function ClusterPlatformRegistrationFields({registrationType,cceUpload,cceContext,cceUploadLoading,cceUploadError,cceInspection,cceInspectionLoading,cceStorageClass,cceRegistrationTask,onUpload,onContextChange,onInspect,onStorageClassChange,onRegister,onCancel,compact=true}:{registrationType:RegistrationType;cceUpload:UploadSession|null;cceContext:string;cceUploadLoading:boolean;cceUploadError:string;cceInspection:Inspection|null;cceInspectionLoading:boolean;cceStorageClass:string;cceRegistrationTask:RegistrationTask|null;onUpload:(file:File|undefined)=>void;onContextChange:(context:string)=>void;onInspect:()=>void;onStorageClassChange:(value:string)=>void;onRegister:()=>void;onCancel:()=>void;compact?:boolean}){
  return                   <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <RegistrationStep number={1} title={registrationType === 'huaweicloud-cce' ? 'Upload CCE kubeconfig' : registrationType === 'openshift' ? 'Upload OpenShift kubeconfig' : 'Upload kubeconfig'} description={compact ? undefined : 'The credential is encrypted in transit and used only for this registration attempt.'}>
+                    <RegistrationStep number={1} title="Get kubeconfig"><ClusterKubeconfigHelp type={registrationType} mode="platform-direct" /></RegistrationStep>
+                    <RegistrationStep number={2} title={registrationType === 'huaweicloud-cce' ? 'Upload CCE kubeconfig' : registrationType === 'openshift' ? 'Upload OpenShift kubeconfig' : 'Upload kubeconfig'} description={compact ? undefined : 'The credential is encrypted in transit and used only for this registration attempt.'}>
                       {!compact && <div className="mb-3 flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] leading-4 text-emerald-800">
                         <CheckCircle2 size={14} className="mt-0.5 shrink-0" />
                         <span><strong className="block">Temporary file · automatically deleted</strong>The uploaded kubeconfig is permanently deleted when registration succeeds or fails, when you cancel, or when the temporary session expires. No manual cleanup is required.</span>
@@ -28,10 +29,9 @@ export function ClusterPlatformRegistrationFields({registrationType,cceUpload,cc
                         {!compact && <span className="mt-1 text-[11px] text-slate-500">Maximum 1 MiB. External credential plugins are not executed.</span>}
                         <input type="file" className="sr-only" accept=".yaml,.yml,.json,application/yaml,application/json" disabled={cceUploadLoading} onChange={event => void onUpload(event.target.files?.[0])} />
                       </label>
-                      <ClusterKubeconfigHelp type={registrationType} mode="platform-direct" />
                       {cceUploadError && <p role="alert" className="mt-3 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-medium leading-5 text-rose-700">{cceUploadError}</p>}
                     </RegistrationStep>
-                    {(!compact || cceUpload) && <RegistrationStep number={2} title="Select cluster context" description={compact ? undefined : 'Confirm the exact cluster that HyperCDR may inspect. No cluster resources are changed at this stage.'}>
+                    {(!compact || cceUpload) && <RegistrationStep number={3} title="Select cluster context" description={compact ? undefined : 'Confirm the exact cluster that HyperCDR may inspect. No cluster resources are changed at this stage.'}>
                       {cceUpload ? <>
                         <select value={cceContext} onChange={event => onContextChange(event.target.value)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                           <option value="" disabled>Select a context</option>
@@ -43,7 +43,7 @@ export function ClusterPlatformRegistrationFields({registrationType,cceUpload,cc
                         </div>}
                       </> : <div className="flex min-h-10 items-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-400">Upload a kubeconfig to discover its available contexts.</div>}
                     </RegistrationStep>}
-                    {(!compact || cceUpload) && <RegistrationStep number={3} title="Inspect and register" description={compact ? undefined : 'Inspect identity, version, permissions, capacity, and StorageClass. After confirmation, an isolated preflight verifies network and image pulls before installation.'}>
+                    {(!compact || cceUpload) && <RegistrationStep number={4} title="Inspect and register" description={compact ? undefined : 'Inspect identity, version, permissions, capacity, and StorageClass. After confirmation, an isolated preflight verifies network and image pulls before installation.'}>
                       <button type="button" onClick={() => void onInspect()} disabled={!cceContext || cceUploadLoading || cceInspectionLoading} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300">{cceInspectionLoading && <RefreshCw size={13} className="animate-spin" />}{cceInspectionLoading ? 'Inspecting cluster…' : 'Inspect cluster'}</button>
                       {cceInspection && <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl border border-emerald-100 bg-emerald-50/60 p-3 text-xs">
                         <div><span className="block text-[10px] font-bold uppercase tracking-wide text-emerald-600">Cluster</span><strong className="mt-0.5 block text-slate-800">{cceInspection.clusterName}</strong></div>

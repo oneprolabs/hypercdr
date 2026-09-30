@@ -27,19 +27,13 @@ function CommandBlock({ label, command }: { label: string; command: string }) {
 }
 
 export function ClusterKubeconfigHelp({ type, mode }: { type: RegistrationType; mode: GuideMode }) {
-  const [open, setOpen] = useState(false);
-  const title = type === 'openshift' ? 'an OpenShift' : type === 'huaweicloud-cce' ? 'a Huawei Cloud CCE' : 'a Native Kubernetes';
-  return <div className="hbdr-register-kubeconfig-help">
-    <button type="button" className="hbdr-register-kubeconfig-toggle" aria-expanded={open} onClick={() => setOpen(value => !value)}>
-      How do I get {title} kubeconfig?<span aria-hidden="true">{open ? '−' : '+'}</span>
-    </button>
-    {open && <div className="hbdr-register-kubeconfig-steps">
+  return <div className="hbdr-register-kubeconfig-guide">
       {type === 'native-kubernetes' && <>
         <p>On a control-plane or administration host, use a context with cluster-admin permissions.</p>
         <CommandBlock label="Check context and permissions" command={'kubectl config current-context\nkubectl auth can-i create clusterroles.rbac.authorization.k8s.io'} />
         <p>The permission check must print <code>yes</code>.</p>
         {mode === 'platform-direct' ? <>
-          <p>Export the active context to a portable file, then upload that file above.</p>
+          <p>Export the active context to a portable file, then upload that file in the next step.</p>
           <CommandBlock label="Export kubeconfig" command={'kubectl config view --raw --minify --flatten > hypercdr-native-kubeconfig.yaml\nchmod 600 hypercdr-native-kubeconfig.yaml'} />
         </> : <>
           <p>Run the installer as the user whose <code>~/.kube/config</code> contains that context. If the file is elsewhere, append this option to the install command:</p>
@@ -48,7 +42,7 @@ export function ClusterKubeconfigHelp({ type, mode }: { type: RegistrationType; 
       </>}
       {type === 'huaweicloud-cce' && <>
         <p>In Huawei Cloud CCE, open <strong>Clusters → target cluster → Cluster Connection / kubectl Access</strong>. Download the kubeconfig with cluster administrator permissions.</p>
-        {mode === 'platform-direct' ? <p>Upload the downloaded YAML file above and select its target context.</p> : <>
+        {mode === 'platform-direct' ? <p>Upload the downloaded YAML file in the next step and select its target context.</p> : <>
           <p>Copy the file to the Linux host where you run the installer. Save it as <code>~/.kube/hypercdr-cce.yaml</code>; the installer detects this path. For another path, append:</p>
           <CommandBlock label="Optional kubeconfig argument" command="--kubeconfig /absolute/path/to/cce-kubeconfig.yaml" />
         </>}
@@ -58,7 +52,7 @@ export function ClusterKubeconfigHelp({ type, mode }: { type: RegistrationType; 
         <CommandBlock label="Check login and permissions" command={'oc whoami\noc auth can-i create clusterroles.rbac.authorization.k8s.io'} />
         <p>The permission check must print <code>yes</code>.</p>
         {mode === 'platform-direct' ? <>
-          <p>Export the active context to a portable file, then upload that file above.</p>
+          <p>Export the active context to a portable file, then upload that file in the next step.</p>
           <CommandBlock label="Export kubeconfig" command={'oc config view --raw --minify --flatten > hypercdr-openshift-kubeconfig.yaml\nchmod 600 hypercdr-openshift-kubeconfig.yaml'} />
         </> : <>
           <p>Run the installer as the user who ran <code>oc login</code>; it can use that user's <code>~/.kube/config</code>. For another path, append:</p>
@@ -66,6 +60,5 @@ export function ClusterKubeconfigHelp({ type, mode }: { type: RegistrationType; 
         </>}
       </>}
       <p className="hbdr-register-kubeconfig-security">A kubeconfig contains credentials. Keep exported files private and delete temporary copies after registration.</p>
-    </div>}
-  </div>;
+    </div>;
 }

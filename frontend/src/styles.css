@@ -27916,39 +27916,21 @@ html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-inline [role="ra
   font-weight:500 !important;
 }
 
-#root .premium-app.hbdr-workspace .hbdr-register-kubeconfig-help {
+#root .premium-app.hbdr-workspace .hbdr-register-kubeconfig-guide {
+  display:grid;
+  gap:9px;
+  min-width:0;
+  padding:11px 12px;
   border:1px solid var(--hc-border);
   border-radius:7px;
-  background:var(--hc-surface);
+  background:var(--hc-sunken);
   color:var(--hc-text-2);
   font:400 11.5px/1.5 'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif;
 }
-#root .premium-app.hbdr-workspace .hbdr-register-kubeconfig-toggle {
-  display:flex;
-  width:100%;
-  align-items:center;
-  justify-content:space-between;
-  gap:12px;
-  padding:9px 12px;
-  border:0;
-  background:transparent;
-  color:var(--hc-accent);
-  font:500 12px/1.45 'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif;
-  text-align:left;
-  cursor:pointer;
-}
-#root .premium-app.hbdr-workspace .hbdr-register-kubeconfig-toggle span { font-size:16px; line-height:1; }
-#root .premium-app.hbdr-workspace .hbdr-register-kubeconfig-steps {
-  display:grid;
-  gap:9px;
-  padding:0 12px 12px;
-  border-top:1px solid var(--hc-border);
-}
-#root .premium-app.hbdr-workspace .hbdr-register-kubeconfig-steps p { margin:9px 0 0; }
-#root .premium-app.hbdr-workspace .hbdr-register-kubeconfig-steps strong { font-weight:600; }
-#root .premium-app.hbdr-workspace .hbdr-register-kubeconfig-help code {
-  font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:11px;
+#root .premium-app.hbdr-workspace .hbdr-register-kubeconfig-guide p { margin:0; }
+#root .premium-app.hbdr-workspace .hbdr-register-kubeconfig-guide strong { font-weight:600; }
+#root .premium-app.hbdr-workspace .hbdr-register-kubeconfig-guide code {
+  font:400 11px 'IBM Plex Mono',ui-monospace,monospace;
 }
 #root .premium-app.hbdr-workspace .hbdr-kubeconfig-command {
   min-width:0;
@@ -27984,13 +27966,46 @@ html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-inline [role="ra
   overflow-x:auto;
   color:#dbeafe;
   font:400 11px/1.55 'IBM Plex Mono',ui-monospace,monospace;
-  white-space:pre-wrap;
-  overflow-wrap:anywhere;
+  white-space:pre;
+}
+#root .premium-app.hbdr-workspace .hbdr-kubeconfig-command pre::selection,
+#root .premium-app.hbdr-workspace .hbdr-register-command-compact pre::selection,
+#root .premium-app.hbdr-workspace .hbdr-cluster-register-command::selection {
+  background:#2563eb;
+  color:#fff;
+  -webkit-text-fill-color:#fff;
 }
 #root .premium-app.hbdr-workspace .hbdr-register-kubeconfig-security {
   color:var(--hc-text-3);
   font-size:10.5px;
 }
+#root .premium-app.hbdr-workspace .hbdr-register-guided-step {
+  display:grid;
+  grid-template-columns:28px minmax(0,1fr);
+  align-items:start;
+  gap:12px;
+}
+#root .premium-app.hbdr-workspace .hbdr-register-guided-step > span,
+#root .premium-app.hbdr-workspace .hbdr-register-step-number {
+  display:inline-flex;
+  width:28px;
+  height:28px;
+  flex:none;
+  align-items:center;
+  justify-content:center;
+  border-radius:50%;
+  background:var(--hc-accent);
+  color:#fff;
+  font:600 12px 'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif;
+}
+#root .premium-app.hbdr-workspace .hbdr-register-guided-step > div { min-width:0; }
+#root .premium-app.hbdr-workspace .hbdr-register-guided-step h3 {
+  margin:3px 0 8px;
+  color:var(--hc-text);
+  font:600 12.5px 'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif;
+}
+#root .premium-app.hbdr-workspace .hbdr-register-command-head strong { display:inline-flex; align-items:center; gap:8px; }
+#root .premium-app.hbdr-workspace .hbdr-register-step-number { width:22px; height:22px; font-size:11px; }
 
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-clusters-card-region .hbdr-section-toolbar {
   background:var(--hc-surface) !important;
