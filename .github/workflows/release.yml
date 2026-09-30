@@ -270,7 +270,7 @@ jobs:
 
   deploy:
     needs: publish
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy == true }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy == true) }}
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -278,30 +278,30 @@ jobs:
       - name: Check SSH access
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ vars.HCDR_SSH_HOST }}
-          username: ${{ vars.HCDR_SSH_USER }}
-          port: ${{ vars.HCDR_SSH_PORT }}
+          host: 47.236.253.138
+          username: root
+          port: 22
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -eu
             echo "connected as $(id -un) on $(hostname)"
-            mkdir -p '${{ vars.HCDR_DEPLOY_PATH }}'
-            test -w '${{ vars.HCDR_DEPLOY_PATH }}'
+            test -f /var/lib/hypercdr/.env
+            test -w /var/lib/hypercdr
       - uses: appleboy/ssh-action@v1.0.3
         env:
           HCDR_AUTH_CHALLENGE_MODE: ${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'turnstile' }}
           HCDR_TURNSTILE_SITE_KEY: ${{ secrets.HCDR_TURNSTILE_SITE_KEY }}
           HCDR_TURNSTILE_SECRET_KEY: ${{ secrets.HCDR_TURNSTILE_SECRET_KEY }}
         with:
-          host: ${{ vars.HCDR_SSH_HOST }}
-          username: ${{ vars.HCDR_SSH_USER }}
-          port: ${{ vars.HCDR_SSH_PORT }}
+          host: 47.236.253.138
+          username: root
+          port: 22
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           command_timeout: 3600s
           envs: HCDR_AUTH_CHALLENGE_MODE,HCDR_TURNSTILE_SITE_KEY,HCDR_TURNSTILE_SECRET_KEY
           script: |
             set -eu
-            deploy_path='${{ vars.HCDR_DEPLOY_PATH }}'
+            deploy_path=/var/lib/hypercdr
             source_path="${deploy_path}/source"
             log_file="${deploy_path}/deploy-${{ needs.publish.outputs.image_version }}.log"
             exec 3>&1 4>&2
