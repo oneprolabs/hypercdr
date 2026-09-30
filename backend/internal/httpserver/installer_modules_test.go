@@ -32,8 +32,8 @@ func TestInstallerProviderModulesExposeContractWithoutNativeCCELeakage(t *testin
 			t.Fatalf("Native provider contains CCE-specific behavior %q", forbidden)
 		}
 	}
-	if !strings.Contains(native, `export KUBECONFIG="$KUBECONFIG_PATH"`) {
-		t.Fatal("Native provider does not honor an explicitly selected kubeconfig")
+	if !strings.Contains(native, `provider_native_kubernetes_select_context() { select_registration_kubeconfig; }`) {
+		t.Fatal("Native provider does not use the shared kubeconfig selector")
 	}
 	openShift := modules[openshiftStart:]
 	for _, required := range []string{"DataProtectionApplication", "noDefaultBackupLocation: true", "backupImages: false", "defaultVolumesToFSBackup: true", "uploaderType: kopia", "oadp-comm-agent", `NAMESPACE="openshift-adp"`, "formal installation", "existing OADP installation"} {

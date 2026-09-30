@@ -27614,7 +27614,7 @@ html[data-theme='dark'] #root .tags-page .hbdr-page-hero p { color:var(--hc-text
 .hbdr-cluster-method-tabs .hbdr-cluster-method-tab + .hbdr-cluster-method-tab { border-left:1px solid var(--hc-border); }
 .hbdr-cluster-method-tabs .hbdr-cluster-method-tab.is-active { border-bottom-color:var(--hc-accent); background:var(--hc-surface); }
 .hbdr-cluster-method-tabs .hbdr-cluster-method-tab span { font-size:12px; font-weight:600; }
-.hbdr-resource-create-cluster .hbdr-resource-create-body { gap:0; }
+.hbdr-resource-create-cluster .hbdr-resource-create-body { display:block; }
 .hbdr-resource-create-cluster .hbdr-cluster-type-panel { border-bottom:0; border-radius:8px 8px 0 0; }
 .hbdr-resource-create-cluster .hbdr-cluster-type-panel + div { padding:16px; border:1px solid var(--hc-border); border-top:0; border-radius:0 0 8px 8px; }
 @media(max-width:640px) { .hbdr-cluster-type-tabs { grid-template-columns:1fr; } .hbdr-cluster-type-tabs .hbdr-cluster-type-tab { min-height:44px; } }

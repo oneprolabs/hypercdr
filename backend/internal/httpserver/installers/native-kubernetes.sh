@@ -1,13 +1,8 @@
 # Native Kubernetes provider. Keep this path deliberately small and compatible
 # with the registration flow that predates cloud-provider adapters.
 provider_native_kubernetes_prepare_dependencies() { :; }
-provider_native_kubernetes_select_context() {
-  # Preserve kubectl's default lookup, but honor an explicitly selected file.
-  [[ -n "$KUBECONFIG_PATH" ]] || return 0
-  KUBECONFIG_PATH="${KUBECONFIG_PATH/#\~/$HOME}"
-  [[ -r "$KUBECONFIG_PATH" ]] || fail "Kubernetes kubeconfig is not readable: ${KUBECONFIG_PATH}"
-  export KUBECONFIG="$KUBECONFIG_PATH"
-}
+provider_native_kubernetes_select_context() { select_registration_kubeconfig; }
+
 provider_native_kubernetes_align_kubectl_version() { :; }
 provider_native_kubernetes_verify() { :; }
 provider_native_kubernetes_prepare_platform_trust() {

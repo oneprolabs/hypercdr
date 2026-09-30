@@ -74,59 +74,7 @@ provider_huaweicloud_cce_align_kubectl_version() {
   log_ok "kubectl client is aligned with CCE Kubernetes ${server_minor}"
 }
 
-provider_huaweicloud_cce_select_context() {
-  local candidate resolved selection
-  local -a candidates=()
-  declare -A seen_candidates=()
-  add_kubeconfig_candidate() {
-    local path="$1"
-    [[ -n "$path" && -f "$path" ]] || return 0
-    resolved="$(readlink -f "$path" 2>/dev/null || printf '%s' "$path")"
-    [[ -n "${seen_candidates[$resolved]:-}" ]] && return 0
-    seen_candidates[$resolved]=1
-    candidates+=("$resolved")
-  }
-  for candidate in "${KUBECONFIG:-}" "$HOME/.kube/hypercdr-cce.yaml" "$HOME/.kube/config"; do
-    add_kubeconfig_candidate "$candidate"
-  done
-  shopt -s nullglob
-  for candidate in "$HOME/.kube"/*kubeconfig* "$HOME/.kube"/*config*.yaml "$PWD"/*kubeconfig* "$HOME/Downloads"/*kubeconfig* "$HOME/Downloads"/*config*.yaml; do
-    add_kubeconfig_candidate "$candidate"
-  done
-  shopt -u nullglob
-  if [[ -z "$KUBECONFIG_PATH" && ${#candidates[@]} -gt 0 && "$INTERACTIVE" == "true" ]] && { exec 3<>/dev/tty; } 2>/dev/null; then
-    echo "Detected Kubernetes configuration files:" >&3
-    for selection in "${!candidates[@]}"; do printf '%d) %s\n' "$((selection+1))" "${candidates[$selection]}" >&3; done
-    printf 'Select a CCE kubeconfig [1-%d], or 0 to enter another path: ' "${#candidates[@]}" >&3
-    IFS= read -r selection <&3 || true
-    if [[ "$selection" =~ ^[0-9]+$ ]] && ((selection >= 1 && selection <= ${#candidates[@]})); then
-      KUBECONFIG_PATH="${candidates[$((selection-1))]}"
-    fi
-    exec 3>&-
-  elif [[ -z "$KUBECONFIG_PATH" && ${#candidates[@]} -eq 1 ]]; then
-    KUBECONFIG_PATH="${candidates[0]}"
-  fi
-  if [[ -z "$KUBECONFIG_PATH" && "$INTERACTIVE" == "true" ]] && { exec 3<>/dev/tty; } 2>/dev/null; then
-    printf 'Enter the CCE kubeconfig file path: ' >&3
-    IFS= read -r KUBECONFIG_PATH <&3 || true
-    exec 3>&-
-  fi
-  [[ -n "$KUBECONFIG_PATH" ]] || fail "CCE registration requires a kubeconfig. Rerun with --kubeconfig <path>."
-  KUBECONFIG_PATH="${KUBECONFIG_PATH/#\~/$HOME}"
-  [[ -r "$KUBECONFIG_PATH" ]] || fail "CCE kubeconfig is not readable: ${KUBECONFIG_PATH}"
-  export KUBECONFIG="$KUBECONFIG_PATH"
-  if [[ -z "$KUBECTL_CONTEXT" ]]; then
-    mapfile -t contexts < <(kubectl config get-contexts -o name)
-    if [[ ${#contexts[@]} -eq 1 ]]; then
-      KUBECTL_CONTEXT="${contexts[0]}"
-    elif [[ ${#contexts[@]} -gt 1 ]]; then
-      fail "The CCE kubeconfig contains multiple contexts. Rerun with --context <name>."
-    fi
-  fi
-  if [[ -n "$KUBECTL_CONTEXT" ]] && ! kubectl config get-contexts -o name | grep -Fxq "$KUBECTL_CONTEXT"; then
-    fail "Kubernetes context '${KUBECTL_CONTEXT}' was not found in ${KUBECONFIG_PATH}."
-  fi
-}
+provider_huaweicloud_cce_select_context() { select_registration_kubeconfig; }
 
 provider_huaweicloud_cce_verify() {
   log_info "Verifying Huawei Cloud CCE compatibility"

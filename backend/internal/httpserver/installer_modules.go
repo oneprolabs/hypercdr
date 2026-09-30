@@ -16,6 +16,7 @@ var installerModuleOrder = []string{
 	"installers/core-preflight.sh",
 	"installers/scenario-contract.sh",
 	"installers/provider-contract.sh",
+	"installers/kubeconfig-selection.sh",
 	"installers/native-kubernetes.sh",
 	"installers/huaweicloud-cce.sh",
 	"installers/openshift.sh",

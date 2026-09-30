@@ -113,13 +113,7 @@ func TestOpenShiftProviderSelectsUploadedKubeconfig(t *testing.T) {
 	text := string(module)
 	for _, required := range []string{
 		`provider_openshift_select_context()`,
-		`Detected OpenShift kubeconfig files:`,
-		`"$HOME/.kube/config"`,
-		`"$PWD/kubeconfig"`,
-		`Select an OpenShift kubeconfig`,
-		`export KUBECONFIG="$KUBECONFIG_PATH"`,
-		`OpenShift registration requires a kubeconfig`,
-		`--kubeconfig "$KUBECONFIG_PATH" config get-contexts`,
+		`provider_openshift_select_context() { select_registration_kubeconfig; }`,
 	} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("OpenShift kubeconfig selection is missing %q", required)
