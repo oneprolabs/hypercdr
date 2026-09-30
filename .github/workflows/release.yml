@@ -322,6 +322,13 @@ jobs:
             fetch_asset scripts/release/deploy-blue-green.sh
             fetch_asset scripts/lib/registry-config.sh
             chmod +x "${source_path}/scripts/release/deploy-blue-green.sh"
+            mkdir -p "${deploy_path}/releases/${{ needs.publish.outputs.image_version }}"
+            curl -fsSL "https://github.com/${{ github.repository }}/releases/download/v${{ needs.publish.outputs.image_version }}/release-manifest.json" \
+              -o "${deploy_path}/releases/${{ needs.publish.outputs.image_version }}/release-manifest.json"
+            if curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${ref}/website/index.html" -o "${deploy_path}/website/index.html.tmp"; then
+              mkdir -p "${deploy_path}/website"
+              mv "${deploy_path}/website/index.html.tmp" "${deploy_path}/website/index.html"
+            fi
             mkdir -p "${deploy_path}/nginx/conf.d"
             legacy_install=false
             if [ -f "${deploy_path}/.env" ] && { \
@@ -339,8 +346,8 @@ jobs:
               chmod +x "${source_path}/scripts/release/install-blue-green.sh"
               "${source_path}/scripts/release/install-blue-green.sh" \
                 '${{ needs.publish.outputs.image_version }}' \
-                --base-url 'https://${{ vars.HCDR_DOMAIN }}' \
-                --domain '${{ vars.HCDR_DOMAIN }}' \
+                --base-url 'https://47.236.253.138:12443' \
+                --domain '47.236.253.138' \
                 --registry '${{ vars.HCDR_IMAGE_REGISTRY }}' \
                 --install-dir "${deploy_path}" \
                 --execute
