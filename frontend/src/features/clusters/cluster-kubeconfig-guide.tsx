@@ -32,7 +32,7 @@ export function ClusterKubeconfigHelp({ type, mode }: { type: RegistrationType; 
   return <div className="hbdr-register-kubeconfig-guide">
     {commandMode && <>
       <p>Step 1. Create the directory on the host where you will run the installer.</p>
-      <CommandBlock label="Create kubeconfig directory" command={`sudo install -d -m 700 -o "$(id -un)" ${directory}`} />
+      <CommandBlock label="Create kubeconfig directory" command={`sudo mkdir -p ${directory}\nsudo chown "$USER" ${directory}\nchmod 700 ${directory}`} />
     </>}
     {type === 'native-kubernetes' && <>
       <p>On a control-plane or administration host, use a context with cluster-admin permissions.</p>
@@ -40,7 +40,7 @@ export function ClusterKubeconfigHelp({ type, mode }: { type: RegistrationType; 
       <p>The permission check must print <code>yes</code>.</p>
       <p>{commandMode ? 'Step 2. Generate the kubeconfig directly in that directory.' : 'Export the active context to a portable file.'}</p>
       <CommandBlock label="Export kubeconfig" command={commandMode
-        ? `kubectl config view --raw --minify --flatten | install -m 600 /dev/stdin ${directory}/native-kubeconfig.yaml`
+        ? `umask 077\nkubectl config view --raw --minify --flatten > ${directory}/native-kubeconfig.yaml\nchmod 600 ${directory}/native-kubeconfig.yaml`
         : 'kubectl config view --raw --minify --flatten > hypercdr-native-kubeconfig.yaml\nchmod 600 hypercdr-native-kubeconfig.yaml'} />
       {!commandMode && <p>Upload <code>hypercdr-native-kubeconfig.yaml</code> in the next step.</p>}
     </>}
@@ -57,7 +57,7 @@ export function ClusterKubeconfigHelp({ type, mode }: { type: RegistrationType; 
       <p>The permission check must print <code>yes</code>.</p>
       <p>{commandMode ? 'Step 2. Generate the kubeconfig directly in that directory.' : 'Export the active context to a portable file.'}</p>
       <CommandBlock label="Export kubeconfig" command={commandMode
-        ? `oc config view --raw --minify --flatten | install -m 600 /dev/stdin ${directory}/openshift-kubeconfig.yaml`
+        ? `umask 077\noc config view --raw --minify --flatten > ${directory}/openshift-kubeconfig.yaml\nchmod 600 ${directory}/openshift-kubeconfig.yaml`
         : 'oc config view --raw --minify --flatten > hypercdr-openshift-kubeconfig.yaml\nchmod 600 hypercdr-openshift-kubeconfig.yaml'} />
       {!commandMode && <p>Upload <code>hypercdr-openshift-kubeconfig.yaml</code> in the next step.</p>}
     </>}
