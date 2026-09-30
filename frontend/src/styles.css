@@ -27862,6 +27862,85 @@ html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-inline [role="ra
 }
 #root .premium-app.hbdr-workspace .hbdr-resource-refresh-note.is-error { color:var(--hc-crit); }
 
+/* DR namespace detail: consistent type scale across all four sections. */
+#root .premium-app.hbdr-workspace .hbdr-app-detail-drawer,
+#root .premium-app.hbdr-workspace .hbdr-app-detail-drawer :is(button,span,small,em,strong,p,h3,h4,h5) {
+  font-family:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif;
+}
+#root .premium-app.hbdr-workspace .hbdr-app-detail-drawer :is(code,pre),
+#root .premium-app.hbdr-workspace .hbdr-app-detail-plan-id strong {
+  font-family:'IBM Plex Mono',ui-monospace,monospace;
+}
+#root .premium-app.hbdr-workspace .hbdr-namespace-detail-tabs button {
+  font-size:12.5px !important;
+  font-weight:500 !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-namespace-detail-tabs button.is-active,
+#root .premium-app.hbdr-workspace .hbdr-namespace-detail-section-head strong,
+#root .premium-app.hbdr-workspace .hbdr-app-detail-section-title :is(h4,h5) {
+  font-weight:600 !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-namespace-detail-tabs button span,
+#root .premium-app.hbdr-workspace .hbdr-namespace-detail-section-head > em {
+  font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:10.5px;
+  font-weight:500;
+}
+#root .premium-app.hbdr-workspace .hbdr-app-detail-drawer :is(.hbdr-app-detail-fact,.hbdr-app-detail-config-item,.hbdr-namespace-task-summary,.hbdr-namespace-storage-grid) strong,
+#root .premium-app.hbdr-workspace .hbdr-app-detail-drawer :is(.hbdr-namespace-rp-row,.hbdr-namespace-task-row,.hbdr-task-restore-point-row) strong {
+  font-size:11.5px;
+  font-weight:400;
+}
+#root .premium-app.hbdr-workspace .hbdr-app-detail-drawer :is(.hbdr-namespace-rp-row,.hbdr-namespace-task-row,.hbdr-task-restore-point-row) > div:nth-child(2) strong,
+#root .premium-app.hbdr-workspace .hbdr-app-detail-drawer .hbdr-namespace-task-title > strong {
+  font-size:12.5px;
+  font-weight:600;
+}
+#root .premium-app.hbdr-workspace .hbdr-app-detail-drawer :is(.hbdr-app-detail-fact p,.hbdr-app-detail-config-item p,.hbdr-namespace-detail-section-head span,.hbdr-namespace-rp-row p,.hbdr-namespace-rp-row span,.hbdr-namespace-task-row small,.hbdr-task-purpose span,.hbdr-namespace-detail-empty span) {
+  font-size:11.5px;
+  font-weight:400;
+}
+#root .premium-app.hbdr-workspace .hbdr-app-detail-drawer :is(.hbdr-namespace-rp-meta em,.hbdr-namespace-task-row > em,.hbdr-task-origin) {
+  font-size:11.5px;
+  font-weight:500;
+}
+#root .premium-app.hbdr-workspace .hbdr-app-detail-drawer .hbdr-app-detail-section .font-black {
+  font-weight:600;
+}
+#root .premium-app.hbdr-workspace .hbdr-app-detail-drawer :is(.hbdr-app-detail-section-title h4,.hbdr-app-detail-section-title h5) {
+  font-size:11.5px;
+  font-weight:600 !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-app-detail-drawer :is(.hbdr-app-detail-fact p,.hbdr-app-detail-config-item p,.hbdr-namespace-task-summary span,.hbdr-namespace-storage-grid span) {
+  font-size:10.5px;
+  font-weight:500 !important;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-register-kubeconfig-help {
+  border:1px solid var(--hc-border);
+  border-radius:7px;
+  background:var(--hc-surface);
+  padding:9px 12px;
+  color:var(--hc-text-2);
+  font:400 11.5px/1.5 'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif;
+}
+#root .premium-app.hbdr-workspace .hbdr-register-kubeconfig-help summary {
+  color:var(--hc-accent);
+  font-weight:500;
+  cursor:pointer;
+}
+#root .premium-app.hbdr-workspace .hbdr-register-kubeconfig-help p { margin:8px 0 0; }
+#root .premium-app.hbdr-workspace .hbdr-register-kubeconfig-help ol {
+  margin:8px 0 0;
+  padding-left:18px;
+  list-style:decimal;
+}
+#root .premium-app.hbdr-workspace .hbdr-register-kubeconfig-help li + li { margin-top:5px; }
+#root .premium-app.hbdr-workspace .hbdr-register-kubeconfig-help code {
+  font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:11px;
+}
+
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-clusters-card-region .hbdr-section-toolbar {
   background:var(--hc-surface) !important;
   border-color:var(--hc-border) !important;

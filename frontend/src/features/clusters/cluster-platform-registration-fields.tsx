@@ -1,6 +1,7 @@
 import React from 'react';
 import { CheckCircle2, RefreshCw, Upload } from 'lucide-react';
 import type { RegistrationType } from './cluster-registration-choices';
+import { ClusterKubeconfigHelp } from './cluster-kubeconfig-guide';
 function RegistrationStep({number,title,description,children}:{number:number;title:string;description?:string;children?:React.ReactNode}) {
   return <section className="flex gap-3.5">
     <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white shadow-sm shadow-blue-200">{number}</div>
@@ -14,7 +15,7 @@ function RegistrationStep({number,title,description,children}:{number:number;tit
 type UploadSession={id:string;contexts:Array<{name:string;apiServer:string;isCurrent?:boolean}>;fingerprint?:string;expiresAt?:string};
 type Inspection={clusterName:string;serverVersion?:string;nodeCount?:number;defaultStorageClass?:string;storageClasses:string[];gates:Array<{id:string;label:string;status:string;detail:string}>};
 type RegistrationTask={status:string;progress?:number;errorMessage?:string};
-export function ClusterPlatformRegistrationFields({registrationType,cceUpload,cceContext,cceUploadLoading,cceUploadError,cceInspection,cceInspectionLoading,cceStorageClass,cceRegistrationTask,onOpenGuide,onUpload,onContextChange,onInspect,onStorageClassChange,onRegister,onCancel,compact=true}:{registrationType:RegistrationType;cceUpload:UploadSession|null;cceContext:string;cceUploadLoading:boolean;cceUploadError:string;cceInspection:Inspection|null;cceInspectionLoading:boolean;cceStorageClass:string;cceRegistrationTask:RegistrationTask|null;onOpenGuide:()=>void;onUpload:(file:File|undefined)=>void;onContextChange:(context:string)=>void;onInspect:()=>void;onStorageClassChange:(value:string)=>void;onRegister:()=>void;onCancel:()=>void;compact?:boolean}){
+export function ClusterPlatformRegistrationFields({registrationType,cceUpload,cceContext,cceUploadLoading,cceUploadError,cceInspection,cceInspectionLoading,cceStorageClass,cceRegistrationTask,onUpload,onContextChange,onInspect,onStorageClassChange,onRegister,onCancel,compact=true}:{registrationType:RegistrationType;cceUpload:UploadSession|null;cceContext:string;cceUploadLoading:boolean;cceUploadError:string;cceInspection:Inspection|null;cceInspectionLoading:boolean;cceStorageClass:string;cceRegistrationTask:RegistrationTask|null;onUpload:(file:File|undefined)=>void;onContextChange:(context:string)=>void;onInspect:()=>void;onStorageClassChange:(value:string)=>void;onRegister:()=>void;onCancel:()=>void;compact?:boolean}){
  return                   <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                     <RegistrationStep number={1} title={registrationType === 'huaweicloud-cce' ? 'Upload CCE kubeconfig' : registrationType === 'openshift' ? 'Upload OpenShift kubeconfig' : 'Upload kubeconfig'} description={compact ? undefined : 'The credential is encrypted in transit and used only for this registration attempt.'}>
                       {!compact && <div className="mb-3 flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] leading-4 text-emerald-800">
@@ -27,7 +28,7 @@ export function ClusterPlatformRegistrationFields({registrationType,cceUpload,cc
                         {!compact && <span className="mt-1 text-[11px] text-slate-500">Maximum 1 MiB. External credential plugins are not executed.</span>}
                         <input type="file" className="sr-only" accept=".yaml,.yml,.json,application/yaml,application/json" disabled={cceUploadLoading} onChange={event => void onUpload(event.target.files?.[0])} />
                       </label>
-                      <button type="button" onClick={onOpenGuide} className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-blue-700 underline decoration-blue-200 underline-offset-4 hover:text-blue-800">How do I get {registrationType === 'openshift' ? 'an OpenShift' : registrationType === 'huaweicloud-cce' ? 'a Huawei Cloud CCE' : 'a Native Kubernetes'} kubeconfig?</button>
+                      <ClusterKubeconfigHelp type={registrationType} mode="platform-direct" />
                       {cceUploadError && <p role="alert" className="mt-3 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-medium leading-5 text-rose-700">{cceUploadError}</p>}
                     </RegistrationStep>
                     {(!compact || cceUpload) && <RegistrationStep number={2} title="Select cluster context" description={compact ? undefined : 'Confirm the exact cluster that HyperCDR may inspect. No cluster resources are changed at this stage.'}>

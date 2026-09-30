@@ -7,6 +7,25 @@ const titles: Record<RegistrationType, string> = {
   openshift: 'Get an OpenShift kubeconfig',
 };
 
+export function ClusterKubeconfigHelp({ type, mode }: { type: RegistrationType; mode: 'command' | 'platform-direct' }) {
+  return <details className="hbdr-register-kubeconfig-help">
+    <summary>How do I get {type === 'openshift' ? 'an OpenShift' : type === 'huaweicloud-cce' ? 'a Huawei Cloud CCE' : 'a Native Kubernetes'} kubeconfig?</summary>
+    {type === 'native-kubernetes' && <ol>
+      <li>On a control-plane or administration host, check <code>kubectl config current-context</code> and <code>kubectl auth can-i create clusterroles.rbac.authorization.k8s.io</code>.</li>
+      <li>{mode === 'command' ? <>Run the install command with that user's <code>~/.kube/config</code>, or append <code>--kubeconfig /path/to/config</code>.</> : <>Export the active context with <code>kubectl config view --raw --minify --flatten &gt; hypercdr-native-kubeconfig.yaml</code>, then upload that file here.</>}</li>
+    </ol>}
+    {type === 'huaweicloud-cce' && <ol>
+      <li>In Huawei Cloud CCE, open the target cluster and download its kubeconfig from the cluster connection or kubectl access page using cluster administrator credentials.</li>
+      <li>{mode === 'command' ? <>Save it on the command host as <code>~/.kube/hypercdr-cce.yaml</code>, or append <code>--kubeconfig /path/to/config</code>.</> : 'Upload the downloaded YAML file here, then select the target context.'}</li>
+    </ol>}
+    {type === 'openshift' && <ol>
+      <li>In the OpenShift console, choose <strong>Copy login command</strong> from the user menu. Run the complete <code>oc login</code> command on an administration host.</li>
+      <li>Check <code>oc auth can-i create clusterroles.rbac.authorization.k8s.io</code> returns <code>yes</code>.</li>
+      <li>{mode === 'command' ? <>Run the install command using the active <code>~/.kube/config</code>, or append <code>--kubeconfig /path/to/config</code>.</> : <>Export the active context with <code>oc config view --raw --minify --flatten &gt; hypercdr-openshift-kubeconfig.yaml</code>, then upload that file here.</>}</li>
+    </ol>}
+  </details>;
+}
+
 export function ClusterKubeconfigGuide({ type, onClose }: { type: RegistrationType; onClose: () => void }) {
   return <div className="hbdr-kubeconfig-guide">
     <div className="hbdr-filter-drawer-backdrop" onClick={onClose} />

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Check, CheckCircle2, RefreshCw } from 'lucide-react';
 import type { RegistrationType } from './cluster-registration-choices';
+import { ClusterKubeconfigHelp } from './cluster-kubeconfig-guide';
 function RegistrationStep({number,title,description,children}:{number:number;title:string;description:string;children?:React.ReactNode}) {
   return <section className="flex gap-3.5">
     <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white shadow-sm shadow-blue-200">{number}</div>
@@ -14,8 +15,10 @@ function RegistrationStep({number,title,description,children}:{number:number;tit
 const selectCommandText=(element:HTMLElement)=>{const selection=window.getSelection();if(!selection)return;const range=document.createRange();range.selectNodeContents(element);selection.removeAllRanges();selection.addRange(range)};
 export function ClusterCommandRegistrationFields({registrationType,prepareNodeCommand,installCommand,installLoading,installError,copied,caCopied,registryCACommandRef,installCommandRef,onCopyCA,onCopyInstall,onRegenerate,compact=true}:{registrationType:RegistrationType;prepareNodeCommand:string;installCommand:string;installLoading:boolean;installError:string|null;copied:boolean;caCopied:boolean;registryCACommandRef:React.RefObject<HTMLTextAreaElement|null>;installCommandRef:React.RefObject<HTMLTextAreaElement|null>;onCopyCA:()=>void;onCopyInstall:()=>void;onRegenerate:()=>void;compact?:boolean}) {
  if (compact) return <div className="hbdr-register-command-compact">
+   {registrationType === 'native-kubernetes' && <p>Run on a Linux host with kubectl and a cluster-admin kubeconfig.</p>}
    {registrationType === 'huaweicloud-cce' && <p>Run on a Linux host with kubectl and a CCE kubeconfig.</p>}
    {registrationType === 'openshift' && <p>Run on a Linux administration host with cluster-admin access.</p>}
+   <ClusterKubeconfigHelp type={registrationType} mode="command" />
    {prepareNodeCommand && <section><div className="hbdr-register-command-head"><strong>Prepare cluster nodes</strong><button type="button" disabled={!prepareNodeCommand} onClick={onCopyCA}>{caCopied ? 'Copied' : 'Copy'}</button></div><pre aria-label="Registry CA command" onClick={event=>selectCommandText(event.currentTarget)}>{prepareNodeCommand}</pre><textarea ref={registryCACommandRef} readOnly value={prepareNodeCommand} className="sr-only" tabIndex={-1} aria-hidden="true" /></section>}
    <section><div className="hbdr-register-command-head"><strong>Install agent</strong><div className="hbdr-register-command-tools"><button type="button" className="hbdr-register-regenerate" disabled={installLoading} onClick={onRegenerate}><RefreshCw size={13} />{installLoading ? 'Generating…' : 'Regenerate command'}</button><button type="button" disabled={!installCommand || installLoading} onClick={onCopyInstall}>{copied ? 'Copied' : 'Copy'}</button></div></div>{installError ? <p role="alert">{installError}</p> : <pre aria-label="Install command" onClick={event=>selectCommandText(event.currentTarget)}>{installLoading ? 'Generating command…' : installCommand || 'Command unavailable. Retry generation.'}</pre>}<textarea ref={installCommandRef} readOnly value={installCommand} className="sr-only" tabIndex={-1} aria-hidden="true" /></section>
    {installCommand && !installError && <p>Run the command on a host with cluster access. HyperCDR registers the cluster after its agent connects.</p>}

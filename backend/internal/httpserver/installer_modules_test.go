@@ -27,10 +27,13 @@ func TestInstallerProviderModulesExposeContractWithoutNativeCCELeakage(t *testin
 		t.Fatal("provider modules are not assembled in the declared order")
 	}
 	native := modules[nativeStart:cceStart]
-	for _, forbidden := range []string{"kubeconfig", "dynamic_pvc", "platform_connectivity", "huaweicloud"} {
+	for _, forbidden := range []string{"dynamic_pvc", "platform_connectivity", "huaweicloud"} {
 		if strings.Contains(strings.ToLower(native), forbidden) {
 			t.Fatalf("Native provider contains CCE-specific behavior %q", forbidden)
 		}
+	}
+	if !strings.Contains(native, `export KUBECONFIG="$KUBECONFIG_PATH"`) {
+		t.Fatal("Native provider does not honor an explicitly selected kubeconfig")
 	}
 	openShift := modules[openshiftStart:]
 	for _, required := range []string{"DataProtectionApplication", "noDefaultBackupLocation: true", "backupImages: false", "defaultVolumesToFSBackup: true", "uploaderType: kopia", "oadp-comm-agent", `NAMESPACE="openshift-adp"`, "formal installation", "existing OADP installation"} {

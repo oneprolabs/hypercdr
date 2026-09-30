@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ClusterRegistrationChoices } from './cluster-registration-choices';
 import { ResourceCreateDrawer } from '../../components/resource-create-drawer';
 import { ClusterPlatformRegistrationFields } from './cluster-platform-registration-fields';
-import { ClusterKubeconfigGuide } from './cluster-kubeconfig-guide';
 import { ClusterCommandRegistrationFields } from './cluster-command-registration-fields';
 import { uploadRegistrationKubeconfig, inspectRegistrationCluster, startRegistrationTask, cancelRegistrationTask } from './cluster-registration-service';
 import { AlertTriangle, Check, CheckCircle2, ChevronRight, Cloud, Edit2, Eye, GitBranch, MoreVertical, Plus, PlusCircle, RefreshCw, Server, Star, Trash2, Upload, X } from 'lucide-react';
@@ -103,7 +102,6 @@ export default function ClusterPage(props: {
   const { clusters, loading, protectionPlans, onLoadTopology, canUpgrade, defaultClusterId, clusterMenuId, setClusterMenuId, setSelectedCluster, setDefaultCluster, unregisterCluster, onRenameCluster, onUpgradeCluster, onUpgradeVelero, onRegisterCluster, onRefreshRegistration, clusterTaskLogs, getAgentTokenForRegistration, prefetchAgentToken, openDashboard, registrationAllowed = true, openLicenseManagement, toast } = props;
   const [registerOpen, setRegisterOpen] = useState(false);
   const [licenseGuideOpen, setLicenseGuideOpen] = useState(false);
-  const [kubeconfigGuideType, setKubeconfigGuideType] = useState<ClusterRegistrationType | null>(null);
   const [registrationType, setRegistrationType] = useState<ClusterRegistrationType>('native-kubernetes');
   const [cceRegistrationMode, setCCERegistrationMode] = useState<CCERegistrationMode>('platform-direct');
   const [cceUpload, setCCEUpload] = useState<CCEKubeconfigUpload | null>(null);
@@ -1126,7 +1124,6 @@ export default function ClusterPage(props: {
         })()}
       </AnimatePresence>
 
-      {kubeconfigGuideType && <ClusterKubeconfigGuide type={kubeconfigGuideType} onClose={() => setKubeconfigGuideType(null)} />}
 
       <AnimatePresence>
         {licenseGuideOpen && (
@@ -1143,7 +1140,7 @@ export default function ClusterPage(props: {
 
       {registerOpen && <ResourceCreateDrawer title="Register New Cluster" kind="cluster" onClose={closeRegister} actions={cceRegistrationMode === 'command' ? <><button type="button" className="is-primary" onClick={finishRegisterCluster}>Continue in Background</button><button type="button" onClick={closeRegister}>Cancel</button></> : <button type="button" onClick={closeRegister}>{cceRegistrationTask && ['succeeded', 'failed', 'canceled'].includes(cceRegistrationTask.status) ? 'Done' : 'Cancel'}</button>}>
         <ClusterRegistrationChoices registrationType={registrationType} registrationMode={cceRegistrationMode} installLoading={installLoading} onTypeChange={value => { resetDirectRegistration(); void loadRegistrationCommand(value); }} onModeChange={value => { setRegisterStep(1); setCopied(false); setCCERegistrationMode(value); }} />
-        {cceRegistrationMode === 'platform-direct' && <ClusterPlatformRegistrationFields registrationType={registrationType} cceUpload={cceUpload} cceContext={cceContext} cceUploadLoading={cceUploadLoading} cceUploadError={cceUploadError} cceInspection={cceInspection} cceInspectionLoading={cceInspectionLoading} cceStorageClass={cceStorageClass} cceRegistrationTask={cceRegistrationTask} onOpenGuide={() => setKubeconfigGuideType(registrationType)} onUpload={file => void uploadCCEKubeconfig(file)} onContextChange={setCCEContext} onInspect={() => void inspectCCECluster()} onStorageClassChange={setCCEStorageClass} onRegister={() => void startCCEDirectRegistration()} onCancel={() => void cancelCCEDirectRegistration()} />}
+        {cceRegistrationMode === 'platform-direct' && <ClusterPlatformRegistrationFields registrationType={registrationType} cceUpload={cceUpload} cceContext={cceContext} cceUploadLoading={cceUploadLoading} cceUploadError={cceUploadError} cceInspection={cceInspection} cceInspectionLoading={cceInspectionLoading} cceStorageClass={cceStorageClass} cceRegistrationTask={cceRegistrationTask} onUpload={file => void uploadCCEKubeconfig(file)} onContextChange={setCCEContext} onInspect={() => void inspectCCECluster()} onStorageClassChange={setCCEStorageClass} onRegister={() => void startCCEDirectRegistration()} onCancel={() => void cancelCCEDirectRegistration()} />}
         {cceRegistrationMode === 'command' && <ClusterCommandRegistrationFields registrationType={registrationType} prepareNodeCommand={prepareNodeCommand} installCommand={installCommand} installLoading={installLoading} installError={installError} copied={copied} caCopied={caCopied} registryCACommandRef={registryCACommandRef} installCommandRef={installCommandRef} onCopyCA={() => void copyRegistryCACommand()} onCopyInstall={() => void copyInstallCommand()} onRegenerate={() => void loadRegistrationCommand(registrationType)} />}
       </ResourceCreateDrawer>}
 
