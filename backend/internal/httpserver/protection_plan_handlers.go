@@ -330,9 +330,10 @@ func (r *Router) reconfigureProtectionPlanStorage(w http.ResponseWriter, req *ht
 	writeJSON(w, http.StatusAccepted, protectionPlanStorageReconfigureResponse(plan, tasks, warning))
 }
 
-func protectionPlanStorageReconfigureResponse(plan store.ProtectionPlan, tasks []store.Task, warning string) map[string]any {
+func protectionPlanStorageReconfigureResponse(plan store.ProtectionPlan, tasks []store.Task, warning string) protectionPlanResponse {
 	response := protectionPlanActivationResponse(plan, nil, warning)
-	response["storageTasks"] = nonNilSlice(tasks)
+	items := nonNilSlice(tasks)
+	response.StorageTasks = &items
 	return response
 }
 
@@ -419,35 +420,29 @@ func (r *Router) storageBindingActivationAction(clusterID string, storageRepoID 
 	return "dispatch", "", nil
 }
 
-func protectionPlanActivationResponse(item store.ProtectionPlan, activationTask *store.Task, warning string) map[string]any {
-	response := map[string]any{
-		"id":                   item.ID,
-		"tenantId":             item.TenantID,
-		"sourceClusterId":      item.SourceClusterID,
-		"appId":                item.AppID,
-		"appIds":               nonNilSlice(item.AppIDs),
-		"scopeType":            item.ScopeType,
-		"includedResources":    nonNilSlice(item.IncludedResources),
-		"resourceSelection":    item.ResourceSelection,
-		"labelSelector":        item.LabelSelector,
-		"includeClusterScoped": item.IncludeClusterScoped,
-		"storageRepoId":        item.StorageRepoID,
-		"policyId":             item.PolicyID,
-		"targetClusterId":      item.TargetClusterID,
-		"excludedResources":    nonNilSlice(item.ExcludedResources),
-		"preHooks":             nonNilSlice(item.PreHooks),
-		"postHooks":            nonNilSlice(item.PostHooks),
-		"status":               protectionPlanBusinessStatus(item.Status),
-		"createdAt":            item.CreatedAt,
-		"updatedAt":            item.UpdatedAt,
+func protectionPlanActivationResponse(item store.ProtectionPlan, activationTask *store.Task, warning string) protectionPlanResponse {
+	return protectionPlanResponse{
+		ID:                   item.ID,
+		TenantID:             item.TenantID,
+		SourceClusterID:      item.SourceClusterID,
+		AppID:                item.AppID,
+		AppIDs:               nonNilSlice(item.AppIDs),
+		ScopeType:            item.ScopeType,
+		IncludedResources:    nonNilSlice(item.IncludedResources),
+		ResourceSelection:    item.ResourceSelection,
+		LabelSelector:        item.LabelSelector,
+		IncludeClusterScoped: item.IncludeClusterScoped,
+		StorageRepoID:        item.StorageRepoID,
+		PolicyID:             item.PolicyID,
+		TargetClusterID:      item.TargetClusterID,
+		ExcludedResources:    nonNilSlice(item.ExcludedResources),
+		PreHooks:             nonNilSlice(item.PreHooks),
+		PostHooks:            nonNilSlice(item.PostHooks),
+		Status:               protectionPlanBusinessStatus(item.Status),
+		CreatedAt:            item.CreatedAt,
+		UpdatedAt:            item.UpdatedAt,
+		ActivationTask:       activationTask, Warning: warning,
 	}
-	if activationTask != nil {
-		response["activationTask"] = activationTask
-	}
-	if warning != "" {
-		response["warning"] = warning
-	}
-	return response
 }
 
 func (r *Router) deleteProtectionPlan(w http.ResponseWriter, req *http.Request) {
@@ -481,7 +476,7 @@ func (r *Router) deleteProtectionPlan(w http.ResponseWriter, req *http.Request) 
 	}
 	response := protectionPlanActivationResponse(plan, nil, cleanupWarning)
 	if cleanupTask.ID != "" {
-		response["cleanupTask"] = cleanupTask
+		response.CleanupTask = &cleanupTask
 	}
 	writeJSON(w, http.StatusOK, response)
 }

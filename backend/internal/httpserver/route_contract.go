@@ -110,11 +110,10 @@ func (r *Router) apiSchema(w http.ResponseWriter, req *http.Request) {
 				"default": map[string]any{"description": "Structured API error", "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/ApiError"}}}},
 			},
 		}
-		if !r.applyAuthPayloadContract(route.Pattern, operations[strings.ToLower(method)].(map[string]any)) {
-			if !applyApplicationPayloadContract(route.Pattern, operations[strings.ToLower(method)].(map[string]any)) {
-				if !applyPolicyPayloadContract(route.Pattern, operations[strings.ToLower(method)].(map[string]any)) {
-					applyStoragePayloadContract(route.Pattern, operations[strings.ToLower(method)].(map[string]any))
-				}
+		operation := operations[strings.ToLower(method)].(map[string]any)
+		for _, apply := range []func(string, map[string]any) bool{r.applyAuthPayloadContract, applyApplicationPayloadContract, applyPolicyPayloadContract, applyStoragePayloadContract, applyTaskPayloadContract, applyProtectionPlanPayloadContract} {
+			if apply(route.Pattern, operation) {
+				break
 			}
 		}
 	}

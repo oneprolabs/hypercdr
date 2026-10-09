@@ -21,6 +21,13 @@ write-only inputs and never appear in repository output, and sync distinguishes
 201 dispatched tasks from 202 queued responses. Isolated PostgreSQL tests compare
 actual CRUD/probe/queued-sync responses against these schemas without external
 object-storage dependencies.
+Task contracts cover reads/events, nullable latest tasks, cancellation, recovery
+retry, drill cleanup and backup/restore/drill/takeover creation. Backup documents
+single-task versus task-array responses and boolean versus numeric reuse fields;
+actual-response tests cover both, including first/reused action statuses.
+Protection-plan lifecycle responses share typed DTOs with the handlers and retain
+non-null empty arrays and optional activation/cleanup tasks. Domain tests also
+verify foreign task actions return 404 without mutating persisted tasks.
 Domain route coverage tests fail when one of these mounted routes lacks a
 payload contract.
 

@@ -97,56 +97,7 @@ func TestAuthContractMatchesActualCaptchaLoginConfigAndLogout(t *testing.T) {
 
 func validateWireObject(t *testing.T, value any, schema map[string]any) {
 	t.Helper()
-	if choices, ok := schema["anyOf"].([]any); ok {
-		if value == nil {
-			return
-		}
-		validateWireObject(t, value, choices[0].(map[string]any))
-		return
-	}
-	switch schema["type"] {
-	case "object":
-		object, ok := value.(map[string]any)
-		if !ok {
-			t.Fatalf("expected object, got %T", value)
-		}
-		required, _ := schema["required"].([]string)
-		for _, key := range required {
-			if _, ok := object[key]; !ok {
-				t.Fatalf("missing required %s", key)
-			}
-		}
-		properties, _ := schema["properties"].(map[string]any)
-		for key, val := range object {
-			child, ok := properties[key]
-			if !ok {
-				if additional, allowed := schema["additionalProperties"].(map[string]any); allowed {
-					validateWireObject(t, val, additional)
-					continue
-				}
-				t.Fatalf("undocumented field %s", key)
-			}
-			validateWireObject(t, val, child.(map[string]any))
-		}
-	case "array":
-		items, ok := value.([]any)
-		if !ok {
-			t.Fatalf("expected array got %T", value)
-		}
-		for _, item := range items {
-			validateWireObject(t, item, schema["items"].(map[string]any))
-		}
-	case "string":
-		if _, ok := value.(string); !ok {
-			t.Fatalf("expected string got %T", value)
-		}
-	case "boolean":
-		if _, ok := value.(bool); !ok {
-			t.Fatalf("expected boolean got %T", value)
-		}
-	case "integer", "number":
-		if _, ok := value.(float64); !ok {
-			t.Fatalf("expected number got %T", value)
-		}
+	if err := wireContractError(value, schema); err != nil {
+		t.Fatal(err)
 	}
 }
