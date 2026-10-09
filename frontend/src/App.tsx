@@ -1,3 +1,4 @@
+import { sessionMutationScope } from './app/session-mutation';
 import { replaceApplicationTags } from './api/applications';
 import { listTasks, listTaskEvents } from './api/tasks';
 import { listClusterIdentities, setClusterDefault, requestClusterUnregister, upgradeClusterAgent, upgradeClusterVelero } from './api/clusters';
@@ -963,7 +964,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     if (!token) return;
     let cancelled = false;
     void apiGet<AuthSession['user']>('/api/v1/auth/me').then(user => {
-      if (cancelled) return;
+      if (cancelled || resourceSessionOwnerRef.current !== token) return;
       setAuthSession(current => {
         if (!current || current.session.token !== token) return current;
         const next = { ...current, user };
@@ -1037,6 +1038,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
 
   const saveTimeZone = async () => {
     if (!authSession) return;
+    const apply = sessionMutationScope(resourceSessionOwnerRef, authSession.session.token);
     setSavingTimeZone(true);
     try {
       const user = await apiPatch<AuthSession['user']>('/api/v1/auth/me', {
@@ -1044,23 +1046,25 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
         displayName: authSession.user.displayName || '',
         timeZone: draftTimeZone,
       });
-      const next = { ...authSession, user };
-      setAuthSession(next);
-      writeStoredAuthSession(next);
-      setTimeZonePreference(user.timeZone || '');
-      userTimeZone = user.timeZone || browserTimeZone;
-      setSharedUserTimeZone(user.timeZone || browserTimeZone);
-      if (liveApiPolicies.length > 0) {
-        const remappedPolicies = liveApiPolicies.map(mapPolicy);
-        setPolicies(remappedPolicies);
-        setLivePolicies(remappedPolicies);
-      }
-      setTimeZoneDrawerOpen(false);
-      setToast(`Time zone changed to ${user.timeZone || browserTimeZone}`);
+      apply(() => {
+        const next = { ...authSession, user };
+        setAuthSession(next);
+        writeStoredAuthSession(next);
+        setTimeZonePreference(user.timeZone || '');
+        userTimeZone = user.timeZone || browserTimeZone;
+        setSharedUserTimeZone(user.timeZone || browserTimeZone);
+        if (liveApiPolicies.length > 0) {
+          const remappedPolicies = liveApiPolicies.map(mapPolicy);
+          setPolicies(remappedPolicies);
+          setLivePolicies(remappedPolicies);
+        }
+        setTimeZoneDrawerOpen(false);
+        setToast(`Time zone changed to ${user.timeZone || browserTimeZone}`);
+      });
     } catch (error) {
-      setToast(error instanceof Error ? error.message : 'Failed to update time zone');
+      apply(() => setToast(error instanceof Error ? error.message : 'Failed to update time zone'));
     } finally {
-      setSavingTimeZone(false);
+      apply(() => setSavingTimeZone(false));
     }
   };
 
@@ -1324,6 +1328,9 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     if (resourceSessionOwnerRef.current === owner) return;
     resourceSessionOwnerRef.current = owner;
     clearTenantResourceState();
+    setSavingTheme(false);
+    setSavingTimeZone(false);
+    setTimeZoneDrawerOpen(false);
   }, [authSession?.session.token, clearTenantResourceState]);
 
   const signOut = useCallback(() => {
@@ -1342,18 +1349,21 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
 
   const saveTheme = async (nextTheme: 'light' | 'dark') => {
     if (!authSession || savingTheme || theme === nextTheme) return;
+    const apply = sessionMutationScope(resourceSessionOwnerRef, authSession.session.token);
     setSavingTheme(true);
     try {
       const user = await apiPatch<AuthSession['user']>('/api/v1/auth/me/theme', { theme: nextTheme });
-      const nextSession = { ...authSession, user };
-      setAuthSession(nextSession);
-      writeStoredAuthSession(nextSession);
-      setTheme(user.theme === 'dark' ? 'dark' : 'light');
-      setAccountMenuOpen(false);
+      apply(() => {
+        const nextSession = { ...authSession, user };
+        setAuthSession(nextSession);
+        writeStoredAuthSession(nextSession);
+        setTheme(user.theme === 'dark' ? 'dark' : 'light');
+        setAccountMenuOpen(false);
+      });
     } catch (error) {
-      setToast(error instanceof Error ? error.message : 'Could not save appearance preference');
+      apply(() => setToast(error instanceof Error ? error.message : 'Could not save appearance preference'));
     } finally {
-      setSavingTheme(false);
+      apply(() => setSavingTheme(false));
     }
   };
 
@@ -2177,7 +2187,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
             {view === 'email_settings' && authSession?.user.systemAdmin && <React.Suspense fallback={<PageLoadFallback />}><LazyEmailSettingsPage currentUser={authSession.user} toast={setToast} /></React.Suspense>}
             {view === 'upgrades' && authSession?.user.systemAdmin && <React.Suspense fallback={<PageLoadFallback />}><LazyUpgradeManagementPage isAdmin={authSession.user.systemAdmin} toast={setToast} refreshPlatformData={() => refreshPlatformData()} /></React.Suspense>}
             {view === 'users' && authSession?.user.systemAdmin && !productCapabilities.advancedIdentity?.enabled && <React.Suspense fallback={<PageLoadFallback />}><LazyCommunityUserManagementPage currentUser={authSession.user} toast={setToast} /></React.Suspense>}
-            {view === 'profile' && authSession && <React.Suspense fallback={<PageLoadFallback />}><LazyProfilePage session={authSession} setSession={next => { setAuthSession(next); writeStoredAuthSession(next); }} toast={setToast} /></React.Suspense>}
+            {view === 'profile' && authSession && <React.Suspense fallback={<PageLoadFallback />}><LazyProfilePage session={authSession} setSession={next => { sessionMutationScope(resourceSessionOwnerRef, next.session.token)(() => { setAuthSession(next); writeStoredAuthSession(next); }); }} toast={message => { sessionMutationScope(resourceSessionOwnerRef, authSession.session.token)(() => setToast(message)); }} /></React.Suspense>}
             {authSession && visibleExtensionModules.map(module => view === module.view ? <React.Suspense key={module.id} fallback={<PageLoadFallback />}><module.component currentUser={authSession.user} clusters={liveApiClusters} toast={setToast} /></React.Suspense> : null)}
           </AnimatePresence>
         </section>

@@ -16,7 +16,7 @@
     "visual:compare": "env -u DISPLAY -u WAYLAND_DISPLAY -u XAUTHORITY PLAYWRIGHT_BROWSERS_PATH=/data/software/ms-playwright node scripts/visual-compare.mjs",
     "test": "npm run test:extensions && npm run test:topology && npm run test:task-ui && npm run test:api",
     "lint": "eslint src && tsc --noEmit",
-    "test:api": "node --experimental-strip-types --test src/api/client.test.mjs src/app/platform-snapshots.test.mjs"
+    "test:api": "node --experimental-strip-types --test src/api/client.test.mjs src/app/platform-snapshots.test.mjs src/app/session-mutation.test.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",

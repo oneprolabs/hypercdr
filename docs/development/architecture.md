@@ -115,6 +115,12 @@ catalog endpoints have typed domain API modules; request limits and existing
 workflow semantics are preserved.
 
 Authenticated `/api/v1/schema` exposes the live route, access and error inventory.
+Account preference/profile callbacks are scoped to the submitting session, just
+like shared resource updates. A delayed success, error or finally callback from
+an old session cannot restore its browser credentials, change the new session's
+theme/timezone or publish an unrelated toast/pending state. Session transitions
+reset preference pending flags before paint. Browser acceptance delays an actual
+appearance request through signout/relogin without saving a user preference.
 Task creation checks all cluster/application/plan/restore-point references against
 the resolved tenant. Restore-point creation checks its source, application, plan,
 storage and backup-task references; attaching a restore point during a task status
