@@ -121,6 +121,16 @@ storage and backup-task references; attaching a restore point during a task stat
 update uses the same tenant guard. These checks hold row locks inside the write
 transaction and reject invalid references before changing data or latest-task
 pointers. Late status reports retain the existing terminal-task immutability rule.
+Direct-registration request identity is persisted as tenant + uploader + request
+key. Exact retries reuse the original task even after an API restart, independent
+of task history length; changed settings or a second request for the same upload
+return a conflict. PostgreSQL unique indexes enforce request/session identity.
+The single active API serializes sealed-file publication and task creation; this
+does not introduce multi-active API support. Active tasks protect their temporary
+credentials from deletion and restart cleanup until the persisted deadline.
+Expiry marks an unfinished task failed with instructions to upload/inspect again.
+The credential lifetime, installer timeout and Kubernetes Job deadline share the
+provider timeout rule, including the longer configurable OpenShift timeout.
 Authentication request/success schemas use the same wire DTOs as the handlers,
 with live-response coverage tests. Restore-point list, cached/live content, and
 single/multi-cluster delete responses also have shared wire DTOs and actual-handler

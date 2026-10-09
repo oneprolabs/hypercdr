@@ -43,7 +43,7 @@ func TestCreateRegistrationExecutorJobUsesFixedHardenedTemplate(t *testing.T) {
 		t.Fatal(err)
 	}
 	router := &Router{cfg: config.Config{DeployMode: "helm", RegistrationExecutorImage: "registry/executor:v1", RegistrationExecutorNamespace: "hypercdr", RegistrationConfigSecret: "hypercdr-registration-executor-config", RegistrationSessionPVC: "hypercdr-sessions", RegistrationKubernetesAPI: server.URL, RegistrationServiceTokenPath: tokenPath, RegistrationServiceCAPath: caPath}, logger: slog.Default()}
-	if err = router.createRegistrationExecutorJob(context.Background(), "task-123"); err != nil {
+	if err = router.createRegistrationExecutorJob(context.Background(), "task-123", "native-kubernetes"); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(received)
@@ -58,6 +58,20 @@ func TestCreateRegistrationExecutorJobUsesFixedHardenedTemplate(t *testing.T) {
 	}
 	if strings.Contains(text, `"envFrom"`) {
 		t.Fatalf("Job imported an entire Secret instead of one required key: %s", text)
+	}
+	if received["spec"].(map[string]any)["activeDeadlineSeconds"] != float64(1500) {
+		t.Fatal("native installer deadline changed")
+	}
+	t.Setenv("HCDR_OPENSHIFT_REGISTRATION_TIMEOUT_SECONDS", "2700")
+	if err = router.createRegistrationExecutorJob(context.Background(), "openshift-task", "openshift"); err != nil {
+		t.Fatal(err)
+	}
+	if received["spec"].(map[string]any)["activeDeadlineSeconds"] != float64(3000) {
+		t.Fatal("OpenShift Job kills installer before its configured timeout")
+	}
+	raw, _ = json.Marshal(received)
+	if !strings.Contains(string(raw), `"name":"HCDR_OPENSHIFT_REGISTRATION_TIMEOUT_SECONDS","value":"2700"`) {
+		t.Fatal("configured timeout not propagated to isolated Job")
 	}
 	if err = router.createRegistrationInspectionJob(context.Background(), "ccer_abcdefghijklmnopqrstuvwxyz123456", "internal", "huaweicloud-cce"); err != nil {
 		t.Fatal(err)

@@ -335,6 +335,13 @@ create index idx_agent_sessions_cluster on agent_sessions(cluster_id, connected_
 
 ## Migration Phases
 
+Migration `000042_registration_request_identity.sql` adds partial unique indexes
+for cluster-registration tasks: `(tenant_id, payload.ownerId, payload.idempotencyKey)`
+and `(tenant_id, payload.sessionId)`. Only tasks with uploader identity participate;
+legacy tasks remain readable but are not reused for an owner-bound retry. New task
+payloads also persist `credentialExpiresAt` so restart cleanup can distinguish an
+active registration from an expired orphan without retaining an in-memory session.
+
 1. Base identity and tenant tables.
 2. Cluster registration and agent session tables.
 3. Inventory tables.

@@ -8,18 +8,25 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hypercdr-platform/platform/backend/internal/registration"
 	"io"
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
 
 var kubernetesNameUnsafe = regexp.MustCompile(`[^a-z0-9-]+`)
 
-func (r *Router) createRegistrationExecutorJob(ctx context.Context, taskID string) error {
-	return r.createIsolatedRegistrationJob(ctx, "register-"+taskID, taskID, true, []any{map[string]string{"name": "HCDR_REGISTRATION_TASK_ID", "value": taskID}})
+func (r *Router) createRegistrationExecutorJob(ctx context.Context, taskID string, clusterType string) error {
+	timeout := registration.TaskTimeout(clusterType)
+	env := []any{map[string]string{"name": "HCDR_REGISTRATION_TASK_ID", "value": taskID}}
+	if clusterType == "openshift" {
+		env = append(env, map[string]string{"name": "HCDR_OPENSHIFT_REGISTRATION_TIMEOUT_SECONDS", "value": strconv.FormatInt(int64(timeout/time.Second), 10)})
+	}
+	return r.createIsolatedRegistrationJob(ctx, "register-"+taskID, taskID, true, env, int64((timeout+5*time.Minute)/time.Second))
 }
 
 func (r *Router) createRegistrationInspectionJob(ctx context.Context, sessionID string, contextName string, clusterType string) error {
@@ -27,10 +34,10 @@ func (r *Router) createRegistrationInspectionJob(ctx context.Context, sessionID 
 		map[string]string{"name": "HCDR_REGISTRATION_INSPECT_SESSION_ID", "value": sessionID},
 		map[string]string{"name": "HCDR_REGISTRATION_INSPECT_CONTEXT", "value": contextName},
 		map[string]string{"name": "HCDR_REGISTRATION_INSPECT_CLUSTER_TYPE", "value": clusterType},
-	})
+	}, 1500)
 }
 
-func (r *Router) createIsolatedRegistrationJob(ctx context.Context, jobIdentity string, labelIdentity string, needsDatabase bool, actionEnv []any) error {
+func (r *Router) createIsolatedRegistrationJob(ctx context.Context, jobIdentity string, labelIdentity string, needsDatabase bool, actionEnv []any, deadlineSeconds int64) error {
 	if r.cfg.DeployMode != "helm" && r.cfg.DeployMode != "kubernetes" {
 		return nil
 	}
@@ -72,7 +79,7 @@ func (r *Router) createIsolatedRegistrationJob(ctx context.Context, jobIdentity 
 		containerEnv = append(containerEnv, map[string]any{"name": "HCDR_DATABASE_URL", "valueFrom": map[string]any{"secretKeyRef": map[string]string{"name": r.cfg.RegistrationConfigSecret, "key": "HCDR_DATABASE_URL"}}})
 	}
 	job := map[string]any{"apiVersion": "batch/v1", "kind": "Job", "metadata": map[string]any{"name": "hypercdr-" + suffix, "namespace": r.cfg.RegistrationExecutorNamespace, "labels": map[string]string{"app.kubernetes.io/component": "cluster-registration-executor", "hypercdr.io/operation-id": labelIdentity}}, "spec": map[string]any{
-		"backoffLimit": 0, "activeDeadlineSeconds": 1500, "ttlSecondsAfterFinished": 300,
+		"backoffLimit": 0, "activeDeadlineSeconds": deadlineSeconds, "ttlSecondsAfterFinished": 300,
 		"template": map[string]any{"metadata": map[string]any{"labels": map[string]string{"app.kubernetes.io/component": "cluster-registration-executor"}}, "spec": map[string]any{
 			"restartPolicy": "Never", "automountServiceAccountToken": false, "securityContext": map[string]any{"seccompProfile": map[string]string{"type": "RuntimeDefault"}},
 			"affinity":   map[string]any{"podAffinity": map[string]any{"requiredDuringSchedulingIgnoredDuringExecution": []any{map[string]any{"labelSelector": map[string]any{"matchLabels": platformLabels}, "topologyKey": "kubernetes.io/hostname"}}}},

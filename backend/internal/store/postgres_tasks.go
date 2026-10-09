@@ -187,6 +187,15 @@ func (s *PostgresStore) listTasks(filter TaskFilter) ([]Task, error) {
 	`
 	args := []any{}
 	conditions := []string{}
+	for _, ref := range []struct{ field, value string }{
+		{"ownerId", filter.RegistrationOwnerID}, {"idempotencyKey", filter.RegistrationKey},
+		{"sessionId", filter.RegistrationSessionID},
+	} {
+		if ref.value != "" {
+			args = append(args, ref.value)
+			conditions = append(conditions, fmt.Sprintf("payload->>'%s' = $%d", ref.field, len(args)))
+		}
+	}
 	if filter.TenantID != "" {
 		args = append(args, filter.TenantID)
 		conditions = append(conditions, fmt.Sprintf("tenant_id = $%d", len(args)))

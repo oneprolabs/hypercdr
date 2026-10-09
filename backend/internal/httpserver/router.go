@@ -49,6 +49,7 @@ type Router struct {
 	logMaintRun            bool
 	logCleanupAt           time.Time
 	cceRegistrationMu      sync.Mutex
+	registrationRequestMu  sync.Mutex
 	cceRegistrationUploads map[string]cceKubeconfigUpload
 	diagnosticLogRetention time.Duration
 	extensionRoutes        []ExtensionRoute

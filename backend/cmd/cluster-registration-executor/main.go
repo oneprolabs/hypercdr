@@ -252,13 +252,7 @@ func (s *server) runRegistrationTask(repo store.Store, task store.Task) {
 }
 
 func registrationTaskTimeout(clusterType string) time.Duration {
-	if normalizeClusterType(clusterType) == "openshift" {
-		if seconds, err := strconv.Atoi(strings.TrimSpace(os.Getenv("HCDR_OPENSHIFT_REGISTRATION_TIMEOUT_SECONDS"))); err == nil && seconds >= 60 {
-			return time.Duration(seconds) * time.Second
-		}
-		return 35 * time.Minute
-	}
-	return 20 * time.Minute
+	return registration.TaskTimeout(normalizeClusterType(clusterType))
 }
 
 func runInstallProcess(ctx context.Context, repo store.Store, taskID string, args []string) ([]byte, bool, bool, error) {

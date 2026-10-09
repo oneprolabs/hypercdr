@@ -160,7 +160,7 @@ func TestKubeconfigUploadOwnerCannotBeImpersonatedWithinTenant(t *testing.T) {
 	if err := os.WriteFile(path, []byte("private"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	r := &Router{cceRegistrationUploads: map[string]cceKubeconfigUpload{
+	r := &Router{store: newTestStore(t), cceRegistrationUploads: map[string]cceKubeconfigUpload{
 		"upload": {ID: "upload", TenantID: store.DefaultTenantID, OwnerID: "owner", Path: path, ExpiresAt: time.Now().Add(time.Minute)},
 	}}
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/cluster-registrations/cce/kubeconfigs/upload", nil)

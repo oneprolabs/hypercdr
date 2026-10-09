@@ -42,6 +42,7 @@ func applyRegistrationPayloadContract(pattern string, operation map[string]any) 
 		responses := operation["responses"].(map[string]any)
 		delete(responses, "2XX")
 		responses["204"] = map[string]any{"description": "Uploader-owned session and its temporary files removed; no response body"}
+		responses["409"] = map[string]any{"description": "An active registration owns the credentials; cancel the task before deleting", "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/ApiError"}}}}
 		operation["x-hypercdr-payload-contract"] = true
 		return true
 	}
@@ -65,7 +66,8 @@ func applyRegistrationPayloadContract(pattern string, operation map[string]any) 
 			key := properties["idempotencyKey"].(map[string]any)
 			key["minLength"] = 16
 			key["maxLength"] = 128
-			operation["responses"].(map[string]any)["200"] = map[string]any{"description": "Existing tenant-scoped registration task reused", "content": map[string]any{"application/json": map[string]any{"schema": wireSchema(c.Response)}}}
+			operation["responses"].(map[string]any)["200"] = map[string]any{"description": "Exact uploader-and-tenant-bound registration request reused, including after API restart", "content": map[string]any{"application/json": map[string]any{"schema": wireSchema(c.Response)}}}
+			operation["responses"].(map[string]any)["409"] = map[string]any{"description": "Inspection required, request key reused with different settings, or upload session already assigned to another request", "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/ApiError"}}}}
 		}
 	}
 	operation["description"] = "Temporary kubeconfig sessions are bound to both tenant and uploader. After an API restart, upload and inspect again; persisted registration tasks remain available. The /cce/ alias defaults to Huawei Cloud CCE."

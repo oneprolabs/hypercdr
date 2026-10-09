@@ -276,16 +276,39 @@ func (r *Router) startCCEDirectRegistration(w http.ResponseWriter, req *http.Req
 		return
 	}
 	tenantID := registrationTenantID(req)
+	ownerID := registrationOwnerID(req)
+	if ownerID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+		return
+	}
 	clusterType := normalizeDirectRegistrationClusterType(body.ClusterType)
 	if clusterType == "" && strings.Contains(req.URL.Path, "/cce/") {
 		clusterType = "huaweicloud-cce"
+	}
+	// The supported deployment has one active API. Serialize request-file
+	// publication and task creation; durable keys remain scoped across restart.
+	r.registrationRequestMu.Lock()
+	defer r.registrationRequestMu.Unlock()
+	existing, err := r.store.ListTasksFiltered(store.TaskFilter{TenantID: tenantID, RegistrationOwnerID: ownerID, RegistrationKey: body.IdempotencyKey, Types: []string{"cluster-registration"}, Limit: 1})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "registration_task_lookup_failed"})
+		return
+	}
+	if len(existing) > 0 {
+		task := existing[0]
+		if stringPayload(task.Payload, "sessionId") != body.SessionID || stringPayload(task.Payload, "context") != body.Context || stringPayload(task.Payload, "clusterType") != clusterType || stringPayload(task.Payload, "storageClass") != strings.TrimSpace(body.StorageClass) {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "registration_idempotency_conflict", "message": "This request key was already used for different registration settings. Use a new upload and request key."})
+			return
+		}
+		writeJSON(w, http.StatusOK, task)
+		return
 	}
 	r.cceRegistrationMu.Lock()
 	r.cleanupExpiredCCEKubeconfigsLocked(time.Now().UTC())
 	upload, ok := r.cceRegistrationUploads[body.SessionID]
 	allowed := ok && clusterType != "" && upload.ClusterType == clusterType && upload.TenantID == tenantID && upload.OwnerID == registrationOwnerID(req) && slices.Contains(upload.Contexts, body.Context) && upload.Inspected[body.Context]
 	if allowed {
-		upload.ExpiresAt = time.Now().UTC().Add(25 * time.Minute)
+		upload.ExpiresAt = time.Now().UTC().Add(registration.TaskTimeout(clusterType) + 10*time.Minute)
 		r.cceRegistrationUploads[body.SessionID] = upload
 	}
 	r.cceRegistrationMu.Unlock()
@@ -294,16 +317,14 @@ func (r *Router) startCCEDirectRegistration(w http.ResponseWriter, req *http.Req
 		return
 	}
 	r.startWorker(func() { r.expireCCEKubeconfig(body.SessionID, upload.ExpiresAt) })
-	existing, err := r.store.ListTasksFiltered(store.TaskFilter{TenantID: tenantID, Types: []string{"cluster-registration"}, Limit: 200})
+	existing, err = r.store.ListTasksFiltered(store.TaskFilter{TenantID: tenantID, RegistrationSessionID: body.SessionID, Types: []string{"cluster-registration"}, Limit: 1})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "registration_task_lookup_failed"})
 		return
 	}
-	for _, task := range existing {
-		if stringPayload(task.Payload, "idempotencyKey") == body.IdempotencyKey {
-			writeJSON(w, http.StatusOK, task)
-			return
-		}
+	if len(existing) > 0 {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "registration_session_in_use", "message": "This kubeconfig upload already belongs to a registration task. Upload and inspect again to start a new registration."})
+		return
 	}
 	actor, _ := requestUser(req)
 	displayType := "Native Kubernetes"
@@ -312,7 +333,7 @@ func (r *Router) startCCEDirectRegistration(w http.ResponseWriter, req *http.Req
 	} else if clusterType == "openshift" {
 		displayType = "OpenShift"
 	}
-	token, err := r.store.CreateAgentToken(tenantID, actor.ID, displayType+" platform-direct registration", 30*time.Minute, clusterType)
+	token, err := r.store.CreateAgentToken(tenantID, actor.ID, displayType+" platform-direct registration", time.Until(upload.ExpiresAt), clusterType)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "registration_token_create_failed"})
 		return
@@ -334,7 +355,7 @@ func (r *Router) startCCEDirectRegistration(w http.ResponseWriter, req *http.Req
 		return
 	}
 	task, err := r.store.CreateTask(store.TaskInput{TenantID: tenantID, Type: "cluster-registration", Status: "queued", CommandID: store.NewPublicID(), Payload: map[string]any{
-		"sessionId": body.SessionID, "context": body.Context, "storageClass": strings.TrimSpace(body.StorageClass), "idempotencyKey": body.IdempotencyKey, "provider": clusterType, "clusterType": clusterType, "stage": "queued",
+		"sessionId": body.SessionID, "ownerId": ownerID, "context": body.Context, "storageClass": strings.TrimSpace(body.StorageClass), "idempotencyKey": body.IdempotencyKey, "provider": clusterType, "clusterType": clusterType, "stage": "queued", "credentialExpiresAt": upload.ExpiresAt.Format(time.RFC3339Nano),
 	}})
 	if err != nil {
 		_ = os.Remove(requestPath)
@@ -342,7 +363,7 @@ func (r *Router) startCCEDirectRegistration(w http.ResponseWriter, req *http.Req
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "registration_task_create_failed", "message": "The registration task could not be created. No cluster resources were changed; retry the operation."})
 		return
 	}
-	if err = r.createRegistrationExecutorJob(req.Context(), task.ID); err != nil {
+	if err = r.createRegistrationExecutorJob(req.Context(), task.ID, clusterType); err != nil {
 		_ = os.RemoveAll(filepath.Dir(upload.Path))
 		r.cceRegistrationMu.Lock()
 		delete(r.cceRegistrationUploads, body.SessionID)
@@ -438,19 +459,29 @@ func secureRegistrationID() (string, error) {
 }
 
 func (r *Router) deleteCCEKubeconfig(w http.ResponseWriter, req *http.Request) {
+	r.registrationRequestMu.Lock()
+	defer r.registrationRequestMu.Unlock()
 	id := req.PathValue("id")
 	r.cceRegistrationMu.Lock()
 	upload, ok := r.cceRegistrationUploads[id]
-	if ok && upload.TenantID == registrationTenantID(req) && upload.OwnerID == registrationOwnerID(req) {
-		delete(r.cceRegistrationUploads, id)
-	} else {
-		ok = false
-	}
+	ok = ok && upload.TenantID == registrationTenantID(req) && upload.OwnerID == registrationOwnerID(req)
 	r.cceRegistrationMu.Unlock()
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "kubeconfig_session_not_found"})
 		return
 	}
+	tasks, err := r.store.ListTasksFiltered(store.TaskFilter{TenantID: upload.TenantID, RegistrationSessionID: id, Types: []string{"cluster-registration"}, Statuses: []string{"queued", "dispatched", "accepted", "running", "canceling"}, Limit: 1})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "registration_task_lookup_failed"})
+		return
+	}
+	if len(tasks) > 0 {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "registration_session_in_use", "message": "Cancel the active registration task before removing its temporary kubeconfig."})
+		return
+	}
+	r.cceRegistrationMu.Lock()
+	delete(r.cceRegistrationUploads, id)
+	r.cceRegistrationMu.Unlock()
 	_ = os.RemoveAll(filepath.Dir(upload.Path))
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -481,12 +512,42 @@ func (r *Router) cleanupOrphanedCCEKubeconfigs(now time.Time) {
 	if err != nil {
 		return
 	}
+	active := map[string]time.Time{}
+	if r.store != nil {
+		tasks, err := r.store.ListTasksFiltered(store.TaskFilter{Types: []string{"cluster-registration"}, Statuses: []string{"queued", "dispatched", "accepted", "running", "canceling"}})
+		if err != nil {
+			r.logger.Warn("cannot check registration credential ownership during cleanup", "error", err)
+			return
+		}
+		for _, task := range tasks {
+			id := stringPayload(task.Payload, "sessionId")
+			deadline, err := time.Parse(time.RFC3339Nano, stringPayload(task.Payload, "credentialExpiresAt"))
+			if err != nil {
+				deadline = task.CreatedAt.Add(registration.TaskTimeout(stringPayload(task.Payload, "clusterType")) + 10*time.Minute)
+			}
+			if deadline.After(now) {
+				active[id] = deadline
+				continue
+			}
+			if _, _, err := r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "failed", Progress: 100, ErrorCode: "REGISTRATION_SESSION_EXPIRED", ErrorMessage: "Registration did not finish before its temporary credentials expired. Upload and inspect again, then retry registration.", MarkDone: true}); err != nil {
+				active[id] = now.Add(time.Minute)
+			}
+		}
+	}
 	cutoff := now.UTC().Add(-cceUploadTTL)
 	for _, entry := range entries {
 		if !entry.IsDir() || !cceRegistrationSessionIDPattern.MatchString(entry.Name()) {
 			continue
 		}
 		dir := filepath.Join(baseDir, entry.Name())
+		if active[entry.Name()].After(now) {
+			continue
+		}
+		r.cceRegistrationMu.Lock()
+		if upload, ok := r.cceRegistrationUploads[entry.Name()]; ok && upload.ExpiresAt.After(now) {
+			r.cceRegistrationMu.Unlock()
+			continue
+		}
 		info, statErr := os.Stat(filepath.Join(dir, "kubeconfig"))
 		if statErr != nil {
 			info, statErr = entry.Info()
@@ -494,6 +555,7 @@ func (r *Router) cleanupOrphanedCCEKubeconfigs(now time.Time) {
 		if statErr == nil && !info.ModTime().After(cutoff) {
 			_ = os.RemoveAll(dir)
 		}
+		r.cceRegistrationMu.Unlock()
 	}
 }
 
@@ -530,11 +592,12 @@ func (r *Router) expireCCEKubeconfig(id string, expiresAt time.Time) {
 	}
 	r.cceRegistrationMu.Lock()
 	upload, ok := r.cceRegistrationUploads[id]
-	if ok && !upload.ExpiresAt.After(time.Now().UTC()) {
+	expired := ok && !upload.ExpiresAt.After(time.Now().UTC())
+	if expired {
 		delete(r.cceRegistrationUploads, id)
 	}
 	r.cceRegistrationMu.Unlock()
-	if ok {
+	if expired {
 		_ = os.RemoveAll(filepath.Dir(upload.Path))
 	}
 }
