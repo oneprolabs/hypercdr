@@ -313,13 +313,7 @@ func validUserEmail(value string) bool {
 
 func (r *Router) authConfig(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{
-		"googleEnabled":    strings.TrimSpace(r.cfg.GoogleClientID) != "" && strings.TrimSpace(r.cfg.GoogleClientSecret) != "",
-		"challengeMode":    r.authChallengeMode(),
-		"turnstileSiteKey": strings.TrimSpace(r.cfg.TurnstileSiteKey),
-		"turnstileEnabled": r.turnstileEnabled(),
-		"timeZone":         serverTimeZone(),
-	})
+	writeJSON(w, http.StatusOK, authConfigResponse{GoogleEnabled: strings.TrimSpace(r.cfg.GoogleClientID) != "" && strings.TrimSpace(r.cfg.GoogleClientSecret) != "", ChallengeMode: r.authChallengeMode(), TurnstileSiteKey: strings.TrimSpace(r.cfg.TurnstileSiteKey), TurnstileEnabled: r.turnstileEnabled(), TimeZone: serverTimeZone()})
 }
 
 // authTurnstileConfig exposes only public challenge metadata. The secret is
@@ -329,9 +323,7 @@ func (r *Router) authTurnstileConfig(w http.ResponseWriter, req *http.Request) {
 	enabled := r.turnstileEnabled()
 	site := strings.TrimSpace(r.cfg.TurnstileSiteKey)
 	configured := site != "" && strings.TrimSpace(r.cfg.TurnstileSecretKey) != ""
-	writeJSON(w, http.StatusOK, map[string]any{"code": "0000", "data": map[string]any{
-		"enabled": enabled, "configured": configured, "site_key": site,
-	}})
+	writeJSON(w, http.StatusOK, turnstileConfigResponse{Code: "0000", Data: turnstilePublicConfig{Enabled: enabled, Configured: configured, SiteKey: site}})
 }
 
 func (r *Router) turnstileEnabled() bool {
@@ -380,14 +372,12 @@ func serverLocation() *time.Location {
 }
 
 func (r *Router) forgotPassword(w http.ResponseWriter, req *http.Request) {
-	var body struct {
-		Email string `json:"email"`
-	}
+	var body forgotPasswordRequest
 	if decodeJSON(req, &body) != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
 		return
 	}
-	response := map[string]any{"message": "If the email address is registered, we will send password reset instructions."}
+	response := passwordResetResponse{Message: "If the email address is registered, we will send password reset instructions."}
 	if !validUserEmail(body.Email) {
 		writeJSON(w, http.StatusOK, response)
 		return
@@ -414,8 +404,8 @@ func (r *Router) forgotPassword(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 	if found && r.cfg.PasswordResetRevealToken {
-		response["resetToken"] = token
-		response["expiresInSeconds"] = 900
+		response.ResetToken = token
+		response.ExpiresInSeconds = 900
 	}
 	writeJSON(w, http.StatusOK, response)
 }
@@ -495,7 +485,7 @@ func (r *Router) sendConfiguredEmail(settings store.EmailSettings, recipient, su
 }
 
 func (r *Router) resetPassword(w http.ResponseWriter, req *http.Request) {
-	var body struct{ Token, Password string }
+	var body resetPasswordRequest
 	if decodeJSON(req, &body) != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
 		return
@@ -513,7 +503,7 @@ func (r *Router) resetPassword(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "reset_failed"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"message": "Password updated. You can now sign in."})
+	writeJSON(w, http.StatusOK, messageResponse{Message: "Password updated. You can now sign in."})
 }
 
 func (r *Router) googleStart(w http.ResponseWriter, req *http.Request) {

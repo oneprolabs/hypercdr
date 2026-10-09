@@ -105,21 +105,11 @@ func (r *Router) createCaptcha(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"id":        id,
-		"image":     captchaImageDataURL(code),
-		"expiresAt": now.Add(2 * time.Minute).Format(time.RFC3339),
-	})
+	writeJSON(w, http.StatusOK, captchaResponse{ID: id, Image: captchaImageDataURL(code), ExpiresAt: now.Add(2 * time.Minute).Format(time.RFC3339)})
 }
 
 func (r *Router) login(w http.ResponseWriter, req *http.Request) {
-	var body struct {
-		Email          string `json:"email"`
-		Password       string `json:"password"`
-		CaptchaID      string `json:"captchaId"`
-		CaptchaCode    string `json:"captchaCode"`
-		TurnstileToken string `json:"turnstileToken"`
-	}
+	var body loginRequest
 	if err := decodeJSON(req, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
 		return
@@ -162,13 +152,7 @@ func (r *Router) login(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "session_create_failed"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"user": user,
-		"session": map[string]any{
-			"token":     session.Token,
-			"expiresAt": session.ExpiresAt.Format(time.RFC3339),
-		},
-	})
+	writeJSON(w, http.StatusOK, loginResponse{User: user, Session: loginSessionResponse{Token: session.Token, ExpiresAt: session.ExpiresAt.Format(time.RFC3339)}})
 }
 
 func bearerToken(req *http.Request) string {
@@ -181,7 +165,7 @@ func requestUser(req *http.Request) (store.User, bool) {
 
 func (r *Router) logout(w http.ResponseWriter, req *http.Request) {
 	_ = r.identityProvider.DeleteSession(req.Context(), bearerToken(req))
-	writeJSON(w, http.StatusOK, map[string]any{"loggedOut": true})
+	writeJSON(w, http.StatusOK, logoutResponse{LoggedOut: true})
 }
 func (r *Router) currentUser(w http.ResponseWriter, req *http.Request) {
 	u, ok := requestUser(req)
@@ -196,11 +180,7 @@ func (r *Router) updateCurrentUser(w http.ResponseWriter, req *http.Request) {
 	if !ok {
 		return
 	}
-	var body struct {
-		DisplayName string  `json:"displayName"`
-		Email       string  `json:"email"`
-		TimeZone    *string `json:"timeZone"`
-	}
+	var body profileRequest
 	if decodeJSON(req, &body) != nil {
 		writeJSON(w, 400, map[string]any{"error": "invalid_json"})
 		return
@@ -232,9 +212,7 @@ func (r *Router) updateCurrentUserTheme(w http.ResponseWriter, req *http.Request
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "authentication_required"})
 		return
 	}
-	var body struct {
-		Theme string `json:"theme"`
-	}
+	var body themeRequest
 	if decodeJSON(req, &body) != nil || (body.Theme != "light" && body.Theme != "dark") {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_theme"})
 		return
@@ -255,11 +233,7 @@ func (r *Router) changeOwnPassword(w http.ResponseWriter, req *http.Request) {
 	if !ok {
 		return
 	}
-	var body struct {
-		CurrentPassword string `json:"currentPassword"`
-		NewPassword     string `json:"newPassword"`
-		RecoveryEmail   string `json:"recoveryEmail"`
-	}
+	var body passwordChangeRequest
 	if decodeJSON(req, &body) != nil || !validUserPassword(body.NewPassword) {
 		writeJSON(w, 400, map[string]any{"error": "password_invalid", "message": "Password must be 8 to 128 characters."})
 		return

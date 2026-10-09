@@ -63,7 +63,8 @@ catalog endpoints have typed domain API modules; request limits and existing
 workflow semantics are preserved.
 
 Authenticated `/api/v1/schema` exposes the live route, access and error inventory.
-Endpoint request/success payload schemas remain incomplete; this is not yet a
+Authentication request/success schemas use the same wire DTOs as the handlers,
+with live-response coverage tests. Other endpoint payload schemas remain incomplete; this is not yet a
 client-generation contract. Existing error codes and HTTP statuses are preserved;
 JSON errors can also carry the request ID from the response header. English
 remains the UI language; the header shows an indicator rather than a switcher

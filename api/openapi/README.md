@@ -6,8 +6,13 @@ bearer security, endpoint-specific release-token alternatives, migration-session
 authorization, and the shared error envelope (`error`, optional `message` and
 `requestId`). It includes edition extension routes only when they are mounted.
 
-This is an incremental contract: endpoint request bodies and successful payloads
-are not yet comprehensively modeled. Do not generate a client from it yet.
+Authentication routes share typed wire DTOs with their handlers and expose
+request fields and successful payloads, including the configured challenge mode.
+Tests check mounted auth coverage and compare actual login/profile/config/logout
+responses with the schemas.
+
+This is an incremental contract: other endpoint request bodies and successful
+payloads are not yet comprehensively modeled. Do not generate a client from it yet.
 The route/access inventory is generated at runtime rather than copied by hand.
 Tests verify coverage and default tenant guards. Unknown API domains fail route
 registration until an access policy is explicitly added.

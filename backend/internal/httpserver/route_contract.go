@@ -110,6 +110,7 @@ func (r *Router) apiSchema(w http.ResponseWriter, req *http.Request) {
 				"default": map[string]any{"description": "Structured API error", "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/ApiError"}}}},
 			},
 		}
+		r.applyAuthPayloadContract(route.Pattern, operations[strings.ToLower(method)].(map[string]any))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"openapi": "3.1.0", "info": map[string]any{"title": "HyperCDR API", "version": "v1", "description": "Live route/access/error contract. Request and success payload schemas are not yet comprehensive; this is not a client-generation contract."},
