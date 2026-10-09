@@ -2,9 +2,13 @@ package store
 
 import "testing"
 
-func seedRestorePointBackupTask(t *testing.T, repo *MemoryStore, clusterID string) (ProtectionPlan, Task) {
+func seedRestorePointBackupTask(t *testing.T, repo *PostgresStore, clusterID string) (ProtectionPlan, Task) {
 	t.Helper()
-	plan, err := repo.CreateProtectionPlan(ProtectionPlanInput{SourceClusterID: clusterID, Status: "active"})
+	apps, err := repo.ListApplications(clusterID)
+	if err != nil || len(apps) != 1 {
+		t.Fatalf("fixture application: %v", err)
+	}
+	plan, err := repo.CreateProtectionPlan(ProtectionPlanInput{SourceClusterID: clusterID, AppID: apps[0].ID, Status: "active"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -16,12 +20,13 @@ func seedRestorePointBackupTask(t *testing.T, repo *MemoryStore, clusterID strin
 }
 
 func TestRestorePointDisplayNameIsDeprecated(t *testing.T) {
-	repo := NewMemoryStore()
-	plan, task := seedRestorePointBackupTask(t, repo, "cluster-1")
+	repo := newTestStore(t)
+	cluster, _ := seedPlanApplication(t, repo)
+	plan, task := seedRestorePointBackupTask(t, repo, cluster.ID)
 	point, err := repo.CreateRestorePoint(RestorePointInput{
 		ProtectionPlanID: plan.ID,
 		BackupTaskID:     task.ID,
-		SourceClusterID:  "cluster-1",
+		SourceClusterID:  cluster.ID,
 		VeleroBackupName: "backup-1",
 		DisplayName:      "RP-custom",
 	})

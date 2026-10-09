@@ -3,23 +3,31 @@ package store
 import "testing"
 
 func TestCreateClusterlessTaskUsesExplicitTenant(t *testing.T) {
-	repo := NewMemoryStore()
-	task, err := repo.CreateTask(TaskInput{TenantID: "tenant-registration", Type: "cluster-registration", Status: "queued"})
+	repo := newTestStore(t)
+	tenant, err := repo.CreateTenant(TenantInput{Name: "Registration", Status: "active"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if task.TenantID != "tenant-registration" {
+	task, err := repo.CreateTask(TaskInput{TenantID: tenant.ID, Type: "cluster-registration", Status: "queued"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.TenantID != tenant.ID {
 		t.Fatalf("expected explicit tenant, got %q", task.TenantID)
 	}
-	items, err := repo.ListTasksFiltered(TaskFilter{TenantID: "tenant-registration", Types: []string{"cluster-registration"}})
+	items, err := repo.ListTasksFiltered(TaskFilter{TenantID: tenant.ID, Types: []string{"cluster-registration"}})
 	if err != nil || len(items) != 1 || items[0].ID != task.ID {
 		t.Fatalf("tenant-filtered registration task missing: %#v err=%v", items, err)
 	}
 }
 
 func TestClaimQueuedTaskClaimsExactlyOnce(t *testing.T) {
-	repo := NewMemoryStore()
-	created, err := repo.CreateTask(TaskInput{TenantID: "tenant-registration", Type: "cluster-registration", Status: "queued"})
+	repo := newTestStore(t)
+	tenant, err := repo.CreateTenant(TenantInput{Name: "Registration", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := repo.CreateTask(TaskInput{TenantID: tenant.ID, Type: "cluster-registration", Status: "queued"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,9 +44,13 @@ func TestClaimQueuedTaskClaimsExactlyOnce(t *testing.T) {
 }
 
 func TestClaimQueuedTaskByIDCannotClaimSibling(t *testing.T) {
-	repo := NewMemoryStore()
-	first, _ := repo.CreateTask(TaskInput{TenantID: "tenant-a", Type: "cluster-registration", Status: "queued"})
-	second, _ := repo.CreateTask(TaskInput{TenantID: "tenant-a", Type: "cluster-registration", Status: "queued"})
+	repo := newTestStore(t)
+	tenant, err := repo.CreateTenant(TenantInput{Name: "Registration", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _ := repo.CreateTask(TaskInput{TenantID: tenant.ID, Type: "cluster-registration", Status: "queued"})
+	second, _ := repo.CreateTask(TaskInput{TenantID: tenant.ID, Type: "cluster-registration", Status: "queued"})
 	claimed, ok, err := repo.ClaimQueuedTaskByID(second.ID, "cluster-registration", "job-second")
 	if err != nil || !ok || claimed.ID != second.ID {
 		t.Fatalf("wrong task claimed: %#v ok=%v err=%v", claimed, ok, err)

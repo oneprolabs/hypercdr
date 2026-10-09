@@ -48,8 +48,12 @@ func TestRegistrationTaskDestroysSessionAndCompletes(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sessionDir, "install-request.json"), raw, 0600); err != nil {
 		t.Fatal(err)
 	}
-	repo := store.NewMemoryStore()
-	task, err := repo.CreateTask(store.TaskInput{TenantID: "tenant-a", Type: "cluster-registration", Status: "running", Payload: map[string]any{"sessionId": sessionID, "context": "internal"}})
+	repo := newTestStore(t)
+	tenant, err := repo.CreateTenant(store.TenantInput{Name: "Registration", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := repo.CreateTask(store.TaskInput{TenantID: tenant.ID, Type: "cluster-registration", Status: "running", Payload: map[string]any{"sessionId": sessionID, "context": "internal"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,8 +82,12 @@ func TestRegistrationFailureIsRedactedAndSessionDestroyed(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sessionDir, "install-request.json"), raw, 0600); err != nil {
 		t.Fatal(err)
 	}
-	repo := store.NewMemoryStore()
-	task, _ := repo.CreateTask(store.TaskInput{TenantID: "tenant-a", Type: "cluster-registration", Status: "running", Payload: map[string]any{"sessionId": sessionID, "context": "internal"}})
+	repo := newTestStore(t)
+	tenant, err := repo.CreateTenant(store.TenantInput{Name: "Registration", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, _ := repo.CreateTask(store.TaskInput{TenantID: tenant.ID, Type: "cluster-registration", Status: "running", Payload: map[string]any{"sessionId": sessionID, "context": "internal"}})
 	(&server{baseDir: base, runner: fakeRunner{}, logger: discardLogger()}).runRegistrationTask(repo, task)
 	updated, _, _ := repo.GetTask(task.ID)
 	if updated.Status != "failed" || strings.Contains(updated.ErrorMessage, "secret-token") || !strings.Contains(updated.ErrorMessage, "[REDACTED]") {
@@ -98,8 +106,12 @@ func TestRunInstallProcessHonorsCancellationAndTermTrap(t *testing.T) {
 	if err := os.WriteFile(script, []byte(contents), 0700); err != nil {
 		t.Fatal(err)
 	}
-	repo := store.NewMemoryStore()
-	task, err := repo.CreateTask(store.TaskInput{TenantID: "tenant-a", Type: "cluster-registration", Status: "canceling"})
+	repo := newTestStore(t)
+	tenant, err := repo.CreateTenant(store.TenantInput{Name: "Registration", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := repo.CreateTask(store.TaskInput{TenantID: tenant.ID, Type: "cluster-registration", Status: "canceling"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,8 +127,12 @@ func TestRunInstallProcessHonorsCancellationAndTermTrap(t *testing.T) {
 }
 
 func TestRegistrationProgressWriterReportsInstallerStages(t *testing.T) {
-	repo := store.NewMemoryStore()
-	task, err := repo.CreateTask(store.TaskInput{TenantID: "tenant-a", Type: "cluster-registration", Status: "running"})
+	repo := newTestStore(t)
+	tenant, err := repo.CreateTenant(store.TenantInput{Name: "Registration", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := repo.CreateTask(store.TaskInput{TenantID: tenant.ID, Type: "cluster-registration", Status: "running"})
 	if err != nil {
 		t.Fatal(err)
 	}

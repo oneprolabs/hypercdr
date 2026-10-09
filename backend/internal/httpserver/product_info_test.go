@@ -9,12 +9,11 @@ import (
 	"testing"
 
 	"hypercdr-platform/platform/backend/internal/config"
-	"hypercdr-platform/platform/backend/internal/store"
 )
 
 func TestCommunityProductInfoIsPublic(t *testing.T) {
 	response := httptest.NewRecorder()
-	NewRouter(config.Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)), store.NewMemoryStore()).ServeHTTP(
+	NewRouter(config.Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)), newTestStore(t)).ServeHTTP(
 		response,
 		httptest.NewRequest(http.MethodGet, "/api/v1/product-info", nil),
 	)
@@ -39,7 +38,7 @@ func TestCustomProductInfoIsReturnedUnchanged(t *testing.T) {
 		License:      map[string]any{"mode": "development", "status": "active"},
 	}
 	response := httptest.NewRecorder()
-	NewRouterWithProductInfo(config.Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)), store.NewMemoryStore(), want).ServeHTTP(
+	NewRouterWithProductInfo(config.Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)), newTestStore(t), want).ServeHTTP(
 		response,
 		httptest.NewRequest(http.MethodGet, "/api/v1/product-info", nil),
 	)

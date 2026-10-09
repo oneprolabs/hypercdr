@@ -37,7 +37,7 @@ users:
 `
 
 func TestCCEKubeconfigUploadListsContextsAndCanBeDeleted(t *testing.T) {
-	server := httptest.NewServer(NewRouter(config.Config{}, slog.Default(), store.NewMemoryStore()))
+	server := httptest.NewServer(NewRouter(config.Config{}, slog.Default(), newTestStore(t)))
 	defer server.Close()
 
 	status, response := uploadTestKubeconfig(t, server.URL, "cce.yaml", validCCEKubeconfig)
@@ -58,7 +58,7 @@ func TestCCEKubeconfigUploadListsContextsAndCanBeDeleted(t *testing.T) {
 	}
 
 	req, _ := http.NewRequest(http.MethodDelete, server.URL+"/api/v1/cluster-registrations/cce/kubeconfigs/"+id, nil)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := authenticatedTestClient(t).Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestCCEKubeconfigUploadListsContextsAndCanBeDeleted(t *testing.T) {
 }
 
 func TestKubeconfigUploadAcceptsStandardExtensionlessFilename(t *testing.T) {
-	server := httptest.NewServer(NewRouter(config.Config{}, slog.Default(), store.NewMemoryStore()))
+	server := httptest.NewServer(NewRouter(config.Config{}, slog.Default(), newTestStore(t)))
 	defer server.Close()
 
 	status, response := uploadTestKubeconfig(t, server.URL, "kubeconfig", validCCEKubeconfig)
@@ -79,7 +79,7 @@ func TestKubeconfigUploadAcceptsStandardExtensionlessFilename(t *testing.T) {
 }
 
 func TestCCEKubeconfigUploadRejectsExecPlugin(t *testing.T) {
-	server := httptest.NewServer(NewRouter(config.Config{}, slog.Default(), store.NewMemoryStore()))
+	server := httptest.NewServer(NewRouter(config.Config{}, slog.Default(), newTestStore(t)))
 	defer server.Close()
 	unsafe := strings.ReplaceAll(validCCEKubeconfig, "    token: test-token", "    exec:\n      command: steal-credentials")
 	status, response := uploadTestKubeconfig(t, server.URL, "cce.yaml", unsafe)
@@ -92,7 +92,7 @@ func TestCCEKubeconfigUploadRejectsExecPlugin(t *testing.T) {
 }
 
 func TestCCEKubeconfigUploadRejectsExternalCredentialFiles(t *testing.T) {
-	server := httptest.NewServer(NewRouter(config.Config{}, slog.Default(), store.NewMemoryStore()))
+	server := httptest.NewServer(NewRouter(config.Config{}, slog.Default(), newTestStore(t)))
 	defer server.Close()
 	unsafe := strings.ReplaceAll(validCCEKubeconfig, "    token: test-token", "    client-key: /tmp/client.key")
 	status, response := uploadTestKubeconfig(t, server.URL, "cce.yaml", unsafe)
@@ -119,7 +119,7 @@ func TestCCEKubeconfigJanitorRemovesExpiredRestartOrphans(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_ = NewRouter(config.Config{RegistrationSessionDir: sessionDir}, slog.Default(), store.NewMemoryStore())
+	_ = NewRouter(config.Config{RegistrationSessionDir: sessionDir}, slog.Default(), newTestStore(t))
 	if _, err := os.Stat(filepath.Join(sessionDir, expiredID)); !os.IsNotExist(err) {
 		t.Fatalf("expired restart orphan was not removed: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestCCEDirectRegistrationRequiresInspectionAndCreatesIdempotentTask(t *test
 	}))
 	defer executor.Close()
 	sessionDir := t.TempDir()
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	cfg := config.Config{RegistrationSessionDir: sessionDir, RegistrationExecutorEndpoint: executor.URL, RegistrationExecutorToken: "executor-token", AgentNamespace: "hypercdr-agent", BaseURL: "https://platform:18443"}
 	server := httptest.NewServer(NewRouter(cfg, slog.Default(), repo))
 	defer server.Close()
@@ -180,7 +180,7 @@ func TestCCEDirectRegistrationRequiresInspectionAndCreatesIdempotentTask(t *test
 }
 
 func TestQueuedCCEDirectRegistrationCanBeCanceled(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	task, err := repo.CreateTask(store.TaskInput{TenantID: store.DefaultTenantID, Type: "cluster-registration", Status: "queued", Payload: map[string]any{"sessionId": "ccer_abcdefghijklmnopqrstuvwxyz123456"}})
 	if err != nil {
 		t.Fatal(err)
@@ -200,7 +200,7 @@ func TestQueuedCCEDirectRegistrationCanBeCanceled(t *testing.T) {
 func postTestJSON(t *testing.T, endpoint string, body any) (int, map[string]any) {
 	t.Helper()
 	raw, _ := json.Marshal(body)
-	resp, err := http.Post(endpoint, "application/json", bytes.NewReader(raw))
+	resp, err := authenticatedTestClient(t).Post(endpoint, "application/json", bytes.NewReader(raw))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func uploadTestKubeconfig(t *testing.T, baseURL, filename, contents string) (int
 	_ = w.Close()
 	req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/cluster-registrations/cce/kubeconfigs", &body)
 	req.Header.Set("Content-Type", w.FormDataContentType())
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := authenticatedTestClient(t).Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}

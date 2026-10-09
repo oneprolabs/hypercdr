@@ -8,18 +8,16 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"hypercdr-platform/platform/backend/internal/store"
 )
 
 func TestAuditLogRecordsAuthenticatedMutationWithoutRequestSecrets(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	router := &Router{store: repo, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	handler := router.withAuditLog(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusCreated, map[string]any{"id": "11111111-1111-1111-1111-111111111111", "name": "daily-policy"})
 	}))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/policies", strings.NewReader(`{"name":"daily-policy","password":"must-not-be-recorded"}`))
-	req = req.WithContext(context.WithValue(req.Context(), requestUserContextKey{}, store.User{ID: "00000000-0000-0000-0000-00000000a001", Email: "admin"}))
+	req = req.WithContext(context.WithValue(req.Context(), requestUserContextKey{}, testAdmin(t, repo)))
 	handler.ServeHTTP(httptest.NewRecorder(), req)
 
 	items, err := repo.ListAuditLogs(10, 0)
@@ -36,12 +34,12 @@ func TestAuditLogRecordsAuthenticatedMutationWithoutRequestSecrets(t *testing.T)
 }
 
 func TestAuditLogRecordsFailureAndSkipsReads(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	router := &Router{store: repo, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	handler := router.withAuditLog(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "policy_in_use", "message": "Policy is still in use."})
 	}))
-	user := store.User{ID: "00000000-0000-0000-0000-00000000a001", Email: "admin"}
+	user := testAdmin(t, repo)
 	failed := httptest.NewRequest(http.MethodDelete, "/api/v1/policies/22222222-2222-2222-2222-222222222222", nil)
 	failed = failed.WithContext(context.WithValue(failed.Context(), requestUserContextKey{}, user))
 	handler.ServeHTTP(httptest.NewRecorder(), failed)

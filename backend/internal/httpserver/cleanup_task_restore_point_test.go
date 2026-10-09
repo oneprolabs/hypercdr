@@ -8,12 +8,14 @@ import (
 )
 
 func TestEnrichCleanupTaskRestorePointTimesFillsMissingValue(t *testing.T) {
-	repo := store.NewMemoryStore()
-	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: "cluster-1", Status: "active"})
+	repo := newTestStore(t)
+	clusterID := seedSchedulerCluster(t, repo)
+	app := seedSchedulerApplication(t, repo, clusterID, "demo")
+	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: clusterID, AppID: app.ID, Status: "active"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	backupTask, err := repo.CreateTask(store.TaskInput{ProtectionPlanID: plan.ID, ClusterID: "cluster-1", Type: "backup", Status: "succeeded"})
+	backupTask, err := repo.CreateTask(store.TaskInput{ProtectionPlanID: plan.ID, ClusterID: clusterID, Type: "backup", Status: "succeeded"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,7 +23,7 @@ func TestEnrichCleanupTaskRestorePointTimesFillsMissingValue(t *testing.T) {
 	point, err := repo.CreateRestorePoint(store.RestorePointInput{
 		ProtectionPlanID: plan.ID,
 		BackupTaskID:     backupTask.ID,
-		SourceClusterID:  "cluster-1",
+		SourceClusterID:  clusterID,
 		VeleroBackupName: "backup-1",
 		TaskCreatedAt:    time.Date(2030, time.July, 22, 18, 39, 29, 0, time.UTC),
 	})

@@ -7,7 +7,7 @@ import (
 )
 
 func TestCCERegistrationPersistsPlatformIdentity(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
 	token, err := repo.CreateAgentToken(DefaultTenantID, "", "cce", time.Hour, "huaweicloud-cce")
 	if err != nil {
 		t.Fatal(err)
@@ -22,7 +22,7 @@ func TestCCERegistrationPersistsPlatformIdentity(t *testing.T) {
 }
 
 func TestRegistrationRejectsTokenClusterTypeMismatch(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
 	token, err := repo.CreateAgentToken(DefaultTenantID, "", "cce", time.Hour, "huaweicloud-cce")
 	if err != nil {
 		t.Fatal(err)
@@ -34,7 +34,7 @@ func TestRegistrationRejectsTokenClusterTypeMismatch(t *testing.T) {
 }
 
 func TestLegacyRegistrationDefaultsToNativeKubernetes(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
 	token, err := repo.CreateAgentToken(DefaultTenantID, "", "legacy", time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +49,7 @@ func TestLegacyRegistrationDefaultsToNativeKubernetes(t *testing.T) {
 }
 
 func TestOpenShiftRegistrationPreservesClusterType(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
 	token, err := repo.CreateAgentToken(DefaultTenantID, "", "openshift", time.Hour, "openshift")
 	if err != nil {
 		t.Fatal(err)

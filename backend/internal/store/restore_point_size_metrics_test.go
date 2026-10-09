@@ -3,10 +3,11 @@ package store
 import "testing"
 
 func TestRestorePointSizeMetricsV2RoundTripAndUpsert(t *testing.T) {
-	repo := NewMemoryStore()
-	plan, task := seedRestorePointBackupTask(t, repo, "cluster-size")
+	repo := newTestStore(t)
+	cluster, _ := seedPlanApplication(t, repo)
+	plan, task := seedRestorePointBackupTask(t, repo, cluster.ID)
 	point, err := repo.CreateRestorePoint(RestorePointInput{
-		SourceClusterID: "cluster-size", VeleroBackupName: "backup-size",
+		SourceClusterID: cluster.ID, VeleroBackupName: "backup-size",
 		ProtectionPlanID: plan.ID, BackupTaskID: task.ID,
 		SizeMetricsV2: map[string]any{
 			"schemaVersion": float64(2),
@@ -21,7 +22,7 @@ func TestRestorePointSizeMetricsV2RoundTripAndUpsert(t *testing.T) {
 		t.Fatal("known zero incremental data was not preserved")
 	}
 	updated, err := repo.CreateRestorePoint(RestorePointInput{
-		SourceClusterID: "cluster-size", VeleroBackupName: "backup-size",
+		SourceClusterID: cluster.ID, VeleroBackupName: "backup-size",
 		ProtectionPlanID: plan.ID, BackupTaskID: task.ID,
 		SizeMetricsV2: map[string]any{"measurementStatus": "partial"},
 	})

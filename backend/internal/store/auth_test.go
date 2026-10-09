@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-func TestMemoryStoreUserRegistrationAndPasswordReset(t *testing.T) {
-	repo := NewMemoryStore()
+func TestPostgresStoreUserRegistrationAndPasswordReset(t *testing.T) {
+	repo := newTestStore(t)
 	user, err := repo.CreateUser(DefaultTenantID, "USER@example.com", "old-password")
 	if err != nil || user.Email != "user@example.com" {
 		t.Fatalf("create user: %#v, %v", user, err)
@@ -39,7 +39,7 @@ func TestMemoryStoreUserRegistrationAndPasswordReset(t *testing.T) {
 }
 
 func TestPasswordChangeRequirementCanBeClearedOrRestored(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
 	users, _ := repo.ListUsers()
 	admin := users[0]
 	if !admin.MustChangePassword {
@@ -63,7 +63,7 @@ func TestPasswordChangeRequirementCanBeClearedOrRestored(t *testing.T) {
 }
 
 func TestCommunityAdminRecoveryEmailCreatesResetToken(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
 	users, err := repo.ListUsers()
 	if err != nil || len(users) != 1 || !users[0].SystemAdmin {
 		t.Fatalf("admin users = %#v, %v", users, err)
@@ -79,8 +79,8 @@ func TestCommunityAdminRecoveryEmailCreatesResetToken(t *testing.T) {
 	}
 }
 
-func TestMemoryStoreGoogleUserLinksExistingEmail(t *testing.T) {
-	repo := NewMemoryStore()
+func TestPostgresStoreGoogleUserLinksExistingEmail(t *testing.T) {
+	repo := newTestStore(t)
 	created, err := repo.CreateUser(DefaultTenantID, "user@example.com", "password")
 	if err != nil {
 		t.Fatal(err)
@@ -92,8 +92,8 @@ func TestMemoryStoreGoogleUserLinksExistingEmail(t *testing.T) {
 }
 
 func TestUserThemeIsAccountScopedAndSurvivesProfileUpdate(t *testing.T) {
-	repo := NewMemoryStore()
-	admin, found, err := repo.GetUser("00000000-0000-0000-0000-00000000a001")
+	repo := newTestStore(t)
+	admin, found, err := repo.GetUser(testAdmin(t, repo).ID)
 	if err != nil || !found || admin.Theme != "light" {
 		t.Fatalf("default admin theme: %#v, found=%v err=%v", admin, found, err)
 	}
@@ -119,7 +119,7 @@ func TestUserThemeIsAccountScopedAndSurvivesProfileUpdate(t *testing.T) {
 }
 
 func TestTenantAndSystemAdminMetadataStayConsistent(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
 
 	tenants, err := repo.ListTenants()
 	if err != nil || len(tenants) != 1 {
@@ -139,7 +139,7 @@ func TestTenantAndSystemAdminMetadataStayConsistent(t *testing.T) {
 	}
 
 	updated, found, err := repo.UpdateUser(UserUpdateInput{
-		ID: admin.ID, TenantID: "another-tenant", Email: "changed@example.com",
+		ID: admin.ID, TenantID: DefaultTenantID, Email: "changed@example.com",
 		DisplayName: "Platform Administrator", Role: "operator", Status: "disabled",
 	})
 	if err != nil || !found {
@@ -151,7 +151,7 @@ func TestTenantAndSystemAdminMetadataStayConsistent(t *testing.T) {
 }
 
 func TestTenantDescriptionPersistsAndIsLimited(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
 	tenant, err := repo.CreateTenant(TenantInput{Name: "Customer", Description: "Customer production workloads", Status: "active"})
 	if err != nil || tenant.Description != "Customer production workloads" {
 		t.Fatalf("create tenant description: %#v, %v", tenant, err)

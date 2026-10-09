@@ -2,8 +2,8 @@ package store
 
 import "testing"
 
-func TestMemoryStoreTaskProgressDoesNotRegress(t *testing.T) {
-	repo := NewMemoryStore()
+func TestPostgresStoreTaskProgressDoesNotRegress(t *testing.T) {
+	repo := newTestStore(t)
 	task, err := repo.CreateTask(TaskInput{
 		Type:   "drill",
 		Status: "running",

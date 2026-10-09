@@ -2,22 +2,14 @@ package store
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 )
 
 func TestCommunityMigrationExportAndBackupPostgres(t *testing.T) {
-	dsn := os.Getenv("HCDR_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("HCDR_TEST_DATABASE_URL is not set")
-	}
-	repo, err := NewPostgresStore(context.Background(), dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer repo.Close()
-	if err = repo.ConfigureSecretKey(context.Background(), "migration-export-integration-secret"); err != nil {
+	repo := newTestStore(t)
+
+	if err := repo.ConfigureSecretKey(context.Background(), "migration-export-integration-secret"); err != nil {
 		t.Fatal(err)
 	}
 	settings, found, err := repo.GetPlatformSettings()

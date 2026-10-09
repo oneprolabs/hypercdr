@@ -18,6 +18,7 @@ type Router struct {
 	cfg                    config.Config
 	logger                 *slog.Logger
 	mux                    *http.ServeMux
+	routeContracts         []RouteContract
 	store                  store.Store
 	hub                    *sessionHub
 	captchaMu              sync.Mutex
@@ -297,6 +298,7 @@ func (r *Router) mountExtensionRoutes() {
 		if strings.TrimSpace(route.Pattern) == "" || route.Handler == nil {
 			panic("invalid edition extension route")
 		}
+		r.routeContracts = append(r.routeContracts, RouteContract{Pattern: route.Pattern, Scope: "edition-policy"})
 		r.mux.HandleFunc(route.Pattern, func(w http.ResponseWriter, req *http.Request) {
 			user, ok := requestUser(req)
 			if !ok {

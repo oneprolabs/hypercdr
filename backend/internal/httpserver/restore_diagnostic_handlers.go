@@ -372,6 +372,18 @@ func sanitizeDiagnosticMessage(message string) string {
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
+	if status >= 400 {
+		if body, ok := value.(map[string]any); ok && body["error"] != nil {
+			copy := make(map[string]any, len(body)+1)
+			for key, item := range body {
+				copy[key] = item
+			}
+			if id := w.Header().Get("X-Request-ID"); id != "" {
+				copy["requestId"] = id
+			}
+			value = copy
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)

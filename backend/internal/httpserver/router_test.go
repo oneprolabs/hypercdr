@@ -41,7 +41,7 @@ func TestTaskProgressPayloadPatchClearsTransferProgressDuringReadiness(t *testin
 }
 
 func TestAgentCredentialReconnect(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	server := httptest.NewServer(NewRouter(config.Config{}, logger, repo))
 	defer server.Close()
@@ -144,7 +144,7 @@ func TestValidReleaseToken(t *testing.T) {
 }
 
 func TestDisasterHandoverRejectsOrdinaryAgentTokenAndPublishesRollbackScript(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	server := httptest.NewServer(NewRouter(config.Config{}, logger, repo))
 	defer server.Close()
@@ -166,7 +166,7 @@ func TestDisasterHandoverRejectsOrdinaryAgentTokenAndPublishesRollbackScript(t *
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("disaster token rejected: %d", response.StatusCode)
 	}
-	scriptResponse, err := http.Get(server.URL + "/disaster-handover.sh")
+	scriptResponse, err := authenticatedTestClient(t).Get(server.URL + "/disaster-handover.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestDisasterHandoverRejectsOrdinaryAgentTokenAndPublishesRollbackScript(t *
 }
 
 func TestPasswordResetFlow(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	if _, err := repo.CreateUser(store.DefaultTenantID, "reset-user@example.com", "old-password"); err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestPasswordResetFlow(t *testing.T) {
 	server := httptest.NewServer(NewRouter(config.Config{PasswordResetRevealToken: true}, logger, repo))
 	defer server.Close()
 
-	response, err := http.Post(server.URL+"/api/v1/auth/forgot-password", "application/json", strings.NewReader(`{"email":"reset-user@example.com"}`))
+	response, err := authenticatedTestClient(t).Post(server.URL+"/api/v1/auth/forgot-password", "application/json", strings.NewReader(`{"email":"reset-user@example.com"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestPasswordResetFlow(t *testing.T) {
 	}
 
 	resetBody, _ := json.Marshal(map[string]string{"token": forgot.ResetToken, "password": "new-password"})
-	response, err = http.Post(server.URL+"/api/v1/auth/reset-password", "application/json", bytes.NewReader(resetBody))
+	response, err = authenticatedTestClient(t).Post(server.URL+"/api/v1/auth/reset-password", "application/json", bytes.NewReader(resetBody))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestPasswordResetFlow(t *testing.T) {
 		t.Fatalf("new password authentication failed: ok=%v err=%v", ok, err)
 	}
 
-	response, err = http.Post(server.URL+"/api/v1/auth/reset-password", "application/json", bytes.NewReader(resetBody))
+	response, err = authenticatedTestClient(t).Post(server.URL+"/api/v1/auth/reset-password", "application/json", bytes.NewReader(resetBody))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestPasswordResetFlow(t *testing.T) {
 }
 
 func TestClusterRoleAndDefault(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	server := httptest.NewServer(NewRouter(config.Config{}, logger, repo))
 	defer server.Close()
@@ -245,7 +245,7 @@ func TestClusterRoleAndDefault(t *testing.T) {
 	}
 	req.URL.Path = "/api/v1/clusters/" + first
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := authenticatedTestClient(t).Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +254,7 @@ func TestClusterRoleAndDefault(t *testing.T) {
 		t.Fatalf("expected update status 200, got %d", resp.StatusCode)
 	}
 
-	resp, err = http.Post(server.URL+"/api/v1/clusters/"+first+"/default", "application/json", nil)
+	resp, err = authenticatedTestClient(t).Post(server.URL+"/api/v1/clusters/"+first+"/default", "application/json", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +262,7 @@ func TestClusterRoleAndDefault(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected first default status 200, got %d", resp.StatusCode)
 	}
-	resp, err = http.Post(server.URL+"/api/v1/clusters/"+second+"/default", "application/json", nil)
+	resp, err = authenticatedTestClient(t).Post(server.URL+"/api/v1/clusters/"+second+"/default", "application/json", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +271,7 @@ func TestClusterRoleAndDefault(t *testing.T) {
 		t.Fatalf("expected second default status 200, got %d", resp.StatusCode)
 	}
 
-	resp, err = http.Get(server.URL + "/api/v1/clusters")
+	resp, err = authenticatedTestClient(t).Get(server.URL + "/api/v1/clusters")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +300,7 @@ func TestClusterRoleAndDefault(t *testing.T) {
 }
 
 func TestSchedulerCreatesSingleBackupTaskPerPlan(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	router := &Router{store: repo, logger: logger, hub: newSessionHub()}
 
@@ -392,7 +392,7 @@ func TestSchedulerCreatesSingleBackupTaskPerPlan(t *testing.T) {
 	}
 }
 
-func seedSchedulerCluster(t *testing.T, repo *store.MemoryStore) string {
+func seedSchedulerCluster(t *testing.T, repo *store.PostgresStore) string {
 	t.Helper()
 	token, err := repo.CreateAgentToken(store.DefaultTenantID, "", "test", time.Hour)
 	if err != nil {
@@ -412,7 +412,7 @@ func seedSchedulerCluster(t *testing.T, repo *store.MemoryStore) string {
 	return cluster.ID
 }
 
-func seedSchedulerApplication(t *testing.T, repo *store.MemoryStore, clusterID string, namespace string) store.Application {
+func seedSchedulerApplication(t *testing.T, repo *store.PostgresStore, clusterID string, namespace string) store.Application {
 	t.Helper()
 	_, _, err := repo.ApplyInventory(store.InventoryInput{
 		ClusterID:      clusterID,
@@ -446,7 +446,7 @@ func seedSchedulerApplication(t *testing.T, repo *store.MemoryStore, clusterID s
 }
 
 func TestDeleteCluster(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	server := httptest.NewServer(NewRouter(config.Config{}, logger, repo))
 	defer server.Close()
@@ -456,7 +456,7 @@ func TestDeleteCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := authenticatedTestClient(t).Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -469,7 +469,7 @@ func TestDeleteCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err = http.DefaultClient.Do(req)
+	resp, err = authenticatedTestClient(t).Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,7 +478,7 @@ func TestDeleteCluster(t *testing.T) {
 		t.Fatalf("expected force delete status 200, got %d", resp.StatusCode)
 	}
 
-	resp, err = http.Get(server.URL + "/api/v1/clusters")
+	resp, err = authenticatedTestClient(t).Get(server.URL + "/api/v1/clusters")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -499,7 +499,7 @@ func TestDeleteCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err = http.DefaultClient.Do(req)
+	resp, err = authenticatedTestClient(t).Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -510,7 +510,7 @@ func TestDeleteCluster(t *testing.T) {
 }
 
 func TestCreateBackupTaskRequiresProtectionPlan(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	server := httptest.NewServer(NewRouter(config.Config{}, logger, repo))
 	defer server.Close()
@@ -540,7 +540,7 @@ func TestCreateBackupTaskRequiresProtectionPlan(t *testing.T) {
 }
 
 func TestCreateBackupTaskResolvesProtectionPlanForApp(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	server := httptest.NewServer(NewRouter(config.Config{}, logger, repo))
 	defer server.Close()
@@ -588,7 +588,7 @@ func TestCreateBackupTaskResolvesProtectionPlanForApp(t *testing.T) {
 }
 
 func TestUnregisterClusterOfflineIsBlockedBeforeTaskCreation(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	server := httptest.NewServer(NewRouter(config.Config{AgentNamespace: "hypercdr-agent"}, logger, repo))
 	defer server.Close()
@@ -598,7 +598,7 @@ func TestUnregisterClusterOfflineIsBlockedBeforeTaskCreation(t *testing.T) {
 	// the short-lived test connection before asserting the offline guard.
 	deadline := time.Now().Add(time.Second)
 	for {
-		precheck, precheckErr := http.Get(server.URL + "/api/v1/clusters/" + clusterID + "/unregister/precheck")
+		precheck, precheckErr := authenticatedTestClient(t).Get(server.URL + "/api/v1/clusters/" + clusterID + "/unregister/precheck")
 		if precheckErr != nil {
 			t.Fatal(precheckErr)
 		}
@@ -616,7 +616,7 @@ func TestUnregisterClusterOfflineIsBlockedBeforeTaskCreation(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	resp, err := http.Post(server.URL+"/api/v1/clusters/"+clusterID+"/unregister", "application/json", strings.NewReader(`{"reason":"test cleanup"}`))
+	resp, err := authenticatedTestClient(t).Post(server.URL+"/api/v1/clusters/"+clusterID+"/unregister", "application/json", strings.NewReader(`{"reason":"test cleanup"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -646,7 +646,7 @@ func TestUnregisterClusterOfflineIsBlockedBeforeTaskCreation(t *testing.T) {
 }
 
 func TestStorageRepositorySecretsAreNotReturned(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	server := httptest.NewServer(NewRouter(config.Config{}, logger, repo))
 	defer server.Close()
@@ -661,7 +661,7 @@ func TestStorageRepositorySecretsAreNotReturned(t *testing.T) {
 		"accessKey":"minio-access",
 		"secretKey":"minio-secret"
 	}`
-	resp, err := http.Post(server.URL+"/api/v1/storage-repositories", "application/json", strings.NewReader(payload))
+	resp, err := authenticatedTestClient(t).Post(server.URL+"/api/v1/storage-repositories", "application/json", strings.NewReader(payload))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -680,7 +680,7 @@ func TestStorageRepositorySecretsAreNotReturned(t *testing.T) {
 		t.Fatal("create response must not include accessKey")
 	}
 
-	resp, err = http.Get(server.URL + "/api/v1/storage-repositories")
+	resp, err = authenticatedTestClient(t).Get(server.URL + "/api/v1/storage-repositories")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -708,7 +708,7 @@ func TestUpdateStorageRepositoryRevalidatesStatus(t *testing.T) {
 	}))
 	defer objectStorage.Close()
 
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	storageRepo, err := repo.CreateStorageRepository(store.StorageRepositoryInput{
 		Name: "minio-primary", Type: "S3", Endpoint: objectStorage.URL, Bucket: "hypercdr", AccessKey: "test-access", SecretKey: "test-secret",
 	})
@@ -725,7 +725,7 @@ func TestUpdateStorageRepositoryRevalidatesStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := authenticatedTestClient(t).Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -743,12 +743,12 @@ func TestUpdateStorageRepositoryRevalidatesStatus(t *testing.T) {
 }
 
 func TestVeleroCRDsEndpoint(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	server := httptest.NewServer(NewRouter(config.Config{}, logger, repo))
 	defer server.Close()
 
-	resp, err := http.Get(server.URL + "/assets/velero/v1.18.2/crds.yaml")
+	resp, err := authenticatedTestClient(t).Get(server.URL + "/assets/velero/v1.18.2/crds.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -767,19 +767,20 @@ func TestVeleroCRDsEndpoint(t *testing.T) {
 }
 
 func TestRecoveryTaskRequiresOriginalNamespaceConfirmation(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
+	clusterID := seedSchedulerCluster(t, repo)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	server := httptest.NewServer(NewRouter(config.Config{}, logger, repo))
 	defer server.Close()
 
 	body := bytes.NewBufferString(`{
-		"clusterId":"cluster-a",
+		"clusterId":"` + clusterID + `",
 		"veleroBackupName":"backup-a",
 		"sourceNamespace":"demo-mysql-csi",
 		"targetNamespace":"demo-mysql-csi",
 		"conflictPolicy":"overwrite"
 	}`)
-	resp, err := http.Post(server.URL+"/api/v1/tasks/drill", "application/json", body)
+	resp, err := authenticatedTestClient(t).Post(server.URL+"/api/v1/tasks/drill", "application/json", body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -797,13 +798,14 @@ func TestRecoveryTaskRequiresOriginalNamespaceConfirmation(t *testing.T) {
 }
 
 func TestRecoveryTaskRejectsDataOnlyRestoreWhenExecutorDisabled(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
+	clusterID := seedSchedulerCluster(t, repo)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	server := httptest.NewServer(NewRouter(config.Config{}, logger, repo))
 	defer server.Close()
 
 	body := bytes.NewBufferString(`{
-		"clusterId":"cluster-a",
+		"clusterId":"` + clusterID + `",
 		"veleroBackupName":"backup-a",
 		"sourceNamespace":"demo-mysql-csi",
 		"targetNamespace":"demo-mysql-csi",
@@ -811,7 +813,7 @@ func TestRecoveryTaskRejectsDataOnlyRestoreWhenExecutorDisabled(t *testing.T) {
 		"conflictPolicy":"overwrite",
 		"originalNamespaceConfirmed":true
 	}`)
-	resp, err := http.Post(server.URL+"/api/v1/tasks/drill", "application/json", body)
+	resp, err := authenticatedTestClient(t).Post(server.URL+"/api/v1/tasks/drill", "application/json", body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -829,13 +831,14 @@ func TestRecoveryTaskRejectsDataOnlyRestoreWhenExecutorDisabled(t *testing.T) {
 }
 
 func TestDrillTaskRejectsDuplicateActiveTask(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
+	clusterID := seedSchedulerCluster(t, repo)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	server := httptest.NewServer(NewRouter(config.Config{}, logger, repo))
 	defer server.Close()
 
 	_, err := repo.CreateTask(store.TaskInput{
-		ClusterID: "cluster-a",
+		ClusterID: clusterID,
 		Type:      "drill",
 		Status:    "running",
 		Payload: map[string]any{
@@ -848,13 +851,13 @@ func TestDrillTaskRejectsDuplicateActiveTask(t *testing.T) {
 	}
 
 	body := bytes.NewBufferString(`{
-		"clusterId":"cluster-a",
+		"clusterId":"` + clusterID + `",
 		"veleroBackupName":"backup-a",
 		"sourceNamespace":"demo-mysql-csi",
 		"targetNamespace":"demo-mysql-csi-drill-2",
 		"restoreMode":"full"
 	}`)
-	resp, err := http.Post(server.URL+"/api/v1/tasks/drill", "application/json", body)
+	resp, err := authenticatedTestClient(t).Post(server.URL+"/api/v1/tasks/drill", "application/json", body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -872,7 +875,7 @@ func TestDrillTaskRejectsDuplicateActiveTask(t *testing.T) {
 }
 
 func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	if _, err := repo.UpsertPlatformRelease(store.PlatformReleaseInput{Version: "active", APIImage: "registry.local:5000/hypercdr/platform-api:active", APIImageDigest: "sha256:api", FrontendImage: "registry.local:5000/hypercdr/platform-frontend:active", FrontendImageDigest: "sha256:frontend", Status: "active", ComponentManifest: map[string]store.ReleaseComponent{
 		"comm-agent":                        {Version: "active", Image: "registry.local:5000/hypercdr/comm-agent:active", ImageDigest: "sha256:agent"},
 		"oadp-comm-agent":                   {Version: "active", Image: "registry.local:5000/hypercdr/oadp-comm-agent:active", ImageDigest: "sha256:oadp-agent"},
@@ -895,7 +898,7 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 	}, logger, repo))
 	defer server.Close()
 
-	resp, err := http.Get(server.URL + "/install.sh")
+	resp, err := authenticatedTestClient(t).Get(server.URL + "/install.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1016,11 +1019,11 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 }
 
 func TestAgentOfflineUninstallScriptIsSafeByDefault(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	server := httptest.NewServer(NewRouter(config.Config{}, logger, repo))
 	defer server.Close()
-	resp, err := http.Get(server.URL + "/uninstall-agent.sh")
+	resp, err := authenticatedTestClient(t).Get(server.URL + "/uninstall-agent.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1046,7 +1049,7 @@ func TestDetailedTaskFailureMessageDoesNotDuplicateStatusMessage(t *testing.T) {
 }
 
 func TestPrepareNodeScriptInstallsRegistryCA(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	caPath := filepath.Join(t.TempDir(), "registry-ca.crt")
 	caData := []byte("test-private-registry-ca\n")
@@ -1059,7 +1062,7 @@ func TestPrepareNodeScriptInstallsRegistryCA(t *testing.T) {
 	}, logger, repo))
 	defer server.Close()
 
-	resp, err := http.Get(server.URL + "/prepare-node.sh")
+	resp, err := authenticatedTestClient(t).Get(server.URL + "/prepare-node.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1082,7 +1085,7 @@ func TestPrepareNodeScriptInstallsRegistryCA(t *testing.T) {
 			t.Fatalf("expected prepare node script to contain %q", expected)
 		}
 	}
-	caResponse, err := http.Get(server.URL + "/assets/registry/ca.crt")
+	caResponse, err := authenticatedTestClient(t).Get(server.URL + "/assets/registry/ca.crt")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1097,12 +1100,12 @@ func TestPrepareNodeScriptInstallsRegistryCA(t *testing.T) {
 }
 
 func TestPublicRegistryOmitsNodeCAPreparation(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	server := httptest.NewServer(NewRouter(config.Config{AgentNamespace: "hypercdr-agent"}, logger, repo))
 	defer server.Close()
 
-	response, err := http.Post(server.URL+"/api/v1/agent-tokens", "application/json", bytes.NewReader([]byte(`{"description":"public-registry"}`)))
+	response, err := authenticatedTestClient(t).Post(server.URL+"/api/v1/agent-tokens", "application/json", bytes.NewReader([]byte(`{"description":"public-registry"}`)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1114,7 +1117,7 @@ func TestPublicRegistryOmitsNodeCAPreparation(t *testing.T) {
 	if _, exists := body["prepareNodeCommand"]; exists {
 		t.Fatalf("public registry response must not include prepareNodeCommand: %#v", body)
 	}
-	prepareResponse, err := http.Get(server.URL + "/prepare-node.sh")
+	prepareResponse, err := authenticatedTestClient(t).Get(server.URL + "/prepare-node.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1125,12 +1128,12 @@ func TestPublicRegistryOmitsNodeCAPreparation(t *testing.T) {
 }
 
 func TestAgentTokenInstallCommandUsesKubernetesMode(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	server := httptest.NewServer(NewRouter(config.Config{AgentNamespace: "hypercdr-agent"}, logger, repo))
 	defer server.Close()
 
-	resp, err := http.Post(server.URL+"/api/v1/agent-tokens", "application/json", bytes.NewReader([]byte(`{"description":"test"}`)))
+	resp, err := authenticatedTestClient(t).Post(server.URL+"/api/v1/agent-tokens", "application/json", bytes.NewReader([]byte(`{"description":"test"}`)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1153,12 +1156,12 @@ func TestAgentTokenInstallCommandUsesKubernetesMode(t *testing.T) {
 }
 
 func TestCCEAgentTokenInstallCommandUsesDualEndpoints(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	cfg := config.Config{AgentNamespace: "hypercdr-agent", AgentPrivateWSEndpoint: "wss://10.0.0.10:3102/ws/agent", AgentPublicWSEndpoint: "wss://203.0.113.10:3102/ws/agent"}
 	server := httptest.NewServer(NewRouter(cfg, logger, repo))
 	defer server.Close()
-	resp, err := http.Post(server.URL+"/api/v1/agent-tokens", "application/json", bytes.NewReader([]byte(`{"clusterType":"huaweicloud-cce"}`)))
+	resp, err := authenticatedTestClient(t).Post(server.URL+"/api/v1/agent-tokens", "application/json", bytes.NewReader([]byte(`{"clusterType":"huaweicloud-cce"}`)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1181,12 +1184,12 @@ func TestCCEAgentTokenInstallCommandUsesDualEndpoints(t *testing.T) {
 }
 
 func TestNativeAgentTokenInstallCommandUsesDualEndpoints(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	cfg := config.Config{AgentNamespace: "hypercdr-agent", AgentPrivateWSEndpoint: "wss://10.0.0.10:3002/ws/agent", AgentPublicWSEndpoint: "wss://203.0.113.10:3002/ws/agent"}
 	server := httptest.NewServer(NewRouter(cfg, logger, repo))
 	defer server.Close()
-	resp, err := http.Post(server.URL+"/api/v1/agent-tokens", "application/json", bytes.NewReader([]byte(`{"clusterType":"native-kubernetes"}`)))
+	resp, err := authenticatedTestClient(t).Post(server.URL+"/api/v1/agent-tokens", "application/json", bytes.NewReader([]byte(`{"clusterType":"native-kubernetes"}`)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1206,12 +1209,12 @@ func TestNativeAgentTokenInstallCommandUsesDualEndpoints(t *testing.T) {
 }
 
 func TestOpenShiftAgentTokenPreservesSelectedClusterType(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	cfg := config.Config{AgentNamespace: "hypercdr-agent", AgentPrivateWSEndpoint: "wss://10.0.0.10:3002/ws/agent"}
 	server := httptest.NewServer(NewRouter(cfg, logger, repo))
 	defer server.Close()
-	resp, err := http.Post(server.URL+"/api/v1/agent-tokens", "application/json", bytes.NewReader([]byte(`{"clusterType":"openshift"}`)))
+	resp, err := authenticatedTestClient(t).Post(server.URL+"/api/v1/agent-tokens", "application/json", bytes.NewReader([]byte(`{"clusterType":"openshift"}`)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1254,7 +1257,7 @@ func TestStorageDomainPrefixIncludesTenantAndCluster(t *testing.T) {
 }
 
 func TestAgentTokenInstallCommandSkipsSelfSignedHTTPS(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	caPath := filepath.Join(t.TempDir(), "registry-ca.crt")
 	if err := os.WriteFile(caPath, []byte("test-ca"), 0o600); err != nil {
@@ -1270,7 +1273,7 @@ func TestAgentTokenInstallCommandSkipsSelfSignedHTTPS(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Forwarded-Proto", "https")
 	req.Header.Set("X-Forwarded-Host", "192.168.8.149:18080")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := authenticatedTestClient(t).Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1327,7 +1330,8 @@ func TestStorageBucketLookupHonorsRepositoryURLStyle(t *testing.T) {
 }
 
 func TestBuildStoredStorageSyncDispatchIncludesCredentials(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
+	clusterID := seedSchedulerCluster(t, repo)
 	storageRepo, err := repo.CreateStorageRepository(store.StorageRepositoryInput{
 		Name:       "minio-primary",
 		Type:       "S3",
@@ -1342,7 +1346,7 @@ func TestBuildStoredStorageSyncDispatchIncludesCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	task, err := repo.CreateTask(store.TaskInput{
-		ClusterID: "cluster-a",
+		ClusterID: clusterID,
 		Type:      "storage-sync",
 		Status:    "queued",
 		CommandID: store.NewPublicID(),
@@ -1369,14 +1373,15 @@ func TestBuildStoredStorageSyncDispatchIncludesCredentials(t *testing.T) {
 }
 
 func TestBuildStoredUnregisterDispatch(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
+	clusterID := seedSchedulerCluster(t, repo)
 	task, err := repo.CreateTask(store.TaskInput{
-		ClusterID: "cluster-a",
+		ClusterID: clusterID,
 		Type:      "unregister",
 		Status:    "queued",
 		CommandID: store.NewPublicID(),
 		Payload: map[string]any{
-			"clusterId":       "cluster-a",
+			"clusterId":       clusterID,
 			"namespace":       "hypercdr-agent",
 			"deleteVelero":    true,
 			"deleteNamespace": true,
@@ -1395,7 +1400,7 @@ func TestBuildStoredUnregisterDispatch(t *testing.T) {
 	if dispatch.Payload.Unregister == nil {
 		t.Fatal("expected unregister payload")
 	}
-	if dispatch.Payload.Unregister.ClusterID != "cluster-a" ||
+	if dispatch.Payload.Unregister.ClusterID != clusterID ||
 		dispatch.Payload.Unregister.Namespace != "hypercdr-agent" ||
 		!dispatch.Payload.Unregister.DeleteVelero ||
 		!dispatch.Payload.Unregister.DeleteNamespace {
@@ -1404,8 +1409,9 @@ func TestBuildStoredUnregisterDispatch(t *testing.T) {
 }
 
 func TestBuildStoredOADPUpgradeDispatch(t *testing.T) {
-	repo := store.NewMemoryStore()
-	task, err := repo.CreateTask(store.TaskInput{ClusterID: "openshift-a", Type: "velero-upgrade", Status: "queued", CommandID: store.NewPublicID(), Payload: map[string]any{
+	repo := newTestStore(t)
+	clusterID := seedSchedulerCluster(t, repo)
+	task, err := repo.CreateTask(store.TaskInput{ClusterID: clusterID, Type: "velero-upgrade", Status: "queued", CommandID: store.NewPublicID(), Payload: map[string]any{
 		"namespace": "openshift-adp", "oadp": true, "catalogImage": "registry/oadp-catalog@sha256:catalog", "oadpPackage": "oadp-operator", "oadpChannel": "stable-1.3", "oadpTargetCsv": "oadp-operator.v1.3.10", "image": "registry/oadp-velero@sha256:velero", "version": "1.3.10", "expectedDigest": "sha256:velero",
 	}})
 	if err != nil {
@@ -1423,8 +1429,9 @@ func TestBuildStoredOADPUpgradeDispatch(t *testing.T) {
 }
 
 func TestBuildStoredScheduleSyncDispatch(t *testing.T) {
-	repo := store.NewMemoryStore()
-	task, err := repo.CreateTask(store.TaskInput{ClusterID: "cluster-a", Type: "schedule-sync", Status: "queued", CommandID: store.NewPublicID(), Payload: map[string]any{
+	repo := newTestStore(t)
+	clusterID := seedSchedulerCluster(t, repo)
+	task, err := repo.CreateTask(store.TaskInput{ClusterID: clusterID, Type: "schedule-sync", Status: "queued", CommandID: store.NewPublicID(), Payload: map[string]any{
 		"planId": "plan-a", "scheduleName": "hcdr-plan-a", "cron": "0 * * * *", "sourceNamespaces": []string{"demo"}, "storageRepo": "repo-a",
 		"includedResources": []string{"deployments.apps"}, "labelSelector": map[string]any{"matchLabels": map[string]any{"app": "demo"}},
 	}})
@@ -1446,8 +1453,8 @@ func TestBuildStoredScheduleSyncDispatch(t *testing.T) {
 }
 
 func TestOpenShiftUsesOADPNamespace(t *testing.T) {
-	repo := store.NewMemoryStore()
-	token, err := repo.CreateAgentToken("tenant-a", "admin", "openshift", time.Hour, "openshift")
+	repo := newTestStore(t)
+	token, err := repo.CreateAgentToken(store.DefaultTenantID, testAdmin(t, repo).ID, "openshift", time.Hour, "openshift")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1471,7 +1478,7 @@ func TestOpenShiftUsesOADPNamespace(t *testing.T) {
 }
 
 func TestFinishUnregisterDoesNotAccessObjectStorage(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	server := httptest.NewServer(NewRouter(config.Config{}, logger, repo))
 	defer server.Close()
@@ -1539,7 +1546,7 @@ func TestFinishUnregisterDoesNotAccessObjectStorage(t *testing.T) {
 }
 
 func TestFinishUnregisterDeletesClusterWithoutObjectStorageDependency(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	server := httptest.NewServer(NewRouter(config.Config{}, logger, repo))
 	defer server.Close()
@@ -1580,7 +1587,7 @@ func TestFinishUnregisterDeletesClusterWithoutObjectStorageDependency(t *testing
 }
 
 func TestForceCleanupRemovesPlatformRecordsWithoutObjectStorage(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	server := httptest.NewServer(NewRouter(config.Config{}, logger, repo))
 	defer server.Close()
@@ -1612,7 +1619,7 @@ func TestForceCleanupRemovesPlatformRecordsWithoutObjectStorage(t *testing.T) {
 		return objectStorageCleanupResult{RepositoryID: repo.ID, RepositoryName: repo.Name, Prefix: prefix, ObjectsDeleted: 5, BytesDeleted: 1024}, nil
 	}
 
-	resp, err := http.Post(server.URL+"/api/v1/clusters/"+clusterID+"/force-cleanup", "application/json", strings.NewReader(`{"reason":"test"}`))
+	resp, err := authenticatedTestClient(t).Post(server.URL+"/api/v1/clusters/"+clusterID+"/force-cleanup", "application/json", strings.NewReader(`{"reason":"test"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1635,13 +1642,13 @@ func TestForceCleanupRemovesPlatformRecordsWithoutObjectStorage(t *testing.T) {
 }
 
 func TestForceCleanupClearsTargetReferenceAndPreservesSourcePlan(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	server := httptest.NewServer(NewRouter(config.Config{}, logger, repo))
 	defer server.Close()
 	sourceID := registerClusterViaWS(t, server.URL, "source-cluster")
 	targetID := registerClusterViaWS(t, server.URL, "offline-target")
-	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: sourceID, TargetClusterID: targetID, Status: "active"})
+	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: sourceID, TargetClusterID: targetID, Status: "active", AppID: testApplicationID(t, repo, sourceID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1667,7 +1674,7 @@ func TestForceCleanupClearsTargetReferenceAndPreservesSourcePlan(t *testing.T) {
 }
 
 func TestCleanupClusterObjectStorageSkipsClusterWithoutDRData(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	server := httptest.NewServer(NewRouter(config.Config{}, logger, repo))
 	defer server.Close()
@@ -1693,18 +1700,18 @@ func TestCleanupClusterObjectStorageSkipsClusterWithoutDRData(t *testing.T) {
 }
 
 func TestUnregisterPrecheckBlocksTargetClusterAndActiveTasks(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	server := httptest.NewServer(NewRouter(config.Config{}, logger, repo))
 	defer server.Close()
 	clusterID := registerClusterViaWS(t, server.URL, "target-cluster")
-	if _, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: "source-cluster", TargetClusterID: clusterID, AppID: "app-1", Status: "active"}); err != nil {
+	if _, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: testClusterID(t, repo, "source-cluster"), TargetClusterID: clusterID, AppID: testApplicationID(t, repo, testClusterID(t, repo, "source-cluster")), Status: "active"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.CreateTask(store.TaskInput{ClusterID: clusterID, Type: "drill", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	resp, err := http.Get(server.URL + "/api/v1/clusters/" + clusterID + "/unregister/precheck")
+	resp, err := authenticatedTestClient(t).Get(server.URL + "/api/v1/clusters/" + clusterID + "/unregister/precheck")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1722,7 +1729,7 @@ func TestUnregisterPrecheckBlocksTargetClusterAndActiveTasks(t *testing.T) {
 }
 
 func TestUnregisterPrecheckBlocksExistingUnregisterTask(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	server := httptest.NewServer(NewRouter(config.Config{}, logger, repo))
 	defer server.Close()
@@ -1742,7 +1749,7 @@ func TestUnregisterPrecheckBlocksExistingUnregisterTask(t *testing.T) {
 }
 
 func TestCleanupClusterObjectStorageUsesOnlyAssociatedRepositories(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	token, err := repo.CreateAgentToken(store.DefaultTenantID, "", "cleanup-test", time.Hour)
 	if err != nil {
@@ -1778,7 +1785,7 @@ func TestCleanupClusterObjectStorageUsesOnlyAssociatedRepositories(t *testing.T)
 }
 
 func TestUnregisterAuditUsesHistoricalStorageBinding(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	clusterID := seedSchedulerCluster(t, repo)
 	storage, err := repo.CreateStorageRepository(store.StorageRepositoryInput{Name: "historical", Type: "S3", Endpoint: "http://minio", Bucket: "bucket"})
 	if err != nil {
@@ -1802,12 +1809,13 @@ func TestUnregisterAuditUsesHistoricalStorageBinding(t *testing.T) {
 }
 
 func TestProtectionPlanRestoreNamesComeFromDatabaseTasks(t *testing.T) {
-	repo := store.NewMemoryStore()
-	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{TenantID: store.DefaultTenantID, SourceClusterID: "cluster-a", Status: "active"})
+	repo := newTestStore(t)
+	clusterID := seedSchedulerCluster(t, repo)
+	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{TenantID: store.DefaultTenantID, SourceClusterID: clusterID, Status: "active", AppID: testApplicationID(t, repo, clusterID)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherPlan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{TenantID: store.DefaultTenantID, SourceClusterID: "cluster-b", Status: "active"})
+	otherPlan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{TenantID: store.DefaultTenantID, SourceClusterID: testClusterID(t, repo, "cluster-b"), Status: "active", AppID: testApplicationID(t, repo, testClusterID(t, repo, "cluster-b"))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1833,7 +1841,7 @@ func TestProtectionPlanRestoreNamesComeFromDatabaseTasks(t *testing.T) {
 }
 
 func TestUnregisterRequiresExplicitBackupDeletion(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	router := newUnregisterTestRouter(logger, repo)
 	server := httptest.NewServer(router.mux)
@@ -1843,7 +1851,7 @@ func TestUnregisterRequiresExplicitBackupDeletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: clusterID, StorageRepoID: storage.ID, Status: "active"})
+	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: clusterID, StorageRepoID: storage.ID, Status: "active", AppID: testApplicationID(t, repo, clusterID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1870,7 +1878,7 @@ func TestUnregisterRequiresExplicitBackupDeletion(t *testing.T) {
 }
 
 func TestTargetUnregisterPreservesSourcePlanRestorePointAndStorage(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	register := func(name string) store.Cluster {
 		token, err := repo.CreateAgentToken(store.DefaultTenantID, "", name, time.Hour)
 		if err != nil {
@@ -1887,7 +1895,7 @@ func TestTargetUnregisterPreservesSourcePlanRestorePointAndStorage(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{TenantID: store.DefaultTenantID, SourceClusterID: source.ID, TargetClusterID: target.ID, StorageRepoID: storage.ID, Status: "active"})
+	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{TenantID: store.DefaultTenantID, SourceClusterID: source.ID, TargetClusterID: target.ID, StorageRepoID: storage.ID, Status: "active", AppID: testApplicationID(t, repo, source.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1920,7 +1928,7 @@ func TestTargetUnregisterPreservesSourcePlanRestorePointAndStorage(t *testing.T)
 }
 
 func TestSourceUnregisterDeletesOnlyItsOwnPlans(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	register := func(name string) store.Cluster {
 		token, _ := repo.CreateAgentToken(store.DefaultTenantID, "", name, time.Hour)
 		cluster, _, err := repo.RegisterCluster(store.RegisterClusterInput{Token: token.Token, ClusterName: name})
@@ -1930,8 +1938,8 @@ func TestSourceUnregisterDeletesOnlyItsOwnPlans(t *testing.T) {
 		return cluster
 	}
 	a, b, c := register("a"), register("b"), register("c")
-	aPlan, _ := repo.CreateProtectionPlan(store.ProtectionPlanInput{TenantID: store.DefaultTenantID, SourceClusterID: a.ID, TargetClusterID: b.ID, Status: "active"})
-	cPlan, _ := repo.CreateProtectionPlan(store.ProtectionPlanInput{TenantID: store.DefaultTenantID, SourceClusterID: c.ID, TargetClusterID: a.ID, Status: "active"})
+	aPlan, _ := repo.CreateProtectionPlan(store.ProtectionPlanInput{TenantID: store.DefaultTenantID, SourceClusterID: a.ID, TargetClusterID: b.ID, Status: "active", AppID: testApplicationID(t, repo, a.ID)})
+	cPlan, _ := repo.CreateProtectionPlan(store.ProtectionPlanInput{TenantID: store.DefaultTenantID, SourceClusterID: c.ID, TargetClusterID: a.ID, Status: "active", AppID: testApplicationID(t, repo, c.ID)})
 	router := &Router{store: repo}
 	if err := router.cleanupUnregisterProtectionRelationships(a.ID, []store.ProtectionPlan{aPlan, cPlan}); err != nil {
 		t.Fatal(err)
@@ -1946,7 +1954,7 @@ func TestSourceUnregisterDeletesOnlyItsOwnPlans(t *testing.T) {
 }
 
 func TestObjectStorageCleanupFailurePreventsAgentDispatch(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	router := newUnregisterTestRouter(logger, repo)
 	server := httptest.NewServer(router.mux)
@@ -1956,7 +1964,7 @@ func TestObjectStorageCleanupFailurePreventsAgentDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: clusterID, StorageRepoID: storage.ID, Status: "active"})
+	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: clusterID, StorageRepoID: storage.ID, Status: "active", AppID: testApplicationID(t, repo, clusterID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2009,7 +2017,7 @@ func TestObjectStorageCleanupFailurePreventsAgentDispatch(t *testing.T) {
 }
 
 func TestCleanupConsentDoesNotBypassOfflineAgent(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	router := newUnregisterTestRouter(logger, repo)
 	server := httptest.NewServer(router.mux)
@@ -2023,7 +2031,7 @@ func TestCleanupConsentDoesNotBypassOfflineAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	clusterID := cluster.ID
-	if _, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: "other-source", TargetClusterID: clusterID, Status: "active"}); err != nil {
+	if _, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: testClusterID(t, repo, "other-source"), TargetClusterID: clusterID, Status: "active", AppID: testApplicationID(t, repo, testClusterID(t, repo, "other-source"))}); err != nil {
 		t.Fatal(err)
 	}
 	resp := postJSON(t, server.URL+"/api/v1/clusters/"+clusterID+"/unregister", map[string]any{"deleteBackupData": true})
@@ -2034,7 +2042,7 @@ func TestCleanupConsentDoesNotBypassOfflineAgent(t *testing.T) {
 }
 
 func TestTargetOnlyAuditDoesNotIncludeSourceObjectStorage(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	register := func(name string) store.Cluster {
 		token, _ := repo.CreateAgentToken(store.DefaultTenantID, "", name, time.Hour)
 		cluster, _, err := repo.RegisterCluster(store.RegisterClusterInput{Token: token.Token, ClusterName: name})
@@ -2051,7 +2059,7 @@ func TestTargetOnlyAuditDoesNotIncludeSourceObjectStorage(t *testing.T) {
 	if _, err := repo.UpsertClusterStorageBinding(store.ClusterStorageBindingInput{ClusterID: target.ID, StorageRepoID: storage.ID, SourceClusterID: source.ID, BSLName: "source-bsl", ObjectPrefix: "tenant/source-owner"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: source.ID, TargetClusterID: target.ID, StorageRepoID: storage.ID, Status: "active"}); err != nil {
+	if _, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: source.ID, TargetClusterID: target.ID, StorageRepoID: storage.ID, Status: "active", AppID: testApplicationID(t, repo, source.ID)}); err != nil {
 		t.Fatal(err)
 	}
 	router := &Router{store: repo, hub: newSessionHub()}
@@ -2153,7 +2161,7 @@ func postJSON(t *testing.T, url string, body any) *http.Response {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := http.Post(url, "application/json", bytes.NewReader(raw))
+	resp, err := authenticatedTestClient(t).Post(url, "application/json", bytes.NewReader(raw))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2162,7 +2170,7 @@ func postJSON(t *testing.T, url string, body any) *http.Response {
 
 func createTestAgentToken(t *testing.T, baseURL string) string {
 	t.Helper()
-	resp, err := http.Post(baseURL+"/api/v1/agent-tokens", "application/json", bytes.NewReader([]byte(`{"description":"test"}`)))
+	resp, err := authenticatedTestClient(t).Post(baseURL+"/api/v1/agent-tokens", "application/json", bytes.NewReader([]byte(`{"description":"test"}`)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2214,7 +2222,7 @@ func registerTestAgent(t *testing.T, wsURL string, payload protocol.RegisterPayl
 }
 
 func TestLicenseRejectedAgentRegistrationRollsBackPlatformResources(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	admission := EditionAdmissionController(func(_ context.Context, request EditionAdmissionRequest) EditionAuthorizationDecision {
 		if request.Operation != "cluster.register" || request.WorkerNodes != 11 {

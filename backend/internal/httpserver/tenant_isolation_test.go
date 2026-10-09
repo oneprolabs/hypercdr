@@ -19,7 +19,7 @@ func tenantRequest(req *http.Request, user store.User) *http.Request {
 }
 
 func TestTenantListsAndMutationsAreIsolated(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	tenantA, _ := repo.CreateTenant(store.TenantInput{Name: "Tenant A", Status: "active"})
 	tenantB, _ := repo.CreateTenant(store.TenantInput{Name: "Tenant B", Status: "active"})
 	storageA, _ := repo.CreateStorageRepository(store.StorageRepositoryInput{TenantID: tenantA.ID, Name: "A", Type: "S3"})
@@ -71,21 +71,11 @@ func TestTenantListsAndMutationsAreIsolated(t *testing.T) {
 }
 
 func TestProtectionPlanListIsTenantScoped(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	tenantA, _ := repo.CreateTenant(store.TenantInput{Name: "Topology Tenant A", Status: "active"})
 	tenantB, _ := repo.CreateTenant(store.TenantInput{Name: "Topology Tenant B", Status: "active"})
-	planA, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{
-		TenantID: tenantA.ID, SourceClusterID: "a-source", TargetClusterID: "a-target", AppID: "a-app", Status: "ready",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	planB, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{
-		TenantID: tenantB.ID, SourceClusterID: "b-source", TargetClusterID: "b-target", AppID: "b-app", Status: "ready",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	planA := testTenantPlan(t, repo, tenantA.ID)
+	planB := testTenantPlan(t, repo, tenantB.ID)
 
 	r := &Router{cfg: config.Config{}, logger: slog.New(slog.NewTextHandler(io.Discard, nil)), store: repo}
 	userB := store.User{ID: "user-b", TenantID: tenantB.ID, Role: "admin", Status: "active"}
@@ -110,9 +100,9 @@ func TestProtectionPlanListIsTenantScoped(t *testing.T) {
 }
 
 func TestAgentRegistrationUsesTokenTenant(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	tenant, _ := repo.CreateTenant(store.TenantInput{Name: "Agent Tenant", Status: "active"})
-	token, err := repo.CreateAgentToken(tenant.ID, "creator", "registration", 60_000_000_000)
+	token, err := repo.CreateAgentToken(tenant.ID, testAdmin(t, repo).ID, "registration", 60_000_000_000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,20 +116,16 @@ func TestAgentRegistrationUsesTokenTenant(t *testing.T) {
 }
 
 func TestRecoveryRejectsCrossTenantProtectionPlan(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	tenantA, _ := repo.CreateTenant(store.TenantInput{Name: "Recovery Tenant A", Status: "active"})
 	tenantB, _ := repo.CreateTenant(store.TenantInput{Name: "Recovery Tenant B", Status: "active"})
-	tokenB, _ := repo.CreateAgentToken(tenantB.ID, "user-b", "registration", 60_000_000_000)
+	tokenB, _ := repo.CreateAgentToken(tenantB.ID, testAdmin(t, repo).ID, "registration", 60_000_000_000)
 	clusterB, _, err := repo.RegisterCluster(store.RegisterClusterInput{Token: tokenB.Token, ClusterName: "tenant-b-cluster"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	planA, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{
-		TenantID: tenantA.ID, SourceClusterID: "tenant-a-cluster", AppID: "tenant-a-app", StorageRepoID: "tenant-a-storage",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	planA := testTenantPlan(t, repo, tenantA.ID)
+
 	r := &Router{cfg: config.Config{}, logger: slog.New(slog.NewTextHandler(io.Discard, nil)), store: repo}
 	userB := store.User{ID: "user-b", TenantID: tenantB.ID, Role: "operator", Status: "active"}
 	body := bytes.NewBufferString(`{"clusterId":"` + clusterB.ID + `","protectionPlanId":"` + planA.ID + `","veleroBackupName":"foreign-backup","sourceNamespace":"demo","targetNamespace":"demo-copy"}`)

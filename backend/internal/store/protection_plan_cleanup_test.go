@@ -3,14 +3,13 @@ package store
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestCleanupProtectionPlanRecordsReturnsApplicationsToPendingProtection(t *testing.T) {
-	repo := NewMemoryStore()
-	const appID = "app-1"
-	const planID = "plan-1"
-	repo.applications[appID] = Application{ID: appID, ProtectionStatus: "protected"}
-	repo.plans[planID] = ProtectionPlan{ID: planID, AppID: appID, AppIDs: []string{appID}}
+	repo := newTestStore(t)
+	appFixture, planFixture := seedProtectionPlan(t, repo)
+	appID, planID := appFixture.ID, planFixture.ID
 
 	if _, ok, err := repo.CleanupProtectionPlanRecords(planID); err != nil || !ok {
 		t.Fatalf("cleanup protection plan: ok=%v err=%v", ok, err)
@@ -25,11 +24,9 @@ func TestCleanupProtectionPlanRecordsReturnsApplicationsToPendingProtection(t *t
 }
 
 func TestDeleteProtectionPlanReturnsApplicationsToUnprotected(t *testing.T) {
-	repo := NewMemoryStore()
-	const appID = "app-1"
-	const planID = "plan-1"
-	repo.applications[appID] = Application{ID: appID, ProtectionStatus: "protected"}
-	repo.plans[planID] = ProtectionPlan{ID: planID, AppID: appID, AppIDs: []string{appID}}
+	repo := newTestStore(t)
+	appFixture, planFixture := seedProtectionPlan(t, repo)
+	appID, planID := appFixture.ID, planFixture.ID
 
 	if _, ok, err := repo.DeleteProtectionPlan(planID); err != nil || !ok {
 		t.Fatalf("delete protection plan: ok=%v err=%v", ok, err)
@@ -44,32 +41,60 @@ func TestDeleteProtectionPlanReturnsApplicationsToUnprotected(t *testing.T) {
 }
 
 func TestCreateProtectionPlanRejectsDuplicateApplication(t *testing.T) {
-	repo := NewMemoryStore()
-	first, err := repo.CreateProtectionPlan(ProtectionPlanInput{TenantID: "tenant-1", SourceClusterID: "cluster-1", AppID: "app-1"})
+	repo := newTestStore(t)
+	cluster, app := seedPlanApplication(t, repo)
+	first, err := repo.CreateProtectionPlan(ProtectionPlanInput{TenantID: DefaultTenantID, SourceClusterID: cluster.ID, AppID: app.ID})
 	if err != nil {
-		t.Fatalf("create first plan: %v", err)
+		t.Fatal(err)
 	}
-	_, err = repo.CreateProtectionPlan(ProtectionPlanInput{TenantID: "tenant-1", SourceClusterID: "cluster-1", AppIDs: []string{"app-2", "app-1"}})
+	_, err = repo.CreateProtectionPlan(ProtectionPlanInput{TenantID: DefaultTenantID, SourceClusterID: cluster.ID, AppIDs: []string{app.ID}})
 	var conflict *ApplicationAlreadyProtectedError
-	if !errors.As(err, &conflict) || conflict.ProtectionPlanID != first.ID || conflict.ApplicationID != "app-1" {
-		t.Fatalf("duplicate error = %#v, want conflict with plan %q and app-1", err, first.ID)
+	if !errors.As(err, &conflict) || conflict.ProtectionPlanID != first.ID || conflict.ApplicationID != app.ID {
+		t.Fatalf("duplicate error=%v, want plan %s application %s", err, first.ID, app.ID)
 	}
-	if _, err := repo.CreateProtectionPlan(ProtectionPlanInput{TenantID: "tenant-2", SourceClusterID: "cluster-1", AppID: "app-1"}); err != nil {
-		t.Fatalf("same app identity in another tenant should be allowed: %v", err)
+	otherCluster, otherApp := seedPlanApplication(t, repo)
+	if _, err := repo.CreateProtectionPlan(ProtectionPlanInput{TenantID: DefaultTenantID, SourceClusterID: otherCluster.ID, AppID: otherApp.ID}); err != nil {
+		t.Fatalf("separate cluster/application should be allowed: %v", err)
 	}
-	if _, err := repo.CreateProtectionPlan(ProtectionPlanInput{TenantID: "tenant-1", SourceClusterID: "cluster-2", AppID: "app-1"}); err != nil {
-		t.Fatalf("same app identity in another source cluster should be allowed: %v", err)
+	tenant, err := repo.CreateTenant(TenantInput{Name: "Independent tenant", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
 	}
+	token, err := repo.CreateAgentToken(tenant.ID, "", "other-tenant", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	separate, _, err := repo.RegisterCluster(RegisterClusterInput{Token: token.Token, ClusterName: "plan-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := repo.ApplyInventory(InventoryInput{ClusterID: separate.ID, Apps: []Application{{Namespace: app.Namespace, Name: app.Name}}}); err != nil {
+		t.Fatal(err)
+	}
+	apps, err := repo.ListApplications(separate.ID)
+	if err != nil || len(apps) != 1 {
+		t.Fatalf("tenant applications: %v %v", apps, err)
+	}
+	if _, err := repo.CreateProtectionPlan(ProtectionPlanInput{TenantID: tenant.ID, SourceClusterID: separate.ID, AppID: apps[0].ID}); err != nil {
+		t.Fatalf("same namespace/name in independent tenant: %v", err)
+	}
+
 }
 
 func TestCleanupProtectionPlanKeepsApplicationProtectedWhenAnotherPlanOwnsIt(t *testing.T) {
-	repo := NewMemoryStore()
-	const appID = "app-1"
-	repo.applications[appID] = Application{ID: appID, ProtectionStatus: "protected"}
-	repo.plans["old-plan"] = ProtectionPlan{ID: "old-plan", TenantID: "tenant-1", SourceClusterID: "cluster-1", AppID: appID, AppIDs: []string{appID}}
-	repo.plans["remaining-plan"] = ProtectionPlan{ID: "remaining-plan", TenantID: "tenant-1", SourceClusterID: "cluster-1", AppID: appID, AppIDs: []string{appID}}
+	repo := newTestStore(t)
+	appFixture, oldPlan := seedProtectionPlan(t, repo)
+	appID := appFixture.ID
+	remainingID := newID()
+	// Simulate legacy duplicate ownership; the public API correctly rejects new duplicates.
+	if _, err := repo.db.Exec(`insert into protection_plans(id,tenant_id,source_cluster_id,app_id,scope_type,status) select $1,tenant_id,source_cluster_id,app_id,scope_type,status from protection_plans where id=$2`, remainingID, oldPlan.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.db.Exec(`insert into protection_plan_apps(plan_id,app_id) values($1,$2)`, remainingID, appID); err != nil {
+		t.Fatal(err)
+	}
 
-	if _, ok, err := repo.CleanupProtectionPlanRecords("old-plan"); err != nil || !ok {
+	if _, ok, err := repo.CleanupProtectionPlanRecords(oldPlan.ID); err != nil || !ok {
 		t.Fatalf("cleanup duplicate plan: ok=%v err=%v", ok, err)
 	}
 	app, _, _ := repo.GetApplication(appID)

@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"hypercdr-platform/platform/backend/internal/config"
-	"hypercdr-platform/platform/backend/internal/store"
 )
 
 func TestAuthChallengeModeFallsBackToImageWithoutCompleteTurnstileConfig(t *testing.T) {
@@ -29,7 +28,7 @@ func TestVerifyTurnstile(t *testing.T) {
 		io.WriteString(w, `{"success":true}`)
 	}))
 	defer server.Close()
-	r := &Router{cfg: config.Config{TurnstileSecretKey: "secret", TurnstileVerifyURL: server.URL}, logger: slog.Default(), store: store.NewMemoryStore()}
+	r := &Router{cfg: config.Config{TurnstileSecretKey: "secret", TurnstileVerifyURL: server.URL}, logger: slog.Default(), store: newTestStore(t)}
 	if ok, codes, _ := r.verifyTurnstile(httptest.NewRequest(http.MethodPost, "/", nil), "token"); !ok {
 		t.Fatalf("expected valid Turnstile response, got codes=%v", codes)
 	}

@@ -50,7 +50,9 @@ func TestTerminalPayloadPatchesClearRunningSizeProgress(t *testing.T) {
 }
 
 func TestCreateRestorePointFromBackupPersistsTypedSizeMetricsV2(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
+	clusterID := seedSchedulerCluster(t, repo)
+	app := seedSchedulerApplication(t, repo, clusterID, "demo")
 	router := &Router{
 		store:             repo,
 		logger:            slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError})),
@@ -59,8 +61,8 @@ func TestCreateRestorePointFromBackupPersistsTypedSizeMetricsV2(t *testing.T) {
 		contentIndexSlots: make(chan struct{}, 2),
 	}
 	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{
-		SourceClusterID: "cluster-1",
-		AppID:           "app-1",
+		SourceClusterID: clusterID,
+		AppID:           app.ID,
 		Status:          "active",
 	})
 	if err != nil {
@@ -77,7 +79,7 @@ func TestCreateRestorePointFromBackupPersistsTypedSizeMetricsV2(t *testing.T) {
 		MeasuredAt:        time.Date(2026, 8, 12, 1, 2, 3, 0, time.UTC),
 	}
 	patch := taskCompletedPayloadPatch(protocol.TaskCompletedPayload{SizeMetricsV2: metrics})
-	backupTask, err := repo.CreateTask(store.TaskInput{ProtectionPlanID: plan.ID, ClusterID: "cluster-1", AppID: "app-1", Type: "backup", Status: "succeeded", Payload: patch})
+	backupTask, err := repo.CreateTask(store.TaskInput{ProtectionPlanID: plan.ID, ClusterID: clusterID, AppID: app.ID, Type: "backup", Status: "succeeded", Payload: patch})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,17 +7,24 @@ import (
 	"strings"
 )
 
+// DiagnosticLogContextRepository supplies only log writing and correlation data.
+type DiagnosticLogContextRepository interface {
+	CreateDiagnosticLog(DiagnosticLogInput) (DiagnosticLog, error)
+	ListTasks(string) ([]Task, error)
+	ListClusters() ([]Cluster, error)
+}
+
 // DiagnosticSlogHandler mirrors warning and error records into the structured
 // diagnostic index while preserving the normal stdout handler.
 type DiagnosticSlogHandler struct {
 	inner     slog.Handler
-	store     Store
+	store     DiagnosticLogContextRepository
 	component string
 	attrs     []slog.Attr
 	group     string
 }
 
-func NewDiagnosticSlogHandler(inner slog.Handler, repo Store, component string) slog.Handler {
+func NewDiagnosticSlogHandler(inner slog.Handler, repo DiagnosticLogContextRepository, component string) slog.Handler {
 	return &DiagnosticSlogHandler{inner: inner, store: repo, component: component}
 }
 func (h *DiagnosticSlogHandler) Enabled(ctx context.Context, level slog.Level) bool {

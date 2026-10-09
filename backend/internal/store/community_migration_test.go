@@ -7,11 +7,11 @@ import (
 )
 
 func TestCommunityMigrationAuthorizationIsSingleUseAndFreezeIsDurable(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
 	if _, err := repo.UpsertPlatformSettings(PlatformSettingsInput{AgentNamespace: "hypercdr-agent", PublicEndpoint: "https://community.example"}); err != nil {
 		t.Fatal(err)
 	}
-	authorization, err := repo.CreateCommunityMigrationAuthorization("00000000-0000-0000-0000-00000000a001", 30*time.Minute)
+	authorization, err := repo.CreateCommunityMigrationAuthorization(testAdmin(t, repo).ID, 30*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,11 +40,11 @@ func TestCommunityMigrationAuthorizationIsSingleUseAndFreezeIsDurable(t *testing
 }
 
 func TestExpiredCommunityMigrationReleasesFreezeAndAllowsNewSession(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
 	if _, err := repo.UpsertPlatformSettings(PlatformSettingsInput{AgentNamespace: "hypercdr-agent", PublicEndpoint: "https://community.example"}); err != nil {
 		t.Fatal(err)
 	}
-	first, _ := repo.CreateCommunityMigrationAuthorization("00000000-0000-0000-0000-00000000a001", time.Minute)
+	first, _ := repo.CreateCommunityMigrationAuthorization(testAdmin(t, repo).ID, time.Minute)
 	session, err := repo.ConsumeCommunityMigrationAuthorization(first.Token, "enterprise-one", "hypercdr-community-migration/v1", "key", time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +56,7 @@ func TestExpiredCommunityMigrationReleasesFreezeAndAllowsNewSession(t *testing.T
 	if frozen, err := repo.HasCommunityMigrationFreeze(); err != nil || frozen {
 		t.Fatalf("expired migration retained freeze: frozen=%v err=%v", frozen, err)
 	}
-	second, _ := repo.CreateCommunityMigrationAuthorization("00000000-0000-0000-0000-00000000a001", time.Minute)
+	second, _ := repo.CreateCommunityMigrationAuthorization(testAdmin(t, repo).ID, time.Minute)
 	if _, err = repo.ConsumeCommunityMigrationAuthorization(second.Token, "enterprise-two", "hypercdr-community-migration/v1", "key", time.Hour); err != nil {
 		t.Fatalf("new migration was blocked after expiry: %v", err)
 	}

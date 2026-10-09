@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func registerDefaultInvariantCluster(t *testing.T, repo *MemoryStore, description string) Cluster {
+func registerDefaultInvariantCluster(t *testing.T, repo *PostgresStore, description string) Cluster {
 	t.Helper()
 	token, err := repo.CreateAgentToken(DefaultTenantID, "", description, time.Hour)
 	if err != nil {
@@ -19,7 +19,7 @@ func registerDefaultInvariantCluster(t *testing.T, repo *MemoryStore, descriptio
 	return cluster
 }
 
-func findDefaultInvariantCluster(t *testing.T, repo *MemoryStore, id string) (Cluster, bool) {
+func findDefaultInvariantCluster(t *testing.T, repo *PostgresStore, id string) (Cluster, bool) {
 	t.Helper()
 	clusters, err := repo.ListClusters()
 	if err != nil {
@@ -34,7 +34,7 @@ func findDefaultInvariantCluster(t *testing.T, repo *MemoryStore, id string) (Cl
 }
 
 func TestDefaultClusterCannotBeCleared(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
 	cluster := registerDefaultInvariantCluster(t, repo, "first")
 	value := false
 	if _, _, err := repo.UpdateCluster(ClusterUpdateInput{ID: cluster.ID, IsDefault: &value}); !errors.Is(err, ErrDefaultClusterRequired) {
@@ -47,12 +47,11 @@ func TestDefaultClusterCannotBeCleared(t *testing.T) {
 }
 
 func TestRegistrationRepairsMissingDefault(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
 	first := registerDefaultInvariantCluster(t, repo, "first")
-	repo.mu.Lock()
-	first.IsDefault = false // simulate historical data created before the invariant
-	repo.clusters[first.ID] = first
-	repo.mu.Unlock()
+	if _, err := repo.db.Exec("update clusters set is_default=false where id=$1", first.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	second := registerDefaultInvariantCluster(t, repo, "second")
 	if !second.IsDefault {
@@ -61,13 +60,12 @@ func TestRegistrationRepairsMissingDefault(t *testing.T) {
 }
 
 func TestDeletionRepairsMissingDefault(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
 	first := registerDefaultInvariantCluster(t, repo, "first")
 	second := registerDefaultInvariantCluster(t, repo, "second")
-	repo.mu.Lock()
-	first.IsDefault = false // simulate historical data created before the invariant
-	repo.clusters[first.ID] = first
-	repo.mu.Unlock()
+	if _, err := repo.db.Exec("update clusters set is_default=false where id=$1", first.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	if deleted, err := repo.DeleteCluster(second.ID); err != nil || !deleted {
 		t.Fatalf("DeleteCluster: deleted=%v err=%v", deleted, err)
@@ -79,7 +77,7 @@ func TestDeletionRepairsMissingDefault(t *testing.T) {
 }
 
 func TestSwitchingDefaultKeepsExactlyOne(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
 	first := registerDefaultInvariantCluster(t, repo, "first")
 	second := registerDefaultInvariantCluster(t, repo, "second")
 	if _, found, err := repo.SetDefaultCluster(second.ID); err != nil || !found {

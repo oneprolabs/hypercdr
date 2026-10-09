@@ -8,9 +8,10 @@ import (
 )
 
 func TestCreateTaskUpdatesOnlyMatchingProtectionPlanLatestPointer(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
+	cluster, app := seedPlanApplication(t, repo)
 	plan, err := repo.CreateProtectionPlan(ProtectionPlanInput{
-		TenantID: "tenant-1", SourceClusterID: "cluster-1", AppID: "app-1", Status: "active",
+		TenantID: DefaultTenantID, SourceClusterID: cluster.ID, AppID: app.ID, Status: "active",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -47,8 +48,9 @@ func TestCreateTaskUpdatesOnlyMatchingProtectionPlanLatestPointer(t *testing.T) 
 }
 
 func TestHistoricalReconciliationTaskDoesNotPublishLatestPointer(t *testing.T) {
-	repo := NewMemoryStore()
-	plan, err := repo.CreateProtectionPlan(ProtectionPlanInput{TenantID: "tenant-1", SourceClusterID: "cluster-1", Status: "active"})
+	repo := newTestStore(t)
+	cluster, app := seedPlanApplication(t, repo)
+	plan, err := repo.CreateProtectionPlan(ProtectionPlanInput{TenantID: DefaultTenantID, SourceClusterID: cluster.ID, AppID: app.ID, Status: "active"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,8 +72,9 @@ func TestHistoricalReconciliationTaskDoesNotPublishLatestPointer(t *testing.T) {
 }
 
 func TestConcurrentTaskCreationPublishesOneCompleteTask(t *testing.T) {
-	repo := NewMemoryStore()
-	plan, err := repo.CreateProtectionPlan(ProtectionPlanInput{TenantID: "tenant-1", SourceClusterID: "cluster-1", AppID: "app-1", Status: "active"})
+	repo := newTestStore(t)
+	cluster, app := seedPlanApplication(t, repo)
+	plan, err := repo.CreateProtectionPlan(ProtectionPlanInput{TenantID: DefaultTenantID, SourceClusterID: cluster.ID, AppID: app.ID, Status: "active"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,8 +120,9 @@ func TestConcurrentTaskCreationPublishesOneCompleteTask(t *testing.T) {
 }
 
 func TestTaskEventsAndRestorePointStayBoundToExactTask(t *testing.T) {
-	repo := NewMemoryStore()
-	plan, err := repo.CreateProtectionPlan(ProtectionPlanInput{TenantID: "tenant-1", SourceClusterID: "cluster-1", AppID: "app-1", Status: "active"})
+	repo := newTestStore(t)
+	cluster, app := seedPlanApplication(t, repo)
+	plan, err := repo.CreateProtectionPlan(ProtectionPlanInput{TenantID: DefaultTenantID, SourceClusterID: cluster.ID, AppID: app.ID, Status: "active"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,14 +150,14 @@ func TestTaskEventsAndRestorePointStayBoundToExactTask(t *testing.T) {
 	if len(firstEvents) != 1 || firstEvents[0].TaskID != first.ID || len(secondEvents) != 1 || secondEvents[0].TaskID != second.ID {
 		t.Fatalf("events crossed task boundaries: first=%#v second=%#v", firstEvents, secondEvents)
 	}
-	point, err := repo.CreateRestorePoint(RestorePointInput{ProtectionPlanID: plan.ID, SourceClusterID: "cluster-1", BackupTaskID: second.ID, VeleroBackupName: "backup-second", TaskCreatedAt: time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)})
+	point, err := repo.CreateRestorePoint(RestorePointInput{ProtectionPlanID: plan.ID, SourceClusterID: cluster.ID, BackupTaskID: second.ID, VeleroBackupName: "backup-second", TaskCreatedAt: time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if point.BackupTaskID != second.ID || !point.TaskCreatedAt.Equal(second.CreatedAt) {
 		t.Fatalf("restore point relation = task %q time %v, want %q %v", point.BackupTaskID, point.TaskCreatedAt, second.ID, second.CreatedAt)
 	}
-	if _, err := repo.CreateRestorePoint(RestorePointInput{ProtectionPlanID: plan.ID, SourceClusterID: "cluster-1", BackupTaskID: first.ID, VeleroBackupName: "backup-wrong-status"}); err != nil {
+	if _, err := repo.CreateRestorePoint(RestorePointInput{ProtectionPlanID: plan.ID, SourceClusterID: cluster.ID, BackupTaskID: first.ID, VeleroBackupName: "backup-wrong-status"}); err != nil {
 		// A failed backup is still a backup task; callers decide whether its
 		// outcome is usable. The relation itself remains structurally valid.
 		t.Fatal(err)
@@ -161,9 +165,10 @@ func TestTaskEventsAndRestorePointStayBoundToExactTask(t *testing.T) {
 }
 
 func TestTaskStatusChangesDoNotChangeProtectionPlanLatestPointer(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
+	cluster, app := seedPlanApplication(t, repo)
 	plan, err := repo.CreateProtectionPlan(ProtectionPlanInput{
-		TenantID: "tenant-1", SourceClusterID: "cluster-1", AppID: "app-1", Status: "active",
+		TenantID: DefaultTenantID, SourceClusterID: cluster.ID, AppID: app.ID, Status: "active",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -185,8 +190,9 @@ func TestTaskStatusChangesDoNotChangeProtectionPlanLatestPointer(t *testing.T) {
 }
 
 func TestTerminalTaskStateIsImmutable(t *testing.T) {
-	repo := NewMemoryStore()
-	plan, err := repo.CreateProtectionPlan(ProtectionPlanInput{TenantID: "tenant-1", SourceClusterID: "cluster-1", Status: "active"})
+	repo := newTestStore(t)
+	cluster, app := seedPlanApplication(t, repo)
+	plan, err := repo.CreateProtectionPlan(ProtectionPlanInput{TenantID: DefaultTenantID, SourceClusterID: cluster.ID, AppID: app.ID, Status: "active"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +204,7 @@ func TestTerminalTaskStateIsImmutable(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("terminal update: ok=%v err=%v", ok, err)
 	}
-	late, ok, err := repo.UpdateTaskStatus(TaskStatusInput{TaskID: task.ID, Status: "succeeded", Progress: 100, RestorePointID: "late-point", MarkDone: true})
+	late, ok, err := repo.UpdateTaskStatus(TaskStatusInput{TaskID: task.ID, Status: "succeeded", Progress: 100, RestorePointID: newID(), MarkDone: true})
 	if err != nil || !ok {
 		t.Fatalf("late update: ok=%v err=%v", ok, err)
 	}

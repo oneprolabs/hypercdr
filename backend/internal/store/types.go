@@ -16,6 +16,7 @@ const DefaultAdminPassword = "admin123"
 const clusterConnectionStaleAfter = 10 * time.Minute
 
 var (
+	ErrTenantResourceMismatch  = errors.New("referenced resource is outside the tenant or source cluster")
 	ErrTokenInvalid            = errors.New("install token is invalid")
 	ErrTokenExpired            = errors.New("install token is expired")
 	ErrTokenUsed               = errors.New("install token is already used")
@@ -35,12 +36,42 @@ func (e *ApplicationAlreadyProtectedError) Error() string {
 	return "application already belongs to protection plan " + e.ProtectionPlanID
 }
 
+// Store composes domain capabilities for the platform router. Consumers that
+// need only one domain should accept the narrower repository interface.
 type Store interface {
+	SchedulerRepository
+	TenantRepository
+	EmailRepository
+	SettingsRepository
+	IdentityRepository
+	AgentRepository
+	MigrationRepository
+	ClusterRepository
+	ApplicationRepository
+	TagRepository
+	InventoryRepository
+	StorageRepositoryStore
+	PolicyRepository
+	ProtectionRepository
+	ApplicationLookupRepository
+	RestorePointRepository
+	TaskRepository
+	DiagnosticRepository
+	AuditRepository
+	UpgradeRepository
+}
+
+// TenantRepository defines the persisted tenant operations.
+type TenantRepository interface {
 	ListTenants() ([]Tenant, error)
 	GetTenant(id string) (Tenant, bool, error)
 	CreateTenant(input TenantInput) (Tenant, error)
 	UpdateTenant(id string, input TenantInput) (Tenant, bool, error)
 	DeleteTenant(id string) (bool, bool, error)
+}
+
+// EmailRepository defines the persisted email operations.
+type EmailRepository interface {
 	GetEmailSettings() (EmailSettings, bool, error)
 	UpsertEmailSettings(input EmailSettingsInput) (EmailSettings, error)
 	ListEmailSettings() ([]EmailSettings, error)
@@ -50,8 +81,16 @@ type Store interface {
 	DeleteEmailSettings(id string) (bool, bool, error)
 	SetDefaultEmailSettings(id string) (EmailSettings, bool, error)
 	UpdateEmailSettingsTestResult(id, status, message string, testedAt time.Time) error
+}
+
+// SettingsRepository defines the persisted settings operations.
+type SettingsRepository interface {
 	GetPlatformSettings() (PlatformSettings, bool, error)
 	UpsertPlatformSettings(input PlatformSettingsInput) (PlatformSettings, error)
+}
+
+// IdentityRepository defines the persisted identity operations.
+type IdentityRepository interface {
 	AuthenticateUser(input UserAuthInput) (User, bool, error)
 	CreateUser(tenantID string, email string, password string) (User, error)
 	ListUsers() ([]User, error)
@@ -68,32 +107,60 @@ type Store interface {
 	CreatePasswordResetToken(email string, ttl time.Duration) (string, bool, error)
 	ResetPassword(token string, password string) (User, error)
 	FindOrCreateGoogleUser(email string) (User, error)
+}
+
+// AgentRepository defines the persisted agent operations.
+type AgentRepository interface {
 	CreateAgentToken(tenantID, createdBy, description string, ttl time.Duration, clusterType ...string) (AgentToken, error)
 	ValidateAgentToken(token string) error
 	ValidateDisasterHandoverToken(token string) error
 	RegisterCluster(input RegisterClusterInput) (Cluster, string, error)
 	AuthenticateAgentCredential(input AgentCredentialInput) (Cluster, bool, error)
+}
+
+// MigrationRepository defines the persisted migration operations.
+type MigrationRepository interface {
 	CreateCommunityMigrationAuthorization(createdBy string, ttl time.Duration) (CommunityMigrationAuthorization, error)
 	ConsumeCommunityMigrationAuthorization(token, targetInstanceID, protocolVersion, targetPublicKey string, ttl time.Duration) (CommunityMigrationSession, error)
 	AuthenticateCommunityMigrationSession(token string) (CommunityMigrationSession, bool, error)
 	UpdateCommunityMigrationState(id, state, reason, message string, frozen bool) (CommunityMigrationSession, bool, error)
 	ListCommunityMigrationSessions() ([]CommunityMigrationSession, error)
 	HasCommunityMigrationFreeze() (bool, error)
+}
+
+// ClusterRepository defines the persisted cluster operations.
+type ClusterRepository interface {
 	ListClusters() ([]Cluster, error)
 	UpdateCluster(input ClusterUpdateInput) (Cluster, bool, error)
 	SetClusterConnectionStatus(clusterID string, status string) (Cluster, bool, error)
 	SetDefaultCluster(clusterID string) (Cluster, bool, error)
 	DeleteCluster(clusterID string) (bool, error)
+}
+
+// ApplicationRepository defines the persisted application operations.
+type ApplicationRepository interface {
 	ListApplications(clusterID string) ([]Application, error)
 	ListApplicationsFiltered(filter ApplicationFilter) ([]Application, error)
 	UpdateApplication(input ApplicationUpdateInput) (Application, bool, error)
+}
+
+// TagRepository defines the persisted tag operations.
+type TagRepository interface {
 	ListTags() ([]Tag, error)
 	CreateTag(tenantID, name string) (Tag, error)
 	UpdateTag(id, name string) (Tag, bool, error)
 	DeleteTag(id string) (bool, error)
 	SetApplicationTags(applicationID string, tagIDs []string) (Application, bool, error)
+}
+
+// InventoryRepository defines the persisted inventory operations.
+type InventoryRepository interface {
 	ApplyInventory(input InventoryInput) (Cluster, bool, error)
 	UpdateHeartbeat(input HeartbeatInput) (Cluster, bool, error)
+}
+
+// StorageRepositoryStore defines the persisted storagerepositorystore operations.
+type StorageRepositoryStore interface {
 	CreateStorageRepository(input StorageRepositoryInput) (StorageRepository, error)
 	UpdateStorageRepository(id string, input StorageRepositoryInput) (StorageRepository, bool, error)
 	DeleteStorageRepository(id string) (bool, bool, error)
@@ -103,10 +170,18 @@ type Store interface {
 	UpsertClusterStorageBinding(input ClusterStorageBindingInput) (ClusterStorageBinding, error)
 	GetClusterStorageBinding(clusterID string, storageRepoID string, sourceClusterID string) (ClusterStorageBinding, bool, error)
 	UpdateClusterStorageBindingStatus(input ClusterStorageBindingStatusInput) (ClusterStorageBinding, bool, error)
+}
+
+// PolicyRepository defines the persisted policy operations.
+type PolicyRepository interface {
 	CreatePolicy(input PolicyInput) (Policy, error)
 	UpdatePolicy(id string, input PolicyInput) (Policy, bool, error)
 	DeletePolicy(id string) (bool, bool, error)
 	ListPolicies() ([]Policy, error)
+}
+
+// ProtectionRepository defines the persisted protection operations.
+type ProtectionRepository interface {
 	CreateProtectionPlan(input ProtectionPlanInput) (ProtectionPlan, error)
 	ListProtectionPlans(clusterID string) ([]ProtectionPlan, error)
 	GetProtectionPlan(id string) (ProtectionPlan, bool, error)
@@ -120,11 +195,23 @@ type Store interface {
 	DeleteProtectionPlan(id string) (ProtectionPlan, bool, error)
 	ClearProtectionPlanTargetCluster(planID string, targetClusterID string) (ProtectionPlan, bool, error)
 	CleanupProtectionPlanRecords(id string) (ProtectionPlan, bool, error)
+}
+
+// ApplicationLookupRepository defines the persisted applicationlookup operations.
+type ApplicationLookupRepository interface {
 	GetApplication(id string) (Application, bool, error)
+}
+
+// RestorePointRepository defines the persisted restorepoint operations.
+type RestorePointRepository interface {
 	CreateRestorePoint(input RestorePointInput) (RestorePoint, error)
 	ListRestorePoints(filter RestorePointFilter) ([]RestorePoint, error)
 	GetRestorePoint(id string) (RestorePoint, bool, error)
 	UpdateRestorePointState(input RestorePointStateInput) (RestorePoint, bool, error)
+}
+
+// TaskRepository defines the persisted task operations.
+type TaskRepository interface {
 	CreateTask(input TaskInput) (Task, error)
 	ClaimQueuedTask(taskType string, executorID string) (Task, bool, error)
 	ClaimQueuedTaskByID(taskID string, taskType string, executorID string) (Task, bool, error)
@@ -134,13 +221,25 @@ type Store interface {
 	UpdateTaskStatus(input TaskStatusInput) (Task, bool, error)
 	AddTaskEvent(input TaskEventInput) error
 	ListTaskEvents(taskID string) ([]TaskEvent, error)
+}
+
+// DiagnosticRepository defines the persisted diagnostic operations.
+type DiagnosticRepository interface {
 	CreateDiagnosticLog(input DiagnosticLogInput) (DiagnosticLog, error)
 	ListDiagnosticLogs(filter DiagnosticLogFilter) ([]DiagnosticLog, error)
 	PurgeDiagnosticLogs(before time.Time) (int64, error)
 	GetClusterLogCoverage(clusterID string, component string) (ClusterLogCoverage, bool, error)
 	UpsertClusterLogCoverage(input ClusterLogCoverageInput) (ClusterLogCoverage, error)
+}
+
+// AuditRepository defines the persisted audit operations.
+type AuditRepository interface {
 	CreateAuditLog(input AuditLogInput) (AuditLog, error)
 	ListAuditLogs(limit, offset int) ([]AuditLog, error)
+}
+
+// UpgradeRepository defines the persisted upgrade operations.
+type UpgradeRepository interface {
 	ListPlatformReleases() ([]PlatformRelease, error)
 	UpsertPlatformRelease(input PlatformReleaseInput) (PlatformRelease, error)
 	ActivatePlatformRelease(id string, publishedBy string) (PlatformRelease, bool, error)

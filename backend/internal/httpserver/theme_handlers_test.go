@@ -6,12 +6,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"hypercdr-platform/platform/backend/internal/store"
 )
 
 func TestUpdateCurrentUserTheme(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	users, err := repo.ListUsers()
 	if err != nil || len(users) != 1 {
 		t.Fatalf("users: %v", err)

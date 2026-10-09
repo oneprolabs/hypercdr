@@ -8,7 +8,7 @@ import (
 
 func TestRecoveryDispatchPreservesSelectionMappingsAndValidation(t *testing.T) {
 	router := &Router{}
-	task := store.Task{ID: "task-1", ClusterID: "cluster-1", CommandID: "command-1", Type: "drill", Payload: map[string]any{
+	task := store.Task{ID: "task-1", ClusterID: "cluster-1", CommandID: "00000000-0000-0000-0000-00000000c001", Type: "drill", Payload: map[string]any{
 		"veleroBackupName": "backup-1", "sourceNamespace": "demo", "sourceNamespaces": []string{"demo"}, "targetNamespace": "demo-drill",
 		"includedResources": []string{"deployments.apps"}, "excludedResources": []string{"secrets"},
 		"storageClassMappings": map[string]string{"source-sc": "target-sc"}, "imageMappings": map[string]string{"nginx:latest": "registry.local/nginx:v1"},

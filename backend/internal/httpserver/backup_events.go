@@ -468,7 +468,7 @@ func taskFailureMessagesFromDetails(details map[string]any) []string {
 
 func humanizeBackupFailureMessage(message string) string {
 	if strings.Contains(message, "repository not initialized in the provided storage") {
-		return message + "。Kopia 文件系统备份仓库不存在或未初始化，请重新配置/重试该集群的 BackupStorageLocation 后再执行同步；如果刚手动删除过对象存储 kopia 目录，需要先让系统重新初始化仓库。"
+		return message + ". The Kopia filesystem backup repository is missing or uninitialized. Reconfigure or retry the cluster BackupStorageLocation before synchronizing. If its Kopia directory was manually deleted, allow the repository to initialize again."
 	}
 	return message
 }

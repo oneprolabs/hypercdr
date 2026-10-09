@@ -28,7 +28,7 @@ func TestMissingRegistryBackfillUsesConfiguredRegistryAndPreservesSettings(t *te
 }
 
 func TestReconcileRunningReleaseActivatesExactDeployedVersion(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	oldRelease, err := repo.UpsertPlatformRelease(store.PlatformReleaseInput{Version: "1.0.12.20260903", Status: "active"})
 	if err != nil {
 		t.Fatal(err)
@@ -145,5 +145,16 @@ func TestCommunityUsesFixedDefaultTenant(t *testing.T) {
 		if decision.Allowed != test.allowed {
 			t.Errorf("%s %s allowed = %v, want %v", test.method, test.path, decision.Allowed, test.allowed)
 		}
+	}
+}
+
+func TestRunRequiresPostgresAndDoesNotFallback(t *testing.T) {
+	t.Setenv("HCDR_DATABASE_URL", "")
+	if err := Run(Options{}); err == nil {
+		t.Fatal("missing database URL must fail startup")
+	}
+	t.Setenv("HCDR_DATABASE_URL", "postgres://invalid:invalid@127.0.0.1:1/invalid?sslmode=disable")
+	if err := Run(Options{}); err == nil {
+		t.Fatal("unreachable PostgreSQL must fail startup")
 	}
 }

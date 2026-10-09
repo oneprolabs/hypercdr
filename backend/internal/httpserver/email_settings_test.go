@@ -9,7 +9,7 @@ import (
 )
 
 func TestEmailSettingsPasswordIsEncryptedAndNotExposed(t *testing.T) {
-	r := &Router{cfg: config.Config{SecretKey: "test-secret-key"}, logger: slog.Default(), store: store.NewMemoryStore()}
+	r := &Router{cfg: config.Config{SecretKey: "test-secret-key"}, logger: slog.Default(), store: newTestStore(t)}
 	ciphertext, err := r.encryptSetting("smtp-password")
 	if err != nil {
 		t.Fatal(err)

@@ -2,17 +2,32 @@ package store
 
 import "testing"
 
-func TestMemoryStoreListTasksFilteredScopesBeforeLimit(t *testing.T) {
-	repo := NewMemoryStore()
-	repo.mu.Lock()
-	repo.tasks["other-tenant"] = Task{ID: "other-tenant", TenantID: "tenant-b", Type: "drill", Status: "failed"}
-	repo.tasks["wrong-type"] = Task{ID: "wrong-type", TenantID: "tenant-a", Type: "backup", Status: "failed"}
-	repo.tasks["wrong-status"] = Task{ID: "wrong-status", TenantID: "tenant-a", Type: "drill", Status: "succeeded"}
-	repo.tasks["match"] = Task{ID: "match", TenantID: "tenant-a", Type: "drill", Status: "failed"}
-	repo.mu.Unlock()
+func TestPostgresStoreListTasksFilteredScopesBeforeLimit(t *testing.T) {
+	repo := newTestStore(t)
+	tenantA, err := repo.CreateTenant(TenantInput{Name: "A", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenantB, err := repo.CreateTenant(TenantInput{Name: "B", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range []TaskInput{
+		{TenantID: tenantB.ID, Type: "drill", Status: "failed"},
+		{TenantID: tenantA.ID, Type: "backup", Status: "failed"},
+		{TenantID: tenantA.ID, Type: "drill", Status: "succeeded"},
+	} {
+		if _, err := repo.CreateTask(input); err != nil {
+			t.Fatal(err)
+		}
+	}
+	match, err := repo.CreateTask(TaskInput{TenantID: tenantA.ID, Type: "drill", Status: "failed"})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	items, err := repo.ListTasksFiltered(TaskFilter{
-		TenantID: "tenant-a",
+		TenantID: tenantA.ID,
 		Types:    []string{"drill"},
 		Statuses: []string{"failed"},
 		Limit:    1,
@@ -20,17 +35,15 @@ func TestMemoryStoreListTasksFilteredScopesBeforeLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0].ID != "match" {
+	if len(items) != 1 || items[0].ID != match.ID {
 		t.Fatalf("items=%v, want only matching tenant/type/status task", items)
 	}
 }
 
-func TestMemoryStoreTaskSummaryKeepsListFieldsAndGetTaskKeepsFullPayload(t *testing.T) {
-	repo := NewMemoryStore()
-	repo.mu.Lock()
-	repo.tasks["task-1"] = Task{
-		ID:       "task-1",
-		TenantID: "tenant-a",
+func TestPostgresStoreTaskSummaryKeepsListFieldsAndGetTaskKeepsFullPayload(t *testing.T) {
+	repo := newTestStore(t)
+	task, err := repo.CreateTask(TaskInput{
+		TenantID: DefaultTenantID,
 		Type:     "drill",
 		Payload: map[string]any{
 			"namespace":         "demo",
@@ -41,10 +54,12 @@ func TestMemoryStoreTaskSummaryKeepsListFieldsAndGetTaskKeepsFullPayload(t *test
 			"recoveryStages":    []any{map[string]any{"id": "waiting_for_workloads", "status": "running"}},
 			"technicalDetails":  map[string]any{"large": true},
 		},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	repo.mu.Unlock()
 
-	items, err := repo.ListTasksFiltered(TaskFilter{TenantID: "tenant-a", Summary: true})
+	items, err := repo.ListTasksFiltered(TaskFilter{TenantID: DefaultTenantID, Summary: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +79,7 @@ func TestMemoryStoreTaskSummaryKeepsListFieldsAndGetTaskKeepsFullPayload(t *test
 		t.Fatalf("summary payload=%v, technical details must be omitted", items[0].Payload)
 	}
 
-	item, ok, err := repo.GetTask("task-1")
+	item, ok, err := repo.GetTask(task.ID)
 	if err != nil || !ok {
 		t.Fatalf("GetTask: ok=%v err=%v", ok, err)
 	}

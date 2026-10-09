@@ -8,7 +8,7 @@ import (
 )
 
 func TestStorageBindingActivationActionRedispatchesFailedBinding(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	clusterID := seedSchedulerCluster(t, repo)
 	storageRepo, err := repo.CreateStorageRepository(store.StorageRepositoryInput{
 		Name: "minio", Type: "s3", Endpoint: "http://minio:9000", Bucket: "bucket",

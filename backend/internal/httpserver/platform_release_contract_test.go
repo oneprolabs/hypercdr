@@ -25,7 +25,7 @@ func TestBlueGreenReleaseWithoutUpgrader(t *testing.T) {
 				manifest[name] = store.ReleaseComponent{Version: "test", Image: image, ImageDigest: digest}
 				cache[image] = imageDigestCacheEntry{Digest: digest, ExpiresAt: time.Now().Add(time.Hour)}
 			}
-			repo := store.NewMemoryStore()
+			repo := newTestStore(t)
 			r := &Router{store: repo, imageDigests: cache}
 			body, _ := json.Marshal(map[string]any{"version": "test", "componentManifest": manifest})
 			w := httptest.NewRecorder()

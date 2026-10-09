@@ -6,7 +6,7 @@ import (
 )
 
 func TestRegisterClusterAppendsControlPlaneIPForTenantDuplicateName(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
 	firstToken, err := repo.CreateAgentToken(DefaultTenantID, "", "first", time.Hour)
 	if err != nil {
 		t.Fatal(err)

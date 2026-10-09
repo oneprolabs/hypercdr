@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
-	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -19,7 +18,7 @@ func TestRegistrationUsesConfiguredPort(t *testing.T) {
 		for _, clusterType := range []string{"native-kubernetes", "huaweicloud-cce", "openshift"} {
 			t.Run(port+"/"+clusterType, func(t *testing.T) {
 				base := "https://platform.example:" + port
-				repo := store.NewMemoryStore()
+				repo := newTestStore(t)
 				components := map[string]store.ReleaseComponent{}
 				for _, name := range []string{"comm-agent", "velero", "velero-plugin-for-aws", "velero-plugin-for-microsoft-azure", "velero-plugin-for-gcp"} {
 					components[name] = store.ReleaseComponent{Version: "test", Image: "registry.example/hypercdr/" + name + ":test", ImageDigest: "sha256:test"}
@@ -29,7 +28,7 @@ func TestRegistrationUsesConfiguredPort(t *testing.T) {
 				}
 				server := httptest.NewServer(NewRouter(config.Config{BaseURL: base}, slog.New(slog.NewTextHandler(io.Discard, nil)), repo))
 				defer server.Close()
-				resp, err := http.Post(server.URL+"/api/v1/agent-tokens", "application/json", bytes.NewBufferString(`{"clusterType":"`+clusterType+`"}`))
+				resp, err := authenticatedTestClient(t).Post(server.URL+"/api/v1/agent-tokens", "application/json", bytes.NewBufferString(`{"clusterType":"`+clusterType+`"}`))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -45,7 +44,7 @@ func TestRegistrationUsesConfiguredPort(t *testing.T) {
 						t.Fatalf("command missing %q: %s", want, result.InstallCommand)
 					}
 				}
-				resp, err = http.Get(server.URL + "/install.sh")
+				resp, err = authenticatedTestClient(t).Get(server.URL + "/install.sh")
 				if err != nil {
 					t.Fatal(err)
 				}

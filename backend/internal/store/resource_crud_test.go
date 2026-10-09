@@ -3,7 +3,7 @@ package store
 import "testing"
 
 func TestStorageRepositoryUpdateAndDelete(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
 	created, err := repo.CreateStorageRepository(StorageRepositoryInput{Name: "before", Type: "S3-Compatible", Endpoint: "http://old", Bucket: "old", AccessKey: "ak", SecretKey: "sk"})
 	if err != nil {
 		t.Fatal(err)
@@ -22,7 +22,7 @@ func TestStorageRepositoryUpdateAndDelete(t *testing.T) {
 }
 
 func TestPolicyUpdateAndDelete(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
 	created, err := repo.CreatePolicy(PolicyInput{Name: "before", Composition: "combined", ScheduleType: "interval", IntervalValue: 5, Status: "active"})
 	if err != nil {
 		t.Fatal(err)
@@ -41,7 +41,7 @@ func TestPolicyUpdateAndDelete(t *testing.T) {
 }
 
 func TestReferencedStorageAndPolicyCannotBeDeleted(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
 	storage, err := repo.CreateStorageRepository(StorageRepositoryInput{Name: "used-storage", Type: "S3", Bucket: "bucket"})
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +50,10 @@ func TestReferencedStorageAndPolicyCannotBeDeleted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo.plans["plan-1"] = ProtectionPlan{ID: "plan-1", StorageRepoID: storage.ID, PolicyID: policy.ID}
+	cluster, app := seedPlanApplication(t, repo)
+	if _, err := repo.CreateProtectionPlan(ProtectionPlanInput{SourceClusterID: cluster.ID, AppID: app.ID, StorageRepoID: storage.ID, PolicyID: policy.ID}); err != nil {
+		t.Fatal(err)
+	}
 	if deleted, inUse, err := repo.DeleteStorageRepository(storage.ID); err != nil || deleted || !inUse {
 		t.Fatalf("referenced storage delete: deleted=%v inUse=%v err=%v", deleted, inUse, err)
 	}

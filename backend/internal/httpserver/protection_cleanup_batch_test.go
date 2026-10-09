@@ -7,9 +7,12 @@ import (
 )
 
 func TestProtectionCleanupTasksCompleteIgnoresHistoricalFailedRun(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
+	sourceID := seedSchedulerCluster(t, repo)
+	targetID := seedSchedulerCluster(t, repo)
+	app := seedSchedulerApplication(t, repo, sourceID, "demo")
 	router := &Router{store: repo}
-	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: "source", TargetClusterID: "target", Status: "active"})
+	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: sourceID, AppID: app.ID, TargetClusterID: targetID, Status: "active"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,9 +34,12 @@ func TestProtectionCleanupTasksCompleteIgnoresHistoricalFailedRun(t *testing.T) 
 }
 
 func TestProtectionCleanupTasksCompleteLegacyTasksUseLatestAttempt(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
+	sourceID := seedSchedulerCluster(t, repo)
+	targetID := seedSchedulerCluster(t, repo)
+	app := seedSchedulerApplication(t, repo, sourceID, "demo")
 	router := &Router{store: repo}
-	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: "source", TargetClusterID: "target", Status: "active"})
+	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: sourceID, AppID: app.ID, TargetClusterID: targetID, Status: "active"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,8 +60,11 @@ func TestProtectionCleanupTasksCompleteLegacyTasksUseLatestAttempt(t *testing.T)
 }
 
 func TestReconcileProtectionCleanupFinalizesSuccessfulTasks(t *testing.T) {
-	repo := store.NewMemoryStore()
-	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: "source", TargetClusterID: "target", AppID: "app-1", Status: "cleanup_running"})
+	repo := newTestStore(t)
+	sourceID := seedSchedulerCluster(t, repo)
+	targetID := seedSchedulerCluster(t, repo)
+	app := seedSchedulerApplication(t, repo, sourceID, "demo")
+	plan, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{SourceClusterID: sourceID, AppID: app.ID, TargetClusterID: targetID, Status: "cleanup_running"})
 	if err != nil {
 		t.Fatal(err)
 	}

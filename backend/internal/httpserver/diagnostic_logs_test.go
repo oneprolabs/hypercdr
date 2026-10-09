@@ -29,7 +29,7 @@ func TestClusterLogSearchCapsUnavailableHistory(t *testing.T) {
 }
 
 func TestDiagnosticLogFilterForcesTenantScope(t *testing.T) {
-	r := &Router{store: store.NewMemoryStore()}
+	r := &Router{store: newTestStore(t)}
 	req := httptest.NewRequest("GET", "/api/v1/diagnostic-logs?tenantId=another-tenant&scope=system", nil)
 	user := store.User{ID: "user-a", TenantID: "tenant-a", Role: "admin"}
 	req = req.WithContext(context.WithValue(req.Context(), requestUserContextKey{}, user))
@@ -43,7 +43,7 @@ func TestDiagnosticLogFilterForcesTenantScope(t *testing.T) {
 }
 
 func TestAccessLogKeepsFailureReason(t *testing.T) {
-	repo := store.NewMemoryStore()
+	repo := newTestStore(t)
 	r := &Router{store: repo, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	handler := r.withAccessLog(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "storage_endpoint_invalid", "message": "Storage endpoint is unreachable"})
@@ -59,7 +59,7 @@ func TestAccessLogKeepsFailureReason(t *testing.T) {
 }
 
 func TestSystemAdminCanSelectAllTenants(t *testing.T) {
-	r := &Router{store: store.NewMemoryStore()}
+	r := &Router{store: newTestStore(t)}
 	req := httptest.NewRequest("GET", "/api/v1/diagnostic-logs", nil)
 	user := store.User{ID: "admin", TenantID: store.DefaultTenantID, SystemAdmin: true}
 	req = req.WithContext(context.WithValue(req.Context(), requestUserContextKey{}, user))
@@ -73,7 +73,7 @@ func TestSystemAdminCanSelectAllTenants(t *testing.T) {
 }
 
 func TestClusterSourceRejectsSystemScope(t *testing.T) {
-	r := &Router{store: store.NewMemoryStore()}
+	r := &Router{store: newTestStore(t)}
 	req := httptest.NewRequest("GET", "/api/v1/diagnostic-logs?source=cluster&scope=system", nil)
 	user := store.User{ID: "admin", TenantID: store.DefaultTenantID, SystemAdmin: true}
 	req = req.WithContext(context.WithValue(req.Context(), requestUserContextKey{}, user))

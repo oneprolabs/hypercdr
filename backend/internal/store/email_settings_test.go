@@ -11,7 +11,7 @@ func smtpInput(name string) EmailSettingsInput {
 }
 
 func TestEmailSettingsCRUDAndDefaultSelection(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
 	primary, err := repo.CreateEmailSettings(smtpInput("Primary"))
 	if err != nil || !primary.IsDefault {
 		t.Fatalf("first configuration should be default: item=%+v err=%v", primary, err)
@@ -40,7 +40,7 @@ func TestEmailSettingsCRUDAndDefaultSelection(t *testing.T) {
 }
 
 func TestEmailSettingsUpdatePreservesDefaultAndTestResult(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
 	item, err := repo.CreateEmailSettings(smtpInput("Primary"))
 	if err != nil {
 		t.Fatal(err)

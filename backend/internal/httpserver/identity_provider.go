@@ -8,8 +8,8 @@ import (
 	"hypercdr-platform/platform/backend/internal/store"
 )
 
-type storeIdentityProvider struct{ store store.Store }
-type storeAuditSink struct{ store store.Store }
+type storeIdentityProvider struct{ store store.IdentityRepository }
+type storeAuditSink struct{ store store.AuditRepository }
 
 func (s storeAuditSink) RecordAudit(_ context.Context, event EditionAuditEvent) error {
 	_, err := s.store.CreateAuditLog(store.AuditLogInput{ActorID: event.ActorID, Actor: event.Actor, Action: event.Action, ResourceType: event.ResourceType, ResourceID: event.ResourceID, ResourceName: event.ResourceName, Result: event.Result, Message: event.Message, Payload: map[string]any{"httpStatus": event.HTTPStatus}})

@@ -15,7 +15,7 @@ import (
 func TestExtensionRouteReceivesAuthenticatedPrincipal(t *testing.T) {
 	var principal EditionPrincipal
 	router := &Router{
-		cfg: config.Config{}, logger: slog.New(slog.NewTextHandler(io.Discard, nil)), mux: http.NewServeMux(), store: store.NewMemoryStore(),
+		cfg: config.Config{}, logger: slog.New(slog.NewTextHandler(io.Discard, nil)), mux: http.NewServeMux(), store: newTestStore(t),
 		extensionRoutes: []ExtensionRoute{{Pattern: "GET /api/v1/enterprise/check", Handler: func(w http.ResponseWriter, _ *http.Request, got EditionPrincipal) {
 			principal = got
 			w.WriteHeader(http.StatusNoContent)

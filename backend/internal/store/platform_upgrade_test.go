@@ -19,7 +19,7 @@ func platformReleaseInput(version string) PlatformReleaseInput {
 }
 
 func TestPlatformReleaseManifestIsImmutableForVersion(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
 	first, err := repo.UpsertPlatformRelease(platformReleaseInput("v1"))
 	if err != nil {
 		t.Fatal(err)
@@ -36,7 +36,7 @@ func TestPlatformReleaseManifestIsImmutableForVersion(t *testing.T) {
 }
 
 func TestPlatformReleaseActivationKeepsOneActiveRelease(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
 	firstInput := platformReleaseInput("v1")
 	firstInput.Status = "active"
 	first, err := repo.UpsertPlatformRelease(firstInput)
@@ -73,7 +73,7 @@ func TestPlatformReleaseActivationKeepsOneActiveRelease(t *testing.T) {
 }
 
 func TestPlatformUpgradeAllowsOnlyOneActiveJob(t *testing.T) {
-	repo := NewMemoryStore()
+	repo := newTestStore(t)
 	release, err := repo.UpsertPlatformRelease(platformReleaseInput("v2"))
 	if err != nil {
 		t.Fatal(err)

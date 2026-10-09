@@ -1,8 +1,6 @@
 package store
 
 import (
-	"context"
-	"os"
 	"testing"
 	"time"
 )
@@ -16,18 +14,7 @@ import (
 // DO UPDATE SET ..., which only refreshes inventory-derived fields and does
 // NOT touch protection_status or protection_score.
 func TestApplyInventoryPreservesProtectionStatus(t *testing.T) {
-	dsn := os.Getenv("HCDR_TEST_DATABASE_URL")
-	if dsn == "" {
-		dsn = "postgres://hypercdr:hypercdr@127.0.0.1:5432/hypercdr?sslmode=disable"
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	store, err := NewPostgresStore(ctx, dsn)
-	if err != nil {
-		t.Skipf("postgres not available, skipping: %v", err)
-	}
-	defer store.Close()
+	store := newTestStore(t)
 
 	now := time.Now().UTC()
 
