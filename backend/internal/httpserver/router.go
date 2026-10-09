@@ -18,6 +18,8 @@ type Router struct {
 	workerContext          context.Context
 	stopWorkers            context.CancelFunc
 	workers                sync.WaitGroup
+	workerMu               sync.Mutex
+	workersClosing         bool
 	cfg                    config.Config
 	logger                 *slog.Logger
 	mux                    *http.ServeMux
@@ -517,7 +519,10 @@ type managedRouter struct {
 }
 
 func (h *managedRouter) Close(ctx context.Context) error {
+	h.router.workerMu.Lock()
+	h.router.workersClosing = true
 	h.router.stopWorkers()
+	h.router.workerMu.Unlock()
 	done := make(chan struct{})
 	go func() { h.router.workers.Wait(); close(done) }()
 	select {
@@ -525,6 +530,39 @@ func (h *managedRouter) Close(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+// startWorker serializes admission with shutdown so Wait cannot race an Add
+// after the last worker exits. Persisted queued tasks remain available to the
+// next process when admission is refused.
+func (r *Router) startWorker(run func()) bool {
+	r.workerMu.Lock()
+	if r.workersClosing {
+		r.workerMu.Unlock()
+		return false
+	}
+	r.workers.Add(1)
+	r.workerMu.Unlock()
+	go func() { defer r.workers.Done(); run() }()
+	return true
+}
+
+func (r *Router) backgroundContext() context.Context {
+	if r.workerContext != nil {
+		return r.workerContext
+	}
+	return context.Background()
+}
+
+func (r *Router) waitForBackgroundDelay(delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-r.workerDone():
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 

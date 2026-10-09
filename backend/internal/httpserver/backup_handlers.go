@@ -1,7 +1,6 @@
 package httpserver
 
 import (
-	"context"
 	"errors"
 	"hypercdr-platform/platform/backend/internal/store"
 	"net/http"
@@ -118,7 +117,9 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "create_task_failed"})
 				return
 			}
-			go r.dispatchBackupTaskAfterStorageSync(task, storageName, plan.StorageRepoID, plan.SourceClusterID)
+			r.startWorker(func() {
+				r.dispatchBackupTaskAfterStorageSync(task, storageName, plan.StorageRepoID, plan.SourceClusterID)
+			})
 			writeJSON(w, http.StatusCreated, map[string]any{"task": task})
 			return
 		}
@@ -243,7 +244,7 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		tasks = append(tasks, task)
-		go r.dispatchBackupTaskAfterStorageSync(task, tgt.storage, tgt.storageRepoID, body.ClusterID)
+		r.startWorker(func() { r.dispatchBackupTaskAfterStorageSync(task, tgt.storage, tgt.storageRepoID, body.ClusterID) })
 	}
 	statusCode := http.StatusCreated
 	warning := ""
@@ -427,6 +428,9 @@ func (r *Router) createPendingBackupTask(body backupTaskRequest, appID string) (
 }
 
 func (r *Router) dispatchBackupTaskAfterStorageSync(task store.Task, storageName string, storageRepoID string, sourceClusterID string) {
+	if r.backgroundContext().Err() != nil {
+		return
+	}
 	if storageRepoID == "" {
 		r.dispatchBackupTask(task)
 		return
@@ -447,8 +451,11 @@ func (r *Router) dispatchBackupTaskAfterStorageSync(task store.Task, storageName
 		Reason:  "storage_preflight_started",
 		Message: "Configuring storage...",
 	})
-	storageTask, err := r.ensureStorageSynced(context.Background(), task.ClusterID, storageName, storageRepoID, sourceClusterID)
+	storageTask, err := r.ensureStorageSynced(r.backgroundContext(), task.ClusterID, storageName, storageRepoID, sourceClusterID)
 	if err != nil {
+		if r.backgroundContext().Err() != nil {
+			return
+		}
 		r.logger.Error("storage sync preflight failed before backup dispatch", "cluster_id", task.ClusterID, "task_id", task.ID, "storage_repo", storageName, "storage_task_id", storageTask.ID, "error", err)
 		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{
 			TaskID:       task.ID,
@@ -478,6 +485,9 @@ func (r *Router) dispatchBackupTaskAfterStorageSync(task store.Task, storageName
 }
 
 func (r *Router) dispatchBackupTask(task store.Task) {
+	if r.backgroundContext().Err() != nil {
+		return
+	}
 	conn, ok := r.hub.get(task.ClusterID)
 	if !ok {
 		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{

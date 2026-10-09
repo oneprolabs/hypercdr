@@ -65,7 +65,13 @@ func (r *Router) redispatchPendingTasks(clusterID string, conn *websocket.Conn) 
 		return
 	}
 	for _, task := range tasks {
+		if r.backgroundContext().Err() != nil {
+			return
+		}
 		if task.Status != "queued" && task.Status != "dispatched" {
+			continue
+		}
+		if task.Status == "queued" && r.resumeQueuedStoragePreflight(task) {
 			continue
 		}
 		if err := r.dispatchStoredTask(conn, task); err != nil {
@@ -93,6 +99,51 @@ func (r *Router) redispatchPendingTasks(clusterID string, conn *websocket.Conn) 
 	}
 }
 
+// A process can stop after a data task is saved but before its storage preflight
+// completes. Reconstruct the dependency from persisted plan/restore-point data
+// rather than blindly dispatching the data task after agent reconnect.
+func (r *Router) resumeQueuedStoragePreflight(task store.Task) bool {
+	var repositoryID, sourceClusterID string
+	switch task.Type {
+	case "backup":
+		if task.ProtectionPlanID == "" {
+			return false
+		}
+		plan, found, err := r.store.GetProtectionPlan(task.ProtectionPlanID)
+		if err != nil || !found || plan.TenantID != task.TenantID {
+			return true
+		}
+		repositoryID, sourceClusterID = plan.StorageRepoID, plan.SourceClusterID
+	case "restore", "drill", "takeover":
+		pointID := taskPayloadString(task.Payload, "restorePointId")
+		if pointID == "" {
+			return false
+		}
+		point, found, err := r.store.GetRestorePoint(pointID)
+		if err != nil || !found || point.TenantID != task.TenantID {
+			return true
+		}
+		repositoryID, sourceClusterID = point.StorageRepoID, point.SourceClusterID
+	default:
+		return false
+	}
+	if repositoryID == "" {
+		return false
+	}
+	name := taskPayloadString(task.Payload, "storageRepo")
+	if r.isStorageAlreadySynced(task.ClusterID, name, repositoryID, sourceClusterID) {
+		return false
+	}
+	r.startWorker(func() {
+		if task.Type == "backup" {
+			r.dispatchBackupTaskAfterStorageSync(task, name, repositoryID, sourceClusterID)
+		} else {
+			r.dispatchRecoveryTaskAfterStorageSync(task, name, repositoryID, sourceClusterID)
+		}
+	})
+	return true
+}
+
 func (r *Router) dispatchStoredTask(conn *websocket.Conn, task store.Task) error {
 	r.taskDispatchMu.Lock()
 	defer r.taskDispatchMu.Unlock()
@@ -100,6 +151,12 @@ func (r *Router) dispatchStoredTask(conn *websocket.Conn, task store.Task) error
 	if err != nil {
 		return err
 	}
+	return conn.WriteJSON(dispatch)
+}
+
+func (r *Router) writeTaskDispatch(conn *websocket.Conn, dispatch any) error {
+	r.taskDispatchMu.Lock()
+	defer r.taskDispatchMu.Unlock()
 	return conn.WriteJSON(dispatch)
 }
 

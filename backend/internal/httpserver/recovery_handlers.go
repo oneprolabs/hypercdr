@@ -1,7 +1,6 @@
 package httpserver
 
 import (
-	"context"
 	"fmt"
 	"hypercdr-platform/platform/backend/internal/store"
 	"net/http"
@@ -337,7 +336,9 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "create_task_failed"})
 		return
 	}
-	go r.dispatchRecoveryTaskAfterStorageSync(task, body.StorageRepo, storageRepoID, storageSourceClusterID)
+	r.startWorker(func() {
+		r.dispatchRecoveryTaskAfterStorageSync(task, body.StorageRepo, storageRepoID, storageSourceClusterID)
+	})
 	writeJSON(w, http.StatusCreated, task)
 }
 
@@ -472,7 +473,7 @@ func (r *Router) retryRecoveryTask(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	_ = r.store.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "info", Reason: "retry_created", Message: "Recovery retry created from task " + original.ID})
-	go r.dispatchRecoveryTask(task)
+	r.startWorker(func() { r.dispatchRecoveryTask(task) })
 	writeJSON(w, http.StatusCreated, task)
 }
 
@@ -512,6 +513,9 @@ func protectionPlanAllowsBackup(status string) bool {
 }
 
 func (r *Router) dispatchRecoveryTaskAfterStorageSync(task store.Task, storageName string, storageRepoID string, sourceClusterID string) {
+	if r.backgroundContext().Err() != nil {
+		return
+	}
 	if storageRepoID == "" {
 		r.dispatchRecoveryTask(task)
 		return
@@ -532,8 +536,11 @@ func (r *Router) dispatchRecoveryTaskAfterStorageSync(task store.Task, storageNa
 		Reason:  "storage_preflight_started",
 		Message: "Configuring storage...",
 	})
-	storageTask, err := r.ensureStorageSynced(context.Background(), task.ClusterID, storageName, storageRepoID, sourceClusterID)
+	storageTask, err := r.ensureStorageSynced(r.backgroundContext(), task.ClusterID, storageName, storageRepoID, sourceClusterID)
 	if err != nil {
+		if r.backgroundContext().Err() != nil {
+			return
+		}
 		r.logger.Error("storage sync preflight failed before recovery dispatch", "cluster_id", task.ClusterID, "task_type", task.Type, "task_id", task.ID, "storage_repo", storageName, "storage_task_id", storageTask.ID, "error", err)
 		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{
 			TaskID:       task.ID,
@@ -563,6 +570,9 @@ func (r *Router) dispatchRecoveryTaskAfterStorageSync(task store.Task, storageNa
 }
 
 func (r *Router) dispatchRecoveryTask(task store.Task) {
+	if r.backgroundContext().Err() != nil {
+		return
+	}
 	conn, ok := r.hub.get(task.ClusterID)
 	if !ok {
 		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{

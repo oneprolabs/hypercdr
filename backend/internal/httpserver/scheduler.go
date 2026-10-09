@@ -15,8 +15,7 @@ const maintenanceTaskInactivityTimeout = 35 * time.Minute
 
 func (r *Router) startScheduler() {
 	r.schedulerOnce.Do(func() {
-		r.workers.Add(1)
-		go func() { defer r.workers.Done(); r.schedulerLoop() }()
+		r.startWorker(r.schedulerLoop)
 	})
 }
 
@@ -359,7 +358,9 @@ func (r *Router) createScheduledBackupTask(plan store.ProtectionPlan, policy sto
 			"sourceNamespaces": sourceNamespaces,
 		},
 	})
-	go r.dispatchBackupTaskAfterStorageSync(task, storageName, plan.StorageRepoID, plan.SourceClusterID)
+	r.startWorker(func() {
+		r.dispatchBackupTaskAfterStorageSync(task, storageName, plan.StorageRepoID, plan.SourceClusterID)
+	})
 	return task, nil
 }
 

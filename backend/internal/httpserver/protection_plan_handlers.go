@@ -188,7 +188,7 @@ func (r *Router) createProtectionPlan(w http.ResponseWriter, req *http.Request) 
 	// Ready inside the Save request, otherwise the UI can never present a
 	// truthful, monotonic Configuring -> Ready/Failed state transition.
 	writeJSON(w, http.StatusCreated, protectionPlanActivationResponse(item, nil, ""))
-	go r.activateNewProtectionPlan(item)
+	r.startWorker(func() { r.activateNewProtectionPlan(item) })
 }
 
 func (r *Router) activateNewProtectionPlan(item store.ProtectionPlan) {

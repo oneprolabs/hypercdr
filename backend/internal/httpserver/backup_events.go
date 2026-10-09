@@ -1466,8 +1466,10 @@ func (r *Router) finishProtectionCleanupTask(task store.Task, veleroPayload map[
 		// leaving the plan in cleanup_running forever. Recheck shortly after the
 		// concurrent completions settle; CleanupProtectionPlanRecords is
 		// idempotent, so either retry may safely close the plan.
-		go func(task store.Task) {
-			time.Sleep(500 * time.Millisecond)
+		r.startWorker(func() {
+			if !r.waitForBackgroundDelay(500 * time.Millisecond) {
+				return
+			}
 			plan, ok, err := r.store.GetProtectionPlan(planID)
 			if err != nil || !ok {
 				return
@@ -1482,7 +1484,7 @@ func (r *Router) finishProtectionCleanupTask(task store.Task, veleroPayload map[
 			} else if !ok {
 				r.logger.Warn("protection cleanup completion race resolved for missing plan", "plan_id", planID, "task_id", task.ID)
 			}
-		}(task)
+		})
 		return
 	}
 	if _, ok, err := r.store.CleanupProtectionPlanRecords(planID); err != nil {

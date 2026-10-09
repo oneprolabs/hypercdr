@@ -164,7 +164,7 @@ func (r *Router) uploadCCEKubeconfig(w http.ResponseWriter, req *http.Request) {
 	r.cleanupExpiredCCEKubeconfigsLocked(time.Now().UTC())
 	r.cceRegistrationUploads[id] = upload
 	r.cceRegistrationMu.Unlock()
-	go r.expireCCEKubeconfig(id, expiresAt)
+	r.startWorker(func() { r.expireCCEKubeconfig(id, expiresAt) })
 	fingerprint := sha256.Sum256(raw)
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"id": id, "fingerprint": "sha256:" + hex.EncodeToString(fingerprint[:]), "currentContext": doc.CurrentContext,
@@ -299,7 +299,7 @@ func (r *Router) startCCEDirectRegistration(w http.ResponseWriter, req *http.Req
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "inspection_required", "message": "Inspect this exact kubeconfig context successfully before registration."})
 		return
 	}
-	go r.expireCCEKubeconfig(body.SessionID, upload.ExpiresAt)
+	r.startWorker(func() { r.expireCCEKubeconfig(body.SessionID, upload.ExpiresAt) })
 	existing, err := r.store.ListTasksFiltered(store.TaskFilter{TenantID: tenantID, Types: []string{"cluster-registration"}, Limit: 200})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "registration_task_lookup_failed"})
@@ -508,9 +508,7 @@ func (r *Router) startCCEKubeconfigJanitor() {
 		return
 	}
 	r.cleanupOrphanedCCEKubeconfigs(time.Now().UTC())
-	r.workers.Add(1)
-	go func() {
-		defer r.workers.Done()
+	r.startWorker(func() {
 		ticker := time.NewTicker(cceJanitorInterval)
 		defer ticker.Stop()
 		for {
@@ -521,7 +519,7 @@ func (r *Router) startCCEKubeconfigJanitor() {
 				r.cleanupOrphanedCCEKubeconfigs(now)
 			}
 		}
-	}()
+	})
 }
 
 func (r *Router) expireCCEKubeconfig(id string, expiresAt time.Time) {

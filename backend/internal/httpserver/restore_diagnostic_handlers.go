@@ -216,20 +216,32 @@ func (r *Router) scheduleRestorePointContentIndex(point store.RestorePoint) {
 	}
 	r.contentIndexing[point.ID] = struct{}{}
 	r.contentIndexMu.Unlock()
-	go func() {
+	if !r.startWorker(func() {
 		defer func() {
 			r.contentIndexMu.Lock()
 			delete(r.contentIndexing, point.ID)
 			r.contentIndexMu.Unlock()
 		}()
-		r.contentIndexSlots <- struct{}{}
+		select {
+		case r.contentIndexSlots <- struct{}{}:
+		case <-r.workerDone():
+			return
+		}
 		defer func() { <-r.contentIndexSlots }()
 		delays := []time.Duration{0, 5 * time.Second, 30 * time.Second}
 		for attempt, delay := range delays {
+			if r.backgroundContext().Err() != nil {
+				return
+			}
 			if delay > 0 {
-				time.Sleep(delay)
+				if !r.waitForBackgroundDelay(delay) {
+					return
+				}
 			}
 			report, _, err := r.requestBackupContents(point.SourceClusterID, point.VeleroBackupName, r.dataProtectionNamespaceForCluster(point.SourceClusterID))
+			if r.backgroundContext().Err() != nil {
+				return
+			}
 			if err == nil {
 				r.persistRestorePointContentIndex(point, report, "ready", "")
 				r.logger.Info("restore point content index created", "restore_point_id", point.ID, "resources", len(report.Resources), "attempt", attempt+1)
@@ -238,7 +250,11 @@ func (r *Router) scheduleRestorePointContentIndex(point store.RestorePoint) {
 			r.persistRestorePointContentIndex(point, report, "failed", err.Error())
 			r.logger.Warn("restore point content indexing failed", "restore_point_id", point.ID, "attempt", attempt+1, "error", err)
 		}
-	}()
+	}) {
+		r.contentIndexMu.Lock()
+		delete(r.contentIndexing, point.ID)
+		r.contentIndexMu.Unlock()
+	}
 }
 
 func (r *Router) requestBackupContents(clusterID string, backupName string, veleroNamespace string) (protocol.BackupContentReportPayload, int, error) {

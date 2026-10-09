@@ -26,7 +26,7 @@ func (r *Router) scheduleLogMaintenance(now time.Time) {
 	}
 	r.logMaintRun = true
 	r.logMaintMu.Unlock()
-	go func() {
+	if !r.startWorker(func() {
 		defer func() {
 			r.logMaintMu.Lock()
 			r.logMaintRun = false
@@ -35,8 +35,14 @@ func (r *Router) scheduleLogMaintenance(now time.Time) {
 		if r.productInfo.Edition == "community" {
 			r.runDiagnosticLogCleanup(now)
 		}
-		r.runClusterLogArchive(now)
-	}()
+		if r.backgroundContext().Err() == nil {
+			r.runClusterLogArchive(now)
+		}
+	}) {
+		r.logMaintMu.Lock()
+		r.logMaintRun = false
+		r.logMaintMu.Unlock()
+	}
 }
 
 func (r *Router) runDiagnosticLogCleanup(now time.Time) {
@@ -53,6 +59,9 @@ func (r *Router) runDiagnosticLogCleanup(now time.Time) {
 	cutoff := now.Add(-retention)
 	var total int64
 	for batches := 0; batches < 100; batches++ {
+		if r.backgroundContext().Err() != nil {
+			return
+		}
 		removed, err := r.store.PurgeDiagnosticLogs(cutoff)
 		if err != nil {
 			r.logger.Error("diagnostic log retention cleanup failed", "error", err)
@@ -76,10 +85,16 @@ func (r *Router) runClusterLogArchive(now time.Time) {
 		return
 	}
 	for _, cluster := range clusters {
+		if r.backgroundContext().Err() != nil {
+			return
+		}
 		if !r.hub.has(cluster.ID) {
 			continue
 		}
 		for _, component := range clusterLogComponents {
+			if r.backgroundContext().Err() != nil {
+				return
+			}
 			key := cluster.ID + "::" + component
 			r.logMaintMu.Lock()
 			retryAfter := r.logRetryAfter[key]

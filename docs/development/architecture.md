@@ -46,7 +46,13 @@ refresh again if a request was lost. Log/content waiters abort with a retryable
 restricted to their tenant and uploader, and expired on-disk kubeconfigs are
 removed by the janitor. After restart users must upload/inspect again; persisted
 registration tasks and executor-owned files retain their existing semantics.
-Scheduler/janitor workers stop before PostgreSQL closes. Agents reconnect to the
+Scheduler/janitor, storage preflight, protection activation, log maintenance,
+content indexing and deferred cleanup workers are admitted through a lifecycle
+gate and drained before PostgreSQL closes. Storage waits, index slots and retry
+delays observe shutdown. Shutdown cancellation leaves persisted data tasks queued
+rather than reporting a storage failure. Agent reconnect rechecks queued backup
+and recovery storage dependencies from persisted plans/restore points before
+dispatch; storage-sync and data-task messages share the task write lock. Agents reconnect to the
 active API. The deployment still uses a single
 active slot. Distributed request correlation must be designed before advertising multiple active replicas. A scheduler lock
 alone cannot guarantee correctness across arbitrary database/network partitions.

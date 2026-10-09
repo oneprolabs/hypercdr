@@ -283,7 +283,7 @@ func (r *Router) syncStorageRepository(w http.ResponseWriter, req *http.Request)
 			},
 		},
 	}
-	if err := conn.WriteJSON(dispatch); err != nil {
+	if err := r.writeTaskDispatch(conn, dispatch); err != nil {
 		r.logger.Error("failed to dispatch storage sync task", "task_id", task.ID, "error", err)
 		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{
 			TaskID:       task.ID,
@@ -521,7 +521,7 @@ func (r *Router) dispatchStorageSyncTaskForPlanActivationAttempt(clusterID strin
 			},
 		},
 	}
-	if err := conn.WriteJSON(dispatch); err != nil {
+	if err := r.writeTaskDispatch(conn, dispatch); err != nil {
 		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{
 			TaskID:       task.ID,
 			Status:       "queued",
@@ -540,6 +540,9 @@ func (r *Router) dispatchStorageSyncTaskForPlanActivationAttempt(clusterID strin
 }
 
 func (r *Router) ensureStorageSynced(ctx context.Context, clusterID string, storageName string, repositoryID string, sourceClusterID string) (store.Task, error) {
+	if err := ctx.Err(); err != nil {
+		return store.Task{}, err
+	}
 	if repositoryID == "" {
 		repo, ok, err := r.findStorageRepositoryByName(storageName)
 		if err != nil {
