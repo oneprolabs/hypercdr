@@ -115,6 +115,12 @@ catalog endpoints have typed domain API modules; request limits and existing
 workflow semantics are preserved.
 
 Authenticated `/api/v1/schema` exposes the live route, access and error inventory.
+Cluster list/summary, mutations, unregister/precheck, component upgrades and
+inventory requests now have payload contracts (11 mounted operations). Tests
+exercise actual responses, including empty collections, sent/failed inventory,
+offline/timeout/restart outcomes, persisted upgrade dispatch and foreign-tenant
+mutation denial. Inventory correlation keys include the authenticated cluster
+as well as the request ID, so equal IDs on different clusters remain independent.
 Account preference/profile callbacks are scoped to the submitting session, just
 like shared resource updates. A delayed success, error or finally callback from
 an old session cannot restore its browser credentials, change the new session's

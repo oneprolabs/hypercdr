@@ -111,7 +111,7 @@ func (r *Router) apiSchema(w http.ResponseWriter, req *http.Request) {
 			},
 		}
 		operation := operations[strings.ToLower(method)].(map[string]any)
-		for _, apply := range []func(string, map[string]any) bool{r.applyAuthPayloadContract, applyApplicationPayloadContract, applyPolicyPayloadContract, applyStoragePayloadContract, applyTaskPayloadContract, applyProtectionPlanPayloadContract, applyRestorePointPayloadContract, applyRegistrationPayloadContract, applyTokenPayloadContract} {
+		for _, apply := range []func(string, map[string]any) bool{r.applyAuthPayloadContract, applyApplicationPayloadContract, applyPolicyPayloadContract, applyStoragePayloadContract, applyTaskPayloadContract, applyProtectionPlanPayloadContract, applyRestorePointPayloadContract, applyRegistrationPayloadContract, applyTokenPayloadContract, applyClusterPayloadContract} {
 			if apply(route.Pattern, operation) {
 				break
 			}

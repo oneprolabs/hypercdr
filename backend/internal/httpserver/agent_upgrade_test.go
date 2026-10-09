@@ -59,7 +59,13 @@ func TestAgentUpgradeReturnsPersistedQueuedTaskBeforeAsyncDispatch(t *testing.T)
 		t.Fatalf("upgrade status = %d", response.StatusCode)
 	}
 	var queued store.Task
-	if err := json.NewDecoder(response.Body).Decode(&queued); err != nil {
+	var raw map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&raw); err != nil {
+		t.Fatal(err)
+	}
+	validateClusterResponse(t, "POST /api/v1/clusters/{id}/agent/upgrade", 202, raw)
+	encoded, _ := json.Marshal(raw)
+	if err := json.Unmarshal(encoded, &queued); err != nil {
 		t.Fatal(err)
 	}
 	if queued.ID == "" || queued.Status != "queued" {
@@ -150,6 +156,11 @@ func TestOpenShiftAgentUpgradeTargetsDedicatedImageAndExistingContainer(t *testi
 	if response.StatusCode != http.StatusAccepted {
 		t.Fatalf("status=%d", response.StatusCode)
 	}
+	var raw map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&raw); err != nil {
+		t.Fatal(err)
+	}
+	validateClusterResponse(t, "POST /api/v1/clusters/{id}/agent/upgrade", 202, raw)
 	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	var dispatch protocol.Message[protocol.TaskDispatchPayload]
 	if err = conn.ReadJSON(&dispatch); err != nil {

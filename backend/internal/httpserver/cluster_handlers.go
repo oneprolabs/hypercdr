@@ -81,11 +81,10 @@ func (r *Router) listClusters(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 	clusters = visibleClusters
+	if clusters == nil {
+		clusters = []store.Cluster{}
+	}
 	if req.URL.Query().Get("view") == "summary" {
-		type clusterSummary struct {
-			ID        string `json:"id"`
-			IsDefault bool   `json:"isDefault"`
-		}
 		items := make([]clusterSummary, 0, len(clusters))
 		for _, item := range clusters {
 			items = append(items, clusterSummary{ID: item.ID, IsDefault: item.IsDefault})
@@ -598,14 +597,7 @@ func (r *Router) requestClusterInventory(w http.ResponseWriter, req *http.Reques
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "cluster_id_required"})
 		return
 	}
-	var body struct {
-		RequestID                  string `json:"requestId"`
-		Scope                      string `json:"scope"`
-		Namespace                  string `json:"namespace"`
-		IncludeDetails             bool   `json:"includeDetails"`
-		Reason                     string `json:"reason"`
-		IncludeRecentVeleroObjects bool   `json:"includeRecentVeleroObjects"`
-	}
+	var body clusterInventoryRequest
 	if err := decodeJSON(req, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
 		return
@@ -728,7 +720,7 @@ func (r *Router) getClusterInventoryRequest(w http.ResponseWriter, req *http.Req
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "request_id_required"})
 		return
 	}
-	status, ok := r.getInventoryRequestStatus(requestID)
+	status, ok := r.getInventoryRequestStatus(clusterID, requestID)
 	if !ok || status.ClusterID != clusterID {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "inventory_request_not_found", "message": "This request is no longer available; the platform may have restarted. Refresh the inventory again."})
 		return
@@ -749,13 +741,13 @@ func (r *Router) setInventoryRequestStatus(status inventoryRequestStatus) {
 	}
 	r.inventoryMu.Lock()
 	defer r.inventoryMu.Unlock()
-	r.inventory[status.RequestID] = status
+	r.inventory[agentRequestKey(status.ClusterID, status.RequestID)] = status
 }
 
-func (r *Router) getInventoryRequestStatus(requestID string) (inventoryRequestStatus, bool) {
+func (r *Router) getInventoryRequestStatus(clusterID, requestID string) (inventoryRequestStatus, bool) {
 	r.inventoryMu.Lock()
 	defer r.inventoryMu.Unlock()
-	status, ok := r.inventory[requestID]
+	status, ok := r.inventory[agentRequestKey(clusterID, requestID)]
 	return status, ok
 }
 
@@ -763,7 +755,7 @@ func (r *Router) completeInventoryRequest(clusterID string, payload protocol.Inv
 	if payload.RequestID == "" {
 		return
 	}
-	status, ok := r.getInventoryRequestStatus(payload.RequestID)
+	status, ok := r.getInventoryRequestStatus(clusterID, payload.RequestID)
 	if !ok || status.ClusterID != clusterID {
 		return
 	}
@@ -777,7 +769,7 @@ func (r *Router) failInventoryRequest(clusterID string, payload protocol.Message
 	if payload.RequestID == "" {
 		return
 	}
-	status, ok := r.getInventoryRequestStatus(payload.RequestID)
+	status, ok := r.getInventoryRequestStatus(clusterID, payload.RequestID)
 	if !ok || status.ClusterID != clusterID {
 		return
 	}
@@ -1013,12 +1005,7 @@ func (r *Router) unregisterCluster(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "cluster_id_required"})
 		return
 	}
-	var body struct {
-		DeleteVelero     *bool  `json:"deleteVelero"`
-		DeleteNamespace  *bool  `json:"deleteNamespace"`
-		DeleteBackupData bool   `json:"deleteBackupData"`
-		Reason           string `json:"reason"`
-	}
+	var body clusterUnregisterRequest
 	if req.Body != nil {
 		if err := decodeJSON(req, &body); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
@@ -1239,9 +1226,7 @@ func (r *Router) cleanupAndDispatchUnregister(task store.Task, repositoryIDs []s
 }
 
 func (r *Router) upgradeClusterAgent(w http.ResponseWriter, req *http.Request) {
-	var input struct {
-		Repair bool `json:"repair"`
-	}
+	var input clusterUpgradeRequest
 	if req.Body != nil {
 		decoder := json.NewDecoder(io.LimitReader(req.Body, 1<<20))
 		if err := decoder.Decode(&input); err != nil && !errors.Is(err, io.EOF) {
@@ -1333,9 +1318,7 @@ func (r *Router) upgradeClusterAgent(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) upgradeClusterVelero(w http.ResponseWriter, req *http.Request) {
-	var input struct {
-		Repair bool `json:"repair"`
-	}
+	var input clusterUpgradeRequest
 	if req.Body != nil {
 		decoder := json.NewDecoder(io.LimitReader(req.Body, 1<<20))
 		if err := decoder.Decode(&input); err != nil && !errors.Is(err, io.EOF) {
