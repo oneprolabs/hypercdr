@@ -269,6 +269,8 @@ func (r *Router) requestBackupContents(clusterID string, backupName string, vele
 			return report, http.StatusBadGateway, errors.New(report.Message)
 		}
 		return report, http.StatusOK, nil
+	case <-r.workerDone():
+		return protocol.BackupContentReportPayload{}, http.StatusServiceUnavailable, errors.New("The platform is restarting. Retry inspecting restore point contents after reconnecting.")
 	case <-time.After(50 * time.Second):
 		return protocol.BackupContentReportPayload{}, http.StatusGatewayTimeout, errors.New("The cluster agent did not return restore point contents in time.")
 	}

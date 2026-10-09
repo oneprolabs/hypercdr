@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -88,5 +89,38 @@ func TestAPIErrorIncludesRequestCorrelationWithoutMutatingCaller(t *testing.T) {
 	}
 	if _, ok := input["requestId"]; ok {
 		t.Fatal("caller error map was mutated")
+	}
+}
+
+func TestSchemaSecurityMatchesSpecialTokenRoutes(t *testing.T) {
+	r := &Router{mux: http.NewServeMux(), productInfo: ProductInfo{Edition: "community"}}
+	r.routes()
+	w := httptest.NewRecorder()
+	r.apiSchema(w, httptest.NewRequest("GET", "/api/v1/schema", nil))
+	var schema struct {
+		Paths map[string]map[string]struct {
+			Security []map[string][]string `json:"security"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &schema); err != nil {
+		t.Fatal(err)
+	}
+	for path, methods := range schema.Paths {
+		for method, op := range methods {
+			release, migration := false, false
+			for _, requirement := range op.Security {
+				_, hasRelease := requirement["releaseToken"]
+				release = release || hasRelease
+				_, hasMigration := requirement["migrationSession"]
+				migration = migration || hasMigration
+			}
+			if release != allowsReleaseToken(strings.ToUpper(method), path) {
+				t.Fatalf("release-token schema drift: %s %s", method, path)
+			}
+			wantsMigration := strings.HasPrefix(path, "/api/v1/community-migrations/source/") && strings.Contains(path, "/{id}")
+			if migration != wantsMigration {
+				t.Fatalf("migration-token schema drift: %s %s", method, path)
+			}
+		}
 	}
 }

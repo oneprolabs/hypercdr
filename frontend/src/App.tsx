@@ -731,30 +731,24 @@ function clusterStatusMeta(status: ClusterStatus) {
   return { label: 'Alert' };
 }
 
-function LanguageSwitcher({
+function LanguageIndicator({
   locale,
-  setLocale,
   compact = false,
 }: {
   locale: LocaleCode;
-  setLocale: (locale: LocaleCode) => void;
   compact?: boolean;
 }) {
   const language = locales[locale];
-  const switchToEnglish = () => setLocale('en');
 
   return (
-    <button
-      type="button"
-      onClick={switchToEnglish}
+    <span
       className={compact ? 'hbdr-language-switch hbdr-language-switch-compact' : 'hbdr-language-switch'}
       aria-label={`${language.languageLabel}: ${language.name}`}
     >
       <Languages size={14} />
       <span>{compact ? 'EN' : language.languageLabel}</span>
       <strong>{language.name}</strong>
-      <ChevronDown size={13} />
-    </button>
+    </span>
   );
 }
 
@@ -830,7 +824,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   const [passwordResetCompleted, setPasswordResetCompleted] = useState(false);
   const [confirmPassword, setConfirmPassword] = useState('');
   const [resetToken, setResetToken] = useState('');
-  const [locale, setLocale] = useState<LocaleCode>('en');
+  const locale: LocaleCode = 'en';
   const [theme, setTheme] = useState<'light' | 'dark'>(() => readStoredAuthSession()?.user.theme === 'dark' ? 'dark' : 'light');
   const [savingTheme, setSavingTheme] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -1970,7 +1964,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
             <div className="premium-login-card">
               <h2>
                 <span>{authFlow === 'login' ? 'Welcome to HyperCDR' : authFlow === 'forgot' ? 'Forgot your password?' : 'Set a new password'}</span>
-                <LanguageSwitcher locale={locale} setLocale={setLocale} compact />
+                <LanguageIndicator locale={locale} compact />
               </h2>
               {authFlow !== 'login' && <p className="hbdr-auth-description">{authFlow === 'forgot' ? 'Enter your registered email address and we will send a reset link.' : 'Choose a new password for your account.'}</p>}
               <div className="hbdr-login-form grid gap-4">
@@ -2137,8 +2131,8 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
         </div>
         <div>
           <button type="button" onClick={() => { setDraftTimeZone(timeZonePreference); setTimeZoneDrawerOpen(true); }} className="hbdr-timezone-button hbdr-top-tooltip" data-tooltip={`Timezone · ${timeZoneLabel}`} aria-label={`Current timezone: ${timeZoneLabel}`}><span className="hbdr-timezone-short">{timeZoneOptionLabel(userTimeZone).match(/\(([^)]+)\)/)?.[1] || 'UTC+00:00'}</span></button>
-          <span className="hbdr-top-tooltip hbdr-language-tooltip" data-tooltip="Switch language">
-            <LanguageSwitcher locale={locale} setLocale={setLocale} compact />
+          <span className="hbdr-top-tooltip hbdr-language-tooltip" data-tooltip="Interface language: English">
+            <LanguageIndicator locale={locale} compact />
           </span>
           <div className="hbdr-account" ref={accountMenuRef}>
             <button

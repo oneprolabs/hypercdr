@@ -34,12 +34,19 @@ executor work keeps its existing `FOR UPDATE SKIP LOCKED` claim semantics.
 No schema change or change to published image/build/deployment ordering is
 required for this lock.
 
-This is **not general active/active support**. Agent sockets, captcha/OAuth
-challenges, pending inventory/log/content requests and temporary upload metadata
-are process-bound. A restart can require a new challenge or retry of an in-flight
-request; agents reconnect to the active API. The deployment still uses a single
-active slot. Distributed request correlation and authentication-challenge state
-must be designed before advertising multiple active replicas. A scheduler lock
+This is **not general active/active support**. Captcha/OAuth challenges are hashed, expiring, single-use PostgreSQL records.
+`DELETE RETURNING` guarantees one consumer across independent API pools; invalid
+answers also consume a captcha. These challenges survive single-active handoff.
+Agent sockets, pending inventory/log/content requests and temporary upload
+metadata remain process-bound. Inventory lookup explicitly asks the user to
+refresh again if a request was lost. Log/content waiters abort with a retryable
+503 during shutdown; successful content indices remain persisted. Uploads are
+restricted to their tenant and uploader, and expired on-disk kubeconfigs are
+removed by the janitor. After restart users must upload/inspect again; persisted
+registration tasks and executor-owned files retain their existing semantics.
+Scheduler/janitor workers stop before PostgreSQL closes. Agents reconnect to the
+active API. The deployment still uses a single
+active slot. Distributed request correlation must be designed before advertising multiple active replicas. A scheduler lock
 alone cannot guarantee correctness across arbitrary database/network partitions.
 
 ## Frontend and API
@@ -50,12 +57,17 @@ correlation. ESLint rejects bare `fetch` in UI modules. Existing page modules
 remain lazy-loaded; password flows, cluster context and namespace-resource drawer
 rendering are separate components without DOM/style/interaction changes. Platform
 data mapping and lazy namespace-detail tab loading are separate modules as well.
+The four-tab namespace detail drawer owns its rendering and presentation model,
+while the parent retains protection/recovery actions. Inventory and namespace
+catalog endpoints have typed domain API modules; request limits and existing
+workflow semantics are preserved.
 
 Authenticated `/api/v1/schema` exposes the live route, access and error inventory.
 Endpoint request/success payload schemas remain incomplete; this is not yet a
 client-generation contract. Existing error codes and HTTP statuses are preserved;
 JSON errors can also carry the request ID from the response header. English
-remains the UI language. Complete localization needs a separately defined
+remains the UI language; the header shows an indicator rather than a switcher
+that falsely suggests additional supported languages. Complete localization needs a separately defined
 translation scope and visual acceptance, and is not claimed by this refactor.
 
 ## Checks

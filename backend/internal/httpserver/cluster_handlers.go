@@ -730,7 +730,7 @@ func (r *Router) getClusterInventoryRequest(w http.ResponseWriter, req *http.Req
 	}
 	status, ok := r.getInventoryRequestStatus(requestID)
 	if !ok || status.ClusterID != clusterID {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": "inventory_request_not_found"})
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "inventory_request_not_found", "message": "This request is no longer available; the platform may have restarted. Refresh the inventory again."})
 		return
 	}
 	if status.Status == "pending" && time.Since(status.CreatedAt) > 60*time.Second {

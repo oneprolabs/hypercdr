@@ -99,14 +99,11 @@ func (r *Router) createCaptcha(w http.ResponseWriter, req *http.Request) {
 	}
 	id := store.NewPublicID()
 	now := time.Now().UTC()
-	r.captchaMu.Lock()
-	for captchaID, challenge := range r.captchas {
-		if now.After(challenge.ExpiresAt) {
-			delete(r.captchas, captchaID)
-		}
+	if err := r.store.CreateAuthChallenge(req.Context(), "captcha", id, code, now.Add(2*time.Minute)); err != nil {
+		r.logger.Error("failed to persist captcha", "error", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "captcha_generation_failed"})
+		return
 	}
-	r.captchas[id] = captchaChallenge{Code: code, ExpiresAt: now.Add(2 * time.Minute)}
-	r.captchaMu.Unlock()
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id":        id,

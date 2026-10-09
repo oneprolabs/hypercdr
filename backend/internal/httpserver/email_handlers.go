@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -288,11 +289,13 @@ func (r *Router) decryptSetting(value string) (string, error) {
 	return string(plain), err
 }
 func (r *Router) consumeCaptcha(id, code string) bool {
-	r.captchaMu.Lock()
-	challenge, ok := r.captchas[id]
-	delete(r.captchas, id)
-	r.captchaMu.Unlock()
-	return ok && time.Now().UTC().Before(challenge.ExpiresAt) && challenge.Code == strings.TrimSpace(code)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ok, err := r.store.ConsumeAuthChallenge(ctx, "captcha", id, strings.TrimSpace(code))
+	if err != nil {
+		r.logger.Error("failed to consume captcha", "error", err)
+	}
+	return err == nil && ok
 }
 
 func validUserPassword(password string) bool { return len(password) >= 8 && len(password) <= 128 }
@@ -519,9 +522,11 @@ func (r *Router) googleStart(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	state := store.NewPublicID() + store.NewPublicID()
-	r.oauthMu.Lock()
-	r.oauthStates[state] = time.Now().UTC().Add(10 * time.Minute)
-	r.oauthMu.Unlock()
+	if err := r.store.CreateAuthChallenge(req.Context(), "google-oauth", state, "", time.Now().UTC().Add(10*time.Minute)); err != nil {
+		r.logger.Error("failed to persist OAuth state", "error", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "google_state_failed"})
+		return
+	}
 	callback := r.cfg.PublicBaseURL + "/api/v1/auth/google/callback"
 	q := url.Values{"client_id": {r.cfg.GoogleClientID}, "redirect_uri": {callback}, "response_type": {"code"}, "scope": {"openid email profile"}, "state": {state}, "prompt": {"select_account"}}
 	http.Redirect(w, req, "https://accounts.google.com/o/oauth2/v2/auth?"+q.Encode(), http.StatusFound)
@@ -529,17 +534,22 @@ func (r *Router) googleStart(w http.ResponseWriter, req *http.Request) {
 
 func (r *Router) googleCallback(w http.ResponseWriter, req *http.Request) {
 	state := req.URL.Query().Get("state")
-	r.oauthMu.Lock()
-	expiry, ok := r.oauthStates[state]
-	delete(r.oauthStates, state)
-	r.oauthMu.Unlock()
-	if !ok || time.Now().UTC().After(expiry) {
+	ok, err := r.store.ConsumeAuthChallenge(req.Context(), "google-oauth", state, "")
+	if err != nil || !ok {
 		http.Redirect(w, req, "/?auth_error=google_state", http.StatusFound)
 		return
 	}
 	callback := r.cfg.PublicBaseURL + "/api/v1/auth/google/callback"
 	form := url.Values{"code": {req.URL.Query().Get("code")}, "client_id": {r.cfg.GoogleClientID}, "client_secret": {r.cfg.GoogleClientSecret}, "redirect_uri": {callback}, "grant_type": {"authorization_code"}}
-	resp, err := http.PostForm("https://oauth2.googleapis.com/token", form)
+	ctx, cancel := context.WithTimeout(req.Context(), 10*time.Second)
+	defer cancel()
+	tokenRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://oauth2.googleapis.com/token", strings.NewReader(form.Encode()))
+	if err != nil {
+		http.Redirect(w, req, "/?auth_error=google_exchange", http.StatusFound)
+		return
+	}
+	tokenRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := http.DefaultClient.Do(tokenRequest)
 	if err != nil {
 		http.Redirect(w, req, "/?auth_error=google_exchange", http.StatusFound)
 		return
@@ -552,7 +562,7 @@ func (r *Router) googleCallback(w http.ResponseWriter, req *http.Request) {
 		http.Redirect(w, req, "/?auth_error=google_exchange", http.StatusFound)
 		return
 	}
-	userReq, _ := http.NewRequestWithContext(req.Context(), http.MethodGet, "https://openidconnect.googleapis.com/v1/userinfo", nil)
+	userReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://openidconnect.googleapis.com/v1/userinfo", nil)
 	userReq.Header.Set("Authorization", "Bearer "+token.AccessToken)
 	userResp, err := http.DefaultClient.Do(userReq)
 	if err != nil {

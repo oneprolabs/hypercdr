@@ -15,12 +15,9 @@ func (r *Router) withPlatformAuth(next http.Handler) http.Handler {
 			next.ServeHTTP(w, req)
 			return
 		}
-		pipelineReleaseMutation := validReleaseToken(r.cfg.ReleaseToken, req.Header.Get("X-HyperCDR-Release-Token")) &&
-			((req.Method == http.MethodPost && path == "/api/v1/platform/releases") ||
-				(req.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/platform/releases/") && strings.Count(strings.TrimPrefix(path, "/api/v1/platform/releases/"), "/") == 0) ||
-				(strings.HasPrefix(path, "/api/v1/platform/upgrades") && (req.Method == http.MethodGet || req.Method == http.MethodPost)))
+		pipelineReleaseMutation := validReleaseToken(r.cfg.ReleaseToken, req.Header.Get("X-HyperCDR-Release-Token")) && allowsReleaseToken(req.Method, path)
 		if pipelineReleaseMutation {
-			pipeline := store.User{Email: "release-pipeline", Role: "admin", Status: "active"}
+			pipeline := store.User{Email: "release-pipeline", Role: "admin", Status: "active", SystemAdmin: true}
 			next.ServeHTTP(w, req.WithContext(context.WithValue(req.Context(), requestUserContextKey{}, pipeline)))
 			return
 		}
@@ -61,7 +58,7 @@ func (r *Router) withPlatformAuth(next http.Handler) http.Handler {
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": "administrator_required", "message": "Administrator permission is required."})
 			return
 		}
-		if requiresSystemAdmin(req) && !user.SystemAdmin && user.Email != "release-pipeline" {
+		if requiresSystemAdmin(req) && !user.SystemAdmin {
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": "system_administrator_required", "message": "System administrator permission is required."})
 			return
 		}
@@ -85,4 +82,11 @@ func (r *Router) withPlatformAuth(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, req.WithContext(context.WithValue(req.Context(), requestUserContextKey{}, user)))
 	})
+}
+
+// Shared by authentication and the OpenAPI security inventory.
+func allowsReleaseToken(method, path string) bool {
+	return (method == http.MethodPost && path == "/api/v1/platform/releases") ||
+		(method == http.MethodGet && strings.HasPrefix(path, "/api/v1/platform/releases/") && strings.Count(strings.TrimPrefix(path, "/api/v1/platform/releases/"), "/") == 0) ||
+		(strings.HasPrefix(path, "/api/v1/platform/upgrades") && (method == http.MethodGet || method == http.MethodPost))
 }

@@ -15,16 +15,15 @@ import (
 )
 
 type Router struct {
+	workerContext          context.Context
+	stopWorkers            context.CancelFunc
+	workers                sync.WaitGroup
 	cfg                    config.Config
 	logger                 *slog.Logger
 	mux                    *http.ServeMux
 	routeContracts         []RouteContract
 	store                  store.Store
 	hub                    *sessionHub
-	captchaMu              sync.Mutex
-	captchas               map[string]captchaChallenge
-	oauthMu                sync.Mutex
-	oauthStates            map[string]time.Time
 	inventoryMu            sync.Mutex
 	inventory              map[string]inventoryRequestStatus
 	imageDigestMu          sync.Mutex
@@ -210,11 +209,6 @@ const (
 
 var cleanObjectStoragePrefix = deleteObjectStoragePrefix
 
-type captchaChallenge struct {
-	Code      string
-	ExpiresAt time.Time
-}
-
 func (r *Router) getProductInfo(w http.ResponseWriter, _ *http.Request) {
 	if r.productInfoProvider != nil {
 		writeJSON(w, http.StatusOK, r.productInfoProvider())
@@ -250,15 +244,15 @@ func NewRouter(cfg config.Config, logger *slog.Logger, repo store.Store) http.Ha
 }
 
 func NewRouterWithProductInfo(cfg config.Config, logger *slog.Logger, repo store.Store, productInfo ProductInfo, args ...any) http.Handler {
+	workerContext, stopWorkers := context.WithCancel(context.Background())
 	var editionAuthorizer EditionAuthorizer
 	router := &Router{
+		workerContext: workerContext, stopWorkers: stopWorkers,
 		cfg:                    cfg,
 		logger:                 logger,
 		mux:                    http.NewServeMux(),
 		store:                  repo,
 		hub:                    newSessionHub(),
-		captchas:               map[string]captchaChallenge{},
-		oauthStates:            map[string]time.Time{},
 		inventory:              map[string]inventoryRequestStatus{},
 		imageDigests:           map[string]imageDigestCacheEntry{},
 		logRequests:            map[string]chan protocol.LogReportPayload{},
@@ -289,7 +283,7 @@ func NewRouterWithProductInfo(cfg config.Config, logger *slog.Logger, repo store
 	router.mountExtensionRoutes()
 	router.startCCEKubeconfigJanitor()
 	router.startScheduler()
-	return router.withPlatformAuth(router.withAccessLog(router.withAuditLog(router.mux)))
+	return &managedRouter{Handler: router.withPlatformAuth(router.withAccessLog(router.withAuditLog(router.mux))), router: router}
 }
 
 func (r *Router) mountExtensionRoutes() {
@@ -513,4 +507,30 @@ func (r *Router) resetCommunityAdminPassword(w http.ResponseWriter, req *http.Re
 		return
 	}
 	writeJSON(w, 200, map[string]any{"updated": true})
+}
+
+// managedRouter gives the process owner an explicit lifecycle for background
+// workers without changing the public constructor's http.Handler interface.
+type managedRouter struct {
+	http.Handler
+	router *Router
+}
+
+func (h *managedRouter) Close(ctx context.Context) error {
+	h.router.stopWorkers()
+	done := make(chan struct{})
+	go func() { h.router.workers.Wait(); close(done) }()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (r *Router) workerDone() <-chan struct{} {
+	if r.workerContext == nil {
+		return nil
+	}
+	return r.workerContext.Done()
 }

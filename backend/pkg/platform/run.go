@@ -97,6 +97,16 @@ func Run(options Options) error {
 	}
 	handler := httpserver.NewRouterWithProductInfo(cfg, logger, repo, productInfo,
 		editionAuthorizer(options.Authorizer), httpserver.WithEditionAdmissionController(editionAdmissionController(options.AdmissionController)), httpserver.WithEditionMeteringObserver(editionMeteringObserver(options.MeteringObserver)), httpserver.WithProductInfoProvider(productInfoProvider), httpserver.WithDiagnosticLogRetention(options.DiagnosticLogRetention), httpserver.WithExtensionRoutes(editionRoutes(options.Routes)), httpserver.WithIdentityProvider(editionIdentityProvider(options.IdentityProvider)), httpserver.WithAuditSink(editionAuditSink(options.AuditSink)), httpserver.WithEditionRuntimeBinder(editionRuntimeBinder(options.RuntimeBinder)))
+	// Stop workers before closing PostgreSQL, including startup/server failures.
+	if closer, ok := handler.(interface{ Close(context.Context) error }); ok {
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := closer.Close(ctx); err != nil {
+				logger.Error("background shutdown timed out", "error", err)
+			}
+		}()
+	}
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	errCh := make(chan error, 1)
 	go func() {
@@ -112,6 +122,7 @@ func Run(options Options) error {
 	}()
 	stopCh := make(chan os.Signal, 1)
 	signal.Notify(stopCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(stopCh)
 	select {
 	case <-stopCh:
 	case err := <-errCh:
@@ -121,6 +132,11 @@ func Run(options Options) error {
 	}
 	ctx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
+	if closer, ok := handler.(interface{ Close(context.Context) error }); ok {
+		if err := closer.Close(ctx); err != nil {
+			logger.Error("background shutdown timed out", "error", err)
+		}
+	}
 	return server.Shutdown(ctx)
 }
 

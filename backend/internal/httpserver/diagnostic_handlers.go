@@ -225,6 +225,8 @@ func (r *Router) requestClusterLogs(clusterID, component string, since time.Time
 			return report, requestID, 502, errors.New(report.Message)
 		}
 		return report, requestID, 200, nil
+	case <-r.workerDone():
+		return protocol.LogReportPayload{}, requestID, http.StatusServiceUnavailable, errors.New("The platform is restarting. Retry log collection after reconnecting.")
 	case <-time.After(25 * time.Second):
 		return protocol.LogReportPayload{}, requestID, 504, errors.New("The cluster agent did not respond to automatic log collection.")
 	}

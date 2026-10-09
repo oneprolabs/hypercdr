@@ -37,6 +37,7 @@ var cceRegistrationSessionIDPattern = regexp.MustCompile(`^ccer_[A-Za-z0-9_-]{20
 type cceKubeconfigUpload struct {
 	ID          string
 	TenantID    string
+	OwnerID     string
 	Path        string
 	ExpiresAt   time.Time
 	Contexts    []string
@@ -158,7 +159,7 @@ func (r *Router) uploadCCEKubeconfig(w http.ResponseWriter, req *http.Request) {
 	for _, context := range contexts {
 		contextNames = append(contextNames, context.Name)
 	}
-	upload := cceKubeconfigUpload{ID: id, TenantID: registrationTenantID(req), Path: path, ExpiresAt: expiresAt, Contexts: contextNames, Inspected: map[string]bool{}, ClusterType: clusterType}
+	upload := cceKubeconfigUpload{ID: id, TenantID: registrationTenantID(req), OwnerID: registrationOwnerID(req), Path: path, ExpiresAt: expiresAt, Contexts: contextNames, Inspected: map[string]bool{}, ClusterType: clusterType}
 	r.cceRegistrationMu.Lock()
 	r.cleanupExpiredCCEKubeconfigsLocked(time.Now().UTC())
 	r.cceRegistrationUploads[id] = upload
@@ -188,7 +189,7 @@ func (r *Router) inspectCCEKubeconfig(w http.ResponseWriter, req *http.Request) 
 	if clusterType == "" && strings.Contains(req.URL.Path, "/cce/") {
 		clusterType = "huaweicloud-cce"
 	}
-	allowed := ok && clusterType != "" && upload.ClusterType == clusterType && upload.TenantID == registrationTenantID(req) && slices.Contains(upload.Contexts, body.Context)
+	allowed := ok && clusterType != "" && upload.ClusterType == clusterType && upload.TenantID == registrationTenantID(req) && upload.OwnerID == registrationOwnerID(req) && slices.Contains(upload.Contexts, body.Context)
 	r.cceRegistrationMu.Unlock()
 	if !allowed {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "kubeconfig_session_not_found", "message": "The registration session expired, was removed, or does not contain this context."})
@@ -258,7 +259,7 @@ func (r *Router) inspectCCEKubeconfig(w http.ResponseWriter, req *http.Request) 
 	_, _ = w.Write(result)
 	if statusCode >= 200 && statusCode < 300 {
 		r.cceRegistrationMu.Lock()
-		if current, exists := r.cceRegistrationUploads[body.SessionID]; exists && current.TenantID == registrationTenantID(req) {
+		if current, exists := r.cceRegistrationUploads[body.SessionID]; exists && current.TenantID == registrationTenantID(req) && current.OwnerID == registrationOwnerID(req) {
 			current.Inspected[body.Context] = true
 			r.cceRegistrationUploads[body.SessionID] = current
 		}
@@ -288,7 +289,7 @@ func (r *Router) startCCEDirectRegistration(w http.ResponseWriter, req *http.Req
 	r.cceRegistrationMu.Lock()
 	r.cleanupExpiredCCEKubeconfigsLocked(time.Now().UTC())
 	upload, ok := r.cceRegistrationUploads[body.SessionID]
-	allowed := ok && clusterType != "" && upload.ClusterType == clusterType && upload.TenantID == tenantID && slices.Contains(upload.Contexts, body.Context) && upload.Inspected[body.Context]
+	allowed := ok && clusterType != "" && upload.ClusterType == clusterType && upload.TenantID == tenantID && upload.OwnerID == registrationOwnerID(req) && slices.Contains(upload.Contexts, body.Context) && upload.Inspected[body.Context]
 	if allowed {
 		upload.ExpiresAt = time.Now().UTC().Add(25 * time.Minute)
 		r.cceRegistrationUploads[body.SessionID] = upload
@@ -422,6 +423,11 @@ func inspectPlatformKubeconfig(raw []byte) (kubeconfigDocument, []cceContextSumm
 	return doc, contexts, nil
 }
 
+func registrationOwnerID(req *http.Request) string {
+	actor, _ := requestUser(req)
+	return actor.ID
+}
+
 func registrationTenantID(req *http.Request) string {
 	if actor, ok := requestUser(req); ok && actor.TenantID != "" {
 		return actor.TenantID
@@ -441,7 +447,7 @@ func (r *Router) deleteCCEKubeconfig(w http.ResponseWriter, req *http.Request) {
 	id := req.PathValue("id")
 	r.cceRegistrationMu.Lock()
 	upload, ok := r.cceRegistrationUploads[id]
-	if ok && upload.TenantID == registrationTenantID(req) {
+	if ok && upload.TenantID == registrationTenantID(req) && upload.OwnerID == registrationOwnerID(req) {
 		delete(r.cceRegistrationUploads, id)
 	} else {
 		ok = false
@@ -502,11 +508,18 @@ func (r *Router) startCCEKubeconfigJanitor() {
 		return
 	}
 	r.cleanupOrphanedCCEKubeconfigs(time.Now().UTC())
+	r.workers.Add(1)
 	go func() {
+		defer r.workers.Done()
 		ticker := time.NewTicker(cceJanitorInterval)
 		defer ticker.Stop()
-		for now := range ticker.C {
-			r.cleanupOrphanedCCEKubeconfigs(now)
+		for {
+			select {
+			case <-r.workerContext.Done():
+				return
+			case now := <-ticker.C:
+				r.cleanupOrphanedCCEKubeconfigs(now)
+			}
 		}
 	}()
 }
@@ -514,7 +527,15 @@ func (r *Router) startCCEKubeconfigJanitor() {
 func (r *Router) expireCCEKubeconfig(id string, expiresAt time.Time) {
 	timer := time.NewTimer(time.Until(expiresAt))
 	defer timer.Stop()
-	<-timer.C
+	if r.workerContext != nil {
+		select {
+		case <-r.workerContext.Done():
+			return
+		case <-timer.C:
+		}
+	} else {
+		<-timer.C
+	}
 	r.cceRegistrationMu.Lock()
 	upload, ok := r.cceRegistrationUploads[id]
 	if ok && !upload.ExpiresAt.After(time.Now().UTC()) {

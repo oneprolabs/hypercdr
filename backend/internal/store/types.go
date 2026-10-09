@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -39,6 +40,7 @@ func (e *ApplicationAlreadyProtectedError) Error() string {
 // Store composes domain capabilities for the platform router. Consumers that
 // need only one domain should accept the narrower repository interface.
 type Store interface {
+	ChallengeRepository
 	SchedulerRepository
 	TenantRepository
 	EmailRepository
@@ -59,6 +61,12 @@ type Store interface {
 	DiagnosticRepository
 	AuditRepository
 	UpgradeRepository
+}
+
+// ChallengeRepository stores short-lived, single-use authentication state.
+type ChallengeRepository interface {
+	CreateAuthChallenge(context.Context, string, string, string, time.Time) error
+	ConsumeAuthChallenge(context.Context, string, string, string) (bool, error)
 }
 
 // TenantRepository defines the persisted tenant operations.

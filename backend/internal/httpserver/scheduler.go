@@ -15,15 +15,24 @@ const maintenanceTaskInactivityTimeout = 35 * time.Minute
 
 func (r *Router) startScheduler() {
 	r.schedulerOnce.Do(func() {
-		go r.schedulerLoop()
+		r.workers.Add(1)
+		go func() { defer r.workers.Done(); r.schedulerLoop() }()
 	})
 }
 
 func (r *Router) schedulerLoop() {
 	ticker := time.NewTicker(schedulerTickInterval)
 	defer ticker.Stop()
-	for range ticker.C {
-		r.runSchedulerTick(time.Now().UTC())
+	for {
+		select {
+		case <-r.workerContext.Done():
+			return
+		case now := <-ticker.C:
+			if r.workerContext.Err() != nil {
+				return
+			}
+			r.runSchedulerTick(now.UTC())
+		}
 	}
 }
 

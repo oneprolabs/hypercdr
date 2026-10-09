@@ -28593,3 +28593,158 @@ html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-resource-drawer-
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-dock .text-slate-900 {
   color:var(--hc-text) !important;
 }
+
+/* Namespace detail: all four panels share the workspace's dark palette.
+   Keep these overrides theme-scoped so the approved light layout is unchanged. */
+:root[data-theme='dark'] #root .premium-app .hbdr-app-detail-drawer {
+  color: var(--hc-text);
+}
+:root[data-theme='dark'] #root .premium-app .hbdr-app-detail-drawer :is(
+  .hbdr-namespace-detail-tabs, .hbdr-app-detail-fact, .hbdr-app-detail-section,
+  .hbdr-app-detail-resource, .hbdr-namespace-rp-row, .hbdr-namespace-task-row,
+  .hbdr-namespace-task-summary > div, .hbdr-namespace-storage-grid > div,
+  .hbdr-namespace-rp-menu, .hbdr-namespace-detail-pagination button,
+  .hbdr-namespace-detail-section-head > em) {
+  background: var(--hc-surface);
+  border-color: var(--hc-border-strong);
+  box-shadow: none;
+}
+:root[data-theme='dark'] #root .premium-app .hbdr-app-detail-drawer :is(
+  .hbdr-app-detail-chip-list > span, .hbdr-app-detail-pvc-row,
+  .hbdr-namespace-detail-empty, .hbdr-task-restore-points,
+  .hbdr-namespace-detail-pagination button:disabled) {
+  background: var(--hc-sunken);
+  border-color: var(--hc-border-strong);
+  color: var(--hc-text-2);
+}
+:root[data-theme='dark'] #root .premium-app .hbdr-app-detail-drawer :is(
+  h3, h4, h5, strong, .hbdr-namespace-rp-menu button) {
+  color: var(--hc-text);
+}
+:root[data-theme='dark'] #root .premium-app .hbdr-app-detail-drawer :is(
+  p, small, .hbdr-app-detail-plan-id span, .hbdr-app-detail-config-item em,
+  .hbdr-app-detail-chip-list > span, .hbdr-app-detail-empty-line,
+  .hbdr-app-detail-more, .hbdr-namespace-detail-section-head span,
+  .hbdr-namespace-detail-empty span, .hbdr-namespace-detail-tabs button,
+  .hbdr-namespace-task-summary span, .hbdr-namespace-storage-grid span,
+  .hbdr-namespace-rp-row span, .hbdr-namespace-detail-pagination,
+  .hbdr-namespace-detail-pagination em, .hbdr-namespace-detail-pagination button,
+  .hbdr-task-restore-point-row > em, .hbdr-task-origin) {
+  color: var(--hc-text-2);
+}
+:root[data-theme='dark'] #root .premium-app .hbdr-app-detail-drawer :is(
+  .hbdr-app-detail-pvc, .hbdr-task-restore-point-row,
+  .hbdr-namespace-detail-pagination, .hbdr-namespace-rp-menu-button) {
+  border-color: var(--hc-border-strong);
+}
+:root[data-theme='dark'] #root .premium-app .hbdr-app-detail-drawer :is(
+  .hbdr-namespace-detail-tabs button span, .hbdr-namespace-rp-meta em,
+  .hbdr-namespace-task-row > em) {
+  background: var(--hc-sunken);
+  color: var(--hc-text-2);
+}
+:root[data-theme='dark'] #root .premium-app .hbdr-app-detail-drawer :is(
+  .hbdr-namespace-detail-tabs button.is-active,
+  .hbdr-namespace-detail-tabs button:hover, .hbdr-namespace-task-back) {
+  color: var(--hc-accent);
+}
+:root[data-theme='dark'] #root .premium-app .hbdr-app-detail-drawer
+.hbdr-namespace-detail-tabs button.is-active::after {
+  background: var(--hc-accent);
+}
+:root[data-theme='dark'] #root .premium-app .hbdr-app-detail-drawer :is(
+  .hbdr-namespace-detail-tabs button.is-active span, .hbdr-app-detail-icon,
+  .hbdr-namespace-task-icon, .hbdr-task-purpose) {
+  background: color-mix(in srgb, var(--hc-accent) 12%, var(--hc-surface));
+  border-color: color-mix(in srgb, var(--hc-accent) 35%, var(--hc-border));
+  color: var(--hc-accent);
+}
+:root[data-theme='dark'] #root .premium-app .hbdr-app-detail-drawer :is(
+  .hbdr-namespace-rp-meta em.is-available, .hbdr-namespace-task-row > em.is-succeeded,
+  .hbdr-app-detail-pvc-row > span.is-bound, .hbdr-namespace-rp-icon) {
+  background: color-mix(in srgb, var(--hc-ok) 12%, var(--hc-surface));
+  border-color: color-mix(in srgb, var(--hc-ok) 35%, var(--hc-border));
+  color: var(--hc-ok);
+}
+:root[data-theme='dark'] #root .premium-app .hbdr-app-detail-drawer
+.hbdr-namespace-task-row > em.is-failed {
+  background: color-mix(in srgb, var(--hc-crit) 12%, var(--hc-surface));
+  color: var(--hc-crit);
+}
+:root[data-theme='dark'] #root .premium-app .hbdr-app-detail-drawer
+.hbdr-app-detail-pvc-row > span.is-warning {
+  background: color-mix(in srgb, var(--hc-warn) 12%, var(--hc-surface));
+  color: var(--hc-warn);
+}
+:root[data-theme='dark'] #root .premium-app .hbdr-app-detail-drawer :is(
+  .hbdr-namespace-rp-menu button:hover, .hbdr-namespace-task-row:hover,
+  .hbdr-namespace-detail-pagination button:hover:not(:disabled),
+  .hbdr-namespace-rp-menu-button:hover) {
+  background: var(--hc-sunken);
+  border-color: var(--hc-accent);
+  color: var(--hc-text);
+}
+:root[data-theme='dark'] #root .premium-app .hbdr-app-detail-drawer
+.hbdr-namespace-detail-pagination button:disabled {
+  color: var(--hc-text-3);
+}
+/* Legacy workspace button hover uses !important; override it only in this drawer. */
+:root[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-app-detail-drawer button:not(:disabled):hover {
+  background: var(--hc-sunken) !important;
+  border-color: var(--hc-accent) !important;
+  color: var(--hc-accent) !important;
+}
+/* Status colors retain their meaning for discovered, configured and protected namespaces. */
+:root[data-theme='dark'] #root .premium-app .hbdr-app-detail-status {
+  background: var(--hc-sunken);
+  color: var(--hc-text-2);
+  --tw-ring-color: var(--hc-border-strong);
+}
+:root[data-theme='dark'] #root .premium-app .hbdr-app-detail-status.bg-emerald-50 {
+  background: color-mix(in srgb, var(--hc-ok) 12%, var(--hc-surface));
+  color: var(--hc-ok);
+  --tw-ring-color: color-mix(in srgb, var(--hc-ok) 30%, var(--hc-border));
+}
+:root[data-theme='dark'] #root .premium-app .hbdr-app-detail-status.bg-amber-50 {
+  background: color-mix(in srgb, var(--hc-warn) 12%, var(--hc-surface));
+  color: var(--hc-warn);
+  --tw-ring-color: color-mix(in srgb, var(--hc-warn) 30%, var(--hc-border));
+}
+:root[data-theme='dark'] #root .premium-app .hbdr-app-detail-drawer .hbdr-namespace-detail-pagination button:disabled {
+  background: var(--hc-sunken) !important;
+  border-color: var(--hc-border-strong) !important;
+  color: var(--hc-text-3) !important;
+}
+:root[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-app-detail-drawer :is(h3,h4,h5,strong) {
+  color: var(--hc-text) !important;
+}
+:root[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-app-detail-drawer .hbdr-app-detail-status.bg-emerald-50 {
+  color: var(--hc-ok) !important;
+}
+
+:root[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-app-detail-drawer .hbdr-app-detail-status.bg-amber-50 {
+  color: var(--hc-warn) !important;
+}
+:root[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-app-detail-drawer .hbdr-app-detail-status.bg-slate-100 {
+  color: var(--hc-text-2) !important;
+}
+:root[data-theme='dark'] #root .premium-app .hbdr-app-detail-drawer .hbdr-task-detail-section {
+  background: var(--hc-surface);
+  border-color: var(--hc-border-strong);
+}
+:root[data-theme='dark'] #root .premium-app .hbdr-app-detail-drawer .hbdr-task-final-result {
+  background: color-mix(in srgb, var(--hc-ok) 9%, var(--hc-surface));
+  border-color: var(--hc-ok);
+}
+:root[data-theme='dark'] #root .premium-app .hbdr-app-detail-drawer .hbdr-task-final-result.is-failed {
+  background: color-mix(in srgb, var(--hc-crit) 9%, var(--hc-surface));
+  border-color: var(--hc-crit);
+}
+:root[data-theme='dark'] #root .premium-app .hbdr-app-detail-drawer .hbdr-task-final-result.is-warning {
+  background: color-mix(in srgb, var(--hc-warn) 9%, var(--hc-surface));
+  border-color: var(--hc-warn);
+}
+:root[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-app-detail-drawer :is(
+  .hbdr-task-purpose span, .hbdr-task-final-result span, .hbdr-task-final-result small) {
+  color: var(--hc-text-2) !important;
+}

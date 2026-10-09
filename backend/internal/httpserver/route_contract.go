@@ -96,6 +96,12 @@ func (r *Router) apiSchema(w http.ResponseWriter, req *http.Request) {
 		if route.Scope == "public-or-token" {
 			security = []any{}
 		}
+		if allowsReleaseToken(method, path) {
+			security = append(security, map[string]any{"releaseToken": []string{}})
+		}
+		if strings.HasPrefix(path, "/api/v1/community-migrations/source/") && strings.Contains(path, "/{id}") {
+			security = []any{map[string]any{"migrationSession": []string{}}}
+		}
 		operations[strings.ToLower(method)] = map[string]any{
 			"operationId": method + " " + path, "parameters": parameters, "security": security,
 			"x-hypercdr-scope": route.Scope,
@@ -109,8 +115,12 @@ func (r *Router) apiSchema(w http.ResponseWriter, req *http.Request) {
 		"openapi": "3.1.0", "info": map[string]any{"title": "HyperCDR API", "version": "v1", "description": "Live route/access/error contract. Request and success payload schemas are not yet comprehensive; this is not a client-generation contract."},
 		"paths": paths,
 		"components": map[string]any{
-			"securitySchemes": map[string]any{"bearerAuth": map[string]any{"type": "http", "scheme": "bearer"}},
-			"schemas":         map[string]any{"ApiError": map[string]any{"type": "object", "required": []string{"error"}, "properties": map[string]any{"error": map[string]any{"type": "string"}, "message": map[string]any{"type": "string"}, "requestId": map[string]any{"type": "string"}}, "additionalProperties": true}},
+			"securitySchemes": map[string]any{
+				"bearerAuth":       map[string]any{"type": "http", "scheme": "bearer"},
+				"releaseToken":     map[string]any{"type": "apiKey", "in": "header", "name": "X-HyperCDR-Release-Token"},
+				"migrationSession": map[string]any{"type": "apiKey", "in": "header", "name": "Authorization", "description": "Migration <sessionToken>, bound to the session path ID; not a platform Bearer token."},
+			},
+			"schemas": map[string]any{"ApiError": map[string]any{"type": "object", "required": []string{"error"}, "properties": map[string]any{"error": map[string]any{"type": "string"}, "message": map[string]any{"type": "string"}, "requestId": map[string]any{"type": "string"}}, "additionalProperties": true}},
 		},
 	})
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { apiGet } from '../../api/client';
+import { listNamespaceRestorePoints, listNamespaceTasks } from '../../api/namespace-detail';
 import type { AppItem } from '../clusters/types';
-import { listItems, type ApiList, type ApiProtectionPlan, type ApiRestorePoint, type ApiRestorePointView, type ApiTask } from '../recovery/types';
+import { listItems, type ApiProtectionPlan, type ApiRestorePointView, type ApiTask } from '../recovery/types';
 
 // Owns the detail drawer's lazy tab data and cancels stale responses on close
 // or selection changes. Parent pages retain their existing operation handlers.
@@ -39,7 +39,7 @@ export function useNamespaceDetail(protectionPlans: ApiProtectionPlan[]) {
       setNamespaceDetailLoadError('');
       try {
         if (namespaceDetailTab === 'restorePoints') {
-          const response = await apiGet<ApiList<ApiRestorePoint>>(`/api/v1/restore-points?protectionPlanId=${encodeURIComponent(selectedDetailPlanId)}&pageSize=500`);
+          const response = await listNamespaceRestorePoints(selectedDetailPlanId);
           if (cancelled) return;
           setNamespaceDetailRestorePoints(listItems(response).map(point => ({
             id: point.id,
@@ -65,7 +65,7 @@ export function useNamespaceDetail(protectionPlans: ApiProtectionPlan[]) {
             sizeMetricsV2: point.sizeMetricsV2 || point.metadata?.sizeMetricsV2,
           })));
         } else {
-          const response = await apiGet<ApiList<ApiTask>>('/api/v1/tasks?view=summary&types=backup,restore,drill,takeover,retention-cleanup,protection-cleanup&limit=500');
+          const response = await listNamespaceTasks();
           if (!cancelled) setNamespaceDetailTasks(listItems(response).filter(task => task.protectionPlanId === selectedDetailPlanId));
         }
       } catch (error) {

@@ -2093,8 +2093,6 @@ func newUnregisterTestRouter(logger *slog.Logger, repo store.Store) *Router {
 		mux:          http.NewServeMux(),
 		store:        repo,
 		hub:          newSessionHub(),
-		captchas:     map[string]captchaChallenge{},
-		oauthStates:  map[string]time.Time{},
 		inventory:    map[string]inventoryRequestStatus{},
 		imageDigests: map[string]imageDigestCacheEntry{},
 	}
