@@ -169,16 +169,13 @@ func (r *Router) testStorageRepositoryDraft(w http.ResponseWriter, req *http.Req
 		status = "warning"
 		detail = testErr.Error()
 	}
-	body := map[string]any{
-		"status":     status,
-		"detail":     detail,
-		"reachable":  testErr == nil,
-		"testedAt":   time.Now().UTC().Format(time.RFC3339Nano),
-		"probe":      probe,
-		"repository": repo,
+	var probeValue *map[string]any
+	if probe != nil {
+		probeValue = &probe
 	}
+	body := storageDraftTestResponse{Status: status, Detail: detail, Reachable: testErr == nil, TestedAt: time.Now().UTC(), Probe: probeValue, Repository: repo}
 	if testErr != nil {
-		body["error"] = detail
+		body.Error = detail
 	}
 	writeJSON(w, http.StatusOK, body)
 }
@@ -244,18 +241,9 @@ func (r *Router) testStorageRepository(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	body := map[string]any{
-		"status":          status,
-		"detail":          detail,
-		"repository":      updated,
-		"testedAt":        time.Now().UTC().Format(time.RFC3339Nano),
-		"reachable":       testErr == nil,
-		"checkedType":     repo.Type,
-		"checkedBucket":   repo.Bucket,
-		"checkedEndpoint": repo.Endpoint,
-	}
+	body := storageSavedTestResponse{Status: status, Detail: detail, Repository: updated, TestedAt: time.Now().UTC(), Reachable: testErr == nil, CheckedType: repo.Type, CheckedBucket: repo.Bucket, CheckedEndpoint: repo.Endpoint}
 	if testErr != nil {
-		body["error"] = detail
+		body.Error = detail
 	}
 	writeJSON(w, http.StatusOK, body)
 }

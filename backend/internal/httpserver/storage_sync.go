@@ -175,9 +175,7 @@ func (r *Router) syncStorageRepository(w http.ResponseWriter, req *http.Request)
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "repository_id_required"})
 		return
 	}
-	var body struct {
-		ClusterID string `json:"clusterId"`
-	}
+	var body storageSyncRequest
 	if err := decodeJSON(req, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
 		return
@@ -255,10 +253,7 @@ func (r *Router) syncStorageRepository(w http.ResponseWriter, req *http.Request)
 			ErrorCode:    "AGENT_OFFLINE",
 			ErrorMessage: "agent is not connected",
 		})
-		writeJSON(w, http.StatusAccepted, map[string]any{
-			"task":    task,
-			"warning": "agent is offline; task remains queued",
-		})
+		writeJSON(w, http.StatusAccepted, storageSyncQueuedResponse{Task: task, Warning: "agent is offline; task remains queued"})
 		return
 	}
 
@@ -297,10 +292,7 @@ func (r *Router) syncStorageRepository(w http.ResponseWriter, req *http.Request)
 			ErrorCode:    "DISPATCH_FAILED",
 			ErrorMessage: err.Error(),
 		})
-		writeJSON(w, http.StatusAccepted, map[string]any{
-			"task":    task,
-			"warning": "task created but dispatch failed",
-		})
+		writeJSON(w, http.StatusAccepted, storageSyncQueuedResponse{Task: task, Warning: "task created but dispatch failed"})
 		return
 	}
 

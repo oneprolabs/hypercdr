@@ -15,6 +15,12 @@ Application and tag routes also share DTOs with their handlers and document
 query fields, collection responses, batch tag replacement, and creation status.
 Policy CRUD routes use their existing store input/output DTOs, hide server-owned
 tenant input, and validate actual create/list/update/delete responses.
+Storage contracts cover CRUD, draft/saved connection tests and synchronization.
+Connection-test responses share DTOs with their handlers, credentials are
+write-only inputs and never appear in repository output, and sync distinguishes
+201 dispatched tasks from 202 queued responses. Isolated PostgreSQL tests compare
+actual CRUD/probe/queued-sync responses against these schemas without external
+object-storage dependencies.
 Domain route coverage tests fail when one of these mounted routes lacks a
 payload contract.
 

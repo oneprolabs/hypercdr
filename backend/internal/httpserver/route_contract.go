@@ -112,7 +112,9 @@ func (r *Router) apiSchema(w http.ResponseWriter, req *http.Request) {
 		}
 		if !r.applyAuthPayloadContract(route.Pattern, operations[strings.ToLower(method)].(map[string]any)) {
 			if !applyApplicationPayloadContract(route.Pattern, operations[strings.ToLower(method)].(map[string]any)) {
-				applyPolicyPayloadContract(route.Pattern, operations[strings.ToLower(method)].(map[string]any))
+				if !applyPolicyPayloadContract(route.Pattern, operations[strings.ToLower(method)].(map[string]any)) {
+					applyStoragePayloadContract(route.Pattern, operations[strings.ToLower(method)].(map[string]any))
+				}
 			}
 		}
 	}
