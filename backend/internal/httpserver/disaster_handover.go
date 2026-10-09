@@ -8,9 +8,7 @@ import (
 )
 
 func (r *Router) validateDisasterHandoverToken(w http.ResponseWriter, req *http.Request) {
-	var body struct {
-		Token string `json:"token"`
-	}
+	var body tokenValidationRequest
 	if decodeJSON(req, &body) != nil || strings.TrimSpace(body.Token) == "" {
 		writeJSON(w, 400, map[string]any{"error": "token_required"})
 		return

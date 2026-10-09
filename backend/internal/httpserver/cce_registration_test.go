@@ -133,7 +133,7 @@ func TestCCEDirectRegistrationRequiresInspectionAndCreatesIdempotentTask(t *test
 		if req.Header.Get("Authorization") != "Bearer executor-token" {
 			t.Fatalf("missing executor authentication")
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"context": "internal", "clusterName": "cce-test", "clusterId": "cluster-uid", "serverVersion": "v1.35.3", "nodeCount": 1, "storageClasses": []string{"csi-disk"}, "defaultStorageClass": "csi-disk"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"context": "internal", "clusterName": "cce-test", "clusterId": "cluster-uid", "serverVersion": "v1.35.3", "nodeCount": 1, "storageClasses": []string{"csi-disk"}, "defaultStorageClass": "csi-disk", "gates": []map[string]string{{"id": "storage", "label": "Storage", "status": "passed", "detail": "CSI storage class available"}}})
 	}))
 	defer executor.Close()
 	sessionDir := t.TempDir()
@@ -146,6 +146,7 @@ func TestCCEDirectRegistrationRequiresInspectionAndCreatesIdempotentTask(t *test
 		t.Fatalf("upload: %d %#v", status, uploaded)
 	}
 	sessionID := uploaded["id"].(string)
+	validateRegistrationResponse(t, "POST /api/v1/cluster-registrations/cce/kubeconfigs", uploaded)
 	registration := map[string]any{"sessionId": sessionID, "context": "internal", "storageClass": "csi-disk", "idempotencyKey": "registration-request-0001"}
 	status, response := postTestJSON(t, server.URL+"/api/v1/cluster-registrations/cce/tasks", registration)
 	if status != http.StatusConflict || response["error"] != "inspection_required" {
@@ -155,10 +156,12 @@ func TestCCEDirectRegistrationRequiresInspectionAndCreatesIdempotentTask(t *test
 	if status != http.StatusOK {
 		t.Fatalf("inspection: %d %#v", status, response)
 	}
+	validateRegistrationResponse(t, "POST /api/v1/cluster-registrations/cce/inspections", response)
 	status, first := postTestJSON(t, server.URL+"/api/v1/cluster-registrations/cce/tasks", registration)
 	if status != http.StatusAccepted {
 		t.Fatalf("registration: %d %#v", status, first)
 	}
+	validateRegistrationResponse(t, "POST /api/v1/cluster-registrations/cce/tasks", first)
 	status, second := postTestJSON(t, server.URL+"/api/v1/cluster-registrations/cce/tasks", registration)
 	if status != http.StatusOK || first["id"] != second["id"] {
 		t.Fatalf("idempotency failed: %d %#v %#v", status, first, second)

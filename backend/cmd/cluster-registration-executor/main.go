@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hypercdr-platform/platform/backend/internal/registration"
 	"io"
 	"log/slog"
 	"net/http"
@@ -26,30 +27,9 @@ import (
 
 var sessionIDPattern = regexp.MustCompile(`^ccer_[A-Za-z0-9_-]{20,64}$`)
 
-type inspectRequest struct {
-	SessionID   string `json:"sessionId"`
-	Context     string `json:"context"`
-	ClusterType string `json:"clusterType"`
-}
-
-type inspection struct {
-	Context             string           `json:"context"`
-	ClusterName         string           `json:"clusterName"`
-	ClusterID           string           `json:"clusterId"`
-	Region              string           `json:"region,omitempty"`
-	ServerVersion       string           `json:"serverVersion"`
-	NodeCount           int              `json:"nodeCount"`
-	StorageClasses      []string         `json:"storageClasses"`
-	DefaultStorageClass string           `json:"defaultStorageClass,omitempty"`
-	Gates               []inspectionGate `json:"gates"`
-}
-
-type inspectionGate struct {
-	ID     string `json:"id"`
-	Label  string `json:"label"`
-	Status string `json:"status"`
-	Detail string `json:"detail"`
-}
+type inspectRequest = registration.InspectRequest
+type inspection = registration.Inspection
+type inspectionGate = registration.InspectionGate
 
 // Keep these requirements versioned and deliberately modest. They cover the
 // registration-time Agent and Velero control-plane footprint; application

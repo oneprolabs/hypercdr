@@ -13,11 +13,7 @@ import (
 )
 
 func (r *Router) createAgentToken(w http.ResponseWriter, req *http.Request) {
-	var body struct {
-		Description string `json:"description"`
-		TTLSeconds  int    `json:"ttlSeconds"`
-		ClusterType string `json:"clusterType"`
-	}
+	var body agentTokenRequest
 	if req.Body != nil {
 		_ = json.NewDecoder(req.Body).Decode(&body)
 	}
@@ -91,9 +87,7 @@ func (r *Router) agentNamespaceForType(clusterType string) string {
 }
 
 func (r *Router) validateAgentToken(w http.ResponseWriter, req *http.Request) {
-	var body struct {
-		Token string `json:"token"`
-	}
+	var body tokenValidationRequest
 	if decodeJSON(req, &body) != nil || strings.TrimSpace(body.Token) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"valid": false, "error": "TOKEN_INVALID", "message": store.ErrTokenInvalid.Error()})
 		return

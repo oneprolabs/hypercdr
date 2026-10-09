@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"hypercdr-platform/platform/backend/internal/registration"
 	"hypercdr-platform/platform/backend/internal/store"
 
 	"gopkg.in/yaml.v3"
@@ -166,18 +167,11 @@ func (r *Router) uploadCCEKubeconfig(w http.ResponseWriter, req *http.Request) {
 	r.cceRegistrationMu.Unlock()
 	r.startWorker(func() { r.expireCCEKubeconfig(id, expiresAt) })
 	fingerprint := sha256.Sum256(raw)
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"id": id, "fingerprint": "sha256:" + hex.EncodeToString(fingerprint[:]), "currentContext": doc.CurrentContext,
-		"contexts": contexts, "expiresAt": expiresAt,
-	})
+	writeJSON(w, http.StatusCreated, kubeconfigUploadResponse{ID: id, Fingerprint: "sha256:" + hex.EncodeToString(fingerprint[:]), CurrentContext: doc.CurrentContext, Contexts: contexts, ExpiresAt: expiresAt})
 }
 
 func (r *Router) inspectCCEKubeconfig(w http.ResponseWriter, req *http.Request) {
-	var body struct {
-		SessionID   string `json:"sessionId"`
-		Context     string `json:"context"`
-		ClusterType string `json:"clusterType"`
-	}
+	var body registration.InspectRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, req.Body, 16<<10)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "inspection_request_invalid", "message": "A registration session and Kubernetes context are required."})
 		return

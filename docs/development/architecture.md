@@ -119,7 +119,12 @@ Authentication request/success schemas use the same wire DTOs as the handlers,
 with live-response coverage tests. Restore-point list, cached/live content, and
 single/multi-cluster delete responses also have shared wire DTOs and actual-handler
 checks, including pagination, duplicate IDs, foreign/missing batch references,
-offline queues and in-progress conflicts. Other endpoint payload schemas remain incomplete; this is not yet a
+offline queues and in-progress conflicts. Registration upload/inspection/task/delete
+routes (including the CCE aliases) and the three registration/handover token routes
+now have payload contracts. Inspection wire types are shared with the isolated
+executor. Token checks declare body-token authentication and purpose restrictions;
+real PostgreSQL tests cover repeated validation, expiration and cross-purpose denial.
+Other endpoint payload schemas remain incomplete; this is not yet a
 client-generation contract. Existing error codes and HTTP statuses are preserved;
 JSON errors can also carry the request ID from the response header. English
 remains the UI language; the header shows an indicator rather than a switcher
