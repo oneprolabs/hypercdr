@@ -13,6 +13,8 @@ responses with the schemas.
 
 Application and tag routes also share DTOs with their handlers and document
 query fields, collection responses, batch tag replacement, and creation status.
+Policy CRUD routes use their existing store input/output DTOs, hide server-owned
+tenant input, and validate actual create/list/update/delete responses.
 Domain route coverage tests fail when one of these mounted routes lacks a
 payload contract.
 
