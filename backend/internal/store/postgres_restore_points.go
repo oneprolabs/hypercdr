@@ -42,8 +42,21 @@ func (s *PostgresStore) CreateRestorePoint(input RestorePointInput) (RestorePoin
 	if err != nil {
 		return RestorePoint{}, err
 	}
-	tenantID := DefaultTenantID
-	_ = s.db.QueryRow(`select tenant_id from clusters where id=$1`, input.SourceClusterID).Scan(&tenantID)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return RestorePoint{}, err
+	}
+	defer tx.Rollback()
+	var tenantID string
+	if err := tx.QueryRow(`select tenant_id from clusters where id=$1 for share`, input.SourceClusterID).Scan(&tenantID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return RestorePoint{}, ErrTenantResourceMismatch
+		}
+		return RestorePoint{}, err
+	}
+	if err := validateRestorePointReferences(tx, input, tenantID); err != nil {
+		return RestorePoint{}, err
+	}
 	point := RestorePoint{
 		ID:                newID(),
 		TenantID:          tenantID,
@@ -72,7 +85,7 @@ func (s *PostgresStore) CreateRestorePoint(input RestorePointInput) (RestorePoin
 		point.TaskCreatedAt = now
 	}
 
-	_, err = s.db.Exec(`
+	_, err = tx.Exec(`
 		insert into restore_points (
 			id, tenant_id, protection_plan_id, source_cluster_id, app_id, storage_repo_id,
 			display_name, velero_backup_name, point_type, status, size_bytes, started_at, completed_at,
@@ -98,6 +111,9 @@ func (s *PostgresStore) CreateRestorePoint(input RestorePointInput) (RestorePoin
 		point.StorageRepoID, point.DisplayName, point.VeleroBackupName, point.PointType, point.Status, point.SizeBytes,
 		point.StartedAt, point.CompletedAt, point.ExpiresAt, metadataRaw, now, point.TaskCreatedAt, sizeMetricsRaw, point.BackupTaskID)
 	if err != nil {
+		return RestorePoint{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return RestorePoint{}, err
 	}
 	points, err := s.ListRestorePoints(RestorePointFilter{ClusterID: input.SourceClusterID})

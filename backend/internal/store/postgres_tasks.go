@@ -47,14 +47,8 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 	if input.TenantID != "" && input.TenantID != tenantID {
 		return Task{}, ErrTenantResourceMismatch
 	}
-	if input.ClusterID != "" {
-		var valid bool
-		if err := tx.QueryRow(`select exists(select 1 from clusters where id=$1 and tenant_id=$2)`, input.ClusterID, tenantID).Scan(&valid); err != nil {
-			return Task{}, err
-		}
-		if !valid {
-			return Task{}, ErrTenantResourceMismatch
-		}
+	if err := validateTaskReferences(tx, input, tenantID); err != nil {
+		return Task{}, err
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	task := Task{
@@ -257,6 +251,26 @@ func (s *PostgresStore) listTasks(filter TaskFilter) ([]Task, error) {
 }
 
 func (s *PostgresStore) UpdateTaskStatus(input TaskStatusInput) (Task, bool, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Task{}, false, err
+	}
+	defer tx.Rollback()
+	if input.RestorePointID != "" {
+		var tenantID string
+		var completedAt sql.NullTime
+		if err := tx.QueryRow(`select tenant_id, completed_at from tasks where id=$1 for update`, input.TaskID).Scan(&tenantID, &completedAt); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return Task{}, false, nil
+			}
+			return Task{}, false, err
+		}
+		if !completedAt.Valid {
+			if err := validateTenantReference(tx, "restore_points", input.RestorePointID, tenantID); err != nil {
+				return Task{}, false, err
+			}
+		}
+	}
 	now := time.Now().UTC()
 	payload := make(map[string]any, len(input.Payload)+1)
 	for key, value := range input.Payload {
@@ -275,7 +289,7 @@ func (s *PostgresStore) UpdateTaskStatus(input TaskStatusInput) (Task, bool, err
 			return Task{}, false, err
 		}
 	}
-	result, err := s.db.Exec(`
+	result, err := tx.Exec(`
 		update tasks
 		set status = case
 		        when completed_at is not null then status
@@ -298,6 +312,9 @@ func (s *PostgresStore) UpdateTaskStatus(input TaskStatusInput) (Task, bool, err
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
+		return Task{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
 		return Task{}, false, err
 	}
 	if affected == 0 {

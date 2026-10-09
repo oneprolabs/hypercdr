@@ -115,6 +115,12 @@ catalog endpoints have typed domain API modules; request limits and existing
 workflow semantics are preserved.
 
 Authenticated `/api/v1/schema` exposes the live route, access and error inventory.
+Task creation checks all cluster/application/plan/restore-point references against
+the resolved tenant. Restore-point creation checks its source, application, plan,
+storage and backup-task references; attaching a restore point during a task status
+update uses the same tenant guard. These checks hold row locks inside the write
+transaction and reject invalid references before changing data or latest-task
+pointers. Late status reports retain the existing terminal-task immutability rule.
 Authentication request/success schemas use the same wire DTOs as the handlers,
 with live-response coverage tests. Restore-point list, cached/live content, and
 single/multi-cluster delete responses also have shared wire DTOs and actual-handler
