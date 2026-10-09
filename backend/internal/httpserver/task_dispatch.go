@@ -68,6 +68,10 @@ func (r *Router) redispatchPendingTasks(clusterID string, conn *websocket.Conn) 
 		if r.backgroundContext().Err() != nil {
 			return
 		}
+		if task.Type == "unregister" && boolPayload(task.Payload, "cleanupObjectStorage") && !boolPayload(task.Payload, "unregisterPreflightCompleted") && (task.Status == "queued" || task.Status == "dispatched" || task.Status == "running") {
+			r.startUnregisterCleanup(task)
+			continue
+		}
 		if task.Status != "queued" && task.Status != "dispatched" {
 			continue
 		}
@@ -145,19 +149,23 @@ func (r *Router) resumeQueuedStoragePreflight(task store.Task) bool {
 }
 
 func (r *Router) dispatchStoredTask(conn *websocket.Conn, task store.Task) error {
-	r.taskDispatchMu.Lock()
-	defer r.taskDispatchMu.Unlock()
+	if task.Type == "unregister" && boolPayload(task.Payload, "cleanupObjectStorage") && !boolPayload(task.Payload, "unregisterPreflightCompleted") {
+		return errors.New("unregister object-storage preflight is not complete")
+	}
 	dispatch, err := r.buildStoredTaskDispatch(task)
 	if err != nil {
 		return err
 	}
-	return conn.WriteJSON(dispatch)
+	return r.writeAgentMessage(conn, dispatch)
 }
 
-func (r *Router) writeTaskDispatch(conn *websocket.Conn, dispatch any) error {
+func (r *Router) writeAgentMessage(conn *websocket.Conn, message any) error {
 	r.taskDispatchMu.Lock()
 	defer r.taskDispatchMu.Unlock()
-	return conn.WriteJSON(dispatch)
+	if err := conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		return err
+	}
+	return conn.WriteJSON(message)
 }
 
 func (r *Router) dispatchControlPlaneHandover(ctx context.Context, clusterID, action, migrationID string, rollbackDeadline time.Time) error {

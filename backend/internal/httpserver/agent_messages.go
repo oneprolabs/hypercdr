@@ -1,7 +1,6 @@
 package httpserver
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -146,7 +145,7 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 					billable := !(node.Role == "control-plane" && node.Unschedulable)
 					nodes = append(nodes, EditionMeteredNode{Name: node.Name, Billable: billable})
 				}
-				if meterErr := r.editionMetering(context.Background(), EditionMeteringEvent{Operation: "cluster.inventory", TenantID: updated.TenantID, ClusterID: updated.ID, Nodes: nodes}); meterErr != nil {
+				if meterErr := r.editionMetering(r.backgroundContext(), EditionMeteringEvent{Operation: "cluster.inventory", TenantID: updated.TenantID, ClusterID: updated.ID, Nodes: nodes}); meterErr != nil {
 					r.logger.Error("failed to record edition metering inventory", "cluster_id", updated.ID, "error", meterErr)
 				}
 			}

@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"context"
 	"errors"
 	"github.com/gorilla/websocket"
 	"hypercdr-platform/platform/backend/internal/protocol"
@@ -11,6 +12,11 @@ import (
 )
 
 func (r *Router) agentWebSocket(w http.ResponseWriter, req *http.Request) {
+	if !r.admitWorker() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "platform_shutting_down"})
+		return
+	}
+	defer r.workers.Done()
 	upgrader := websocket.Upgrader{
 		CheckOrigin: func(req *http.Request) bool {
 			return true
@@ -23,6 +29,10 @@ func (r *Router) agentWebSocket(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	defer conn.Close()
+	stopClosing := context.AfterFunc(r.backgroundContext(), func() { _ = conn.Close() })
+	defer stopClosing()
+	// A connection that never sends its registration must not live indefinitely.
+	_ = conn.SetReadDeadline(time.Now().Add(agentPongWait))
 
 	var register protocol.Message[protocol.RegisterPayload]
 	if err := conn.ReadJSON(&register); err != nil {
@@ -175,9 +185,11 @@ func (r *Router) agentWebSocket(w http.ResponseWriter, req *http.Request) {
 	r.hub.set(cluster.ID, conn)
 	r.configureAgentConnection(conn, cluster.ID)
 	pingDone := make(chan struct{})
-	go r.pingAgentConnection(conn, cluster.ID, pingDone)
+	pingExited := make(chan struct{})
+	go func() { defer close(pingExited); r.pingAgentConnection(conn, cluster.ID, pingDone) }()
 	defer func() {
 		close(pingDone)
+		<-pingExited
 		r.hub.remove(cluster.ID, conn)
 		if _, _, err := r.store.SetClusterConnectionStatus(cluster.ID, "offline"); err != nil {
 			r.logger.Warn("failed to mark agent offline", "cluster_id", cluster.ID, "error", err)
@@ -233,7 +245,7 @@ func (r *Router) writeEventAck(conn *websocket.Conn, clusterID string, agentID s
 			Persisted:    true,
 		},
 	}
-	return conn.WriteJSON(message)
+	return r.writeAgentMessage(conn, message)
 }
 
 func (r *Router) writeEventError(conn *websocket.Conn, clusterID string, agentID string, ackMessageID string, ackType string, taskID string, commandID string, code string, messageText string, retryable bool) error {
@@ -255,7 +267,7 @@ func (r *Router) writeEventError(conn *websocket.Conn, clusterID string, agentID
 			Retryable:    retryable,
 		},
 	}
-	return conn.WriteJSON(message)
+	return r.writeAgentMessage(conn, message)
 }
 
 func (r *Router) finishUnregisterTask(clusterID string, task store.Task) error {

@@ -689,7 +689,7 @@ func (r *Router) requestClusterInventory(w http.ResponseWriter, req *http.Reques
 			IncludeRecentVeleroObjects: body.IncludeRecentVeleroObjects,
 		},
 	}
-	if err := conn.WriteJSON(message); err != nil {
+	if err := r.writeAgentMessage(conn, message); err != nil {
 		r.logger.Error("failed to dispatch inventory request", "cluster_id", clusterID, "request_id", body.RequestID, "error", err)
 		failed := inventoryRequestStatus{
 			RequestID:   body.RequestID,
@@ -1091,16 +1091,17 @@ func (r *Router) unregisterCluster(w http.ResponseWriter, req *http.Request) {
 		Status:    "queued",
 		CommandID: commandID,
 		Payload: map[string]any{
-			"requestedBy":          requestActor(req),
-			"clusterId":            clusterID,
-			"namespace":            namespace,
-			"deleteVelero":         deleteVelero,
-			"deleteNamespace":      deleteNamespace,
-			"deleteBackupData":     body.DeleteBackupData,
-			"cleanupObjectStorage": cleanupObjectStorage,
-			"storageRepositoryIds": audit.StorageRepositoryIDs,
-			"unregisterStage":      "prechecking",
-			"reason":               body.Reason,
+			"requestedBy":                    requestActor(req),
+			"clusterId":                      clusterID,
+			"namespace":                      namespace,
+			"deleteVelero":                   deleteVelero,
+			"deleteNamespace":                deleteNamespace,
+			"deleteBackupData":               body.DeleteBackupData,
+			"cleanupObjectStorage":           cleanupObjectStorage,
+			"cleanupProtectionRelationships": cleanupProtectionRelationships,
+			"storageRepositoryIds":           audit.StorageRepositoryIDs,
+			"unregisterStage":                "prechecking",
+			"reason":                         body.Reason,
 		},
 	})
 	if err != nil {
@@ -1109,7 +1110,7 @@ func (r *Router) unregisterCluster(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if cleanupObjectStorage {
-		go r.cleanupAndDispatchUnregister(task, audit.StorageRepositoryIDs, cleanupProtectionRelationships)
+		r.startUnregisterCleanup(task)
 		writeJSON(w, http.StatusAccepted, task)
 		return
 	}
@@ -1185,11 +1186,18 @@ func (r *Router) cleanupUnregisterProtectionRelationships(clusterID string, plan
 }
 
 func (r *Router) cleanupAndDispatchUnregister(task store.Task, repositoryIDs []string, cleanupProtectionRelationships bool) {
+	if r.backgroundContext().Err() != nil {
+		return
+	}
 	_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "running", Progress: 10})
 	_ = r.store.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "info", Reason: "cleaning_object_storage", Message: "cleaning backup data before cluster-side uninstall"})
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(r.backgroundContext(), 10*time.Minute)
 	cleanupResults, cleanupErr := r.cleanupClusterObjectStorageRepositories(ctx, task.ClusterID, repositoryIDs)
 	cancel()
+	if r.backgroundContext().Err() != nil {
+		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "queued", Progress: 10})
+		return
+	}
 	if cleanupErr != nil {
 		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "failed", Progress: 10, ErrorCode: "OBJECT_STORAGE_CLEANUP_FAILED", ErrorMessage: cleanupErr.Error(), MarkDone: true})
 		_ = r.store.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "error", Reason: "OBJECT_STORAGE_CLEANUP_FAILED", Message: cleanupErr.Error(), Payload: map[string]any{"cleanupResult": cleanupResults}})
@@ -1206,6 +1214,16 @@ func (r *Router) cleanupAndDispatchUnregister(task store.Task, repositoryIDs []s
 			_ = r.store.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "error", Reason: "UNREGISTER_DEPENDENCY_CLEANUP_FAILED", Message: err.Error()})
 			return
 		}
+	}
+	// Persist the preflight boundary before sending the uninstall command. A
+	// replacement process must not infer completion from an in-memory worker.
+	updated, found, err := r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "queued", Progress: 10, Payload: map[string]any{"unregisterPreflightCompleted": true}})
+	if err != nil || !found || isTerminalTaskStatus(updated.Status) {
+		return
+	}
+	task = updated
+	if r.backgroundContext().Err() != nil {
+		return
 	}
 	conn, ok := r.hub.get(task.ClusterID)
 	if !ok || conn == nil {
@@ -1311,7 +1329,7 @@ func (r *Router) upgradeClusterAgent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, task)
-	go r.dispatchComponentUpgrade(conn, task, "agent upgrade task dispatched")
+	r.startWorker(func() { r.dispatchComponentUpgrade(conn, task, "agent upgrade task dispatched") })
 }
 
 func (r *Router) upgradeClusterVelero(w http.ResponseWriter, req *http.Request) {
@@ -1421,7 +1439,7 @@ func (r *Router) upgradeClusterVelero(w http.ResponseWriter, req *http.Request) 
 		dispatchMessage = "Velero repair task dispatched to cluster agent"
 	}
 	writeJSON(w, http.StatusAccepted, task)
-	go r.dispatchComponentUpgrade(conn, task, dispatchMessage)
+	r.startWorker(func() { r.dispatchComponentUpgrade(conn, task, dispatchMessage) })
 }
 
 func (r *Router) upgradeOpenShiftOADP(w http.ResponseWriter, req *http.Request, cluster store.Cluster, repair bool) {
@@ -1462,10 +1480,13 @@ func (r *Router) upgradeOpenShiftOADP(w http.ResponseWriter, req *http.Request, 
 		return
 	}
 	writeJSON(w, http.StatusAccepted, task)
-	go r.dispatchComponentUpgrade(conn, task, "OADP upgrade task dispatched to OpenShift agent")
+	r.startWorker(func() { r.dispatchComponentUpgrade(conn, task, "OADP upgrade task dispatched to OpenShift agent") })
 }
 
 func (r *Router) dispatchComponentUpgrade(conn *websocket.Conn, task store.Task, message string) {
+	if r.backgroundContext().Err() != nil {
+		return
+	}
 	if err := r.dispatchStoredTask(conn, task); err != nil {
 		r.logger.Error("failed to dispatch component upgrade task", "cluster_id", task.ClusterID, "task_id", task.ID, "type", task.Type, "error", err)
 		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "queued", Progress: 0, ErrorCode: "DISPATCH_FAILED", ErrorMessage: err.Error()})

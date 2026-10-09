@@ -57,6 +57,24 @@ active API. The deployment still uses a single
 active slot. Distributed request correlation must be designed before advertising multiple active replicas. A scheduler lock
 alone cannot guarantee correctness across arbitrary database/network partitions.
 
+Unregister object-store cleanup and component upgrade dispatch also use the worker
+admission gate. Cleanup cancellation preserves a queued task; reconnect resumes
+queued or interrupted running cleanup from its persisted repository references.
+The `unregisterPreflightCompleted` task payload marker is saved only after object
+deletion and requested protection-relationship cleanup succeed. Dispatch refuses
+an uninstall with an incomplete preflight, and later reconnects reuse the durable
+completion marker. Every repository reference is checked for existence and tenant
+ownership before deletion begins. Remote object deletion is not transactional;
+interrupted partial deletion is retried using the same tenant/cluster prefix.
+
+Agent WebSocket handlers participate in shutdown admission/draining, including
+connections waiting for their initial registration. Shutdown closes their sockets
+and waits for handlers and ping loops before returning, since HTTP shutdown alone
+does not close hijacked connections. Inventory, content/log requests, task commands
+and event acknowledgements share a serialized writer with a bounded write deadline.
+Real PostgreSQL tests exercise cancellation, interrupted cleanup, persisted
+completion, credential reconnect, and concurrent inventory/task/ack socket writes.
+
 ## Frontend and API
 
 App's resource state, refresh admission, mapping commits, selection, and polling

@@ -72,6 +72,7 @@ func (r *Router) cleanupClusterObjectStorageRepositories(ctx context.Context, cl
 	// Repositories are tenant scoped; use their tenant at deletion time and
 	// verify every selected repository belongs to the same cluster tenant.
 	results := make([]objectStorageCleanupResult, 0, len(repositoryIDs))
+	selected := make([]store.StorageRepository, 0, len(repositoryIDs))
 	for _, repo := range repositories {
 		if _, ok := wanted[repo.ID]; !ok {
 			continue
@@ -79,12 +80,7 @@ func (r *Router) cleanupClusterObjectStorageRepositories(ctx context.Context, cl
 		if repo.TenantID != clusterTenantID {
 			return results, fmt.Errorf("repository %s does not belong to cluster tenant", repo.Name)
 		}
-		prefix := strings.TrimSuffix(storageDomainPrefix(clusterTenantID, clusterID), "/") + "/"
-		result, err := cleanObjectStoragePrefix(ctx, repo, prefix)
-		if err != nil {
-			return results, fmt.Errorf("cleanup repository %s prefix %s: %w", repo.Name, prefix, err)
-		}
-		results = append(results, result)
+		selected = append(selected, repo)
 		delete(wanted, repo.ID)
 	}
 	if len(wanted) > 0 {
@@ -94,6 +90,19 @@ func (r *Router) cleanupClusterObjectStorageRepositories(ctx context.Context, cl
 		}
 		sort.Strings(missing)
 		return results, fmt.Errorf("associated storage repositories not found: %s", strings.Join(missing, ", "))
+	}
+	// Validate the complete reference set before the first destructive operation.
+	// A missing/foreign later repository must not partially delete earlier ones.
+	for _, repo := range selected {
+		if err := ctx.Err(); err != nil {
+			return results, err
+		}
+		prefix := strings.TrimSuffix(storageDomainPrefix(clusterTenantID, clusterID), "/") + "/"
+		result, err := cleanObjectStoragePrefix(ctx, repo, prefix)
+		if err != nil {
+			return results, fmt.Errorf("cleanup repository %s prefix %s: %w", repo.Name, prefix, err)
+		}
+		results = append(results, result)
 	}
 	return results, nil
 }
@@ -283,7 +292,7 @@ func (r *Router) syncStorageRepository(w http.ResponseWriter, req *http.Request)
 			},
 		},
 	}
-	if err := r.writeTaskDispatch(conn, dispatch); err != nil {
+	if err := r.writeAgentMessage(conn, dispatch); err != nil {
 		r.logger.Error("failed to dispatch storage sync task", "task_id", task.ID, "error", err)
 		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{
 			TaskID:       task.ID,
@@ -521,7 +530,7 @@ func (r *Router) dispatchStorageSyncTaskForPlanActivationAttempt(clusterID strin
 			},
 		},
 	}
-	if err := r.writeTaskDispatch(conn, dispatch); err != nil {
+	if err := r.writeAgentMessage(conn, dispatch); err != nil {
 		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{
 			TaskID:       task.ID,
 			Status:       "queued",

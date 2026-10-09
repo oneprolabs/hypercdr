@@ -181,3 +181,87 @@ func TestKubeconfigUploadOwnerCannotBeImpersonatedWithinTenant(t *testing.T) {
 		t.Fatalf("owner status %d", w.Code)
 	}
 }
+
+func TestShutdownDrainsRegisteredAndUnregisteredAgentSockets(t *testing.T) {
+	repo := newTestStore(t)
+	old := NewRouter(config.Config{}, slog.Default(), repo).(*managedRouter)
+	server := httptest.NewServer(old)
+	defer server.Close()
+	token, err := repo.CreateAgentToken(store.DefaultTenantID, "", "handoff", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dial := func(url string) *websocket.Conn {
+		t.Helper()
+		conn, _, err := websocket.DefaultDialer.Dial("ws"+url[4:]+"/ws/agent", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return conn
+	}
+	agent := dial(server.URL)
+	defer agent.Close()
+	halfRegistered := dial(server.URL)
+	defer halfRegistered.Close()
+	registration := protocol.Message[protocol.RegisterPayload]{Version: protocol.Version, Type: protocol.MessageAgentRegister, AgentID: "handoff-agent", Payload: protocol.RegisterPayload{InstallToken: token.Token, Cluster: protocol.ClusterSummary{Name: "handoff-cluster"}, Agent: protocol.AgentSummary{Version: "test"}, Velero: protocol.VeleroSummary{Status: "ready"}}}
+	if err := agent.WriteJSON(registration); err != nil {
+		t.Fatal(err)
+	}
+	var accepted protocol.Message[protocol.RegisterAcceptedPayload]
+	if err := agent.ReadJSON(&accepted); err != nil {
+		t.Fatal(err)
+	}
+	if accepted.Type != protocol.MessagePlatformRegisterAccepted {
+		t.Fatalf("registration rejected: %s", accepted.Type)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := old.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, conn := range []*websocket.Conn{agent, halfRegistered} {
+		conn.SetReadDeadline(time.Now().Add(time.Second))
+		if _, _, err := conn.ReadMessage(); err == nil {
+			t.Fatal("old socket still live after Close")
+		}
+	}
+	if old.router.hub.has(accepted.Payload.ClusterID) {
+		t.Fatal("old process retained agent session")
+	}
+	clusters, err := repo.ListClusters()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(clusters) != 1 || clusters[0].ConnectionStatus != "offline" {
+		t.Fatalf("handler not fully drained: %#v", clusters)
+	}
+	_, response, err := websocket.DefaultDialer.Dial("ws"+server.URL[4:]+"/ws/agent", nil)
+	if err == nil || response == nil || response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatal("shutdown accepted another websocket")
+	}
+	if response != nil {
+		response.Body.Close()
+	}
+	// The replacement uses the existing durable credential, never another install token.
+	next := NewRouter(config.Config{}, slog.Default(), repo).(*managedRouter)
+	nextServer := httptest.NewServer(next)
+	defer nextServer.Close()
+	defer next.Close(ctx)
+	replacement := dial(nextServer.URL)
+	defer replacement.Close()
+	registration.ClusterID = accepted.Payload.ClusterID
+	registration.Payload.InstallToken = ""
+	registration.Payload.AgentCredential = accepted.Payload.AgentCredential
+	if err := replacement.WriteJSON(registration); err != nil {
+		t.Fatal(err)
+	}
+	if err := replacement.ReadJSON(&accepted); err != nil {
+		t.Fatal(err)
+	}
+	if accepted.Type != protocol.MessagePlatformRegisterAccepted {
+		t.Fatalf("handoff credential rejected: %s", accepted.Type)
+	}
+	if err := next.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+}

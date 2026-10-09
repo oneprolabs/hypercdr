@@ -216,7 +216,7 @@ func (r *Router) requestClusterLogs(clusterID, component string, since time.Time
 	r.logRequestMu.Unlock()
 	defer func() { r.logRequestMu.Lock(); delete(r.logRequests, requestID); r.logRequestMu.Unlock() }()
 	message := protocol.Message[protocol.LogRequestPayload]{Version: protocol.Version, MessageID: store.NewPublicID(), MessageKind: protocol.MessageKindRequest, Type: protocol.MessagePlatformLogRequest, ClusterID: clusterID, Timestamp: time.Now().UTC(), Payload: protocol.LogRequestPayload{RequestID: requestID, Component: component, Since: since, TailLines: tailLines}}
-	if err := conn.WriteJSON(message); err != nil {
+	if err := r.writeAgentMessage(conn, message); err != nil {
 		return protocol.LogReportPayload{}, requestID, 502, err
 	}
 	select {

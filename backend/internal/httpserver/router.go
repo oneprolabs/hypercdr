@@ -42,6 +42,8 @@ type Router struct {
 	contentIndexing        map[string]struct{}
 	contentIndexSlots      chan struct{}
 	taskDispatchMu         sync.Mutex
+	unregisterMu           sync.Mutex
+	unregisterCleaning     map[string]struct{}
 	logCollectMu           sync.Mutex
 	logMaintMu             sync.Mutex
 	logMaintRun            bool
@@ -537,6 +539,16 @@ func (h *managedRouter) Close(ctx context.Context) error {
 // after the last worker exits. Persisted queued tasks remain available to the
 // next process when admission is refused.
 func (r *Router) startWorker(run func()) bool {
+	if !r.admitWorker() {
+		return false
+	}
+	go func() { defer r.workers.Done(); run() }()
+	return true
+}
+
+// Hijacked agent connections are not drained by http.Server.Shutdown. They
+// use the same admission gate and remain counted until their handler exits.
+func (r *Router) admitWorker() bool {
 	r.workerMu.Lock()
 	if r.workersClosing {
 		r.workerMu.Unlock()
@@ -544,7 +556,6 @@ func (r *Router) startWorker(run func()) bool {
 	}
 	r.workers.Add(1)
 	r.workerMu.Unlock()
-	go func() { defer r.workers.Done(); run() }()
 	return true
 }
 

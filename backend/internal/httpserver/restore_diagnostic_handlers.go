@@ -276,7 +276,7 @@ func (r *Router) requestBackupContents(clusterID string, backupName string, vele
 		r.backupContentRequestMu.Unlock()
 	}()
 	message := protocol.Message[protocol.BackupContentRequestPayload]{Version: protocol.Version, MessageID: store.NewPublicID(), MessageKind: protocol.MessageKindRequest, Type: protocol.MessagePlatformBackupContentRequest, ClusterID: clusterID, Timestamp: time.Now().UTC(), Payload: protocol.BackupContentRequestPayload{RequestID: requestID, VeleroBackupName: backupName, VeleroNamespace: veleroNamespace}}
-	if err := conn.WriteJSON(message); err != nil {
+	if err := r.writeAgentMessage(conn, message); err != nil {
 		return protocol.BackupContentReportPayload{}, http.StatusBadGateway, err
 	}
 	select {
