@@ -110,18 +110,31 @@ func validateWireObject(t *testing.T, value any, schema map[string]any) {
 		if !ok {
 			t.Fatalf("expected object, got %T", value)
 		}
-		for _, key := range schema["required"].([]string) {
+		required, _ := schema["required"].([]string)
+		for _, key := range required {
 			if _, ok := object[key]; !ok {
 				t.Fatalf("missing required %s", key)
 			}
 		}
-		properties := schema["properties"].(map[string]any)
+		properties, _ := schema["properties"].(map[string]any)
 		for key, val := range object {
 			child, ok := properties[key]
 			if !ok {
+				if additional, allowed := schema["additionalProperties"].(map[string]any); allowed {
+					validateWireObject(t, val, additional)
+					continue
+				}
 				t.Fatalf("undocumented field %s", key)
 			}
 			validateWireObject(t, val, child.(map[string]any))
+		}
+	case "array":
+		items, ok := value.([]any)
+		if !ok {
+			t.Fatalf("expected array got %T", value)
+		}
+		for _, item := range items {
+			validateWireObject(t, item, schema["items"].(map[string]any))
 		}
 	case "string":
 		if _, ok := value.(string); !ok {

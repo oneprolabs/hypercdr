@@ -45,9 +45,7 @@ func (r *Router) listApplications(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 	apps = visibleApps
-	writeJSON(w, http.StatusOK, map[string]any{
-		"items": nonNilSlice(apps),
-	})
+	writeJSON(w, http.StatusOK, listResponse[store.Application]{Items: nonNilSlice(apps)})
 }
 
 func (r *Router) updateApplication(w http.ResponseWriter, req *http.Request) {
@@ -56,9 +54,7 @@ func (r *Router) updateApplication(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "missing_id"})
 		return
 	}
-	var body struct {
-		ProtectionStatus string `json:"protectionStatus"`
-	}
+	var body applicationStatusRequest
 	if req.Body != nil {
 		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_body"})
@@ -101,12 +97,10 @@ func (r *Router) listTags(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 	items = visible
-	writeJSON(w, 200, map[string]any{"items": nonNilSlice(items)})
+	writeJSON(w, 200, listResponse[store.Tag]{Items: nonNilSlice(items)})
 }
 func (r *Router) createTag(w http.ResponseWriter, req *http.Request) {
-	var body struct {
-		Name string `json:"name"`
-	}
+	var body tagNameRequest
 	if decodeJSON(req, &body) != nil || strings.TrimSpace(body.Name) == "" {
 		writeJSON(w, 400, map[string]any{"error": "tag_name_required"})
 		return
@@ -123,9 +117,7 @@ func (r *Router) createTag(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, 201, tag)
 }
 func (r *Router) updateTag(w http.ResponseWriter, req *http.Request) {
-	var body struct {
-		Name string `json:"name"`
-	}
+	var body tagNameRequest
 	if decodeJSON(req, &body) != nil || strings.TrimSpace(body.Name) == "" {
 		writeJSON(w, 400, map[string]any{"error": "tag_name_required"})
 		return
@@ -151,12 +143,10 @@ func (r *Router) deleteTag(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, 404, map[string]any{"error": "tag_not_found"})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"deleted": true})
+	writeJSON(w, 200, deletedResponse{Deleted: true})
 }
 func (r *Router) setApplicationTags(w http.ResponseWriter, req *http.Request) {
-	var body struct {
-		TagIDs []string `json:"tagIds"`
-	}
+	var body applicationTagsRequest
 	if decodeJSON(req, &body) != nil {
 		writeJSON(w, 400, map[string]any{"error": "invalid_json"})
 		return

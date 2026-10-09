@@ -11,6 +11,11 @@ request fields and successful payloads, including the configured challenge mode.
 Tests check mounted auth coverage and compare actual login/profile/config/logout
 responses with the schemas.
 
+Application and tag routes also share DTOs with their handlers and document
+query fields, collection responses, batch tag replacement, and creation status.
+Domain route coverage tests fail when one of these mounted routes lacks a
+payload contract.
+
 This is an incremental contract: other endpoint request bodies and successful
 payloads are not yet comprehensively modeled. Do not generate a client from it yet.
 The route/access inventory is generated at runtime rather than copied by hand.
