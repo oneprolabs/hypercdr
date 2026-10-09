@@ -1,3 +1,5 @@
+import { useNamespaceDetail } from './use-namespace-detail';
+import NamespaceResourcesDrawer from './namespace-resources-drawer';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
@@ -186,79 +188,9 @@ export default function ApplicationDrPage(props: {
   const [drSupportCheckingKeys, setDrSupportCheckingKeys] = useState<string[]>([]);
   const drSupportAutoRequestedRef = useRef<Set<string>>(new Set());
   const [appBulkMenuOpen, setAppBulkMenuOpen] = useState(false);
-  const [selectedDetailApp, setSelectedDetailApp] = useState<AppItem | null>(null);
-  const [namespaceDetailTab, setNamespaceDetailTab] = useState<'overview' | 'restorePoints' | 'tasks' | 'storage'>('overview');
-  const [namespaceDetailTaskId, setNamespaceDetailTaskId] = useState('');
-  const [namespaceRestorePointPage, setNamespaceRestorePointPage] = useState(1);
-	const [restorePointMenuId, setRestorePointMenuId] = useState('');
-  const [namespaceTaskPage, setNamespaceTaskPage] = useState(1);
-  const [namespaceDetailRestorePoints, setNamespaceDetailRestorePoints] = useState<ApiRestorePointView[] | null>(null);
-  const [namespaceDetailTasks, setNamespaceDetailTasks] = useState<ApiTask[] | null>(null);
-  const [namespaceDetailLoading, setNamespaceDetailLoading] = useState(false);
-  const [namespaceDetailLoadError, setNamespaceDetailLoadError] = useState('');
   const [drSupportErrorDetail, setDrSupportErrorDetail] = useState<AppItem | null>(null);
   const [operationConfirm, setOperationConfirm] = useState<'cancel-sync' | 'cleanup-drill' | 'remove-config' | null>(null);
-  const openNamespaceDetail = (app: AppItem, tab: 'overview' | 'restorePoints' | 'tasks' | 'storage' = 'overview') => {
-    setSelectedDetailApp(app);
-    setNamespaceDetailTab(tab);
-    setNamespaceDetailTaskId('');
-    setNamespaceRestorePointPage(1);
-    setNamespaceTaskPage(1);
-    setNamespaceDetailRestorePoints(null);
-    setNamespaceDetailTasks(null);
-    setNamespaceDetailLoadError('');
-  };
-  const selectedDetailPlanId = selectedDetailApp?.protectionPlanId
-    || protectionPlans.find(plan => plan.appId === selectedDetailApp?.apiId || plan.appIds?.includes(selectedDetailApp?.apiId || ''))?.id
-    || '';
-  useEffect(() => {
-    if (!selectedDetailApp || !selectedDetailPlanId || namespaceDetailTab === 'overview' || namespaceDetailTab === 'storage') return;
-    if (namespaceDetailTab === 'restorePoints' && namespaceDetailRestorePoints !== null) return;
-    if (namespaceDetailTab === 'tasks' && namespaceDetailTasks !== null) return;
-    let cancelled = false;
-    const loadTab = async () => {
-      setNamespaceDetailLoading(true);
-      setNamespaceDetailLoadError('');
-      try {
-        if (namespaceDetailTab === 'restorePoints') {
-          const response = await apiGet<ApiList<ApiRestorePoint>>(`/api/v1/restore-points?protectionPlanId=${encodeURIComponent(selectedDetailPlanId)}&pageSize=500`);
-          if (cancelled) return;
-          setNamespaceDetailRestorePoints(listItems(response).map(point => ({
-            id: point.id,
-            sourceClusterId: point.sourceClusterId,
-            protectionPlanId: point.protectionPlanId,
-            appId: point.appId,
-            storageRepoId: point.storageRepoId,
-            backupTaskId: String(point.metadata?.backupTaskId || ''),
-            sourceNamespace: point.sourceNamespace || String(point.metadata?.sourceNamespace || ''),
-            taskCreatedAt: point.taskCreatedAt,
-            createdAt: point.createdAt,
-            title: point.veleroBackupName || point.id,
-            time: point.completedAt || point.createdAt,
-            pointType: point.pointType?.toLowerCase().includes('local') ? 'local' : 'remote',
-            status: point.status,
-            sizeBytes: point.sizeBytes,
-            completedAt: point.completedAt,
-            expiresAt: point.expiresAt,
-            backupStorageName: point.backupStorageName || String(point.metadata?.backupStorageName || ''),
-            veleroBackupName: point.veleroBackupName,
-            includedNamespaces: Array.isArray(point.metadata?.includedNamespaces) ? point.metadata.includedNamespaces as string[] : [],
-            metadata: point.metadata || {},
-            sizeMetricsV2: point.sizeMetricsV2 || point.metadata?.sizeMetricsV2,
-          })));
-        } else {
-          const response = await apiGet<ApiList<ApiTask>>('/api/v1/tasks?view=summary&types=backup,restore,drill,takeover,retention-cleanup,protection-cleanup&limit=500');
-          if (!cancelled) setNamespaceDetailTasks(listItems(response).filter(task => task.protectionPlanId === selectedDetailPlanId));
-        }
-      } catch (error) {
-        if (!cancelled) setNamespaceDetailLoadError(error instanceof Error ? error.message : 'Unable to load this detail section.');
-      } finally {
-        if (!cancelled) setNamespaceDetailLoading(false);
-      }
-    };
-    void loadTab();
-    return () => { cancelled = true; };
-  }, [namespaceDetailRestorePoints, namespaceDetailTab, namespaceDetailTasks, selectedDetailApp, selectedDetailPlanId]);
+  const { selectedDetailApp, setSelectedDetailApp, namespaceDetailTab, setNamespaceDetailTab, namespaceDetailTaskId, setNamespaceDetailTaskId, namespaceRestorePointPage, setNamespaceRestorePointPage, restorePointMenuId, setRestorePointMenuId, namespaceTaskPage, setNamespaceTaskPage, namespaceDetailRestorePoints, setNamespaceDetailRestorePoints, namespaceDetailTasks, setNamespaceDetailTasks, namespaceDetailLoading, setNamespaceDetailLoading, namespaceDetailLoadError, setNamespaceDetailLoadError, openNamespaceDetail, selectedDetailPlanId } = useNamespaceDetail(protectionPlans);
   const currentClusterIdRef = useRef(currentClusterId);
   useEffect(() => {
     if (currentClusterIdRef.current === currentClusterId) return;
@@ -3094,151 +3026,13 @@ export default function ApplicationDrPage(props: {
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {resourceDetail && (
-          <div className="fixed inset-0 z-[230]">
-            {(() => {
-              const namespace = resourceDetail.app.namespace || resourceDetail.app.name;
-              const clusterId = resourceDetail.app.clusterId || currentClusterId || '';
-              const isRefreshing = resourceRefreshKey === `${clusterId}:${namespace}`;
-              const refreshState = resourceRefreshStatus?.key === `${clusterId}:${namespace}` ? resourceRefreshStatus : null;
-              return (
-                <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="hbdr-filter-drawer-backdrop"
-              onClick={() => { setResourceRefreshStatus(null); setResourceDetail(null); }}
-            />
-            <motion.div
-              initial={{ opacity: 0, x: 32 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 32 }}
-              transition={{ duration: 0.16, ease: 'easeOut' }}
-              className="hbdr-filter-drawer hbdr-resource-drawer"
-            >
-              <div className="hbdr-filter-drawer-head hbdr-resource-drawer-head">
-                <div className="hbdr-resource-modal-title">
-                  <span className="hbdr-resource-modal-icon"><Grid3X3 size={18} /></span>
-                  <div>
-                    <h3>Namespace Resources</h3>
-                    <p>{resourceDetail.app.namespace || resourceDetail.app.name}</p>
-                  </div>
-                </div>
-                <div className="hbdr-resource-modal-head-right">
-                  <div className="hbdr-resource-modal-meta">
-                    <span>
-                      <em>Groups</em>
-                      <strong>{resourceDetailGroups.length}</strong>
-                    </span>
-                    <span>
-                      <em>Objects</em>
-                      <strong>{resourceSummaryTotal(resourceDetail.app)}</strong>
-                    </span>
-                    <span>
-                      <em>Storage</em>
-                      <strong>{resourceDetail.app.pvCapacityBytes ? formatBytes(resourceDetail.app.pvCapacityBytes) : '0 B'}</strong>
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void refreshNamespaceResources(resourceDetail.app)}
-                    disabled={isRefreshing}
-                    title="Refresh namespace resources from the cluster agent"
-                    aria-label="Refresh namespace resources"
-                  >
-                    <RefreshCw size={18} className={isRefreshing ? 'animate-spin' : ''} />
-                  </button>
-              <button type="button" onClick={() => { setResourceRefreshStatus(null); setResourceDetail(null); }} aria-label="Close resource details"><X size={18} /></button>
-                </div>
-              </div>
-              <div className="hbdr-filter-drawer-body hbdr-resource-detail">
-                {refreshState && refreshState.status !== 'succeeded' && (
-                  <div className={`hbdr-resource-refresh-note ${refreshState.status === 'pending' ? 'is-pending' : 'is-error'}`} role="status">
-                    {refreshState.status === 'pending' ? 'Refreshing inventory…' : (refreshState.message || 'Inventory refresh failed.')}
-                  </div>
-                )}
-                {resourceDetailGroups.length > 0 ? (
-                  <div className="hbdr-resource-inventory">
-                    <div className="hbdr-resource-overview-strip">
-                      {resourceDetailGroups.map(group => {
-                        const Icon = resourceCategoryIconMap[group.category.key as ResourceCategoryKey] || MoreVertical;
-                        return (
-                          <span key={group.category.key}>
-                            <Icon size={15} />
-                            <strong>{group.category.total}</strong>
-                            <em>{group.category.label}</em>
-                          </span>
-                        );
-                      })}
-                    </div>
-                    {resourceDetailGroups.map(group => {
-                      const Icon = resourceCategoryIconMap[group.category.key as ResourceCategoryKey] || MoreVertical;
-                      return (
-                        <section key={group.category.key} className="hbdr-resource-inventory-section">
-                          <div className="hbdr-resource-inventory-divider">
-                            <span><Icon size={14} />{group.category.label}</span>
-                            <em>{group.category.total} objects</em>
-                          </div>
-                          <div className="hbdr-resource-inventory-table">
-                            <div className="hbdr-resource-inventory-columns">
-                              <span>Resource</span>
-                              <span>Type</span>
-                              <span>Details</span>
-                            </div>
-                            {group.items.flatMap(item => {
-                              const rows = item.resources || [];
-                              if (rows.length === 0) {
-                                return [(
-                                  <div key={`${group.category.key}-${item.kind}-count`} className="hbdr-resource-inventory-count-row">
-                                    <span className="hbdr-resource-kind-badge">{item.shortName || shortResourceKind(item.kind)}</span>
-                                    <strong>{item.kind}</strong>
-                                    <em>{item.count} reported, object details pending</em>
-                                  </div>
-                                )];
-                              }
-                              return rows.map(resource => {
-                                const detailText = resourceInventoryDetailText(resource, item, resourceDetail.app.namespace);
-                                return (
-                                  <div
-                                    key={`${item.kind}-${resource.namespace || resourceDetail.app.namespace}-${resource.name}`}
-                                    className="hbdr-resource-inventory-item"
-                                    title={resourceInventoryTitle(resource, item, resourceDetail.app.namespace)}
-                                  >
-                                    <div className="hbdr-resource-inventory-resource">
-                                      <span className="hbdr-resource-kind-badge">{item.shortName || shortResourceKind(item.kind)}</span>
-                                      <div>
-                                        <strong>{resource.name}</strong>
-                                        <em>{resource.namespace || resourceDetail.app.namespace} · {formatAge(resource.ageSeconds)}</em>
-                                      </div>
-                                    </div>
-                                    <div className="hbdr-resource-inventory-type">{item.kind}</div>
-                                    <div className="hbdr-resource-inventory-detail-text">{detailText}</div>
-                                  </div>
-                                );
-                              });
-                            })}
-                          </div>
-                        </section>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="hbdr-resource-detail-empty">
-                    <Database size={18} />
-                    <strong>No namespaced resources found</strong>
-                    <span>The agent has not reported resources for this namespace yet.</span>
-                  </div>
-                )}
-              </div>
-            </motion.div>
-                </>
-              );
-            })()}
-          </div>
-        )}
-      </AnimatePresence>
+      <NamespaceResourcesDrawer
+        resourceDetail={resourceDetail} resourceDetailGroups={resourceDetailGroups}
+        currentClusterId={currentClusterId} resourceRefreshKey={resourceRefreshKey}
+        resourceRefreshStatus={resourceRefreshStatus}
+        onClose={() => { setResourceRefreshStatus(null); setResourceDetail(null); }}
+        onRefresh={refreshNamespaceResources}
+      />
 
 	  <AnimatePresence>
         {tagAction && (

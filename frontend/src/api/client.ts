@@ -1,4 +1,4 @@
-import { AUTH_EXPIRED_EVENT, readStoredAuthSession } from '../auth/session';
+import { AUTH_EXPIRED_EVENT, readStoredAuthSession } from '../auth/session.ts';
 
 export class ApiRequestError extends Error {
   readonly status: number;
@@ -89,4 +89,18 @@ export async function apiDelete<T>(path: string): Promise<T> {
   const response = await ensureApiResponse(await fetch(path, { method: 'DELETE', headers: apiHeaders(false, token) }), path, token);
   if (response.status === 204 || response.headers.get('content-length') === '0') return undefined as T;
   return response.json() as Promise<T>;
+}
+
+// Multipart requests and binary downloads share session expiry/error handling
+// with JSON requests. Let the browser set the multipart boundary.
+export async function apiUpload<T>(path: string, body: FormData): Promise<T> {
+  const token = readStoredAuthSession()?.session.token || '';
+  const response = await ensureApiResponse(await fetch(path, { method: 'POST', headers: apiHeaders(false, token), body }), path, token);
+  return response.json() as Promise<T>;
+}
+
+export async function apiDownload(path: string): Promise<Blob> {
+  const token = readStoredAuthSession()?.session.token || '';
+  const response = await ensureApiResponse(await fetch(path, { headers: apiHeaders(false, token) }), path, token);
+  return response.blob();
 }

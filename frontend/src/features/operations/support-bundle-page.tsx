@@ -1,8 +1,7 @@
 import PageTitleBar from '../../components/page-title-bar';
 import { useState } from 'react';
 import { Download, FileArchive, Trash2 } from 'lucide-react';
-import { apiDelete, apiPost } from '../../api/client';
-import { apiHeaders } from '../../api/client';
+import { apiDelete, apiDownload, apiPost } from '../../api/client';
 import { ConfirmDialog } from '../../components/confirm-dialog';
 import { formatLocalDateTime, getUserTimeZone } from '../../lib/date-time';
 
@@ -26,9 +25,9 @@ export default function SupportBundlePage({ toast }: { toast: (message: string) 
     finally { setBusy(false); }
   };
   const download = async (bundle:Bundle) => {
-    const response = await fetch(bundle.downloadUrl, { headers: apiHeaders() });
-    if (!response.ok) { toast('Download failed. Please generate the bundle again.'); return; }
-    const blob = await response.blob(); const url = URL.createObjectURL(blob);
+    let blob: Blob;
+    try { blob = await apiDownload(bundle.downloadUrl); }
+    catch { toast('Download failed. Please generate the bundle again.'); return; } const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = bundle.name; a.click(); URL.revokeObjectURL(url);const next=bundles.map(item=>item.name===bundle.name?{...item,fresh:false}:item);setBundles(next);saveBundles(next);
   };
   const remove = async (bundle:Bundle) => {

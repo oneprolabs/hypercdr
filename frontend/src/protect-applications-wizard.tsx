@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronLeft, ChevronRight, Plus, Search, ShieldCheck, X } from 'lucide-react';
-import { apiGet, apiHeaders, apiPost } from './api/client';
+import { apiGet, apiDelete, apiPost } from './api/client';
 import type { Props, ProtectWizardStep } from './dr-configuration-modal';
 import { ScopedResourceSelector } from './components/scoped-resource-selector';
 import { createPolicy, defaultPolicyForm } from './features/policies/policy-form-model';
@@ -184,7 +184,7 @@ export function ProtectApplicationsWizard(props: Props & { onResourcesChanged: (
       setCreationError('Registration is still running. Wait for completion or cancel it first.');
       return;
     }
-    if (kubeconfigUpload?.id && (!registrationTask || ['succeeded', 'failed', 'canceled', 'cancelled'].includes(registrationTask.status))) void fetch(`/api/v1/cluster-registrations/kubeconfigs/${encodeURIComponent(kubeconfigUpload.id)}`, { method: 'DELETE', headers: apiHeaders() });
+    if (kubeconfigUpload?.id && (!registrationTask || ['succeeded', 'failed', 'canceled', 'cancelled'].includes(registrationTask.status))) void apiDelete(`/api/v1/cluster-registrations/kubeconfigs/${encodeURIComponent(kubeconfigUpload.id)}`).catch(() => { /* Temporary uploads also expire server-side. */ });
     const keepWaitingForCommand = inlineCreate === 'target' && registrationMode === 'command' && Boolean(installCommand) && (registrationWatchStarted || continueInBackground);
     setRegistrationWatchStarted(keepWaitingForCommand);
     setKubeconfigUpload(null); setKubeconfigContext(''); setClusterInspection(null); setRegistrationStorageClass(''); setRegistrationTask(null); if (!keepWaitingForCommand) { setInstallCommand(''); setPrepareNodeCommand(''); } setStorageDraft(null); setCreationBusy(false); setInlineCreate(null);

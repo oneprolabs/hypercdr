@@ -1,4 +1,4 @@
-.PHONY: help dev stop status test test-backend test-agent test-frontend build-frontend verify fmt
+.PHONY: help dev stop status test test-backend test-agent test-frontend build-frontend verify fmt lint
 
 help:
 	@echo "HyperCDR development commands"
@@ -20,7 +20,7 @@ status:
 test: test-backend test-agent test-frontend
 
 test-backend:
-	cd backend && go test ./...
+	./scripts/test-backend.sh
 
 test-agent:
 	cd agent/comm-agent && go test ./...
@@ -35,7 +35,12 @@ fmt:
 	cd backend && gofmt -w $$(find . -name '*.go' -type f)
 	cd agent/comm-agent && gofmt -w $$(find . -name '*.go' -type f)
 
-verify: test
+lint:
+	cd backend && go vet ./...
+	cd agent/comm-agent && go vet ./...
+	test -z "$$(gofmt -l $$(find backend agent/comm-agent -name '*.go' -type f))"
+
+verify: lint test
 	bash scripts/tests/repository-hygiene.sh
 	bash scripts/tests/blue-green-deploy.sh
 	bash scripts/tests/blue-green-compose.sh

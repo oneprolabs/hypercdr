@@ -13,7 +13,10 @@
     "test:task-ui": "node --experimental-strip-types --test src/features/recovery/task-stage-model.test.mjs src/features/recovery/plan-task-selection.test.mjs src/lib/date-time.test.mjs src/lib/cluster-compatibility.test.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 3002",
-    "visual:compare": "env -u DISPLAY -u WAYLAND_DISPLAY -u XAUTHORITY PLAYWRIGHT_BROWSERS_PATH=/data/software/ms-playwright node scripts/visual-compare.mjs"
+    "visual:compare": "env -u DISPLAY -u WAYLAND_DISPLAY -u XAUTHORITY PLAYWRIGHT_BROWSERS_PATH=/data/software/ms-playwright node scripts/visual-compare.mjs",
+    "test": "npm run test:extensions && npm run test:topology && npm run test:task-ui && npm run test:api",
+    "lint": "eslint src && tsc --noEmit",
+    "test:api": "node --experimental-strip-types --test src/api/client.test.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",
@@ -30,6 +33,8 @@
     "@playwright/test": "^1.60.0",
     "@types/react": "^19.2.16",
     "@types/react-dom": "^19.2.3",
-    "typescript": "~5.8.2"
+    "eslint": "^9.39.5",
+    "typescript": "~5.8.2",
+    "typescript-eslint": "^8.71.1"
   }
 }

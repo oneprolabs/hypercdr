@@ -20,9 +20,19 @@ jobs:
         with:
           go-version: '1.25.13'
           cache-dependency-path: ${{ matrix.module }}/go.sum
+      - name: Vet and check formatting
+        run: |
+          cd '${{ matrix.module }}'
+          go vet ./...
+          test -z "$(gofmt -l $(find . -name '*.go' -type f))"
       - name: Test ${{ matrix.module }}
-        working-directory: ${{ matrix.module }}
-        run: go test ./...
+        run: |
+          if [ '${{ matrix.module }}' = backend ]; then
+            ./scripts/test-backend.sh
+          else
+            cd '${{ matrix.module }}'
+            go test ./...
+          fi
 
   frontend:
     runs-on: ubuntu-latest
@@ -41,7 +51,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check shell syntax
-        run: find scripts bootstrap -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+        run: find scripts -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
       - name: Test registry profile selection
         run: bash scripts/tests/registry-config.sh
       - name: Test blue/green deployment contracts

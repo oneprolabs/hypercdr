@@ -67,8 +67,8 @@ if [[ "${SKIP_TESTS}" != true && "${COMPONENT}" != frontend ]]; then
   mkdir -p "${CACHE_ROOT}/go-build" "${CACHE_ROOT}/go-mod"
   if [[ "${COMPONENT}" == all || "${COMPONENT}" == api || "${COMPONENT}" == executor ]]; then
     log "Testing backend"
-    (cd "${ROOT_DIR}/backend" && PATH="$(dirname "${GO_BIN}"):${PATH}" GOTOOLCHAIN=local GOPROXY="${GOPROXY}" \
-      GOCACHE="${CACHE_ROOT}/go-build" GOMODCACHE="${CACHE_ROOT}/go-mod" "${GO_BIN}" test ./...)
+    (PATH="$(dirname "${GO_BIN}"):${PATH}" GOTOOLCHAIN=local GOPROXY="${GOPROXY}" \
+      GOCACHE="${CACHE_ROOT}/go-build" GOMODCACHE="${CACHE_ROOT}/go-mod" "${ROOT_DIR}/scripts/test-backend.sh")
   fi
   if [[ "${COMPONENT}" == all || "${COMPONENT}" == agents ]]; then
     log "Testing comm-agent"

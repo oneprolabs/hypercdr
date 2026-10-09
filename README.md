@@ -96,7 +96,7 @@ Generated binaries, frontend assets, release packages, logs, certificates, datab
 
 ### Prerequisites
 
-- Go 1.24
+- Go 1.25.13
 - Node.js 22 and npm
 - Docker Engine with Docker Compose v2
 - PostgreSQL 16 (provided by Docker for the standard workflows)

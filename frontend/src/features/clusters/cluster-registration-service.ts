@@ -1,4 +1,4 @@
-import { apiHeaders, apiPost, ensureApiResponse } from '../../api/client';
+import { apiPost, apiUpload } from '../../api/client';
 import type { RegistrationType } from './cluster-registration-choices';
 
 export type RegistrationUpload = { id: string; contexts: Array<{ name: string; apiServer: string; isCurrent?: boolean }> };
@@ -10,8 +10,7 @@ export async function uploadRegistrationKubeconfig<T extends RegistrationUpload>
   body.append('kubeconfig', file);
   body.append('clusterType', clusterType);
   const path = '/api/v1/cluster-registrations/kubeconfigs';
-  const response = await ensureApiResponse(await fetch(path, { method: 'POST', headers: apiHeaders(), body }), path);
-  return response.json() as Promise<T>;
+  return apiUpload<T>(path, body);
 }
 export function inspectRegistrationCluster<T extends RegistrationInspection>(sessionId: string, context: string, clusterType: RegistrationType): Promise<T> {
   return apiPost<T>('/api/v1/cluster-registrations/inspections', { sessionId, context, clusterType });

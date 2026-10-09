@@ -16,7 +16,7 @@ mkdir -p "${WORK_DIR}" "${OUT_DIR}" "${NPM_CACHE}"
 cp -a "${ROOT_DIR}/frontend/." "${WORK_DIR}/"
 cd "${WORK_DIR}"
 npm ci --cache="${NPM_CACHE}"
-npm run test:extensions
-npm run test:topology
+npm run lint
+npm test
 HCDR_FRONTEND_OUT_DIR="${OUT_DIR}" npm run build
 printf '%s\n' "${OUT_DIR}"

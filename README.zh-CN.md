@@ -36,7 +36,7 @@ docs/                     架构、协议、部署和运维资料
 
 ## 本地开发
 
-依赖 Go 1.24、Node.js 22、Docker Compose v2、PostgreSQL 16 和 OpenSSL。
+依赖 Go 1.25.13、Node.js 22、Docker Compose v2、PostgreSQL 16 和 OpenSSL。
 
 ```bash
 cp scripts/dev/dev.conf.example ../hypercdr-runtime/environments/community/dev.conf

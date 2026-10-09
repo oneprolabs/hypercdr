@@ -5,7 +5,7 @@
 - `backend`: control-plane API, scheduler, persistence, migrations, and upgrader.
 - `frontend`: React control-plane UI.
 - `agent/comm-agent`: managed-cluster communication and task execution.
-- `bootstrap`: first-install delivery and installer UX.
+- `deploy/online`: first-install delivery and installer UX.
 - `charts`: Kubernetes deployment assets.
 - `third_party/velero`: pinned third-party source; avoid unrelated edits.
 

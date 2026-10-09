@@ -2,8 +2,7 @@ import PageTitleBar from '../../components/page-title-bar';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Boxes, Search, Server, Terminal, Upload, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { apiGet, apiHeaders, apiPost, ensureApiResponse } from '../../api/client';
-import { readStoredAuthSession } from '../../auth/session';
+import { apiDownload, apiGet, apiPost } from '../../api/client';
 import type { ApiLoginResponse } from '../../auth/types';
 import { HyperTable, type HyperTableColumn } from '../../components/table';
 import { formatLocalDateTime, getUserTimeZone } from '../../lib/date-time';
@@ -107,10 +106,8 @@ export default function DiagnosticLogsPage({ currentUser, toast, advancedTenancy
 
   const exportLogs = async () => {
     try {
-      const token = readStoredAuthSession()?.session.token || '';
       const path = `/api/v1/diagnostic-logs/export?${params(true)}`;
-      const response = await ensureApiResponse(await fetch(path, { headers: apiHeaders(false, token) }), path, token);
-      const blob = await response.blob(); const url = URL.createObjectURL(blob); const anchor = document.createElement('a');
+      const blob = await apiDownload(path); const url = URL.createObjectURL(blob); const anchor = document.createElement('a');
       anchor.href = url; anchor.download = `hypercdr-${source}-logs-${new Date().toISOString().slice(0, 10)}.log`; anchor.click(); URL.revokeObjectURL(url);
       toast(`${source === 'platform' ? 'Platform' : 'Cluster'} log export is ready`);
     } catch (error) { toast(error instanceof Error ? error.message : 'Log export failed'); }

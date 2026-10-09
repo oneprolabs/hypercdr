@@ -6,7 +6,7 @@ import { ClusterCommandRegistrationFields } from './cluster-command-registration
 import { uploadRegistrationKubeconfig, inspectRegistrationCluster, startRegistrationTask, cancelRegistrationTask } from './cluster-registration-service';
 import { AlertTriangle, Check, CheckCircle2, ChevronRight, Cloud, Edit2, Eye, GitBranch, MoreVertical, Plus, PlusCircle, RefreshCw, Server, Star, Trash2, Upload, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ApiRequestError, apiGet, apiHeaders, apiPatch, apiPost } from '../../api/client';
+import { ApiRequestError, apiGet, apiDelete, apiPatch, apiPost } from '../../api/client';
 import { SearchBar } from '../../components/search-bar';
 import { HyperTable, type HyperTableColumn } from '../../components/table';
 import ClusterActivityPanel from './cluster-activity-panel';
@@ -379,7 +379,7 @@ export default function ClusterPage(props: {
   };
 
   const resetDirectRegistration = () => {
-    if (cceUpload?.id) void fetch(`/api/v1/cluster-registrations/kubeconfigs/${encodeURIComponent(cceUpload.id)}`, { method: 'DELETE', headers: apiHeaders() });
+    if (cceUpload?.id) void apiDelete(`/api/v1/cluster-registrations/kubeconfigs/${encodeURIComponent(cceUpload.id)}`).catch(() => { /* Temporary uploads also expire server-side. */ });
     setCCEUpload(null);
     setCCEContext('');
     setCCEUploadError('');
@@ -473,7 +473,7 @@ export default function ClusterPage(props: {
     setCCEIdempotencyKey('');
     try {
       const upload = await uploadRegistrationKubeconfig<CCEKubeconfigUpload>(file, registrationType);
-      if (cceUpload?.id && cceUpload.id !== upload.id) void fetch(`/api/v1/cluster-registrations/kubeconfigs/${encodeURIComponent(cceUpload.id)}`, { method: 'DELETE', headers: apiHeaders() });
+      if (cceUpload?.id && cceUpload.id !== upload.id) void apiDelete(`/api/v1/cluster-registrations/kubeconfigs/${encodeURIComponent(cceUpload.id)}`).catch(() => { /* Temporary uploads also expire server-side. */ });
       setCCEUpload(upload);
       const current = upload.contexts.find(context => context.isCurrent)?.name || (upload.contexts.length === 1 ? upload.contexts[0].name : '');
       setCCEContext(current);
