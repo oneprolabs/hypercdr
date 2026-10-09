@@ -1113,10 +1113,22 @@ func (s *PostgresStore) SetApplicationTags(applicationID string, tagIDs []string
 	}
 	defer tx.Rollback()
 	var tenantID string
-	if err = tx.QueryRow(`select tenant_id from applications where id=$1`, applicationID).Scan(&tenantID); errors.Is(err, sql.ErrNoRows) {
+	if err = tx.QueryRow(`select tenant_id from applications where id=$1 for update`, applicationID).Scan(&tenantID); errors.Is(err, sql.ErrNoRows) {
 		return Application{}, false, nil
 	} else if err != nil {
 		return Application{}, false, err
+	}
+	// Validate the entire replacement before deleting existing associations.
+	// Lock referenced tags against concurrent deletion or ownership changes.
+	for _, tagID := range tagIDs {
+		var ownedID string
+		err = tx.QueryRow(`select id from tags where id=$1 and tenant_id=$2 for share`, tagID, tenantID).Scan(&ownedID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return Application{}, false, ErrTenantResourceMismatch
+		}
+		if err != nil {
+			return Application{}, false, err
+		}
 	}
 	if _, err = tx.Exec(`delete from application_tags where application_id=$1`, applicationID); err != nil {
 		return Application{}, false, err

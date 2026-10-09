@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hypercdr-platform/platform/backend/internal/store"
 	"net/http"
@@ -161,6 +162,10 @@ func (r *Router) setApplicationTags(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	app, ok, err := r.store.SetApplicationTags(req.PathValue("id"), body.TagIDs)
+	if errors.Is(err, store.ErrTenantResourceMismatch) {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "tag_not_found", "message": "One or more selected tags are unavailable in this tenant."})
+		return
+	}
 	if err != nil {
 		writeJSON(w, 500, map[string]any{"error": "set_application_tags_failed"})
 		return

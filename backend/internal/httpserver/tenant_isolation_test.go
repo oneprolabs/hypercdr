@@ -8,7 +8,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"hypercdr-platform/platform/backend/internal/config"
 	"hypercdr-platform/platform/backend/internal/store"
@@ -134,5 +136,55 @@ func TestRecoveryRejectsCrossTenantProtectionPlan(t *testing.T) {
 	r.createRecoveryTask(res, req, "drill")
 	if res.Code != http.StatusNotFound {
 		t.Fatalf("cross-tenant recovery returned %d, want 404: %s", res.Code, res.Body.String())
+	}
+}
+
+func TestApplicationTagBatchRejectsForeignReferencesWithoutDeletingBindings(t *testing.T) {
+	repo := newTestStore(t)
+	token, err := repo.CreateAgentToken(store.DefaultTenantID, "", "tag-test", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cluster, _, err := repo.RegisterCluster(store.RegisterClusterInput{Token: token.Token, ClusterName: "tag-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := repo.ApplyInventory(store.InventoryInput{ClusterID: cluster.ID, Apps: []store.Application{{Namespace: "demo", Name: "demo"}}}); err != nil {
+		t.Fatal(err)
+	}
+	apps, err := repo.ListApplications(cluster.ID)
+	if err != nil || len(apps) != 1 {
+		t.Fatalf("apps: %v", err)
+	}
+	own, err := repo.CreateTag(store.DefaultTenantID, "own")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := repo.CreateTenant(store.TenantInput{Name: "Foreign", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := repo.CreateTag(other.ID, "foreign")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := repo.SetApplicationTags(apps[0].ID, []string{own.ID}); err != nil {
+		t.Fatal(err)
+	}
+	r := &Router{store: repo}
+	body, _ := json.Marshal(map[string]any{"tagIds": []string{foreign.ID}})
+	req := tenantRequest(httptest.NewRequest(http.MethodPut, "/api/v1/applications/"+apps[0].ID+"/tags", bytes.NewReader(body)), testAdmin(t, repo))
+	req.SetPathValue("id", apps[0].ID)
+	w := httptest.NewRecorder()
+	r.tenantGuard("application", r.setApplicationTags)(w, req)
+	if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "tag_not_found") {
+		t.Fatalf("foreign tags status: %d %s", w.Code, w.Body.String())
+	}
+	updated, err := repo.ListApplications(cluster.ID)
+	if err != nil || len(updated) != 1 {
+		t.Fatalf("reload: %v", err)
+	}
+	if len(updated[0].Tags) != 1 || updated[0].Tags[0] != own.ID {
+		t.Fatalf("original bindings changed: %#v", updated[0].Tags)
 	}
 }

@@ -19,7 +19,9 @@ pass-through layer to every CRUD operation.
 Protection-plan insertion verifies tenant ownership of source/target clusters,
 storage and policy, and source-cluster ownership of application references inside
 the transaction. Task creation rejects an explicit tenant inconsistent with its
-plan or cluster. Resource detail routes select a tenant guard at registration;
+plan or cluster. Application tag replacement validates and locks every tag in
+the application tenant before deleting old bindings; foreign/missing references
+fail atomically, while duplicate valid tags and clearing remain supported. Resource detail routes select a tenant guard at registration;
 unknown API domains must declare their policy before they can mount. Collection,
 batch, upload-owner, migration-token and administrative handlers retain their
 specific scope checks. This does not enable PostgreSQL RLS or make global
