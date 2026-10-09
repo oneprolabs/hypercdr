@@ -28364,3 +28364,232 @@ html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-profile-page :wh
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-profile-page :where(.border-slate-100,.border-slate-200) {
   border-color:var(--hc-border) !important;
 }
+
+/* Keep interactive controls on dark surfaces, including their hover states. */
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-action-button {
+  background:var(--hc-sunken) !important;
+  border-color:var(--hc-border-strong) !important;
+  color:var(--hc-text-2) !important;
+  box-shadow:none !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-action-button:hover,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-action-button[aria-expanded='true'] {
+  background:var(--hc-surface-2,var(--hc-border)) !important;
+  color:var(--hc-text) !important;
+  border-color:var(--hc-accent) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-action-menu {
+  background:var(--hc-surface) !important;
+  border-color:var(--hc-border-strong) !important;
+  box-shadow:0 14px 32px rgba(0,0,0,.32) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-action-menu button { color:var(--hc-text-2) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-action-menu button:hover { background:var(--hc-surface-2,var(--hc-border)) !important; color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-action-menu button.text-rose-600 { color:var(--hc-crit) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-action-menu button.text-rose-600:hover { background:color-mix(in srgb,var(--hc-crit) 12%,var(--hc-surface)) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-dr-resource-summary-chip {
+  background:var(--hc-sunken) !important;
+  border-color:var(--hc-border-strong) !important;
+  color:var(--hc-text-2) !important;
+  box-shadow:none !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-dr-resource-summary-chip:hover {
+  background:var(--hc-surface-2,var(--hc-border)) !important;
+  border-color:var(--hc-accent) !important;
+  color:var(--hc-text) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-dr-resource-summary-chip strong { color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-dr-resource-summary-chip em { color:var(--hc-text-2) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-task-ledger-range-options button {
+  background:var(--hc-sunken) !important;
+  border-color:var(--hc-border-strong) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-task-ledger-range-options button:hover,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-task-ledger-range-options button.is-active {
+  background:color-mix(in srgb,var(--hc-accent) 14%,var(--hc-surface)) !important;
+  border-color:var(--hc-accent) !important;
+  color:var(--hc-accent) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-dr-app-name { color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content input[type='checkbox'],
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content input[type='radio'] {
+  background:var(--hc-sunken) !important;
+  border:1px solid var(--hc-border-strong) !important;
+  color-scheme:dark;
+  accent-color:var(--hc-accent);
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content :is(.hbdr-dr-storage,.hbdr-dr-ssl,.hbdr-dr-url-style) {
+  background:var(--hc-sunken) !important;
+  border-color:var(--hc-border-strong) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-dr-ssl-on {
+  background:color-mix(in srgb,var(--hc-ok) 12%,var(--hc-surface)) !important;
+  border-color:color-mix(in srgb,var(--hc-ok) 35%,var(--hc-border)) !important;
+  color:var(--hc-ok) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .cluster-default-button {
+  background:var(--hc-sunken) !important;
+  border-color:var(--hc-border-strong) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .cluster-default-button:hover {
+  background:color-mix(in srgb,var(--hc-accent) 12%,var(--hc-surface)) !important;
+  border-color:var(--hc-accent) !important;
+  color:var(--hc-accent) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .cluster-default-button-active,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .cluster-default-button-active:hover {
+  background:color-mix(in srgb,var(--hc-accent) 16%,var(--hc-surface)) !important;
+  border-color:color-mix(in srgb,var(--hc-accent) 50%,var(--hc-border)) !important;
+  color:var(--hc-accent) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-filter-drawer-body .hbdr-advanced-filter-box {
+  background:var(--hc-surface) !important;
+  border-color:var(--hc-border) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-filter-drawer-body .hbdr-advanced-filter-section h4 {
+  color:var(--hc-text) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-filter-drawer-body .hbdr-advanced-filter-box label {
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-filter-drawer-actions > button:disabled {
+  background:var(--hc-sunken) !important;
+  border-color:var(--hc-border) !important;
+  color:var(--hc-text-3) !important;
+  box-shadow:none !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-filter-drawer-body button.bg-blue-600 {
+  background:var(--hc-accent) !important;
+  border-color:var(--hc-accent) !important;
+  color:#fff !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-filter-drawer-body button.bg-blue-600:hover {
+  filter:brightness(1.12);
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-filter-drawer-body label { color:var(--hc-text-2) !important; }
+
+/* The legacy workspace hover rule uses a light blue fill; override it at dark-only interaction points. */
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-hyper-table-head-cell button:hover,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content table thead button:hover,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-dr-namespace-link:hover,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content button[aria-label='Edit cluster name']:hover {
+  background:var(--hc-surface-2,var(--hc-border)) !important;
+  color:var(--hc-accent) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content :is(.hbdr-stage-card,.hbdr-application-stage):hover {
+  background:color-mix(in srgb,var(--hc-accent) 10%,var(--hc-surface)) !important;
+  border-color:var(--hc-accent) !important;
+  color:var(--hc-text) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-dashboard-health-filter button:hover,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-dashboard-events button:hover,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content [role='tab'][aria-selected]:hover {
+  background:var(--hc-surface-2,var(--hc-border)) !important;
+  color:var(--hc-accent) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-card-grid .cluster-card-premium {
+  border:1px solid var(--hc-border-strong) !important;
+  box-shadow:0 0 0 1px rgba(255,255,255,.025),0 8px 22px rgba(0,0,0,.16) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-card-grid .cluster-card-premium:hover {
+  border-color:color-mix(in srgb,var(--hc-accent) 60%,var(--hc-border-strong)) !important;
+  box-shadow:0 0 0 1px color-mix(in srgb,var(--hc-accent) 20%,transparent),0 12px 28px rgba(0,0,0,.22) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-dr-main-table .hbdr-dr-status {
+  background:var(--hc-sunken) !important;
+  border-color:var(--hc-border-strong) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-dr-main-table .hbdr-dr-status:is(.hbdr-dr-status-ok,.hbdr-dr-status-active,.hbdr-dr-status-running) {
+  background:color-mix(in srgb,var(--hc-ok) 12%,var(--hc-surface)) !important;
+  border-color:color-mix(in srgb,var(--hc-ok) 35%,var(--hc-border)) !important;
+  color:var(--hc-ok) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-dr-main-table .hbdr-dr-status:hover {
+  filter:brightness(1.15);
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-picker :is(.hbdr-cluster-picker-default,.hbdr-cluster-picker-open) {
+  background:var(--hc-sunken) !important;
+  border-color:var(--hc-border-strong) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-picker :is(.hbdr-cluster-picker-default,.hbdr-cluster-picker-open):hover,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-picker .hbdr-cluster-picker-default-active {
+  background:color-mix(in srgb,var(--hc-accent) 13%,var(--hc-surface)) !important;
+  border-color:var(--hc-accent) !important;
+  color:var(--hc-accent) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-timezone-option input[type='radio'] {
+  color-scheme:dark;
+  accent-color:var(--hc-accent);
+  background:var(--hc-sunken) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-resource-modal,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-resource-modal-head {
+  background:var(--hc-surface) !important;
+  border-color:var(--hc-border-strong) !important;
+  color:var(--hc-text) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-resource-detail {
+  background:var(--hc-bg) !important;
+  color:var(--hc-text-2) !important;
+  scrollbar-color:var(--hc-border-strong) var(--hc-bg);
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-resource-modal-head :is(h3,strong) { color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-resource-modal-head :is(p,em) { color:var(--hc-text-2) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-resource-modal :is(.hbdr-resource-modal-icon,.hbdr-resource-modal-meta > span,.hbdr-resource-modal-head button) {
+  background:var(--hc-sunken) !important;
+  border-color:var(--hc-border-strong) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-resource-modal-head button:hover {
+  background:var(--hc-border) !important;
+  color:var(--hc-text) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-resource-overview-strip,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-resource-inventory-table,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-resource-inventory-columns,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-resource-inventory-item,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-resource-detail-empty {
+  background:var(--hc-surface) !important;
+  border-color:var(--hc-border) !important;
+  color:var(--hc-text-2) !important;
+  box-shadow:none !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-resource-overview-strip span,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-resource-kind-badge {
+  background:var(--hc-sunken) !important;
+  border-color:var(--hc-border-strong) !important;
+  color:var(--hc-accent) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-resource-inventory-item:nth-child(odd) { background:var(--hc-sunken) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-resource-inventory-item:hover { background:var(--hc-border) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content :is(.hbdr-resource-overview-strip,.hbdr-resource-inventory-resource,.hbdr-resource-inventory-divider,.hbdr-resource-detail-empty) strong,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-resource-inventory-divider span { color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content :is(.hbdr-resource-overview-strip,.hbdr-resource-inventory-resource,.hbdr-resource-inventory-divider,.hbdr-resource-inventory-type,.hbdr-resource-inventory-detail-text,.hbdr-resource-inventory-columns,.hbdr-resource-detail-empty) :is(em,span),
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content :is(.hbdr-resource-inventory-type,.hbdr-resource-inventory-detail-text) { color:var(--hc-text-2) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-dr-toolbar :is(button:not(.hbdr-dr-action-primary),select,input),
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-dr-table-head :is(button,select,input) {
+  border-color:#536176 !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-dr-toolbar button:hover:not(:disabled),
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-dr-table-head button:hover:not(:disabled) {
+  border-color:var(--hc-accent) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-resource-drawer-head button {
+  background:var(--hc-sunken) !important;
+  border-color:var(--hc-border-strong) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-resource-drawer-head button:hover {
+  background:var(--hc-border) !important;
+  border-color:var(--hc-accent) !important;
+  color:var(--hc-text) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-dock .text-slate-900 {
+  color:var(--hc-text) !important;
+}
