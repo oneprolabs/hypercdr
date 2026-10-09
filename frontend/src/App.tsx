@@ -1,4 +1,8 @@
-import { mapClusterStatus, mapRestorePoint, taskPlanId, recoveryTaskMatchesApp, buildAppTaskMap, includePointedTasks, mergeTaskMapKeepingActive, planIncludesApp, mapApps, mapCluster, mapStorageRepo } from './app/platform-data';
+import { replaceApplicationTags } from './api/applications';
+import { listTasks, listTaskEvents } from './api/tasks';
+import { listClusterIdentities, setClusterDefault, requestClusterUnregister, upgradeClusterAgent, upgradeClusterVelero } from './api/clusters';
+import { usePlatformResources } from './app/use-platform-resources';
+
 import ClusterContextCard from './components/cluster-context-card';
 import { RequiredPasswordChange, PasswordChangeSuccess, PasswordRecoveryPage } from './auth/password-pages';
 import PageTitleBar from './components/page-title-bar';
@@ -71,7 +75,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { apiDelete, apiGet, apiHeaders, apiPatch, apiPost, apiPut, ensureApiResponse } from './api/client';
+import { apiGet, apiPatch, apiPost } from './api/client';
 import { AUTH_EXPIRED_EVENT, clearStoredAuthSession, readStoredAuthSession, writeStoredAuthSession } from './auth/session';
 import type { ApiLoginResponse, AuthSession } from './auth/types';
 import { setUserTimeZone as setSharedUserTimeZone } from './lib/date-time';
@@ -320,14 +324,6 @@ type RecoveryTaskState = {
   message: string;
 };
 
-const initialClusters: Cluster[] = [];
-
-const initialStorage: StorageRepo[] = [];
-
-const initialPolicies: PolicyItem[] = [];
-
-const initialTags: TagItem[] = [];
-
 type StorageRepositoryInput = {
   name: string;
   type: string;
@@ -406,17 +402,7 @@ const RESTORABLE_VIEWS = new Set<View>([
   'support_bundle',
 ]);
 
-const PLATFORM_DATA_VIEWS = new Set<View>([
-  'dashboard',
-  'applications',
-  'dr_tasks',
-  'failback',
-  'clusters',
-  'storage',
-  'policies',
-  'restore_points',
-  'tags',
-]);
+
 
 function isRestorableView(view: View) {
   return RESTORABLE_VIEWS.has(view) || view.startsWith('extension:');
@@ -922,21 +908,55 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     }
     setReleaseNotesUnread(hasUnreadReleaseNotes(releaseNotesAdminAudience));
   }, [authSession, releaseNotesAdminAudience]);
-  const [clusters, setClusters] = useState<Cluster[]>(initialClusters);
-  const [liveClusters, setLiveClusters] = useState<Cluster[] | null>(null);
   const [clusterRegistrationState, setClusterRegistrationState] = useState<'loading' | 'register' | 'default' | 'ready' | 'error'>('loading');
-  const [storage, setStorage] = useState<StorageRepo[]>(initialStorage);
-  const [liveStorage, setLiveStorage] = useState<StorageRepo[] | null>(null);
-  const [policies, setPolicies] = useState<PolicyItem[]>(initialPolicies);
-  const [livePolicies, setLivePolicies] = useState<PolicyItem[] | null>(null);
-  const [tags, setTags] = useState<TagItem[]>(initialTags);
-  const [restorePointCount, setRestorePointCount] = useState(0);
-  const [liveRestorePoints, setLiveRestorePoints] = useState<ApiRestorePointView[]>([]);
-  const [liveApiClusters, setLiveApiClusters] = useState<ApiCluster[]>([]);
-  const [liveApiStorageRepos, setLiveApiStorageRepos] = useState<ApiStorageRepo[]>([]);
-  const [liveApiTasks, setLiveApiTasks] = useState<ApiTask[]>([]);
-  const [liveApiRestorePointViews, setLiveApiRestorePointViews] = useState<ApiRestorePointView[]>([]);
-  const [liveApiRestorePoints, setLiveApiRestorePoints] = useState<ApiRestorePoint[]>([]);
+  const resourceSessionOwnerRef = useRef(authSession?.session.token || '');
+  const {
+    clusters,
+    setClusters,
+    liveClusters,
+    setLiveClusters,
+    storage,
+    setStorage,
+    liveStorage,
+    setLiveStorage,
+    policies,
+    setPolicies,
+    livePolicies,
+    setLivePolicies,
+    tags,
+    setTags,
+    restorePointCount,
+    setRestorePointCount,
+    liveRestorePoints,
+    setLiveRestorePoints,
+    liveApiClusters,
+    setLiveApiClusters,
+    liveApiStorageRepos,
+    setLiveApiStorageRepos,
+    liveApiTasks,
+    setLiveApiTasks,
+    liveApiRestorePointViews,
+    setLiveApiRestorePointViews,
+    liveApiRestorePoints,
+    setLiveApiRestorePoints,
+    liveApiPolicies,
+    setLiveApiPolicies,
+    liveApiPlans,
+    setLiveApiPlans,
+    liveApiApps,
+    setLiveApiApps,
+    liveAppTasks,
+    setLiveAppTasks,
+    liveRecoveryTasks,
+    setLiveRecoveryTasks,
+    selectedCluster,
+    setSelectedCluster,
+    defaultClusterId,
+    setDefaultClusterId,
+    clearResources,
+    refreshPlatformData,
+    loadClusterTopology
+  } = usePlatformResources({ sessionToken: authSession?.session.token || '', view, resourceSessionOwnerRef, mapPolicy });
 
   useEffect(() => {
     const token = authSession?.session.token;
@@ -959,28 +979,15 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     });
     return () => { cancelled = true; };
   }, [authSession?.session.token]);
-  const [liveApiPolicies, setLiveApiPolicies] = useState<ApiPolicy[]>([]);
-  const [liveApiPlans, setLiveApiPlans] = useState<ApiProtectionPlan[]>([]);
-  const [liveApiApps, setLiveApiApps] = useState<ApiApplication[]>([]);
-  const liveApiPlansRef = useRef<ApiProtectionPlan[]>([]);
-  const liveApiAppsRef = useRef<ApiApplication[]>([]);
-  const [liveAppTasks, setLiveAppTasks] = useState<Record<string, ApiTask>>({});
-  const [liveRecoveryTasks, setLiveRecoveryTasks] = useState<Record<string, ApiTask>>({});
   const [restorePointNamespaceFilter, setRestorePointNamespaceFilter] = useState<string[]>([]);
   const [secondaryCollapsed, setSecondaryCollapsed] = useState(false);
-  const [selectedCluster, setSelectedCluster] = useState<Cluster | null>(null);
-  const [defaultClusterId, setDefaultClusterId] = useState<string | null>(null);
   const [clusterPickerOpen, setClusterPickerOpen] = useState(false);
   const [clusterMenuId, setClusterMenuId] = useState<string | null>(null);
   const [diagnosticTaskId, setDiagnosticTaskId] = useState('');
   const prefetchedAgentTokenRef = useRef<ApiAgentToken | null>(null);
   const prefetchingAgentTokenRef = useRef<Promise<ApiAgentToken | null> | null>(null);
   const agentTokenOwnerRef = useRef('');
-  const refreshInFlightRef = useRef<Promise<Cluster[]> | null>(null);
-  const refreshInFlightViewRef = useRef<View | null>(null);
-  const refreshLastStartedAtRef = useRef(0);
-  const refreshLastResultRef = useRef<Cluster[]>([]);
-  const resourceSessionOwnerRef = useRef(authSession?.session.token || '');
+
 
   useEffect(() => {
     const owner = authSession?.session.token || '';
@@ -990,7 +997,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     }
     let cancelled = false;
     setClusterRegistrationState('loading');
-    void apiGet<ApiList<Pick<ApiCluster, 'id' | 'isDefault'>>>('/api/v1/clusters?view=summary')
+    void listClusterIdentities()
       .then(response => {
         if (cancelled || resourceSessionOwnerRef.current !== owner) return;
         const items = listItems(response);
@@ -1306,37 +1313,13 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   }, [confirmPassword, loginPassword, resetToken, switchAuthFlow]);
 
   const clearTenantResourceState = useCallback(() => {
-    refreshInFlightRef.current = null;
-    refreshInFlightViewRef.current = null;
-    refreshLastStartedAtRef.current = 0;
-    refreshLastResultRef.current = [];
+    clearResources();
     prefetchedAgentTokenRef.current = null;
     prefetchingAgentTokenRef.current = null;
     agentTokenOwnerRef.current = '';
-    setClusters([]);
-    setLiveClusters(null);
-    setStorage([]);
-    setLiveStorage(null);
-    setPolicies([]);
-    setLivePolicies(null);
-    setTags([]);
-    setRestorePointCount(0);
-    setLiveRestorePoints([]);
-    setLiveApiClusters([]);
-    setLiveApiStorageRepos([]);
-    setLiveApiTasks([]);
-    setLiveApiRestorePointViews([]);
-    setLiveApiRestorePoints([]);
-    setLiveApiPolicies([]);
-    setLiveApiPlans([]);
-    setLiveApiApps([]);
-    setLiveAppTasks({});
-    setLiveRecoveryTasks({});
-    setSelectedCluster(null);
-    setDefaultClusterId(null);
-  }, []);
+  }, [clearResources]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const owner = authSession?.session.token || '';
     if (resourceSessionOwnerRef.current === owner) return;
     resourceSessionOwnerRef.current = owner;
@@ -1404,7 +1387,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
     const loadTasks = async () => {
       if (document.visibilityState === 'hidden') return;
       try {
-        const res = await apiGet<ApiList<ApiTask>>('/api/v1/tasks?view=summary&types=register,unregister,agent-upgrade,velero-upgrade&limit=100');
+        const res = await listTasks({ view: 'summary', types: ['register', 'unregister', 'agent-upgrade', 'velero-upgrade'], limit: 100 });
         const tasks = listItems(res);
         const clusterTasks = tasks
           .filter(task => ['register', 'unregister', 'agent-upgrade', 'velero-upgrade'].includes(task.type))
@@ -1455,7 +1438,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       if (document.visibilityState === 'hidden') return;
       for (const taskId of ids) {
         try {
-          const res = await apiGet<ApiList<ApiTaskEvent>>(`/api/v1/tasks/${taskId}/events`);
+          const res = await listTaskEvents(taskId);
           if (cancelled) return;
           const events = listItems(res);
           setClusterTaskLogs(prev => {
@@ -1477,247 +1460,6 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
       window.clearInterval(timer);
     };
   }, [activeClusterTaskIds, authSession, view]);
-
-  const refreshPlatformData = useCallback((targetView: View = view) => {
-    const owner = authSession?.session.token || '';
-    if (!owner || resourceSessionOwnerRef.current !== owner) return Promise.resolve([]);
-    const now = Date.now();
-    if (refreshInFlightRef.current && refreshInFlightViewRef.current === targetView) return refreshInFlightRef.current;
-    if (refreshInFlightViewRef.current === targetView && refreshLastResultRef.current.length > 0 && now - refreshLastStartedAtRef.current < 1200) {
-      return Promise.resolve(refreshLastResultRef.current);
-    }
-    refreshLastStartedAtRef.current = now;
-    const request = (async () => {
-      if (targetView === 'clusters' || targetView === 'dr_tasks' || targetView === 'restore_points' || targetView === 'failback') {
-        const clusterRes = await apiGet<ApiList<ApiCluster>>('/api/v1/clusters');
-        if (resourceSessionOwnerRef.current !== owner) return [];
-        const apiClusters = listItems(clusterRes);
-        const nextClusters = apiClusters.map(cluster => mapCluster(cluster, []));
-        setLiveApiClusters(apiClusters);
-        // A cluster-only poll must not discard applications loaded on demand
-        // for the open DR topology. Otherwise relationships briefly appear and
-        // disappear again on the next 10-second cluster refresh.
-        setLiveClusters(previous => apiClusters.map(cluster => mapCluster(
-          cluster,
-          previous?.find(item => item.id === cluster.id)?.apps || [],
-        )));
-        setClusters(previous => apiClusters.map(cluster => mapCluster(
-          cluster,
-          previous.find(item => item.id === cluster.id)?.apps || [],
-        )));
-        return nextClusters;
-      }
-      if (targetView === 'storage') {
-        const [clusterRes, storageRes] = await Promise.all([
-          apiGet<ApiList<ApiCluster>>('/api/v1/clusters'),
-          apiGet<ApiList<ApiStorageRepo>>('/api/v1/storage-repositories'),
-        ]);
-        if (resourceSessionOwnerRef.current !== owner) return [];
-        const apiClusters = listItems(clusterRes);
-        const nextClusters = apiClusters.map(cluster => mapCluster(cluster, []));
-        const apiStorage = listItems(storageRes);
-        const nextStorage = apiStorage.map(mapStorageRepo);
-        setLiveApiClusters(apiClusters); setLiveClusters(nextClusters); setClusters(nextClusters);
-        setLiveApiStorageRepos(apiStorage); setLiveStorage(nextStorage); setStorage(nextStorage);
-        return nextClusters;
-      }
-      if (targetView === 'policies') {
-        const policyRes = await apiGet<ApiList<ApiPolicy>>('/api/v1/policies');
-        if (resourceSessionOwnerRef.current !== owner) return [];
-        const nextPolicies = listItems(policyRes).map(mapPolicy);
-        setLiveApiPolicies(listItems(policyRes)); setLivePolicies(nextPolicies); setPolicies(nextPolicies);
-        return refreshLastResultRef.current;
-      }
-      if (targetView === 'tags') {
-        const [clusterRes, appRes, tagRes] = await Promise.all([
-          apiGet<ApiList<ApiCluster>>('/api/v1/clusters'),
-          apiGet<ApiList<ApiApplication>>('/api/v1/applications?view=summary'),
-          apiGet<ApiList<TagItem>>('/api/v1/tags'),
-        ]);
-        if (resourceSessionOwnerRef.current !== owner) return [];
-        const apiClusters = listItems(clusterRes); const apiApps = listItems(appRes);
-        const nextClusters = apiClusters.map(cluster => mapCluster(cluster, mapApps(apiApps.filter(app => app.clusterId === cluster.id), [], [], [], apiClusters)));
-        setTags(listItems(tagRes)); setLiveApiApps(apiApps); setLiveApiClusters(apiClusters); setLiveClusters(nextClusters); setClusters(nextClusters);
-        return nextClusters;
-      }
-      const clusterRequest = apiGet<ApiList<ApiCluster>>('/api/v1/clusters');
-      void clusterRequest.then(clusterRes => {
-        if (resourceSessionOwnerRef.current !== owner) return;
-        const apiClusters = listItems(clusterRes);
-        setLiveApiClusters(apiClusters);
-        setLiveClusters(previous => apiClusters.map(cluster => mapCluster(
-          cluster,
-          previous?.find(item => item.id === cluster.id)?.apps || [],
-        )));
-      }).catch(() => {
-        // The complete refresh below keeps the previously rendered data visible.
-      });
-      const [clusterRes, appRes, storageRes, policyRes, planRes, taskRes, tagRes, restorePointRes] = await Promise.all([
-        clusterRequest,
-        apiGet<ApiList<ApiApplication>>('/api/v1/applications'),
-        apiGet<ApiList<ApiStorageRepo>>('/api/v1/storage-repositories'),
-        apiGet<ApiList<ApiPolicy>>('/api/v1/policies'),
-        apiGet<ApiList<ApiProtectionPlan>>('/api/v1/protection-plans'),
-        apiGet<ApiList<ApiTask>>('/api/v1/tasks?view=summary&types=backup,restore,drill,takeover,storage-sync,schedule-sync,protection-cleanup&limit=500'),
-        apiGet<ApiList<TagItem>>('/api/v1/tags'),
-        apiGet<ApiList<ApiRestorePoint>>('/api/v1/restore-points?view=summary&pageSize=500'),
-      ]);
-      if (resourceSessionOwnerRef.current !== owner) return [];
-      const apiClusters = listItems(clusterRes);
-      const apiApps = listItems(appRes);
-      const apiStorage = listItems(storageRes);
-      const apiPolicies = listItems(policyRes);
-      const apiPlans = listItems(planRes);
-      const apiRestorePoints = listItems(restorePointRes).map(mapRestorePoint);
-      const apiTasks = await includePointedTasks(listItems(taskRes), apiPlans);
-      setTags(listItems(tagRes));
-      const nextAppTasks = buildAppTaskMap(apiTasks, apiApps, ['backup'], apiRestorePoints, apiPlans);
-      const nextRecoveryTasks = buildAppTaskMap(apiTasks, apiApps, ['restore', 'drill', 'takeover'], apiRestorePoints, apiPlans);
-      const nextStorage = apiStorage.map(mapStorageRepo);
-      const nextPolicies = apiPolicies.map(mapPolicy);
-      const nextClusters = apiClusters.map(cluster => {
-        const apps = mapApps(
-          apiApps.filter(app => app.clusterId === cluster.id),
-          apiPlans,
-          apiPolicies,
-          apiStorage,
-          apiClusters,
-        );
-        return mapCluster(cluster, apps);
-      });
-      refreshLastResultRef.current = nextClusters;
-      setLiveClusters(nextClusters);
-      setLiveStorage(nextStorage);
-      setLivePolicies(nextPolicies.length > 0 ? nextPolicies : null);
-      setLiveApiClusters(apiClusters);
-      setLiveApiStorageRepos(apiStorage);
-      if (!USE_PROTOTYPE_VISUAL_DATA) {
-        setClusters(nextClusters);
-        setStorage(nextStorage);
-        setPolicies(nextPolicies);
-        setRestorePointCount(apiRestorePoints.length);
-        setLiveRestorePoints(apiRestorePoints);
-        setLiveApiTasks(apiTasks);
-        setLiveApiRestorePointViews(apiRestorePoints);
-        setLiveApiRestorePoints(listItems(restorePointRes));
-        setLiveApiPolicies(apiPolicies);
-        setLiveApiPlans(apiPlans);
-        setLiveApiApps(apiApps);
-        setLiveAppTasks(previous => mergeTaskMapKeepingActive(previous, nextAppTasks));
-        setLiveRecoveryTasks(previous => mergeTaskMapKeepingActive(previous, nextRecoveryTasks));
-        setSelectedCluster(prev => {
-          if (prev && nextClusters.some(cluster => cluster.id === prev.id)) {
-            return nextClusters.find(cluster => cluster.id === prev.id) || nextClusters[0] || null;
-          }
-          let storedSelectedId = '';
-          try {
-            storedSelectedId = localStorage.getItem(SELECTED_CLUSTER_KEY) || '';
-          } catch {
-            // localStorage may be unavailable in private contexts.
-          }
-          const apiDefault = nextClusters.find(cluster => cluster.isDefault);
-          return nextClusters.find(cluster => cluster.id === storedSelectedId)
-            || apiDefault
-            || nextClusters[0]
-            || null;
-        });
-        setDefaultClusterId(() => {
-          const apiDefault = nextClusters.find(cluster => cluster.isDefault);
-          return apiDefault?.id || null;
-        });
-      }
-      return nextClusters;
-    })().finally(() => {
-      if (refreshInFlightRef.current === request) refreshInFlightRef.current = null;
-      if (refreshInFlightViewRef.current === targetView) refreshInFlightViewRef.current = null;
-    });
-    refreshInFlightRef.current = request;
-    refreshInFlightViewRef.current = targetView;
-    return request;
-  }, [authSession?.session.token, view]);
-
-  const loadClusterTopology = useCallback(async () => {
-    const [clusterRes, appRes, planRes] = await Promise.all([
-      apiGet<ApiList<ApiCluster>>('/api/v1/clusters'),
-      apiGet<ApiList<ApiApplication>>('/api/v1/applications?view=summary'),
-      apiGet<ApiList<ApiProtectionPlan>>('/api/v1/protection-plans'),
-    ]);
-    const apiClusters = listItems(clusterRes);
-    const apiApps = listItems(appRes);
-    const apiPlans = listItems(planRes);
-    const nextClusters = apiClusters.map(cluster => mapCluster(cluster, mapApps(
-      apiApps.filter(app => app.clusterId === cluster.id), apiPlans, [], [], apiClusters,
-    )));
-    setLiveApiClusters(apiClusters);
-    setLiveApiApps(apiApps);
-    setLiveApiPlans(apiPlans);
-    setLiveClusters(nextClusters);
-    setClusters(nextClusters);
-  }, []);
-
-  useEffect(() => {
-    liveApiAppsRef.current = liveApiApps;
-  }, [liveApiApps]);
-  useEffect(() => {
-    liveApiPlansRef.current = liveApiPlans;
-  }, [liveApiPlans]);
-
-  useEffect(() => {
-    if (!authSession || !PLATFORM_DATA_VIEWS.has(view)) return;
-    let cancelled = false;
-    const realtimeViews = new Set<View>(['dashboard', 'applications', 'clusters']);
-    const loadPlatformData = async () => {
-      if (document.visibilityState === 'hidden') return;
-      try {
-        await refreshPlatformData(view);
-      } catch {
-        if (!cancelled) {
-          // Keep the current state visible if the backend is temporarily unavailable.
-        }
-      }
-    };
-    const loadApplicationActivity = async () => {
-      if (document.visibilityState === 'hidden') return;
-      try {
-        // Task identity is owned by the persisted plan pointers. A recovery
-        // can be submitted by another browser or directly through the API, so
-        // poll the lightweight plan list in the same snapshot as tasks. Using
-        // a stale latestRecoveryTaskId makes the row keep rendering the prior
-        // drill until a full-page refresh.
-        const [taskRes, restorePointRes, planRes] = await Promise.all([
-          apiGet<ApiList<ApiTask>>('/api/v1/tasks?view=summary&types=backup,restore,drill,takeover,storage-sync,schedule-sync,protection-cleanup&limit=500'),
-          apiGet<ApiList<ApiRestorePoint>>('/api/v1/restore-points?view=summary&pageSize=500'),
-          apiGet<ApiList<ApiProtectionPlan>>('/api/v1/protection-plans'),
-        ]);
-        if (cancelled) return;
-        const apiPlans = listItems(planRes);
-        const apiTasks = await includePointedTasks(listItems(taskRes), apiPlans);
-        const apiRestorePoints = listItems(restorePointRes);
-        const apiRestorePointViews = apiRestorePoints.map(mapRestorePoint);
-        setLiveApiTasks(apiTasks);
-        setLiveApiPlans(apiPlans);
-        const nextAppTasks = buildAppTaskMap(apiTasks, liveApiAppsRef.current, ['backup'], apiRestorePointViews, apiPlans);
-        const nextRecoveryTasks = buildAppTaskMap(apiTasks, liveApiAppsRef.current, ['restore', 'drill', 'takeover'], apiRestorePointViews, apiPlans);
-        setLiveAppTasks(previous => mergeTaskMapKeepingActive(previous, nextAppTasks));
-        setLiveRecoveryTasks(previous => mergeTaskMapKeepingActive(previous, nextRecoveryTasks));
-        setRestorePointCount(apiRestorePointViews.length);
-        setLiveRestorePoints(apiRestorePointViews);
-        setLiveApiRestorePointViews(apiRestorePointViews);
-        setLiveApiRestorePoints(apiRestorePoints);
-      } catch {
-        // Keep the current application state visible if a status poll fails.
-      }
-    };
-    loadPlatformData();
-    const shouldPoll = realtimeViews.has(view);
-    const pollIntervalMs = view === 'applications' ? 3000 : 10000;
-    const poll = view === 'applications' ? loadApplicationActivity : loadPlatformData;
-    const timer = shouldPoll ? window.setInterval(poll, pollIntervalMs) : undefined;
-    return () => {
-      cancelled = true;
-      if (timer) window.clearInterval(timer);
-    };
-  }, [authSession, refreshPlatformData, view]);
 
   const visibleExtensionModules = useMemo(() => extensionModules.filter(module => authSession && (!module.isVisible || module.isVisible({ currentUser: authSession.user, capabilities: productCapabilities }))), [authSession, extensionModules, productCapabilities]);
   const activeExtension = visibleExtensionModules.find(module => module.view === view);
@@ -1829,7 +1571,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   const setDefaultCluster = async (cluster: Cluster, event?: React.MouseEvent) => {
     event?.stopPropagation();
     try {
-      const updated = await apiPost<ApiCluster>(`/api/v1/clusters/${cluster.id}/default`, {});
+      const updated = await setClusterDefault(cluster.id);
       setDefaultClusterId(updated.isDefault ? updated.id : null);
       setSelectedCluster(prev => prev?.id === updated.id ? { ...prev, isDefault: updated.isDefault } : cluster);
       await refreshPlatformData();
@@ -1841,7 +1583,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
 
   const unregisterCluster = async (cluster: Cluster, event?: React.MouseEvent, deleteBackupData = false): Promise<ApiTask> => {
     event?.stopPropagation();
-    const result = await apiPost<ApiTaskResponse>(`/api/v1/clusters/${cluster.id}/unregister`, {
+    const result = await requestClusterUnregister(cluster.id, {
       deleteVelero: true,
       deleteNamespace: true,
       deleteBackupData,
@@ -1856,7 +1598,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   const updateAppTags = (clusterId: string | null, appNames: string[], updater: (currentTags: string[]) => string[]) => {
     if (!clusterId || appNames.length === 0) return;
 	const targets = liveApiApps.filter(app => app.clusterId === clusterId && appNames.includes(app.namespace || app.name));
-	void Promise.all(targets.map(app => apiPut(`/api/v1/applications/${app.id}/tags`, { tagIds: updater(app.tags || []) }))).catch(error => {
+	void Promise.all(targets.map(app => replaceApplicationTags(app.id, updater(app.tags || [])))).catch(error => {
 	  setToast(error instanceof Error ? error.message : 'Failed to update application tags');
 	  void refreshPlatformData();
 	});
@@ -2335,7 +2077,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
                   setSelectedCluster(prev => prev ? patchCluster(prev) : prev);
                 }}
                 onUpgradeCluster={async (clusterId) => {
-                  const task = await apiPost<ApiTask>(`/api/v1/clusters/${clusterId}/agent/upgrade`, {});
+                  const task = await upgradeClusterAgent(clusterId);
                   setClusterTaskLogs(prev => ({ ...prev, [clusterId]: [{ task, events: [], loading: true }, ...(prev[clusterId] || []).filter(log => log.task.id !== task.id)] }));
                   setActiveClusterTaskIds(prev => new Set(prev).add(task.id));
                   const markUpgrading = (cluster: Cluster) => cluster.id === clusterId ? {
@@ -2348,7 +2090,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
                   return task;
                 }}
                 onUpgradeVelero={async (clusterId) => {
-                  const task = await apiPost<ApiTask>(`/api/v1/clusters/${clusterId}/velero/upgrade`, {});
+                  const task = await upgradeClusterVelero(clusterId);
                   setClusterTaskLogs(prev => ({ ...prev, [clusterId]: [{ task, events: [], loading: true }, ...(prev[clusterId] || []).filter(log => log.task.id !== task.id)] }));
                   setActiveClusterTaskIds(prev => new Set(prev).add(task.id));
                   const markUpgrading = (cluster: Cluster) => cluster.id === clusterId ? { ...cluster, veleroUpgradeStatus: 'upgrading' } : cluster;
@@ -2477,7 +2219,6 @@ function PageLoadFallback() {
 }
 
 
-const USE_PROTOTYPE_VISUAL_DATA = import.meta.env.VITE_USE_PROTOTYPE_VISUAL_DATA === 'true';
 
 function resolveRecoveryCluster(cluster: Cluster | null, clusters: Cluster[]): Cluster | null {
   if (!cluster) return null;

@@ -59,6 +59,20 @@ alone cannot guarantee correctness across arbitrary database/network partitions.
 
 ## Frontend and API
 
+App's resource state, refresh admission, mapping commits, selection, and polling
+live in `app/use-platform-resources.ts`. `app/platform-snapshots.ts` owns the
+multi-endpoint snapshots and plan-pointer hydration; it checks the session scope
+before launching requests and after each asynchronous dependency. Late partial
+cluster, topology, or pointed-task responses cannot repopulate a replaced session.
+Session resource reset occurs before paint, and an old refresh cannot clear the
+new session's in-flight refresh. Resource setters exposed to child pages are
+also session-bound, so delayed mutation callbacks cannot populate a replaced
+workspace after their page has unmounted. Prototype suppression of persisted resource
+updates has been removed. Snapshot tests exercise delayed responses, session
+replacement, expired scopes, missing pointer targets and bounded task histories.
+
+App/Application DR resource reads and mutations use shared domain API modules
+for clusters, applications/tags, storage, policies, plans, tasks and restore points.
 Pages use `src/api/client.ts` for JSON, multipart uploads, and binary downloads.
 The client owns session headers, expiration checks, error codes and request
 correlation. ESLint rejects bare `fetch` in UI modules. Existing page modules

@@ -1,4 +1,3 @@
-import { apiGet } from '../api/client';
 import type { AppItem, Cluster, ClusterStatus } from '../features/clusters/types';
 import type { ApiApplication, ApiPolicy, ApiProtectionPlan, ApiRestorePointView, ApiTask, StorageRepo } from '../features/recovery/types';
 import type { ApiCluster, ApiStorageRepo } from '../features/recovery/platform-types';
@@ -100,14 +99,6 @@ export function buildAppTaskMap(tasks: ApiTask[], apps: ApiApplication[], taskTy
     if (match) byNamespace[app.namespace] = match;
   }
   return byNamespace;
-}
-
-export async function includePointedTasks(tasks: ApiTask[], plans: ApiProtectionPlan[]): Promise<ApiTask[]> {
-  const present = new Set(tasks.map(task => task.id));
-  const missing = Array.from(new Set(plans.flatMap(plan => [plan.latestSyncTaskId, plan.latestRecoveryTaskId]).filter((id): id is string => Boolean(id) && !present.has(id))));
-  if (!missing.length) return tasks;
-  const fetched = await Promise.all(missing.map(id => apiGet<ApiTask>(`/api/v1/tasks/${encodeURIComponent(id)}`).catch(() => null)));
-  return [...tasks, ...fetched.filter((task): task is ApiTask => Boolean(task) && !present.has(task.id))];
 }
 
 // Task summaries can briefly lag immediately after submission. Do not replace

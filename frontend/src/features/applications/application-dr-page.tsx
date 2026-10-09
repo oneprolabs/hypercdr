@@ -1,3 +1,7 @@
+import { getRestorePointContents } from '../../api/restore-points';
+import { listTasks, getTask, listTaskEvents, createBackupTask, createRecoveryTask, cancelTask, cleanupDrillTask } from '../../api/tasks';
+import { listProtectionPlans, createProtectionPlan, activateProtectionPlan, reconfigureProtectionPlanStorage, deleteProtectionPlan } from '../../api/protection-plans';
+import { listApplications, updateApplicationProtection } from '../../api/applications';
 import { requestClusterInventory, getInventoryRequestStatus } from '../../api/inventory';
 import NamespaceDetailDrawer from './namespace-detail-drawer';
 import { useNamespaceDetail } from './use-namespace-detail';
@@ -17,7 +21,6 @@ import { HyperTable, type HyperTableColumn } from '../../components/table';
 import { SearchBar } from '../../components/search-bar';
 import ListToolbarControls from '../../components/list-toolbar-controls';
 import type { ScopedResourceOption } from '../../components/scoped-resource-selector';
-import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from '../../api/client';
 import { formatDateTime, formatLocalDateTime } from '../../lib/date-time';
 import { clusterCompatibilityMessage, clustersAreDRCompatible } from '../../lib/cluster-compatibility';
 import type { AppItem, Cluster, DRSupportSummary, ResourceCategory, ResourceCategoryKey } from '../clusters/types';
@@ -431,7 +434,7 @@ export default function ApplicationDrPage(props: {
     }
     setProtectionPlans(prev => prev.map(item => item.id === plan.id ? { ...item, status: 'activating_storage' } : item));
     try {
-      const updated = await apiPost<ApiProtectionPlan>(`/api/v1/protection-plans/${plan.id}/activate`, {});
+      const updated = await activateProtectionPlan(plan.id);
       setProtectionPlans(prev => prev.map(item => item.id === plan.id ? { ...item, ...updated, status: updated.status || 'activating_storage' } : item));
       toast(updated.warning ? `Activation retry submitted: ${updated.warning}` : 'Activation retry submitted');
       void refreshPlatformData();
@@ -460,7 +463,7 @@ export default function ApplicationDrPage(props: {
     }
     setProtectionPlans(prev => prev.map(item => item.id === plan.id ? { ...item, status: 'activating_storage' } : item));
     try {
-      const updated = await apiPost<ApiProtectionPlan>(`/api/v1/protection-plans/${plan.id}/storage/reconfigure`, {});
+      const updated = await reconfigureProtectionPlanStorage(plan.id);
       setProtectionPlans(prev => prev.map(item => item.id === plan.id ? { ...item, ...updated, status: updated.status || 'activating_storage' } : item));
       toast(updated.warning ? `Storage reconfigure submitted: ${updated.warning}` : 'Storage reconfigure submitted');
       void refreshPlatformData();
@@ -476,7 +479,7 @@ export default function ApplicationDrPage(props: {
     const loadEvents = async () => {
       const entries = await Promise.all(ids.map(async taskId => {
         try {
-          const res = await apiGet<ApiList<ApiTaskEvent>>(`/api/v1/tasks/${taskId}/events`);
+          const res = await listTaskEvents(taskId);
           return [taskId, listItems(res)] as const;
         } catch {
           return [taskId, null] as const;
@@ -528,8 +531,8 @@ export default function ApplicationDrPage(props: {
     const refreshOpenTask = async () => {
       try {
         const [eventResult, latest] = await Promise.all([
-          apiGet<ApiList<ApiTaskEvent>>(`/api/v1/tasks/${taskId}/events`),
-          apiGet<ApiTask>(`/api/v1/tasks/${taskId}`),
+          listTaskEvents(taskId),
+          getTask(taskId),
         ]);
         if (cancelled) return;
         const nextEvents = listItems(eventResult);
@@ -558,7 +561,7 @@ export default function ApplicationDrPage(props: {
   useEffect(() => {
     if (!namespaceDetailTaskId || drTaskEvents[namespaceDetailTaskId]) return;
     let cancelled = false;
-    void apiGet<ApiList<ApiTaskEvent>>(`/api/v1/tasks/${namespaceDetailTaskId}/events`)
+    void listTaskEvents(namespaceDetailTaskId)
       .then(result => {
         if (!cancelled) setDrTaskEvents(prev => ({ ...prev, [namespaceDetailTaskId]: listItems(result) }));
       })
@@ -1142,7 +1145,7 @@ export default function ApplicationDrPage(props: {
       throw new Error('DR support check timed out. Please refresh inventory and try again.');
     }
     await refreshPlatformData();
-    const latest = await apiGet<ApiList<ApiApplication>>('/api/v1/applications');
+    const latest = await listApplications();
     return latest.items;
   };
   const requestResourceCatalog = async (app: AppItem) => {
@@ -1797,7 +1800,7 @@ export default function ApplicationDrPage(props: {
     const submittedMessage = `${action.mode === 'drill' ? 'Drill' : 'Takeover'} job submitted: ${action.config.targetCluster} / ${targetNamespace} / ${point?.time || 'selected recovery point'}`;
     setRecoverySubmitting(true);
     try {
-      const createdTask = await apiPost<ApiTask>(`/api/v1/tasks/${action.mode}`, {
+      const createdTask = await createRecoveryTask(action.mode, {
           clusterId: targetCluster.id,
           protectionPlanId: livePoint.protectionPlanId || action.app.protectionPlanId,
           restorePointId: livePoint.id,
@@ -2006,7 +2009,7 @@ export default function ApplicationDrPage(props: {
       return;
     }
     try {
-      await Promise.all(targetApps.map(app => apiPatch(`/api/v1/applications/${app.apiId}`, { protectionStatus: protection })));
+      await Promise.all(targetApps.map(app => updateApplicationProtection(app.apiId, protection)));
       setAppUiOverrides(prev => {
         const next = { ...prev };
         targetApps.forEach(app => {
@@ -2170,7 +2173,7 @@ export default function ApplicationDrPage(props: {
     try {
       const responses = await Promise.all(selectedRunRows.map(app => {
         const plan = protectionPlanForApp(app);
-        return apiPost<ApiTaskResponse>('/api/v1/tasks/backup', {
+        return createBackupTask({
           clusterId: plan?.sourceClusterId || app.clusterId || currentClusterId,
           appId: app.isMergedPlan ? '' : app.apiId || '',
           protectionPlanId: app.protectionPlanId || '',
@@ -2234,7 +2237,7 @@ export default function ApplicationDrPage(props: {
       return;
     }
     try {
-      const responses = await Promise.all(selectedRunCancelableSyncTasks.map(task => apiPost<ApiTaskCancelResponse>(`/api/v1/tasks/${task.id}/cancel`, {})));
+      const responses = await Promise.all(selectedRunCancelableSyncTasks.map(task => cancelTask(task.id)));
       setSyncTasks(prev => {
         const next = { ...prev };
         selectedRunRows.forEach(row => {
@@ -2288,11 +2291,11 @@ export default function ApplicationDrPage(props: {
 	// the DELETE request and the persisted cleanup state are converging.
 	setProtectionPlans(prev => prev.map(plan => planIds.includes(plan.id) ? { ...plan, status: 'cleaning' } : plan));
     try {
-      await Promise.all(planIds.map(planId => apiDelete<ApiProtectionPlan>(`/api/v1/protection-plans/${planId}`)));
+      await Promise.all(planIds.map(planId => deleteProtectionPlan(planId)));
       const appsWithoutPlan = targetApps.filter(app => !app.protectionPlanId && app.apiId);
       if (appsWithoutPlan.length > 0) {
         await Promise.all(appsWithoutPlan.map(app =>
-          apiPatch(`/api/v1/applications/${app.apiId}`, { protectionStatus: 'pending_protection' })
+          updateApplicationProtection(app.apiId, 'pending_protection')
         ));
       }
     } catch (error) {
@@ -2321,7 +2324,7 @@ export default function ApplicationDrPage(props: {
     const pollCleanup = (remaining: number) => {
       window.setTimeout(async () => {
         try {
-          const response = await apiGet<ApiList<ApiProtectionPlan>>('/api/v1/protection-plans');
+          const response = await listProtectionPlans();
           const remainingPlans = listItems(response).filter(plan => planIds.includes(plan.id));
           if (remainingPlans.length > 0 && remaining > 0) {
             pollCleanup(remaining - 1);
@@ -2375,7 +2378,7 @@ export default function ApplicationDrPage(props: {
     }
     const targetNamespace = String(selectedRunDrillTask.payload?.targetNamespace || '').trim();
     try {
-      const response = await apiPost<ApiTaskResponse>(`/api/v1/tasks/${selectedRunDrillTask.id}/cleanup-drill`, {});
+      const response = await cleanupDrillTask(selectedRunDrillTask.id);
       const cleanupTask = 'task' in response ? response.task : response;
       const cleanupWarning = 'warning' in response ? response.warning : '';
       toast(cleanupWarning || `Drill cleanup submitted for ${targetNamespace}`);
@@ -2384,7 +2387,7 @@ export default function ApplicationDrPage(props: {
       const poll = (remaining: number) => {
         window.setTimeout(async () => {
           try {
-            const result = await apiGet<ApiList<ApiTask>>('/api/v1/tasks?types=protection-cleanup');
+            const result = await listTasks({ types: ['protection-cleanup'] });
             const task = listItems(result).find(item => item.id === cleanupTaskId);
             if (task && isCompletedTaskStatus(task.status)) {
               await refreshPlatformData();
@@ -2411,7 +2414,7 @@ export default function ApplicationDrPage(props: {
     window.setTimeout(async () => {
       try {
         await refreshPlatformData();
-        const response = await apiGet<ApiList<ApiProtectionPlan>>('/api/v1/protection-plans');
+        const response = await listProtectionPlans();
         const plans = listItems(response);
         const watched = plans.filter(plan => planIds.includes(plan.id));
         setProtectionPlans(prev => {
@@ -2492,7 +2495,7 @@ export default function ApplicationDrPage(props: {
 	setConfiguringAppNames(prev => Array.from(new Set([...prev, ...targetApps])));
     try {
       for (const group of planGroups) {
-        const createdPlan = await apiPost<ApiProtectionPlan>('/api/v1/protection-plans', {
+        const createdPlan = await createProtectionPlan({
           sourceClusterId: currentClusterId,
           appIds: group.map(meta => meta.apiId),
           scopeType,
@@ -2536,7 +2539,7 @@ export default function ApplicationDrPage(props: {
       // the database matches the stage-3 UI state, and a fresh page load
       // still shows these apps in stage 3.
 	  void Promise.allSettled(targetAppMeta.map(meta =>
-		apiPatch(`/api/v1/applications/${meta.apiId}`, { protectionStatus: 'protected' })
+		updateApplicationProtection(meta.apiId, 'protected')
 	  )).then(() => refreshPlatformData());
 	  // Capability evidence is collected on demand after DR configuration.
 	  // Periodic inventory intentionally does not upload cluster-wide API data.
@@ -3166,7 +3169,7 @@ export default function ApplicationDrPage(props: {
             onSubmit={confirmRestoreAction}
             submitting={recoverySubmitting}
 			readinessBlockers={0}
-            loadContents={restorePointId => apiGet<{ resources: BackupContentResource[]; truncated?: boolean }>(`/api/v1/restore-points/${encodeURIComponent(restorePointId)}/contents`)}
+            loadContents={restorePointId => getRestorePointContents<{ resources: BackupContentResource[]; truncated?: boolean }>(restorePointId)}
           />
         )}
       </AnimatePresence>
