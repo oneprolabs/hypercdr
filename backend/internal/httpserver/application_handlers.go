@@ -13,7 +13,7 @@ import (
 func (r *Router) listApplications(w http.ResponseWriter, req *http.Request) {
 	query := req.URL.Query()
 	filter := store.ApplicationFilter{ClusterID: query.Get("clusterId"), Summary: query.Get("view") == "summary"}
-	if user, ok := requestUser(req); ok && !user.SystemAdmin {
+	if user, ok := requestUser(req); ok {
 		filter.TenantID = user.TenantID
 	}
 	if pageSize, err := strconv.Atoi(query.Get("pageSize")); err == nil && pageSize > 0 {

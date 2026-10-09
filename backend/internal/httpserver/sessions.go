@@ -6,6 +6,12 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// The authenticated socket's cluster owns a response, even if another agent
+// knows its request ID or supplies a different cluster ID in the message body.
+func agentRequestKey(clusterID, requestID string) string {
+	return clusterID + "/" + requestID
+}
+
 type sessionHub struct {
 	mu       sync.RWMutex
 	sessions map[string]*websocket.Conn

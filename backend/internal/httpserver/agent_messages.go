@@ -211,7 +211,7 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 			// Notify the waiting HTTP request only after every entry has been persisted.
 			// A completed response therefore guarantees that an immediate query can see the logs.
 			r.logRequestMu.Lock()
-			waiter := r.logRequests[report.Payload.RequestID]
+			waiter := r.logRequests[agentRequestKey(clusterID, report.Payload.RequestID)]
 			r.logRequestMu.Unlock()
 			if waiter != nil {
 				select {
@@ -226,7 +226,7 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 				continue
 			}
 			r.backupContentRequestMu.Lock()
-			waiter := r.backupContentRequests[report.Payload.RequestID]
+			waiter := r.backupContentRequests[agentRequestKey(clusterID, report.Payload.RequestID)]
 			r.backupContentRequestMu.Unlock()
 			if waiter != nil {
 				select {

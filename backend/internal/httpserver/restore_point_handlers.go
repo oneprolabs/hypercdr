@@ -15,7 +15,7 @@ func (r *Router) listRestorePoints(w http.ResponseWriter, req *http.Request) {
 		ProtectionPlanID: req.URL.Query().Get("protectionPlanId"),
 		Summary:          query.Get("view") == "summary",
 	}
-	if user, ok := requestUser(req); ok && !user.SystemAdmin {
+	if user, ok := requestUser(req); ok {
 		filter.TenantID = user.TenantID
 	}
 	if pageSize, parseErr := strconv.Atoi(query.Get("pageSize")); parseErr == nil && pageSize > 0 {
@@ -45,10 +45,7 @@ func (r *Router) listRestorePoints(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) deleteRestorePoints(w http.ResponseWriter, req *http.Request) {
-	var body struct {
-		RestorePointIDs []string `json:"restorePointIds"`
-		RestorePointID  string   `json:"restorePointId"`
-	}
+	var body restorePointDeleteRequest
 	if err := decodeJSON(req, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
 		return
@@ -110,12 +107,12 @@ func (r *Router) deleteRestorePoints(w http.ResponseWriter, req *http.Request) {
 	}
 
 	statusCode := http.StatusAccepted
-	response := map[string]any{"tasks": tasks}
+	response := restorePointDeleteResponse{Tasks: tasks}
 	if len(tasks) == 1 {
-		response["task"] = tasks[0]
+		response.Task = &tasks[0]
 	}
 	if len(warnings) > 0 {
-		response["warning"] = strings.Join(warnings, "; ")
+		response.Warning = strings.Join(warnings, "; ")
 	}
 	writeJSON(w, statusCode, response)
 }

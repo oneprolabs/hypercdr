@@ -15,7 +15,7 @@ func (r *Router) listTasks(w http.ResponseWriter, req *http.Request) {
 	query := req.URL.Query()
 	filter := store.TaskFilter{ClusterID: query.Get("clusterId")}
 	filter.Summary = query.Get("view") == "summary"
-	if user, ok := requestUser(req); ok && !user.SystemAdmin {
+	if user, ok := requestUser(req); ok {
 		filter.TenantID = user.TenantID
 	}
 	for _, value := range strings.Split(query.Get("types"), ",") {

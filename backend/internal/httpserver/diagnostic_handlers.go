@@ -212,9 +212,13 @@ func (r *Router) requestClusterLogs(clusterID, component string, since time.Time
 	requestID := store.NewPublicID()
 	waiter := make(chan protocol.LogReportPayload, 1)
 	r.logRequestMu.Lock()
-	r.logRequests[requestID] = waiter
+	r.logRequests[agentRequestKey(clusterID, requestID)] = waiter
 	r.logRequestMu.Unlock()
-	defer func() { r.logRequestMu.Lock(); delete(r.logRequests, requestID); r.logRequestMu.Unlock() }()
+	defer func() {
+		r.logRequestMu.Lock()
+		delete(r.logRequests, agentRequestKey(clusterID, requestID))
+		r.logRequestMu.Unlock()
+	}()
 	message := protocol.Message[protocol.LogRequestPayload]{Version: protocol.Version, MessageID: store.NewPublicID(), MessageKind: protocol.MessageKindRequest, Type: protocol.MessagePlatformLogRequest, ClusterID: clusterID, Timestamp: time.Now().UTC(), Payload: protocol.LogRequestPayload{RequestID: requestID, Component: component, Since: since, TailLines: tailLines}}
 	if err := r.writeAgentMessage(conn, message); err != nil {
 		return protocol.LogReportPayload{}, requestID, 502, err

@@ -115,7 +115,7 @@ func (r *Router) listClusters(w http.ResponseWriter, req *http.Request) {
 		Limit:    100,
 		Summary:  true,
 	}
-	if user, ok := requestUser(req); ok && !user.SystemAdmin {
+	if user, ok := requestUser(req); ok {
 		upgradeTaskFilter.TenantID = user.TenantID
 	}
 	upgradeTasks, taskErr := r.store.ListTasksFiltered(upgradeTaskFilter)

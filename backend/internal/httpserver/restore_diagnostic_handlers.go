@@ -27,7 +27,7 @@ func (r *Router) getRestorePointContents(w http.ResponseWriter, req *http.Reques
 		return
 	}
 	if index, ok := restorePointContentIndex(point); ok && index.Status == "ready" && index.SchemaVersion >= restorePointContentIndexSchemaVersion {
-		writeJSON(w, http.StatusOK, map[string]any{"restorePointId": point.ID, "veleroBackupName": point.VeleroBackupName, "clusterId": clusterID, "resources": index.Resources, "truncated": index.Truncated, "indexedAt": index.IndexedAt, "source": "index"})
+		writeJSON(w, http.StatusOK, restorePointContentsResponse{RestorePointID: point.ID, VeleroBackupName: point.VeleroBackupName, ClusterID: clusterID, Resources: index.Resources, Truncated: index.Truncated, IndexedAt: index.IndexedAt, Source: "index"})
 		return
 	}
 	// Compatibility path for restore points created before content indexing
@@ -40,7 +40,7 @@ func (r *Router) getRestorePointContents(w http.ResponseWriter, req *http.Reques
 		return
 	}
 	r.persistRestorePointContentIndex(point, report, "ready", "")
-	writeJSON(w, http.StatusOK, map[string]any{"restorePointId": point.ID, "veleroBackupName": point.VeleroBackupName, "clusterId": clusterID, "resources": report.Resources, "truncated": report.Truncated, "indexedAt": time.Now().UTC(), "source": "indexed_now"})
+	writeJSON(w, http.StatusOK, restorePointContentsResponse{RestorePointID: point.ID, VeleroBackupName: point.VeleroBackupName, ClusterID: clusterID, Resources: report.Resources, Truncated: report.Truncated, IndexedAt: time.Now().UTC(), Source: "indexed_now"})
 }
 
 type restorePointIndex struct {
@@ -268,11 +268,11 @@ func (r *Router) requestBackupContents(clusterID string, backupName string, vele
 	requestID := store.NewPublicID()
 	waiter := make(chan protocol.BackupContentReportPayload, 1)
 	r.backupContentRequestMu.Lock()
-	r.backupContentRequests[requestID] = waiter
+	r.backupContentRequests[agentRequestKey(clusterID, requestID)] = waiter
 	r.backupContentRequestMu.Unlock()
 	defer func() {
 		r.backupContentRequestMu.Lock()
-		delete(r.backupContentRequests, requestID)
+		delete(r.backupContentRequests, agentRequestKey(clusterID, requestID))
 		r.backupContentRequestMu.Unlock()
 	}()
 	message := protocol.Message[protocol.BackupContentRequestPayload]{Version: protocol.Version, MessageID: store.NewPublicID(), MessageKind: protocol.MessageKindRequest, Type: protocol.MessagePlatformBackupContentRequest, ClusterID: clusterID, Timestamp: time.Now().UTC(), Payload: protocol.BackupContentRequestPayload{RequestID: requestID, VeleroBackupName: backupName, VeleroNamespace: veleroNamespace}}

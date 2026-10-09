@@ -188,3 +188,51 @@ func TestApplicationTagBatchRejectsForeignReferencesWithoutDeletingBindings(t *t
 		t.Fatalf("original bindings changed: %#v", updated[0].Tags)
 	}
 }
+
+func TestTenantScopePrecedesApplicationPagesAndTaskLimitsForSystemAdmin(t *testing.T) {
+	repo := newTestStore(t)
+	ownCluster := testTenantCluster(t, repo, store.DefaultTenantID, "own-limited")
+	ownApp := seedSchedulerApplication(t, repo, ownCluster.ID, "z-own")
+	ownTask, err := repo.CreateTask(store.TaskInput{ClusterID: ownCluster.ID, Type: "backup", Status: "succeeded"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignTenant, err := repo.CreateTenant(store.TenantInput{Name: "foreign-limited", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignCluster := testTenantCluster(t, repo, foreignTenant.ID, "foreign-limited")
+	seedSchedulerApplication(t, repo, foreignCluster.ID, "a-foreign")
+	if _, err := repo.CreateTask(store.TaskInput{ClusterID: foreignCluster.ID, Type: "backup", Status: "succeeded"}); err != nil {
+		t.Fatal(err)
+	}
+	r := &Router{store: repo, logger: slog.Default()}
+	for _, systemAdmin := range []bool{false, true} {
+		actor := store.User{ID: "actor", TenantID: store.DefaultTenantID, Role: "admin", Status: "active", SystemAdmin: systemAdmin}
+		for _, tc := range []struct {
+			path, wantID string
+			handler      http.HandlerFunc
+		}{
+			{"/api/v1/applications?pageSize=1&page=1", ownApp.ID, r.listApplications},
+			{"/api/v1/tasks?types=backup&view=summary&limit=1", ownTask.ID, r.listTasks},
+		} {
+			req := tenantRequest(httptest.NewRequest("GET", tc.path, nil), actor)
+			w := httptest.NewRecorder()
+			tc.handler(w, req)
+			if w.Code != 200 {
+				t.Fatalf("%s: %d %s", tc.path, w.Code, w.Body.String())
+			}
+			var body struct {
+				Items []struct {
+					ID string `json:"id"`
+				}
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if len(body.Items) != 1 || body.Items[0].ID != tc.wantID {
+				t.Fatalf("systemAdmin=%v %s: tenant filtering occurred after limit: %#v", systemAdmin, tc.path, body.Items)
+			}
+		}
+	}
+}

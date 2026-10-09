@@ -27,6 +27,13 @@ batch, upload-owner, migration-token and administrative handlers retain their
 specific scope checks. This does not enable PostgreSQL RLS or make global
 administrative repository reads implicitly tenant-scoped.
 
+Application, task, restore-point and cluster-upgrade-status queries bind every
+authenticated actor to its tenant before applying database pagination or limits,
+including system administrators browsing their tenant workspace. Filtering a
+global page afterward could otherwise hide valid local records when another
+tenant has newer tasks/points or earlier-sorting applications. Explicit global
+diagnostic/admin views retain their separately checked scope semantics.
+
 ## Scheduling and blue/green deployment
 
 All scheduler ticks acquire the same transaction-scoped PostgreSQL advisory lock
@@ -74,6 +81,11 @@ does not close hijacked connections. Inventory, content/log requests, task comma
 and event acknowledgements share a serialized writer with a bounded write deadline.
 Real PostgreSQL tests exercise cancellation, interrupted cleanup, persisted
 completion, credential reconnect, and concurrent inventory/task/ack socket writes.
+Log and backup-content response waiters are keyed by the authenticated agent's
+cluster and request ID. Supplying another cluster ID in a report cannot complete
+that cluster's pending request. Real socket tests deliberately inject foreign
+responses before the legitimate owner responds and verify the saved content index
+remains readable after the owner disconnects.
 
 ## Frontend and API
 
@@ -104,7 +116,10 @@ workflow semantics are preserved.
 
 Authenticated `/api/v1/schema` exposes the live route, access and error inventory.
 Authentication request/success schemas use the same wire DTOs as the handlers,
-with live-response coverage tests. Other endpoint payload schemas remain incomplete; this is not yet a
+with live-response coverage tests. Restore-point list, cached/live content, and
+single/multi-cluster delete responses also have shared wire DTOs and actual-handler
+checks, including pagination, duplicate IDs, foreign/missing batch references,
+offline queues and in-progress conflicts. Other endpoint payload schemas remain incomplete; this is not yet a
 client-generation contract. Existing error codes and HTTP statuses are preserved;
 JSON errors can also carry the request ID from the response header. English
 remains the UI language; the header shows an indicator rather than a switcher
