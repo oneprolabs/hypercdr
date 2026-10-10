@@ -185,6 +185,12 @@ wide System Administrator access. Password request fields are write-only;
 response DTOs exclude the stored encrypted credential. Isolated PostgreSQL tests
 cover route-level tenant-administrator denial, credential retention on blank
 updates, duplicate/default conflicts and invalid recipients without sending email.
+Platform release/catalog/version and upgrade routes share concrete wire DTOs.
+Mounted-route checks enumerate all nine operations. Actual PostgreSQL-backed
+HTTP tests distinguish System Administrator access from ordinary tenant admins
+and constrain pipeline release-token authentication to its existing allowlist;
+the token cannot read accounts, SMTP settings, the release collection or version.
+Available-release cache responses normalize empty items to an array.
 Other endpoint payload schemas remain incomplete; this is not yet a
 client-generation contract. Existing error codes and HTTP statuses are preserved;
 JSON errors can also carry the request ID from the response header. English

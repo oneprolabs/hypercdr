@@ -40,7 +40,7 @@ func (r *Router) listAvailableReleases(w http.ResponseWriter, req *http.Request)
 	if time.Since(r.releaseCatalogAt) < 5*time.Minute && r.releaseCatalogItems != nil {
 		items := append([]store.PlatformRelease(nil), r.releaseCatalogItems...)
 		r.releaseCatalogMu.Unlock()
-		writeJSON(w, http.StatusOK, map[string]any{"items": items, "cached": true})
+		writeJSON(w, http.StatusOK, availableReleaseResponse{Items: nonNilSlice(items), Cached: true})
 		return
 	}
 	if time.Since(r.releaseCatalogFailure) < 30*time.Second {
@@ -143,5 +143,5 @@ func (r *Router) listAvailableReleases(w http.ResponseWriter, req *http.Request)
 	r.releaseCatalogAt = time.Now()
 	r.releaseCatalogFailure = time.Time{}
 	r.releaseCatalogMu.Unlock()
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "cached": false})
+	writeJSON(w, http.StatusOK, availableReleaseResponse{Items: nonNilSlice(items), Cached: false})
 }

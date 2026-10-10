@@ -29,10 +29,7 @@ func (r *Router) readyz(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) platformVersion(w http.ResponseWriter, req *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"version": buildinfo.Version, "gitCommit": buildinfo.GitCommit, "buildTime": buildinfo.BuildTime,
-		"databaseSchemaVersion": buildinfo.SchemaVersion, "deployMode": r.cfg.DeployMode,
-	})
+	writeJSON(w, http.StatusOK, platformVersionResponse{Version: buildinfo.Version, GitCommit: buildinfo.GitCommit, BuildTime: buildinfo.BuildTime, DatabaseSchemaVersion: buildinfo.SchemaVersion, DeployMode: r.cfg.DeployMode})
 }
 
 func (r *Router) listPlatformReleases(w http.ResponseWriter, req *http.Request) {
@@ -41,7 +38,7 @@ func (r *Router) listPlatformReleases(w http.ResponseWriter, req *http.Request) 
 		writeJSON(w, 500, map[string]any{"error": "list_platform_releases_failed"})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"items": nonNilSlice(items)})
+	writeJSON(w, 200, listResponse[store.PlatformRelease]{Items: nonNilSlice(items)})
 }
 
 func (r *Router) getPlatformRelease(w http.ResponseWriter, req *http.Request) {
@@ -67,11 +64,7 @@ var requiredReleaseComponents = []string{
 }
 
 func (r *Router) createPlatformRelease(w http.ResponseWriter, req *http.Request) {
-	var body struct {
-		Version, DatabaseSchemaVersion, MinimumAgentVersion, ReleaseNotes string
-		RollbackSupported                                                 bool
-		ComponentManifest                                                 map[string]store.ReleaseComponent
-	}
+	var body platformReleaseRequest
 	if decodeJSON(req, &body) != nil || strings.TrimSpace(body.Version) == "" {
 		writeJSON(w, 400, map[string]any{"error": "version_required"})
 		return
@@ -113,7 +106,7 @@ func (r *Router) createPlatformRelease(w http.ResponseWriter, req *http.Request)
 	writeJSON(w, 201, item)
 }
 
-func (r *Router) platformPrecheck(releaseID string) ([]map[string]any, bool, store.PlatformRelease) {
+func (r *Router) platformPrecheck(releaseID string) ([]platformPrecheckItem, bool, store.PlatformRelease) {
 	items, _ := r.store.ListPlatformReleases()
 	var release store.PlatformRelease
 	for _, v := range items {
@@ -143,19 +136,26 @@ func (r *Router) platformPrecheck(releaseID string) ([]map[string]any, bool, sto
 			break
 		}
 	}
-	checks := []map[string]any{{"id": "release", "label": "Release package is registered", "passed": release.ID != "", "blocking": true}, {"id": "manifest", "label": "Complete immutable component manifest", "passed": manifestComplete, "blocking": true}, {"id": "mode", "label": "Formal deployment mode", "passed": r.cfg.DeployMode != "development", "detail": r.cfg.DeployMode, "blocking": true}, {"id": "tasks", "label": "No active DR tasks", "passed": activeTasks == 0, "detail": activeTasks, "blocking": true}, {"id": "agents", "label": "Some registered agents are offline", "passed": offline == 0, "detail": offline, "blocking": false}, {"id": "version", "label": "Target differs from running version", "passed": release.Version != "" && release.Version != buildinfo.Version, "blocking": true}}
+	checks := []platformPrecheckItem{
+		{ID: "release", Label: "Release package is registered", Passed: release.ID != "", Blocking: true},
+		{ID: "manifest", Label: "Complete immutable component manifest", Passed: manifestComplete, Blocking: true},
+		{ID: "mode", Label: "Formal deployment mode", Passed: r.cfg.DeployMode != "development", Detail: r.cfg.DeployMode, Blocking: true},
+		{ID: "tasks", Label: "No active DR tasks", Passed: activeTasks == 0, Detail: activeTasks, Blocking: true},
+		{ID: "agents", Label: "Some registered agents are offline", Passed: offline == 0, Detail: offline, Blocking: false},
+		{ID: "version", Label: "Target differs from running version", Passed: release.Version != "" && release.Version != buildinfo.Version, Blocking: true},
+	}
 	passed := true
 	for _, c := range checks {
-		blocking, _ := c["blocking"].(bool)
-		if ok, _ := c["passed"].(bool); blocking && !ok {
+		if c.Blocking && !c.Passed {
 			passed = false
 		}
 	}
+
 	return checks, passed, release
 }
 func (r *Router) precheckPlatformUpgrade(w http.ResponseWriter, req *http.Request) {
 	checks, passed, _ := r.platformPrecheck(req.URL.Query().Get("releaseId"))
-	writeJSON(w, 200, map[string]any{"passed": passed, "checks": checks, "currentVersion": buildinfo.Version})
+	writeJSON(w, 200, platformPrecheckResponse{Passed: passed, Checks: checks, CurrentVersion: buildinfo.Version})
 }
 func (r *Router) listPlatformUpgrades(w http.ResponseWriter, req *http.Request) {
 	items, err := r.store.ListPlatformUpgradeJobs()
@@ -163,12 +163,10 @@ func (r *Router) listPlatformUpgrades(w http.ResponseWriter, req *http.Request) 
 		writeJSON(w, 500, map[string]any{"error": "list_platform_upgrades_failed"})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"items": nonNilSlice(items)})
+	writeJSON(w, 200, listResponse[store.PlatformUpgradeJob]{Items: nonNilSlice(items)})
 }
 func (r *Router) createPlatformUpgrade(w http.ResponseWriter, req *http.Request) {
-	var body struct {
-		ReleaseID string `json:"releaseId"`
-	}
+	var body platformUpgradeRequest
 	if decodeJSON(req, &body) != nil || strings.TrimSpace(body.ReleaseID) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "release_id_required"})
 		return
@@ -204,11 +202,7 @@ func (r *Router) createPlatformUpgrade(w http.ResponseWriter, req *http.Request)
 }
 
 func (r *Router) updatePlatformUpgradeStatus(w http.ResponseWriter, req *http.Request) {
-	var body struct {
-		Status, Step, ErrorCode, ErrorMessage, ExecutorID string
-		Progress                                          int
-		MarkStarted, MarkDone                             bool
-	}
+	var body platformUpgradeStatusRequest
 	if decodeJSON(req, &body) != nil || strings.TrimSpace(body.Status) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "status_required"})
 		return
