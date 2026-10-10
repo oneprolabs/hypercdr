@@ -27,7 +27,7 @@
     "motion": "^12.23.24",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
-    "tailwindcss": "^4.1.14",
+    "tailwindcss": "^4.3.3",
     "vite": "^6.2.3"
   },
   "devDependencies": {
