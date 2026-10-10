@@ -25,14 +25,14 @@
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "react": "^19.0.1",
-    "react-dom": "^19.0.1",
+    "react-dom": "^19.3.0",
     "tailwindcss": "^4.1.14",
     "vite": "^6.2.3"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
     "@types/react": "^19.2.16",
-    "@types/react-dom": "^19.2.3",
+    "@types/react-dom": "^19.3.0",
     "eslint": "^9.39.5",
     "typescript": "~5.8.2",
     "typescript-eslint": "^8.71.1"
