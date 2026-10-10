@@ -33,7 +33,16 @@ type supportBundleRequest struct {
 func (r *Router) createSupportBundle(w http.ResponseWriter, req *http.Request) {
 	var input supportBundleRequest
 	if req.Body != nil {
-		_ = json.NewDecoder(io.LimitReader(req.Body, 1<<20)).Decode(&input)
+		decoder := json.NewDecoder(http.MaxBytesReader(w, req.Body, 14<<20))
+		if err := decoder.Decode(&input); err != nil {
+			writeJSON(w, 400, map[string]any{"error": "invalid_json", "message": "Provide a valid support bundle request of at most 14 MiB."})
+			return
+		}
+		var trailing any
+		if err := decoder.Decode(&trailing); err != io.EOF {
+			writeJSON(w, 400, map[string]any{"error": "invalid_json"})
+			return
+		}
 	}
 	if input.SinceHours <= 0 || input.SinceHours > 168 {
 		input.SinceHours = 24
@@ -84,7 +93,7 @@ func (r *Router) createSupportBundle(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	stat, _ := os.Stat(path)
-	writeJSON(w, http.StatusCreated, map[string]any{"name": name, "downloadUrl": "/api/v1/support-bundles/" + name + "/download", "size": stat.Size(), "generatedAt": generatedAt, "timeZone": location.String()})
+	writeJSON(w, http.StatusCreated, supportBundleResponse{Name: name, DownloadURL: "/api/v1/support-bundles/" + name + "/download", Size: stat.Size(), GeneratedAt: generatedAt, TimeZone: location.String()})
 }
 
 func supportBundleDir() string {

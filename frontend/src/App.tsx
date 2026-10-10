@@ -1541,7 +1541,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
           ...(!hasEnterpriseAuditModule && !productCapabilities.advancedAudit?.enabled ? [{ label: 'Activity Log', desc: 'Review administrator actions and results', view: 'activity' as View, icon: ClipboardList }] : []),
           ...visibleExtensionModules.filter(module => module.navigation.group === 'operations').map(module => ({ label: module.navigation.label, desc: module.navigation.description, view: module.view as View, icon: module.navigation.icon })),
           { label: 'Diagnostic Logs', desc: 'Search platform and managed-cluster logs', view: 'logs' as View, icon: Terminal },
-          { label: 'Support Bundle', desc: 'Collect a comprehensive troubleshooting package', view: 'support_bundle' as View, icon: FileArchive },
+          ...(authSession?.user.systemAdmin ? [{ label: 'Support Bundle', desc: 'Collect a comprehensive troubleshooting package', view: 'support_bundle' as View, icon: FileArchive }] : []),
         ],
       };
     }
@@ -2182,7 +2182,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
             {view === 'operations' && <React.Suspense fallback={<PageLoadFallback />}><LazyOperationsCenterPage toast={setToast} openLogs={(taskId) => openView('logs', { diagnosticTaskId: taskId })} openClusters={() => openView('clusters')} /></React.Suspense>}
             {view === 'activity' && !hasEnterpriseAuditModule && !productCapabilities.advancedAudit?.enabled && <React.Suspense fallback={<PageLoadFallback />}><LazyActivityLogPage /></React.Suspense>}
             {view === 'logs' && authSession && <React.Suspense fallback={<PageLoadFallback />}><LazyDiagnosticLogsPage currentUser={authSession.user} toast={setToast} advancedTenancy={productCapabilities.advancedTenancy?.enabled === true} initialTaskId={diagnosticTaskId} /></React.Suspense>}
-            {view === 'support_bundle' && authSession && <React.Suspense fallback={<PageLoadFallback />}><LazySupportBundlePage toast={setToast} /></React.Suspense>}
+            {view === 'support_bundle' && authSession?.user.systemAdmin && <React.Suspense fallback={<PageLoadFallback />}><LazySupportBundlePage key={`${authSession.user.tenantId}:${authSession.user.id}`} owner={`${authSession.user.tenantId}:${authSession.user.id}`} toast={setToast} /></React.Suspense>}
             {view === 'tags' && (onboarding !== 'ready' ? onboardingGate : <React.Suspense fallback={<PageLoadFallback />}><LazyTagManagementPage tags={tags} setTags={setTags} clusters={clusters} setClusters={setClusters} toast={setToast} /></React.Suspense>)}
             {view === 'email_settings' && authSession?.user.systemAdmin && <React.Suspense fallback={<PageLoadFallback />}><LazyEmailSettingsPage currentUser={authSession.user} toast={setToast} /></React.Suspense>}
             {view === 'upgrades' && authSession?.user.systemAdmin && <React.Suspense fallback={<PageLoadFallback />}><LazyUpgradeManagementPage isAdmin={authSession.user.systemAdmin} toast={setToast} refreshPlatformData={() => refreshPlatformData()} /></React.Suspense>}

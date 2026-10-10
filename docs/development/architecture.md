@@ -165,6 +165,14 @@ limit/offset; newer foreign-tenant history cannot displace a tenant’s page.
 The audit collection has a concrete response contract and mounted-route drift
 check. A real PostgreSQL regression seeds more than 1,000 foreign records and
 checks both ordinary and system-administrator tenant pages.
+Support bundles are platform-wide artifacts and require System Administrator
+permission for creation, download and deletion. Ordinary tenant administrators
+and operators cannot inspect or remove another scope’s diagnostic archive.
+Their contracts distinguish JSON creation responses, gzip downloads, plain-text
+missing-file errors and bodyless deletion. Bounded JSON decoding rejects malformed,
+trailing or oversized requests rather than silently using a partial request.
+The frontend stores bundle history by tenant and user, without migrating the old
+unowned browser history, and ignores callbacks after the owning page unmounts.
 Other endpoint payload schemas remain incomplete; this is not yet a
 client-generation contract. Existing error codes and HTTP statuses are preserved;
 JSON errors can also carry the request ID from the response header. English
