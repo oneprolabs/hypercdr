@@ -47,6 +47,7 @@ lint:
 verify: lint test
 	python3 -B scripts/tests/deployment-inputs.py
 	python3 -B scripts/tests/dev-provenance.py
+	python3 -B scripts/tests/repository-hygiene.py
 	bash scripts/tests/repository-hygiene.sh
 	bash scripts/tests/blue-green-deploy.sh
 	bash scripts/tests/blue-green-compose.sh

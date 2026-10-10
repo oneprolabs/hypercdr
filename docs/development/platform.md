@@ -59,3 +59,10 @@ own PostgreSQL volume. It uses explicit rebuilds, not bind-mounted live reload,
 and does not replace host provenance reporting or production blue/green.
 See [source container development](../deployment/build-release-install.md#portable-source-development)
 for setup, external manifest requirements, HTTP/network limits and teardown.
+
+## Source repository hygiene
+
+Dependency backups and generated outputs must stay outside this checkout.
+`make verify` also checks staged files and the 1 MiB file-size policy; see
+[repository artifact policy](repository-artifacts.md) for exact asset exceptions
+and the retained Velero source boundary.

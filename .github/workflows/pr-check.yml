@@ -70,7 +70,9 @@ jobs:
           python3 -B scripts/tests/dev-provenance.py
           python3 -B scripts/tests/deployment-inputs.py
       - name: Reject generated artifacts
-        run: bash scripts/tests/repository-hygiene.sh
+        run: |
+          python3 -B scripts/tests/repository-hygiene.py
+          bash scripts/tests/repository-hygiene.sh
       - name: Reject tracked secrets and logs
         run: test -z "$(git ls-files -- ':!third_party/**' '*.log' '*.pid' '*.key' '*.pem' '*.crt')"
 
