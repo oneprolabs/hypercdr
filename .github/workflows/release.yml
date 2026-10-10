@@ -130,7 +130,7 @@ jobs:
           exit 1
       - name: Build and push ${{ matrix.image_name }}
         if: ${{ matrix.image_name != 'dependencies' }}
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
