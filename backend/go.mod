@@ -4,7 +4,7 @@ go 1.25.13
 
 require (
 	github.com/gorilla/websocket v1.5.3
-	github.com/jackc/pgx/v5 v5.9.2
+	github.com/jackc/pgx/v5 v5.11.0
 	github.com/minio/minio-go/v7 v7.0.80
 	golang.org/x/crypto v0.51.0
 	gopkg.in/yaml.v3 v3.0.1
