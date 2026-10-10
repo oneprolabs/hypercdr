@@ -456,9 +456,7 @@ func (r *Router) updateCommunityAdminRecoveryEmail(w http.ResponseWriter, req *h
 		writeJSON(w, 404, map[string]any{"error": "user_not_found"})
 		return
 	}
-	var body struct {
-		Email string `json:"email"`
-	}
+	var body communityAdminRecoveryRequest
 	if decodeJSON(req, &body) != nil || !validUserEmail(body.Email) {
 		writeJSON(w, 400, map[string]any{"error": "email_invalid"})
 		return
@@ -468,7 +466,7 @@ func (r *Router) updateCommunityAdminRecoveryEmail(w http.ResponseWriter, req *h
 		writeJSON(w, 500, map[string]any{"error": "recovery_email_update_failed"})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"recoveryEmail": email, "verified": true})
+	writeJSON(w, 200, communityAdminRecoveryResponse{RecoveryEmail: email, Verified: true})
 }
 
 func (r *Router) updateCommunityAdmin(w http.ResponseWriter, req *http.Request) {
@@ -477,9 +475,7 @@ func (r *Router) updateCommunityAdmin(w http.ResponseWriter, req *http.Request) 
 		writeJSON(w, 404, map[string]any{"error": "user_not_found"})
 		return
 	}
-	var body struct {
-		DisplayName string `json:"displayName"`
-	}
+	var body communityAdminProfileRequest
 	if decodeJSON(req, &body) != nil {
 		writeJSON(w, 400, map[string]any{"error": "invalid_json"})
 		return
@@ -499,9 +495,7 @@ func (r *Router) resetCommunityAdminPassword(w http.ResponseWriter, req *http.Re
 		writeJSON(w, 404, map[string]any{"error": "user_not_found"})
 		return
 	}
-	var body struct {
-		Password string `json:"password"`
-	}
+	var body communityAdminPasswordRequest
 	if decodeJSON(req, &body) != nil || !validUserPassword(body.Password) {
 		writeJSON(w, 400, map[string]any{"error": "password_invalid"})
 		return
@@ -511,7 +505,7 @@ func (r *Router) resetCommunityAdminPassword(w http.ResponseWriter, req *http.Re
 		writeJSON(w, 500, map[string]any{"error": "password_update_failed"})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"updated": true})
+	writeJSON(w, 200, communityAdminPasswordResponse{Updated: true})
 }
 
 // managedRouter gives the process owner an explicit lifecycle for background

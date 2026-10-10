@@ -152,6 +152,14 @@ routes (including the CCE aliases) and the three registration/handover token rou
 now have payload contracts. Inspection wire types are shared with the isolated
 executor. Token checks declare body-token authentication and purpose restrictions;
 real PostgreSQL tests cover repeated validation, expiration and cross-purpose denial.
+Community user-management routes also share request/response DTOs and declare
+password constraints, recovery-email format and structured error responses.
+The middleware requires a system administrator for Community user routes;
+mutations additionally require the authenticated administrator’s own ID.
+Tenant administrators cannot read the global administrator list. Enterprise
+extension authorization retains its existing policy boundary. Password updates
+revoke existing sessions, including the caller; real PostgreSQL tests check
+owner isolation, permission denial and session revocation.
 Other endpoint payload schemas remain incomplete; this is not yet a
 client-generation contract. Existing error codes and HTTP statuses are preserved;
 JSON errors can also carry the request ID from the response header. English
