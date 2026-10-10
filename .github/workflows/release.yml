@@ -181,7 +181,7 @@ jobs:
           export HCDR_REGISTRY_CONFIG="${GITHUB_WORKSPACE}/config/registries.conf"
           export HCDR_REGISTRY_PROFILE="${{ needs.prepare-release.outputs.registry_profile }}"
           ./scripts/release/release-all.sh --config "${RUNNER_TEMP}/release.conf"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: ${{ matrix.image_name == 'dependencies' }}
         with:
           name: hypercdr-oadp-lock-${{ needs.prepare-release.outputs.image_version }}
@@ -246,7 +246,7 @@ jobs:
           export HCDR_REGISTRY_CONFIG="${GITHUB_WORKSPACE}/config/registries.conf"
           export HCDR_REGISTRY_PROFILE="${{ needs.prepare-release.outputs.registry_profile }}"
           ./scripts/release/release-all.sh --config "${RUNNER_TEMP}/release.conf"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: hypercdr-installer-${{ needs.prepare-release.outputs.image_version }}
           path: /tmp/hypercdr-runtime/releases/community/${{ needs.prepare-release.outputs.image_version }}/*
