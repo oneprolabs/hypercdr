@@ -331,6 +331,9 @@ func requiresAdmin(req *http.Request) bool {
 
 func requiresSystemAdmin(req *http.Request) bool {
 	p := req.URL.Path
+	if p == "/api/v1/community-migrations" || p == "/api/v1/community-migrations/authorizations" {
+		return true
+	}
 	if p == "/api/v1/support-bundles" || strings.HasPrefix(p, "/api/v1/support-bundles/") {
 		return true
 	}

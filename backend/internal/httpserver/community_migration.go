@@ -33,7 +33,7 @@ func (r *Router) createCommunityMigrationAuthorization(w http.ResponseWriter, re
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "migration_authorization_create_failed", "message": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"id": authorization.ID, "token": authorization.Token, "expiresAt": authorization.ExpiresAt, "protocolVersion": communityMigrationProtocolV1})
+	writeJSON(w, http.StatusCreated, migrationAuthorizationResponse{ID: authorization.ID, Token: authorization.Token, ExpiresAt: authorization.ExpiresAt, ProtocolVersion: communityMigrationProtocolV1})
 }
 
 func (r *Router) listCommunityMigrations(w http.ResponseWriter, _ *http.Request) {
@@ -42,7 +42,7 @@ func (r *Router) listCommunityMigrations(w http.ResponseWriter, _ *http.Request)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "migration_list_failed"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeJSON(w, http.StatusOK, listResponse[store.CommunityMigrationSession]{Items: nonNilSlice(items)})
 }
 
 func (r *Router) openCommunityMigrationSession(w http.ResponseWriter, req *http.Request) {
@@ -50,7 +50,7 @@ func (r *Router) openCommunityMigrationSession(w http.ResponseWriter, req *http.
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "source_must_be_community"})
 		return
 	}
-	var body struct{ Token, TargetInstanceID, ProtocolVersion, TargetPublicKey string }
+	var body migrationSessionRequest
 	if decodeJSON(req, &body) != nil || strings.TrimSpace(body.Token) == "" || strings.TrimSpace(body.TargetInstanceID) == "" || strings.TrimSpace(body.TargetPublicKey) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "migration_session_invalid"})
 		return
@@ -73,7 +73,7 @@ func (r *Router) openCommunityMigrationSession(w http.ResponseWriter, req *http.
 		writeJSON(w, status, map[string]any{"error": code, "message": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"id": session.ID, "sessionToken": session.SessionToken, "sourceInstanceId": session.SourceInstanceID, "targetInstanceId": session.TargetInstanceID, "protocolVersion": session.ProtocolVersion, "state": session.State, "expiresAt": session.ExpiresAt})
+	writeJSON(w, http.StatusCreated, migrationSessionResponse{ID: session.ID, SessionToken: session.SessionToken, SourceInstanceID: session.SourceInstanceID, TargetInstanceID: session.TargetInstanceID, ProtocolVersion: session.ProtocolVersion, State: session.State, ExpiresAt: session.ExpiresAt})
 }
 
 func (r *Router) authenticateCommunityMigration(req *http.Request) (store.CommunityMigrationSession, bool) {
@@ -120,7 +120,7 @@ func (r *Router) communityMigrationInventory(w http.ResponseWriter, req *http.Re
 	if exporter := communityMigrationExporter(r); exporter != nil {
 		manifest, manifestErr = exporter.CommunityMigrationManifest(req.Context())
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"migrationId": session.ID, "sourceInstanceId": settings.InstanceID, "protocolVersion": communityMigrationProtocolV1, "exportFormatVersion": store.CommunityMigrationExportVersion, "schemaVersions": manifest.SchemaVersions, "manifestAvailable": manifestErr == nil, "agentNamespace": settings.AgentNamespace, "counts": map[string]int{"clusters": len(clusters), "storageRepositories": len(storage), "policies": len(policies), "protectionPlans": len(plans), "restorePoints": len(restorePoints), "tasks": tasksCount}, "activeTasks": active, "ready": len(active) == 0 && manifestErr == nil})
+	writeJSON(w, http.StatusOK, migrationInventoryResponse{MigrationID: session.ID, SourceInstanceID: settings.InstanceID, ProtocolVersion: communityMigrationProtocolV1, ExportFormatVersion: store.CommunityMigrationExportVersion, SchemaVersions: nonNilSlice(manifest.SchemaVersions), ManifestAvailable: manifestErr == nil, AgentNamespace: settings.AgentNamespace, Counts: map[string]int{"clusters": len(clusters), "storageRepositories": len(storage), "policies": len(policies), "protectionPlans": len(plans), "restorePoints": len(restorePoints), "tasks": tasksCount}, ActiveTasks: active, Ready: len(active) == 0 && manifestErr == nil})
 }
 
 func communityMigrationExporter(r *Router) store.CommunityMigrationExporter {
@@ -153,7 +153,7 @@ func (r *Router) backupCommunityMigration(w http.ResponseWriter, req *http.Reque
 		writeJSON(w, 500, map[string]any{"error": "migration_backup_state_failed"})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"migration": updated, "manifest": manifest})
+	writeJSON(w, 200, migrationBackupResponse{Migration: updated, Manifest: manifest})
 }
 
 func (r *Router) communityMigrationManifest(w http.ResponseWriter, req *http.Request) {
@@ -265,7 +265,7 @@ func (r *Router) communityMigrationCredentials(w http.ResponseWriter, req *http.
 		}
 		envelopes = append(envelopes, envelope)
 	}
-	writeJSON(w, 200, map[string]any{"algorithm": "RSA-OAEP-3072+AES-256-GCM", "items": envelopes})
+	writeJSON(w, 200, migrationCredentialsResponse{Algorithm: "RSA-OAEP-3072+AES-256-GCM", Items: envelopes})
 }
 
 func (r *Router) communityMigrationSMTP(w http.ResponseWriter, req *http.Request) {
@@ -288,9 +288,9 @@ func (r *Router) communityMigrationSMTP(w http.ResponseWriter, req *http.Request
 		writeJSON(w, 500, map[string]any{"error": "migration_smtp_read_failed"})
 		return
 	}
-	result := []map[string]any{}
+	result := []migrationSMTPItem{}
 	for _, item := range items {
-		entry := map[string]any{"id": item.ID, "name": item.Name, "enabled": item.Enabled, "host": item.Host, "port": item.Port, "security": item.Security, "username": item.Username, "senderName": item.SenderName, "senderEmail": item.SenderEmail}
+		entry := migrationSMTPItem{ID: item.ID, Name: item.Name, Enabled: item.Enabled, Host: item.Host, Port: item.Port, Security: item.Security, Username: item.Username, SenderName: item.SenderName, SenderEmail: item.SenderEmail}
 		if item.PasswordCiphertext != "" {
 			plain, decryptErr := r.decryptSetting(item.PasswordCiphertext)
 			if decryptErr != nil {
@@ -302,11 +302,11 @@ func (r *Router) communityMigrationSMTP(w http.ResponseWriter, req *http.Request
 				writeJSON(w, 500, map[string]any{"error": "migration_smtp_encrypt_failed"})
 				return
 			}
-			entry["passwordEnvelope"] = envelope
+			entry.PasswordEnvelope = &envelope
 		}
 		result = append(result, entry)
 	}
-	writeJSON(w, 200, map[string]any{"items": result, "defaultPreserved": true, "importMode": "disabled-non-default"})
+	writeJSON(w, 200, migrationSMTPResponse{Items: result, DefaultPreserved: true, ImportMode: "disabled-non-default"})
 }
 
 func (r *Router) prepareCommunityMigrationHandover(w http.ResponseWriter, req *http.Request) {
@@ -319,11 +319,7 @@ func (r *Router) prepareCommunityMigrationHandover(w http.ResponseWriter, req *h
 		writeJSON(w, 409, map[string]any{"error": "migration_export_not_ready"})
 		return
 	}
-	var body struct {
-		TargetEndpoint   string            `json:"targetEndpoint"`
-		RollbackDeadline time.Time         `json:"rollbackDeadline"`
-		ClusterTokens    map[string]string `json:"clusterTokens"`
-	}
+	var body migrationHandoverRequest
 	if decodeJSON(req, &body) != nil || strings.TrimSpace(body.TargetEndpoint) == "" || len(body.ClusterTokens) == 0 || body.RollbackDeadline.Before(time.Now().UTC().Add(4*time.Minute)) || body.RollbackDeadline.After(time.Now().UTC().Add(31*time.Minute)) {
 		writeJSON(w, 400, map[string]any{"error": "migration_handover_invalid"})
 		return
@@ -367,7 +363,7 @@ func (r *Router) prepareCommunityMigrationHandover(w http.ResponseWriter, req *h
 		writeJSON(w, 500, map[string]any{"error": "migration_handover_state_failed"})
 		return
 	}
-	writeJSON(w, 202, map[string]any{"migration": updated, "tasks": tasks, "rollbackDeadline": body.RollbackDeadline})
+	writeJSON(w, 202, migrationHandoverResponse{Migration: updated, Tasks: tasks, RollbackDeadline: body.RollbackDeadline})
 }
 
 func parseMigrationPublicKey(value string) (*rsa.PublicKey, error) {
@@ -474,5 +470,5 @@ func (r *Router) commitCommunityMigration(w http.ResponseWriter, req *http.Reque
 		writeJSON(w, 500, map[string]any{"error": "migration_commit_failed"})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"migration": updated, "observationEndsAt": time.Now().UTC().Add(7 * 24 * time.Hour), "readOnly": true, "automaticDeletion": false})
+	writeJSON(w, 200, migrationCommitResponse{Migration: updated, ObservationEndsAt: time.Now().UTC().Add(7 * 24 * time.Hour), ReadOnly: true, AutomaticDeletion: false})
 }

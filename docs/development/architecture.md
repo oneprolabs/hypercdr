@@ -191,6 +191,14 @@ HTTP tests distinguish System Administrator access from ordinary tenant admins
 and constrain pipeline release-token authentication to its existing allowlist;
 the token cannot read accounts, SMTP settings, the release collection or version.
 Available-release cache responses normalize empty items to an array.
+Migration history and authorization routes now require System Administrator
+permission; ordinary accounts cannot inspect installation migration history.
+All thirteen migration operations share concrete payload contracts with source
+handlers. The authorization body token is one-use; source operations require a
+Migration session header bound to the path ID, rather than a platform Bearer or
+release token. PostgreSQL HTTP regressions cover every source route’s denial
+cases, authorization replay and isolated freeze/backup/manifest/credential/SMTP/
+rollback responses. Source transitions are never exercised on the real 149 data.
 Other endpoint payload schemas remain incomplete; this is not yet a
 client-generation contract. Existing error codes and HTTP statuses are preserved;
 JSON errors can also carry the request ID from the response header. English
