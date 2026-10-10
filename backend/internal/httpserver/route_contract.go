@@ -111,14 +111,14 @@ func (r *Router) apiSchema(w http.ResponseWriter, req *http.Request) {
 			},
 		}
 		operation := operations[strings.ToLower(method)].(map[string]any)
-		for _, apply := range []func(string, map[string]any) bool{r.applyAuthPayloadContract, applyApplicationPayloadContract, applyPolicyPayloadContract, applyStoragePayloadContract, applyTaskPayloadContract, applyProtectionPlanPayloadContract, applyRestorePointPayloadContract, applyRegistrationPayloadContract, applyTokenPayloadContract, applyClusterPayloadContract, applyUserPayloadContract, applyAuditPayloadContract, applySupportPayloadContract, applyDiagnosticPayloadContract, applyEmailPayloadContract, applyPlatformPayloadContract, applyMigrationPayloadContract} {
+		for _, apply := range []func(string, map[string]any) bool{r.applyAuthPayloadContract, applyApplicationPayloadContract, applyPolicyPayloadContract, applyStoragePayloadContract, applyTaskPayloadContract, applyProtectionPlanPayloadContract, applyRestorePointPayloadContract, applyRegistrationPayloadContract, applyTokenPayloadContract, applyClusterPayloadContract, applyUserPayloadContract, applyAuditPayloadContract, applySupportPayloadContract, applyDiagnosticPayloadContract, applyEmailPayloadContract, applyPlatformPayloadContract, applyMigrationPayloadContract, applyMetadataPayloadContract} {
 			if apply(route.Pattern, operation) {
 				break
 			}
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"openapi": "3.1.0", "info": map[string]any{"title": "HyperCDR API", "version": "v1", "description": "Live route/access/error contract. Request and success payload schemas are not yet comprehensive; this is not a client-generation contract."},
+		"openapi": "3.1.0", "info": map[string]any{"title": "HyperCDR API", "version": "v1", "description": "Live Community route, authentication and wire payload contract. Edition extensions and versioned migration table records retain their explicitly described extension schemas."},
 		"paths": paths,
 		"components": map[string]any{
 			"securitySchemes": map[string]any{

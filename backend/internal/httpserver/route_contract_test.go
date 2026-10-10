@@ -124,3 +124,52 @@ func TestSchemaSecurityMatchesSpecialTokenRoutes(t *testing.T) {
 		}
 	}
 }
+
+func TestEveryMountedCommunityOperationHasConcretePayloadContract(t *testing.T) {
+	r := &Router{mux: http.NewServeMux(), productInfo: ProductInfo{Edition: "community"}}
+	r.routes()
+	w := httptest.NewRecorder()
+	r.apiSchema(w, httptest.NewRequest("GET", "/api/v1/schema", nil))
+	var document map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &document); err != nil {
+		t.Fatal(err)
+	}
+	paths := document["paths"].(map[string]any)
+	count := 0
+	for _, route := range r.routeContracts {
+		method, path, _ := strings.Cut(route.Pattern, " ")
+		if !strings.HasPrefix(path, "/api/v1/") {
+			continue
+		}
+		count++
+		op := paths[path].(map[string]any)[strings.ToLower(method)].(map[string]any)
+		if op["x-hypercdr-payload-contract"] != true {
+			t.Fatalf("missing payload contract: %s", route.Pattern)
+		}
+		responses := op["responses"].(map[string]any)
+		if _, ok := responses["2XX"]; ok {
+			t.Fatalf("placeholder success: %s", route.Pattern)
+		}
+		success := false
+		for status, response := range responses {
+			if !strings.HasPrefix(status, "2") {
+				continue
+			}
+			success = true
+			if status != "204" {
+				if _, ok := response.(map[string]any)["content"]; !ok {
+					t.Fatalf("success payload absent: %s %s", route.Pattern, status)
+				}
+			}
+		}
+		if !success {
+			t.Fatalf("success status absent: %s", route.Pattern)
+		}
+		if _, ok := responses["default"]; !ok {
+			t.Fatalf("error contract absent: %s", route.Pattern)
+		}
+	}
+	if count != 117 {
+		t.Fatalf("route count changed (%d); review new route payload/security coverage", count)
+	}
+}

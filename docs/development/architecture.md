@@ -199,8 +199,12 @@ Migration session header bound to the path ID, rather than a platform Bearer or
 release token. PostgreSQL HTTP regressions cover every source route’s denial
 cases, authorization replay and isolated freeze/backup/manifest/credential/SMTP/
 rollback responses. Source transitions are never exercised on the real 149 data.
-Other endpoint payload schemas remain incomplete; this is not yet a
-client-generation contract. Existing error codes and HTTP statuses are preserved;
+Every mounted Community API operation now has a concrete success payload or
+bodyless response contract. A route-wide regression rejects missing contracts
+and placeholder success responses, in addition to domain-specific wire tests.
+Product capabilities/license remain edition-owned extension values; migration
+export records follow their versioned table protocol. Contract coverage alone
+does not prove the complete issue remediation or every semantic constraint. Existing error codes and HTTP statuses are preserved;
 JSON errors can also carry the request ID from the response header. English
 remains the UI language; the header shows an indicator rather than a switcher
 that falsely suggests additional supported languages. Complete localization needs a separately defined
