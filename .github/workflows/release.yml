@@ -278,7 +278,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check SSH access
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@v1.2.5
         with:
           host: 47.236.253.138
           username: root
@@ -289,7 +289,7 @@ jobs:
             echo "connected as $(id -un) on $(hostname)"
             test -f /var/lib/hypercdr/.env
             test -w /var/lib/hypercdr
-      - uses: appleboy/ssh-action@v1.0.3
+      - uses: appleboy/ssh-action@v1.2.5
         env:
           HCDR_AUTH_CHALLENGE_MODE: ${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'turnstile' }}
           HCDR_TURNSTILE_SITE_KEY: ${{ secrets.HCDR_TURNSTILE_SITE_KEY }}
