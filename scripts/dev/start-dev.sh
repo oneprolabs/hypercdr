@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
 source "${SCRIPT_DIR}/common.sh"
 
-for command in curl docker npm openssl systemctl systemd-run; do require_command "${command}"; done
+for command in curl docker npm openssl systemctl systemd-run python3; do require_command "${command}"; done
 GO_BIN="${HCDR_GO_BIN:-/usr/local/go/bin/go}"
 [[ -x "${GO_BIN}" ]] || dev_die "Go binary is not executable: ${GO_BIN}"
 [[ -r "${HCDR_DEV_TLS_CERT_FILE}" ]] || dev_die "TLS certificate is not readable: ${HCDR_DEV_TLS_CERT_FILE}"
@@ -60,6 +60,7 @@ else
   HCDR_DATABASE_URL="postgres://hypercdr:hypercdr@127.0.0.1:${HCDR_DEV_POSTGRES_PORT}/hypercdr?sslmode=disable"
 fi
 
+python3 "${SCRIPT_DIR}/provenance.py" capture --source "${HCDR_SOURCE_DIR}" --component api --output "${BIN_DIR}/.source-build.json"
 dev_log "Building backend binaries outside the source tree"
 (
   cd "${HCDR_SOURCE_DIR}/backend"
@@ -72,6 +73,8 @@ dev_log "Building backend binaries outside the source tree"
     GOCACHE="${GO_BUILD_CACHE}" GOMODCACHE="${GO_MOD_CACHE}" \
     "${GO_BIN}" build -trimpath -o "${BIN_DIR}/platform-api" ./cmd/platform-api
 )
+
+python3 "${SCRIPT_DIR}/provenance.py" record --capture "${BIN_DIR}/.source-build.json" --artifact "${BIN_DIR}/platform-api" --output "${BIN_DIR}/platform-api.provenance.json"
 
 export HCDR_DATABASE_URL
 export HCDR_HTTP_ADDR="0.0.0.0:${HCDR_DEV_API_PORT}"
@@ -97,6 +100,7 @@ export HCDR_LOG_LEVEL="${HCDR_LOG_LEVEL:-debug}"
 dev_log "Running database migrations"
 "${BIN_DIR}/platform-migrate"
 
+python3 "${SCRIPT_DIR}/provenance.py" capture --source "${HCDR_SOURCE_DIR}" --component frontend --output "${BIN_DIR}/.frontend-source-build.json"
 dev_log "Preparing external frontend dependencies"
 rm -rf "${FRONTEND_DIR}"
 mkdir -p "${FRONTEND_DIR}"
@@ -112,6 +116,8 @@ dev_log "Type-checking external frontend workspace"
   ./node_modules/.bin/tsc --noEmit
 	./node_modules/.bin/vite build --outDir "${FRONTEND_DIR}/dist" --emptyOutDir
 )
+
+python3 "${SCRIPT_DIR}/provenance.py" record --capture "${BIN_DIR}/.frontend-source-build.json" --artifact "${FRONTEND_DIR}/dist" --output "${FRONTEND_DIR}/dist.provenance.json"
 
 cat > "${HCDR_DEV_DIR}/run-api.sh" <<EOF
 #!/usr/bin/env bash

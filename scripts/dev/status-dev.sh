@@ -5,9 +5,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
 source "${SCRIPT_DIR}/common.sh"
 
-for service in api frontend; do
-  unit="hypercdr-dev-${service}.service"
-  echo "${service}: $(systemctl is-active "${unit}" 2>/dev/null || true)"
-done
+python3 "${SCRIPT_DIR}/provenance.py" status --source "${HCDR_SOURCE_DIR}"
 
 docker ps --filter name=hypercdr-dev-postgres --format 'postgres: {{.Status}}'

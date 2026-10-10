@@ -126,6 +126,11 @@ Check or stop the environment:
 ./scripts/dev/stop-dev.sh
 ```
 
+Use `./scripts/dev/update-dev.sh api`, `frontend`, or `all` to rebuild the running
+environment from this worktree. `make status` shows each component’s build source,
+commit and time, and warns about a different worktree or unbuilt edits. Python 3
+is required for provenance checks. See [development details](docs/development/platform.md).
+
 Development runtime data remains under `../hypercdr-runtime/environments/community` when services are stopped.
 
 ### 3. Run checks
@@ -149,7 +154,8 @@ bash scripts/tests/registry-config.sh
 | Command | Purpose |
 |---|---|
 | `make dev` | Start API, frontend, and development dependencies |
-| `make status` | Show development service status |
+| `make status` | Show development service status and build provenance |
+| `make update-dev` | Rebuild and restart development services without recreating PostgreSQL |
 | `make stop` | Stop development services without deleting data |
 | `make test` | Test backend, agent, frontend, and Bootstrap flows |
 | `make verify` | Run tests plus shell and repository consistency checks |

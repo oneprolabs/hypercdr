@@ -1,9 +1,10 @@
-.PHONY: help dev stop status test test-backend test-agent test-frontend build-frontend verify fmt lint
+.PHONY: help dev update-dev stop status test test-backend test-agent test-frontend build-frontend verify fmt lint
 
 help:
 	@echo "HyperCDR development commands"
 	@echo "  make dev            Start the external-runtime development environment"
 	@echo "  make stop           Stop development services"
+	@echo "  make update-dev     Rebuild running development services with provenance"
 	@echo "  make status         Show development service status"
 	@echo "  make test           Run backend, agent, and frontend checks"
 	@echo "  make verify         Run tests plus repository consistency checks"
@@ -13,6 +14,9 @@ dev:
 
 stop:
 	./scripts/dev/stop-dev.sh
+
+update-dev:
+	./scripts/dev/update-dev.sh
 
 status:
 	./scripts/dev/status-dev.sh
@@ -41,6 +45,7 @@ lint:
 	test -z "$$(gofmt -l $$(find backend agent/comm-agent -name '*.go' -type f))"
 
 verify: lint test
+	python3 -B scripts/tests/dev-provenance.py
 	bash scripts/tests/repository-hygiene.sh
 	bash scripts/tests/blue-green-deploy.sh
 	bash scripts/tests/blue-green-compose.sh
