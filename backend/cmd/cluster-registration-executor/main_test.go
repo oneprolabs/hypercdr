@@ -320,3 +320,112 @@ func TestInspectClusterRejectsInsufficientCapacityBeforePermissions(t *testing.T
 		t.Fatalf("expected capacity policy failure, got %v", err)
 	}
 }
+
+func TestRegistrationShutdownPersistsFailureAndDestroysCredential(t *testing.T) {
+	started := make(chan struct{})
+	installer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done()
+	}))
+	defer installer.Close()
+	base, sessionID := t.TempDir(), "ccer_abcdefghijklmnopqrstuvwxyz123456"
+	sessionDir := filepath.Join(base, sessionID)
+	if err := os.Mkdir(sessionDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(directInstallRequest{Token: "secret-token", InstallScriptURL: installer.URL, Endpoint: "wss://platform/ws/agent", Context: "internal"})
+	if err := os.WriteFile(filepath.Join(sessionDir, "install-request.json"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	repo := newTestStore(t)
+	tenant, err := repo.CreateTenant(store.TenantInput{Name: "Shutdown", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := repo.CreateTask(store.TaskInput{TenantID: tenant.ID, Type: "cluster-registration", Status: "running", Payload: map[string]any{"sessionId": sessionID, "context": "internal"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := &server{baseDir: base, lifecycle: ctx, logger: discardLogger()}
+	done := make(chan struct{})
+	go func() { defer close(done); s.runRegistrationTask(repo, task) }()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("download did not start")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown did not interrupt download")
+	}
+	updated, ok, err := repo.GetTask(task.ID)
+	if err != nil || !ok || updated.Status != "failed" || updated.ErrorCode != "REGISTRATION_INTERRUPTED" {
+		t.Fatalf("unexpected interrupted task: %#v %v", updated, err)
+	}
+	if _, err := os.Stat(sessionDir); !os.IsNotExist(err) {
+		t.Fatalf("credential survived shutdown: %v", err)
+	}
+	// A restarted worker must not silently rerun a potentially partial installation.
+	if _, claimed, err := repo.ClaimQueuedTask("cluster-registration", "restart"); err != nil || claimed {
+		t.Fatalf("interrupted registration was requeued: %v %v", claimed, err)
+	}
+}
+
+func TestRegistrationIdleWorkerStopsImmediately(t *testing.T) {
+	repo := newTestStore(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &server{lifecycle: ctx, logger: discardLogger()}
+	done := make(chan struct{})
+	go func() { defer close(done); s.runTaskLoop(repo, "shutdown-test") }()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("idle worker ignored shutdown")
+	}
+}
+
+func TestInstallerShutdownRunsRollbackTrap(t *testing.T) {
+	dir := t.TempDir()
+	script, ready, rolledBack := filepath.Join(dir, "install.sh"), filepath.Join(dir, "ready"), filepath.Join(dir, "rolled-back")
+	contents := fmt.Sprintf("#!/usr/bin/env bash\ntrap 'touch %q; exit 130' TERM\ntouch %q\nwhile true; do sleep 1; done\n", rolledBack, ready)
+	if err := os.WriteFile(script, []byte(contents), 0700); err != nil {
+		t.Fatal(err)
+	}
+	repo := newTestStore(t)
+	tenant, err := repo.CreateTenant(store.TenantInput{Name: "Shutdown rollback", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := repo.CreateTask(store.TaskInput{TenantID: tenant.ID, Type: "cluster-registration", Status: "running"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { defer close(done); runInstallProcess(ctx, repo, task.ID, []string{script}) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("installer did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("installer ignored shutdown")
+	}
+	if _, err := os.Stat(rolledBack); err != nil {
+		t.Fatalf("shutdown did not run rollback trap: %v", err)
+	}
+}

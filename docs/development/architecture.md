@@ -215,3 +215,10 @@ translation scope and visual acceptance, and is not claimed by this refactor.
 `make verify` runs backend PostgreSQL tests, agent tests, all frontend test groups,
 TypeScript/ESLint checks, Go vet/format checks and deployment contract checks.
 Keep evidence, caches, binaries and browser output outside the source tree.
+
+The registration executor stops claiming work on SIGTERM/SIGINT, cancels HTTP
+inspection and installer downloads, requests installer process-group rollback,
+and waits for its worker before closing PostgreSQL. Interrupted tasks persist
+`REGISTRATION_INTERRUPTED` and temporary credentials are destroyed. They are
+not automatically requeued: users must check cluster state and retry with a
+new credential to avoid repeating a partially completed installation.

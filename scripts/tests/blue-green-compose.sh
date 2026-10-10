@@ -74,3 +74,6 @@ grep -Fxq 'HCDR_RELEASE_MANIFEST_PATH=/deploy/current-release.json' "${ROOT_DIR}
 echo "blue-green compose contract passed"
 
 ! grep -Eq "external: true|nginx-proxy-manager|HCDR_NPM_UPSTREAM_READY" "${ROOT_DIR}/docker-compose.yml"
+
+# Allow the executor to finish its bounded TERM rollback and persist failure.
+jq -e ' .services["hypercdr-cluster-registration-executor"].stop_grace_period == "1m0s" ' "${RUNTIME_DIR}/compose.json" >/dev/null

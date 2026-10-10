@@ -10,10 +10,12 @@ import (
 	"hypercdr-platform/platform/backend/internal/registration"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -63,15 +65,20 @@ func (commandRunner) Run(ctx context.Context, kubeconfig, contextName string, ar
 }
 
 type server struct {
-	baseDir string
-	token   string
-	runner  kubectlRunner
-	logger  *slog.Logger
+	lifecycle context.Context
+	baseDir   string
+	token     string
+	runner    kubectlRunner
+	logger    *slog.Logger
 }
 
 func main() {
+	lifecycle, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	var workers sync.WaitGroup
+	defer workers.Wait()
 	baseDir := env("HCDR_REGISTRATION_SESSION_DIR", "/var/lib/hypercdr/registration-sessions")
-	s := &server{baseDir: filepath.Clean(baseDir), runner: commandRunner{}, logger: slog.Default()}
+	s := &server{lifecycle: lifecycle, baseDir: filepath.Clean(baseDir), runner: commandRunner{}, logger: slog.Default()}
 	if sessionID := strings.TrimSpace(os.Getenv("HCDR_REGISTRATION_INSPECT_SESSION_ID")); sessionID != "" {
 		contextName := strings.TrimSpace(os.Getenv("HCDR_REGISTRATION_INSPECT_CONTEXT"))
 		clusterType := strings.TrimSpace(os.Getenv("HCDR_REGISTRATION_INSPECT_CLUSTER_TYPE"))
@@ -89,7 +96,7 @@ func main() {
 			slog.Error("connect registration task store", "error", err)
 			os.Exit(1)
 		}
-		defer repo.Close()
+		defer func() { stop(); workers.Wait(); repo.Close() }()
 		executorID := env("HOSTNAME", "cluster-registration-executor")
 		if taskID := strings.TrimSpace(os.Getenv("HCDR_REGISTRATION_TASK_ID")); taskID != "" {
 			task, ok, claimErr := repo.ClaimQueuedTaskByID(taskID, "cluster-registration", executorID)
@@ -100,7 +107,8 @@ func main() {
 			s.runRegistrationTask(repo, task)
 			return
 		}
-		go s.runTaskLoop(repo, executorID)
+		workers.Add(1)
+		go func() { defer workers.Done(); s.runTaskLoop(repo, executorID) }()
 	}
 	token := strings.TrimSpace(os.Getenv("HCDR_REGISTRATION_EXECUTOR_TOKEN"))
 	if token == "" {
@@ -111,7 +119,22 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	mux.HandleFunc("POST /v1/inspect", s.inspect)
-	if err := http.ListenAndServe(env("HCDR_REGISTRATION_EXECUTOR_ADDR", ":18082"), mux); err != nil {
+	httpServer := &http.Server{Addr: env("HCDR_REGISTRATION_EXECUTOR_ADDR", ":18082"), Handler: mux, ReadHeaderTimeout: 10 * time.Second, BaseContext: func(net.Listener) context.Context { return lifecycle }}
+	shutdownDone := make(chan struct{})
+	go func() {
+		defer close(shutdownDone)
+		<-lifecycle.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := httpServer.Shutdown(ctx); err != nil {
+			_ = httpServer.Close()
+		}
+	}()
+	err := httpServer.ListenAndServe()
+	stop()
+	<-shutdownDone
+	workers.Wait()
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("registration executor stopped", "error", err)
 		os.Exit(1)
 	}
@@ -127,7 +150,7 @@ func (s *server) runInspectionJob(sessionID, contextName, clusterType string) er
 		return errors.New("invalid inspection session or context")
 	}
 	sessionDir := filepath.Join(s.baseDir, sessionID)
-	result, inspectErr := inspectCluster(context.Background(), s.runner, filepath.Join(sessionDir, "kubeconfig"), contextName, clusterType)
+	result, inspectErr := inspectCluster(s.taskContext(), s.runner, filepath.Join(sessionDir, "kubeconfig"), contextName, clusterType)
 	payload := inspectionJobResult{}
 	if inspectErr != nil {
 		payload.Error = inspectErr.Error()
@@ -159,16 +182,38 @@ type directInstallRequest struct {
 	ClusterType      string `json:"clusterType"`
 }
 
+func (s *server) taskContext() context.Context {
+	if s.lifecycle != nil {
+		return s.lifecycle
+	}
+	return context.Background()
+}
+
+func waitRegistrationPoll(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
 func (s *server) runTaskLoop(repo store.Store, executorID string) {
-	for {
+	for s.taskContext().Err() == nil {
 		task, ok, err := repo.ClaimQueuedTask("cluster-registration", executorID)
 		if err != nil {
 			s.logger.Error("claim registration task", "error", err)
-			time.Sleep(3 * time.Second)
+			if !waitRegistrationPoll(s.taskContext(), 3*time.Second) {
+				return
+			}
 			continue
 		}
 		if !ok {
-			time.Sleep(2 * time.Second)
+			if !waitRegistrationPoll(s.taskContext(), 2*time.Second) {
+				return
+			}
 			continue
 		}
 		s.runRegistrationTask(repo, task)
@@ -210,10 +255,14 @@ func (s *server) runRegistrationTask(repo store.Store, task store.Task) {
 	registrationTimeout := registrationTaskTimeout(clusterType)
 	_ = repo.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "info", Reason: "preflight_started", Message: "Running provider and cluster preflight checks."})
 	_, _, _ = repo.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "running", Progress: 5, Payload: map[string]any{"stage": "preflight"}, MarkStarted: true})
-	ctx, cancel := context.WithTimeout(context.Background(), registrationTimeout)
+	ctx, cancel := context.WithTimeout(s.taskContext(), registrationTimeout)
 	defer cancel()
 	script, err := downloadInstaller(ctx, request.InstallScriptURL)
 	if err != nil {
+		if s.taskContext().Err() != nil {
+			fail("REGISTRATION_INTERRUPTED", "The executor stopped. Check cluster state and retry registration with a new credential.")
+			return
+		}
 		fail("INSTALLER_DOWNLOAD_FAILED", err.Error())
 		return
 	}
@@ -235,6 +284,10 @@ func (s *server) runRegistrationTask(repo store.Store, task store.Task) {
 	if canceled {
 		_, _, _ = repo.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "canceled", Progress: 100, ErrorCode: "REGISTRATION_CANCELED", ErrorMessage: "Registration was canceled and rollback completed.", Payload: map[string]any{"stage": "canceled"}, MarkDone: true})
 		_ = repo.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "warning", Reason: "registration_canceled", Message: "Registration was canceled and rollback completed."})
+		return
+	}
+	if s.taskContext().Err() != nil {
+		fail("REGISTRATION_INTERRUPTED", "The executor stopped; installer rollback was requested. Check cluster state and retry registration with a new credential.")
 		return
 	}
 	if timedOut {

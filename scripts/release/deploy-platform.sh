@@ -251,6 +251,7 @@ services:
   hypercdr-cluster-registration-executor:
     image: ${REGISTRATION_EXECUTOR_IMAGE}
     container_name: hypercdr-cluster-registration-executor
+    stop_grace_period: 60s
     depends_on:
       hypercdr-postgres:
         condition: service_healthy

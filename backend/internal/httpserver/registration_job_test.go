@@ -48,7 +48,7 @@ func TestCreateRegistrationExecutorJobUsesFixedHardenedTemplate(t *testing.T) {
 	}
 	raw, _ := json.Marshal(received)
 	text := string(raw)
-	for _, expected := range []string{`"automountServiceAccountToken":false`, `"backoffLimit":0`, `"readOnlyRootFilesystem":true`, `"drop":["ALL"]`, `"HCDR_REGISTRATION_TASK_ID"`, `"task-123"`, `"claimName":"hypercdr-sessions"`, `"name":"hypercdr-registration-executor-config"`} {
+	for _, expected := range []string{`"automountServiceAccountToken":false`, `"terminationGracePeriodSeconds":60`, `"backoffLimit":0`, `"readOnlyRootFilesystem":true`, `"drop":["ALL"]`, `"HCDR_REGISTRATION_TASK_ID"`, `"task-123"`, `"claimName":"hypercdr-sessions"`, `"name":"hypercdr-registration-executor-config"`} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("Job is missing %s: %s", expected, text)
 		}
