@@ -98,14 +98,13 @@ export function buildDRTopology(clusters: Cluster[], plans: ApiProtectionPlan[])
   for (const plan of plans) {
     const sourceClusterId = plan.sourceClusterId || '';
     const targetClusterId = plan.targetClusterId || '';
-    if (!sourceClusterId || !targetClusterId || sourceClusterId === targetClusterId || !clusterById.has(sourceClusterId) || !clusterById.has(targetClusterId)) continue;
+    if (!sourceClusterId || !targetClusterId || !clusterById.has(sourceClusterId) || !clusterById.has(targetClusterId)) continue;
     const status = relationshipStatus(plan.status);
     if (!status) continue;
     const sourceCluster = clusterById.get(sourceClusterId)!;
     const candidateIds = Array.from(new Set([plan.appId, ...(plan.appIds || [])].filter(Boolean)));
-    const apps = candidateIds
-      .map(appId => ({ appId, app: sourceCluster.apps.find(item => item.apiId === appId) }))
-      .filter(item => Boolean(item.app));
+    // A persisted plan defines the relationship even while live inventory is unavailable.
+    const apps = candidateIds.map(appId => ({ appId, app: sourceCluster.apps.find(item => item.apiId === appId) }));
     if (apps.length === 0) continue;
     const id = `${sourceClusterId}->${targetClusterId}`;
     const relationship = grouped.get(id) || { id, sourceClusterId, targetClusterId, appIds: [], appNames: [], planIds: [], status };

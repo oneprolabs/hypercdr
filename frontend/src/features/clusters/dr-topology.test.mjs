@@ -49,13 +49,11 @@ test('returns no relationships for an empty plan set', () => {
   assert.equal(model.summaries.b.inboundApps, 0);
 });
 
-test('ignores cleaning, same-cluster, unknown-cluster, and unresolved application plans', () => {
+test('ignores cleaning and unknown-cluster plans', () => {
   const clusters = [cluster('a', ['app-1']), cluster('b', [])];
   const model = buildDRTopology(clusters, [
     plan('cleaning', 'a', 'b', ['app-1'], 'cleaning'),
-    plan('same', 'a', 'a', ['app-1']),
     plan('unknown', 'a', 'missing', ['app-1']),
-    plan('unresolved', 'a', 'b', ['missing-app']),
   ]);
   assert.deepEqual(model.relationships, []);
 });
@@ -99,4 +97,20 @@ test('uses a stable geometric layout for connected clusters', () => {
   assert.notDeepEqual(layout.positions['source-b'], layout.positions['target-b']);
   assert.ok(layout.positions['source-a'].x >= 0 && layout.positions['source-a'].x <= 100);
   assert.ok(layout.positions['target-a'].y >= 0 && layout.positions['target-a'].y <= 100);
+});
+
+test('keeps self protection as a directed self relationship and retains isolated clusters', () => {
+ const model = buildDRTopology([cluster('a', ['app-1']), cluster('b', [])], [plan('self', 'a', 'a', ['app-1'])]);
+ assert.equal(model.relationships.length, 1);
+ assert.equal(model.relationships[0].id, 'a->a');
+ assert.equal(model.summaries.a.outboundRelationships, 1);
+ assert.equal(model.summaries.a.inboundRelationships, 1);
+ assert.equal(model.summaries.a.protectedApps, 1);
+ assert.ok(model.summaries.b);
+});
+
+test('does not hide a persisted relationship while application inventory is missing', () => {
+ const model = buildDRTopology([cluster('a', []), cluster('b', [])], [plan('p1', 'a', 'b', ['persisted-app'])]);
+ assert.equal(model.relationships[0].id, 'a->b');
+ assert.deepEqual(model.relationships[0].appNames, ['persisted-app']);
 });

@@ -28748,3 +28748,28 @@ html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-doc
   .hbdr-task-purpose span, .hbdr-task-final-result span, .hbdr-task-final-result small) {
   color: var(--hc-text-2) !important;
 }
+
+/* Dashboard and cluster topology share one graph, with a compact themed frame. */
+.premium-app .hbdr-dr-topology.is-compact {
+  height:auto; width:100%; border:0; border-radius:0;
+  background:transparent; box-shadow:none;
+}
+.premium-app .hbdr-dr-topology.is-compact .hbdr-dr-topology-canvas {
+  background:transparent;
+}
+.premium-app .hbdr-dr-topology.is-compact .hbdr-dr-node {
+  width:144px; min-height:72px; background:var(--hc-surface);
+  border-color:var(--hc-border-strong); box-shadow:none;
+}
+.premium-app .hbdr-dr-topology.is-compact .hbdr-dr-node-title { color:var(--hc-text); }
+.premium-app .hbdr-dr-topology.is-compact .hbdr-dr-node > span:nth-child(2) { color:var(--hc-text-2); }
+.premium-app .hbdr-dr-topology.is-compact :is(.hbdr-dr-edge-label,.hbdr-dr-topology-empty,.hbdr-dr-relationship-detail) {
+  background:var(--hc-surface); border-color:var(--hc-border-strong); color:var(--hc-text-2);
+}
+.premium-app .hbdr-dr-topology.is-compact :is(.hbdr-dr-edge-label-count,.hbdr-dr-topology-empty strong,.hbdr-dr-relationship-summary strong) { color:var(--hc-text); }
+.premium-app .hbdr-dr-topology.is-compact .hbdr-dr-node-title i {
+  background:var(--hc-ok); box-shadow:none;
+}
+.premium-app .hbdr-dr-topology.is-compact .hbdr-dr-node.is-offline .hbdr-dr-node-title i {
+  background:var(--hc-crit); box-shadow:none;
+}

@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { AlertTriangle, ArrowRight, Boxes, CheckCircle2, GitBranch, LoaderCircle, XCircle } from 'lucide-react';
 import type { Cluster } from './types';
 import { orderClustersForTopology, topologyLayout, type DRRelationship, type DRTopologyModel } from './dr-topology';
@@ -9,7 +10,8 @@ const statusMeta = {
   failed: { label: 'Failed', icon: XCircle },
 };
 
-export default function DRTopologyView({ clusters, model, selectedRelationshipId, selectedClusterId, onSelectRelationship, onSelectCluster }: {
+export default function DRTopologyView({ clusters, model, selectedRelationshipId, selectedClusterId, onSelectRelationship, onSelectCluster, compact = false }: {
+  compact?: boolean;
   clusters: Cluster[];
   model: DRTopologyModel;
   selectedRelationshipId: string | null;
@@ -17,15 +19,21 @@ export default function DRTopologyView({ clusters, model, selectedRelationshipId
   onSelectRelationship: (relationship: DRRelationship) => void;
   onSelectCluster: (clusterId: string) => void;
 }) {
+  const markerId = useId().replaceAll(':', '');
   const clusterById = new Map(clusters.map(cluster => [cluster.id, cluster]));
   const orderedClusters = orderClustersForTopology(clusters, model);
   const layout = topologyLayout(orderedClusters.map(cluster => cluster.id), model);
-  const canvasHeight = layout.canvasHeight;
+  const canvasHeight = compact ? Math.max(260, clusters.length > 4 ? 360 : 260) : layout.canvasHeight;
   const positions = new Map(Object.entries(layout.positions));
   const edgeGeometry = (relationship: DRRelationship) => {
     const source = positions.get(relationship.sourceClusterId);
     const target = positions.get(relationship.targetClusterId);
     if (!source || !target) return null;
+    if (relationship.sourceClusterId === relationship.targetClusterId) {
+      const x = source.x * 10, y = source.y * 5;
+      const direction = source.y < 40 ? 1 : -1;
+      return { path: `M ${x - 100} ${y + direction * 70} C ${x - 240} ${y + direction * 210}, ${x + 240} ${y + direction * 210}, ${x + 100} ${y + direction * 70}`, labelX: source.x, labelY: (y + direction * 185) / 5 };
+    }
     const reverse = model.relationships.some(item => item.sourceClusterId === relationship.targetClusterId && item.targetClusterId === relationship.sourceClusterId);
     const sourceX = source.x * 10, sourceY = source.y * 5, targetX = target.x * 10, targetY = target.y * 5;
     const dx = targetX - sourceX, dy = targetY - sourceY;
@@ -39,30 +47,31 @@ export default function DRTopologyView({ clusters, model, selectedRelationshipId
     const x2 = targetX - dx / distance * endpointInset;
     const y2 = targetY - dy / distance * endpointInset;
     const pairDirection = relationship.sourceClusterId.localeCompare(relationship.targetClusterId) < 0 ? -1 : 1;
-    const bend = reverse ? 56 * pairDirection : distance > 520 ? 34 * pairDirection : 0;
+    const bend = reverse ? (compact ? 120 : 56) : distance > 520 ? 34 * pairDirection : 0;
     const controlX = (x1 + x2) / 2 - (y2 - y1) / distance * bend;
     const controlY = (y1 + y2) / 2 + (x2 - x1) / distance * bend;
-    const labelT = reverse ? (pairDirection < 0 ? .43 : .57) : .5;
+    const labelT = .5;
     const inverseT = 1 - labelT;
     const labelSvgX = inverseT * inverseT * x1 + 2 * inverseT * labelT * controlX + labelT * labelT * x2;
     const labelSvgY = inverseT * inverseT * y1 + 2 * inverseT * labelT * controlY + labelT * labelT * y2;
-    return { source, target, x1, y1, x2, y2, controlX, controlY, labelX: labelSvgX / 10, labelY: labelSvgY / 5 };
+    return { path: `M ${x1} ${y1} Q ${controlX} ${controlY} ${x2} ${y2}`, labelX: labelSvgX / 10, labelY: labelSvgY / 5 };
   };
 
   return (
-    <section className="hbdr-dr-topology" aria-label="DR Topology">
-      <div className="hbdr-dr-topology-head">
+    <section className={`hbdr-dr-topology ${compact ? 'is-compact' : ''}`} aria-label="DR Topology">
+      {!compact && <div className="hbdr-dr-topology-head">
         <div><h3>DR Topology</h3><p>Namespace protection relationships between registered clusters</p></div>
         <div className="hbdr-dr-topology-legend"><span className="is-healthy" />Healthy<span className="is-warning" />Attention<span className="is-configuring" />Configuring</div>
       </div>
+      }
       <div className="hbdr-dr-topology-canvas" style={{ minHeight: canvasHeight }}>
         {model.relationships.length === 0 && <div className="hbdr-dr-topology-empty"><GitBranch size={15} /><strong>No DR relationships yet</strong><span>Clusters remain selectable below.</span></div>}
         <svg className="hbdr-dr-topology-lines" viewBox="0 0 1000 500" preserveAspectRatio="none" aria-hidden="true">
-          <defs><marker id="dr-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="userSpaceOnUse" overflow="visible"><path className="hbdr-dr-arrow-head" d="M1,1 L10,6 L1,11" /></marker></defs>
+          <defs><marker id={markerId} markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="userSpaceOnUse" overflow="visible"><path className="hbdr-dr-arrow-head" d="M1,1 L10,6 L1,11" /></marker></defs>
           {model.relationships.map(relationship => {
             const geometry = edgeGeometry(relationship);
             if (!geometry) return null;
-            return <path key={relationship.id} className={`is-${relationship.status} ${selectedRelationshipId === relationship.id ? 'is-selected' : ''}`} d={`M ${geometry.x1} ${geometry.y1} Q ${geometry.controlX} ${geometry.controlY} ${geometry.x2} ${geometry.y2}`} markerEnd="url(#dr-arrow)" />;
+            return <path key={relationship.id} className={`is-${relationship.status} ${selectedRelationshipId === relationship.id ? 'is-selected' : ''}`} d={geometry.path} markerEnd={`url(#${markerId})`} />;
           })}
         </svg>
         {model.relationships.map(relationship => {

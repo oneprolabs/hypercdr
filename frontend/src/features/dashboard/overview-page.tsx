@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import DRTopologyView from '../clusters/dr-topology-view';
 import React from 'react';
 import { AlertCircle, CheckCircle2, ChevronDown, Cloud, Database, History, Lock, RefreshCw, Server } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -121,6 +123,8 @@ export function OverviewPage(props: {
     ? `${targetClusterNames.length} Targets`
     : (recoveryCluster?.name ?? 'N/A');
   const drSiteSubtitle = targetClusterNames.length > 1 ? 'Target Clusters' : 'Target Cluster';
+  const [selectedTopologyRelationship, setSelectedTopologyRelationship] = useState<string | null>(null);
+  const [selectedTopologyCluster, setSelectedTopologyCluster] = useState<string | null>(null);
   const topology = buildDRTopology(clusters, protectionPlans);
   const topologyPairs = topology.relationships.length;
   const topologyStatuses = topology.relationships.reduce((counts, relationship) => {
@@ -290,7 +294,7 @@ export function OverviewPage(props: {
             <span className="hbdr-dashboard-zone-dot hbdr-dashboard-zone-dot-platform" aria-hidden="true" />
             <div>
               <h2>DR topology</h2>
-              <p>{topologyPairs} replication pair{topologyPairs === 1 ? '' : 's'} across {clusters.length} cluster{clusters.length === 1 ? '' : 's'}</p>
+              <p>{topologyPairs} protection relationship{topologyPairs === 1 ? '' : 's'} across {clusters.length} cluster{clusters.length === 1 ? '' : 's'}</p>
             </div>
           </div>
           <div className="hbdr-dashboard-topology-statuses">
@@ -300,17 +304,7 @@ export function OverviewPage(props: {
           </div>
         </header>
         <div className="hbdr-dashboard-topology-body">
-          {topology.relationships.length > 0 ? topology.relationships.slice(0, 4).map(relationship => {
-            const source = clusters.find(item => item.id === relationship.sourceClusterId);
-            const target = clusters.find(item => item.id === relationship.targetClusterId);
-            return <div className={`hbdr-dashboard-topology-pair is-${relationship.status}`} key={relationship.id}>
-              <div><i /><strong>{source?.name || relationship.sourceClusterId}</strong><small>{source?.applications || 0} namespaces · {source?.nodes || 0} nodes · {source?.version || 'N/A'}</small></div>
-              <span className="hbdr-dashboard-topology-link">{relationship.appIds.length} namespaces</span>
-              <div><i /><strong>{target?.name || relationship.targetClusterId}</strong><small>{target?.applications || 0} namespaces · {target?.nodes || 0} nodes · {target?.version || 'N/A'}</small></div>
-            </div>;
-          }) : clusters.length === 1 ? <div className="hbdr-dashboard-topology-single">
-            <div className="hbdr-dashboard-topology-node"><i /><strong>{clusters[0].name}</strong><small>{clusters[0].applications} namespaces · {clusters[0].nodes} nodes · {clusters[0].version}</small><span>Standalone cluster · no replication relationship</span></div>
-          </div> : <div className="hbdr-dashboard-topology-empty"><History size={18} /><span>No replication relationships configured</span></div>}
+          {clusters.length > 0 ? <DRTopologyView compact clusters={clusters} model={topology} selectedRelationshipId={selectedTopologyRelationship} selectedClusterId={selectedTopologyCluster} onSelectRelationship={relationship => setSelectedTopologyRelationship(relationship.id)} onSelectCluster={id => setSelectedTopologyCluster(id)} /> : <div className="hbdr-dashboard-topology-empty"><History size={18} /><span>No registered clusters</span></div>}
         </div>
       </section>
       <aside className="hbdr-dashboard-side hbdr-dashboard-zone hbdr-dashboard-zone-platform">
