@@ -74,7 +74,7 @@ func (r *Router) listDiagnosticLogs(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, 500, map[string]any{"error": "list_diagnostic_logs_failed"})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"items": nonNilSlice(items), "limit": filter.Limit, "offset": filter.Offset})
+	writeJSON(w, 200, diagnosticListResponse{Items: nonNilSlice(items), Limit: filter.Limit, Offset: filter.Offset})
 }
 
 func (r *Router) exportDiagnosticLogs(w http.ResponseWriter, req *http.Request) {
@@ -147,22 +147,18 @@ func (r *Router) diagnosticLogSources(w http.ResponseWriter, req *http.Request) 
 		writeJSON(w, 500, map[string]any{"error": "list_log_sources_failed"})
 		return
 	}
-	items := []map[string]any{}
+	items := []diagnosticSource{}
 	for _, cluster := range clusters {
 		if user.SystemAdmin || cluster.TenantID == user.TenantID {
-			items = append(items, map[string]any{"id": cluster.ID, "tenantId": cluster.TenantID, "name": cluster.Name, "connectionStatus": cluster.ConnectionStatus})
+			items = append(items, diagnosticSource{ID: cluster.ID, TenantID: cluster.TenantID, Name: cluster.Name, ConnectionStatus: cluster.ConnectionStatus})
 		}
 	}
-	writeJSON(w, 200, map[string]any{"items": items})
+	writeJSON(w, 200, listResponse[diagnosticSource]{Items: items})
 }
 
 func (r *Router) collectClusterLogs(w http.ResponseWriter, req *http.Request) {
 	clusterID := req.PathValue("id")
-	var body struct {
-		Component string    `json:"component"`
-		Since     time.Time `json:"since"`
-		TailLines int64     `json:"tailLines"`
-	}
+	var body clusterLogCollectRequest
 	if err := decodeJSON(req, &body); err != nil {
 		writeJSON(w, 400, map[string]any{"error": "invalid_json"})
 		return
@@ -187,7 +183,7 @@ func (r *Router) collectClusterLogs(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, status, map[string]any{"error": "log_collection_failed", "message": err.Error(), "requestId": requestID})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"requestId": requestID, "status": "completed", "count": len(report.Entries), "truncated": report.Truncated, "coverage": coverage, "message": "Cluster logs collected."})
+	writeJSON(w, 200, clusterLogCollectResponse{RequestID: requestID, Status: "completed", Count: len(report.Entries), Truncated: report.Truncated, Coverage: coverage, Message: "Cluster logs collected."})
 }
 
 func (r *Router) collectClusterLogsRange(clusterID, component string, since time.Time, tailLines int64) (protocol.LogReportPayload, store.ClusterLogCoverage, string, int, error) {

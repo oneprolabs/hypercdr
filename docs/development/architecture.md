@@ -173,6 +173,13 @@ missing-file errors and bodyless deletion. Bounded JSON decoding rejects malform
 trailing or oversized requests rather than silently using a partial request.
 The frontend stores bundle history by tenant and user, without migrating the old
 unowned browser history, and ignores callbacks after the owning page unmounts.
+Diagnostic list/source/export and cluster collection/search routes share concrete
+wire DTOs with their handlers. Contracts describe cached and freshly collected
+coverage responses, text exports, component restrictions and agent offline/send/
+restart/timeout errors. PostgreSQL regressions check empty collection, cached
+coverage without dispatch and offline collection behavior. Diagnostic filtering
+remains tenant-scoped for ordinary users; the existing System Administrator
+cross-tenant diagnostic privilege is explicit rather than silently changed.
 Other endpoint payload schemas remain incomplete; this is not yet a
 client-generation contract. Existing error codes and HTTP statuses are preserved;
 JSON errors can also carry the request ID from the response header. English

@@ -322,11 +322,7 @@ func (r *Router) recordClusterLogCoverage(clusterID, component string, requested
 
 func (r *Router) searchClusterLogs(w http.ResponseWriter, req *http.Request) {
 	clusterID := req.PathValue("id")
-	var body struct {
-		Component string    `json:"component"`
-		From      time.Time `json:"from"`
-		To        time.Time `json:"to"`
-	}
+	var body clusterLogSearchRequest
 	if decodeJSON(req, &body) != nil || !map[string]bool{"comm-agent": true, "velero": true, "node-agent": true}[body.Component] {
 		writeJSON(w, 400, map[string]any{"error": "invalid_log_search"})
 		return
@@ -344,7 +340,7 @@ func (r *Router) searchClusterLogs(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if found && !body.From.Before(coverage.CoveredFrom) && !body.To.After(coverage.CoveredTo) {
-		writeJSON(w, 200, map[string]any{"status": "ready", "collected": false, "coverageComplete": true, "coverage": coverage})
+		writeJSON(w, 200, clusterLogCachedResponse{Status: "ready", Collected: false, CoverageComplete: true, Coverage: coverage})
 		return
 	}
 	collectFrom := clusterLogCollectFrom(body.From, now)
@@ -354,9 +350,9 @@ func (r *Router) searchClusterLogs(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	complete := !body.From.Before(coverage.CoveredFrom) && !body.To.After(coverage.CoveredTo)
-	result := map[string]any{"status": "ready", "collected": true, "count": len(report.Entries), "truncated": report.Truncated, "coverageComplete": complete, "coverage": coverage}
+	result := clusterLogSearchResponse{Status: "ready", Collected: true, Count: len(report.Entries), Truncated: report.Truncated, CoverageComplete: complete, Coverage: coverage}
 	if !complete {
-		result["message"] = "The platform collected all logs still retained by the cluster. Earlier logs are no longer available."
+		result.Message = "The platform collected all logs still retained by the cluster. Earlier logs are no longer available."
 	}
 	writeJSON(w, 200, result)
 }
