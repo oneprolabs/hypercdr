@@ -1481,10 +1481,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
   );
   const defaultWorkspaceCluster = defaultCluster || clusters[0] || null;
   const workspaceCluster = selectedCluster || defaultWorkspaceCluster;
-  const dashboardCluster = workspaceCluster;
-  const dashboardApps = dashboardCluster?.apps || [];
-  const protectedApps = dashboardApps.filter(app => app.isProtected).length;
-  const activeRestorePointCount = dashboardCluster ? restorePointCount : 0;
+  const dashboardCluster = workspaceCluster ? clusters.find(cluster => cluster.id === workspaceCluster.id) || workspaceCluster : null;
   const drClusters = liveClusters ?? clusters;
   const drSelectedCluster = selectedCluster ? drClusters.find(cluster => cluster.id === selectedCluster.id) || null : null;
   const drDefaultCluster = drClusters.find(cluster => cluster.isDefault) || null;
@@ -1988,14 +1985,11 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
                   cluster={dashboardCluster}
                   clusters={clusters}
                   storage={storage}
-                  protectedApps={protectedApps}
-                  restorePointCount={activeRestorePointCount}
                   tasks={liveApiTasks}
                   restorePoints={liveApiRestorePointViews}
                   policies={liveApiPolicies}
                   protectionPlans={liveApiPlans}
                   applications={liveApiApps}
-                  defaultClusterId={defaultClusterId}
                   productInfo={productInfo}
                   openDr={() => openView('applications')}
                   openOperations={() => openView('operations')}

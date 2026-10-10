@@ -224,7 +224,7 @@ export default function NamespaceDetailDrawer({detail, catalog, presentation, on
                 {supportMeta.tone === 'unsupported' ? (
                   <TaskErrorDetailBlock failure={supportFailure} details={supportDetails} />
                 ) : (
-                  <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-3">
+                  <div className="hbdr-app-detail-readiness rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-3">
                     <p className="text-sm font-black text-emerald-800">{supportMeta.label}</p>
                     <p className="mt-1 text-xs font-semibold leading-relaxed text-emerald-700">{supportMeta.title}</p>
                   </div>

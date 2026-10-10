@@ -1,5 +1,5 @@
 import { scopedResourceSetter } from './resource-scope';
-import { loadPlatformSnapshot, loadApplicationActivitySnapshot, loadTopologySnapshot } from './platform-snapshots';
+import { loadPlatformSnapshot, loadApplicationActivitySnapshot, loadTopologySnapshot, loadClusterSummarySnapshot } from './platform-snapshots';
 import { listApplications, listTags } from '../api/applications';
 import { listPolicies } from '../api/policies';
 import { listStorageRepositories } from '../api/storage';
@@ -90,9 +90,14 @@ export function usePlatformResources({ sessionToken, view, resourceSessionOwnerR
     refreshLastStartedAtRef.current = now;
     const request = (async () => {
       if (targetView === 'clusters' || targetView === 'dr_tasks' || targetView === 'restore_points' || targetView === 'failback') {
-        const clusterRes = await listClusters();
+        const summary = targetView === 'clusters'
+          ? await loadClusterSummarySnapshot(() => resourceSessionOwnerRef.current === owner)
+          : null;
+        if (targetView === 'clusters' && !summary) return [];
+        const clusterRes = summary ? null : await listClusters();
         if (resourceSessionOwnerRef.current !== owner) return [];
-        const apiClusters = listItems(clusterRes);
+        const apiClusters = summary ? summary.clusters : listItems(clusterRes!);
+        if (summary) setLiveApiPlans(summary.plans);
         const nextClusters = apiClusters.map(cluster => mapCluster(cluster, []));
         setLiveApiClusters(apiClusters);
         // A cluster-only poll must not discard applications loaded on demand
@@ -144,7 +149,7 @@ export function usePlatformResources({ sessionToken, view, resourceSessionOwnerR
       const snapshot = await loadPlatformSnapshot(() => resourceSessionOwnerRef.current === owner, apiClusters => {
         setLiveApiClusters(apiClusters);
         setLiveClusters(previous => apiClusters.map(cluster => mapCluster(cluster, previous?.find(item => item.id === cluster.id)?.apps || [])));
-      });
+      }, targetView === 'dashboard');
       if (!snapshot || resourceSessionOwnerRef.current !== owner) return [];
       const { clusters: apiClusters, applications: apiApps, storage: apiStorage, policies: apiPolicies, plans: apiPlans, tasks: apiTasks } = snapshot;
       const apiRestorePoints = snapshot.restorePoints.map(mapRestorePoint);
@@ -258,7 +263,7 @@ export function usePlatformResources({ sessionToken, view, resourceSessionOwnerR
         // poll the lightweight plan list in the same snapshot as tasks. Using
         // a stale latestRecoveryTaskId makes the row keep rendering the prior
         // drill until a full-page refresh.
-        const snapshot = await loadApplicationActivitySnapshot(() => !cancelled && resourceSessionOwnerRef.current === owner);
+        const snapshot = await loadApplicationActivitySnapshot(() => !cancelled && resourceSessionOwnerRef.current === owner, view === 'dashboard');
         if (!snapshot || cancelled || resourceSessionOwnerRef.current !== owner) return;
         const { tasks: apiTasks, plans: apiPlans, restorePoints: apiRestorePoints } = snapshot;
         const apiRestorePointViews = apiRestorePoints.map(mapRestorePoint);

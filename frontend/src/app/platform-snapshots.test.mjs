@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { loadPlatformSnapshot, loadApplicationActivitySnapshot, loadTopologySnapshot } from './platform-snapshots.ts';
+import { loadPlatformSnapshot, loadApplicationActivitySnapshot, loadTopologySnapshot, loadClusterSummarySnapshot } from './platform-snapshots.ts';
+import { buildDRTopology } from '../features/clusters/dr-topology.ts';
 import { writeStoredAuthSession } from '../auth/session.ts';
 import { scopedResourceSetter } from './resource-scope.ts';
 import { updateApplicationProtection } from '../api/applications.ts';
@@ -140,4 +141,48 @@ test('session-bound setters preserve functional updates for the owning session',
   owner.current = '';
   setResources(['late-after-signout']);
   assert.deepEqual(state, ['existing', 'new']);
+});
+
+test('fresh cluster summary restores source and target roles without visiting DR first', async t => {
+  setup(t);
+  const paths = [];
+  globalThis.fetch.mock.mockImplementation(async path => {
+    paths.push(path);
+    if (path === '/api/v1/clusters') return response({ items: [{ id: 'source', name: 'Source' }, { id: 'target', name: 'Target' }] });
+    if (path === '/api/v1/protection-plans') return response({ items: [{ id: 'plan', sourceClusterId: 'source', targetClusterId: 'target', appId: 'app', status: 'ready' }] });
+    throw new Error(`Unexpected request ${path}`);
+  });
+  const snapshot = await loadClusterSummarySnapshot(() => true);
+  const topology = buildDRTopology(snapshot.clusters.map(cluster => ({ ...cluster, apps: [] })), snapshot.plans);
+  assert.equal(topology.summaries.source.outboundRelationships, 1);
+  assert.equal(topology.summaries.target.inboundRelationships, 1);
+  assert.deepEqual(paths.sort(), ['/api/v1/clusters', '/api/v1/protection-plans']);
+});
+
+test('cluster summary discards relationships when the session changes during loading', async t => {
+  setup(t);
+  const started = deferred();
+  const pending = deferred();
+  let current = true;
+  globalThis.fetch.mock.mockImplementation(async path => {
+    if (path === '/api/v1/protection-plans') { started.resolve(); return pending.promise; }
+    return response({ items: [{ id: 'old-cluster' }] });
+  });
+  const snapshot = loadClusterSummarySnapshot(() => current);
+  await started.promise;
+  current = false;
+  pending.resolve(response({ items: [{ id: 'old-plan' }] }));
+  assert.equal(await snapshot, null);
+});
+
+test('dashboard snapshots read complete lightweight history; other views stay bounded', async t => {
+  setup(t);
+  const paths = [];
+  globalThis.fetch.mock.mockImplementation(async path => { paths.push(path); return response({ items: [] }); });
+  await loadPlatformSnapshot(() => true, undefined, true);
+  await loadApplicationActivitySnapshot(() => true, true);
+  assert.ok(paths.filter(path => path.startsWith('/api/v1/tasks?')).every(path => path.includes('view=summary') && !path.includes('limit=')));
+  paths.length = 0;
+  await loadApplicationActivitySnapshot(() => true);
+  assert.ok(paths.some(path => path.includes('limit=500')));
 });

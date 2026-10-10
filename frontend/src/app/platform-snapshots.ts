@@ -10,7 +10,9 @@ import type { ApiCluster } from '../features/recovery/platform-types.ts';
 
 type CurrentScope = () => boolean;
 const activityTypes = ['backup', 'restore', 'drill', 'takeover', 'storage-sync', 'schedule-sync', 'protection-cleanup'];
-const readActivityTasks = () => listTasks({ view: 'summary', types: activityTypes, limit: 500 });
+// Dashboard totals need the complete summary history, not the first 500 global tasks.
+// Other views keep their bounded activity feed. Full payloads are never fetched.
+const readActivityTasks = (completeHistory = false) => listTasks({ view: 'summary', types: activityTypes, ...(completeHistory ? {} : { limit: 500 }) });
 
 async function completePlanTasks(tasks: ApiTask[], plans: ApiProtectionPlan[], isCurrent: CurrentScope) {
   if (!isCurrent()) return null;
@@ -23,12 +25,12 @@ async function completePlanTasks(tasks: ApiTask[], plans: ApiProtectionPlan[], i
 
 // These loaders own dependency ordering and session checks. They return domain
 // data; mapping and React state commits belong to usePlatformResources.
-export async function loadPlatformSnapshot(isCurrent: CurrentScope, onClusters?: (clusters: ApiCluster[]) => void) {
+export async function loadPlatformSnapshot(isCurrent: CurrentScope, onClusters?: (clusters: ApiCluster[]) => void, completeHistory = false) {
   if (!isCurrent()) return null;
   const clusterRequest = listClusters();
   void clusterRequest.then(response => { if (isCurrent()) onClusters?.(listItems(response)); }).catch(() => undefined);
   const [clusterRes, appRes, storageRes, policyRes, planRes, taskRes, tagRes, pointRes] = await Promise.all([
-    clusterRequest, listApplications(), listStorageRepositories(), listPolicies(), listProtectionPlans(), readActivityTasks(), listTags(), listRestorePoints(),
+    clusterRequest, listApplications(), listStorageRepositories(), listPolicies(), listProtectionPlans(), readActivityTasks(completeHistory), listTags(), listRestorePoints(true, completeHistory ? 0 : 500),
   ]);
   if (!isCurrent()) return null;
   const plans = listItems(planRes);
@@ -40,9 +42,9 @@ export async function loadPlatformSnapshot(isCurrent: CurrentScope, onClusters?:
   };
 }
 
-export async function loadApplicationActivitySnapshot(isCurrent: CurrentScope) {
+export async function loadApplicationActivitySnapshot(isCurrent: CurrentScope, completeHistory = false) {
   if (!isCurrent()) return null;
-  const [taskRes, pointRes, planRes] = await Promise.all([readActivityTasks(), listRestorePoints(), listProtectionPlans()]);
+  const [taskRes, pointRes, planRes] = await Promise.all([readActivityTasks(completeHistory), listRestorePoints(true, completeHistory ? 0 : 500), listProtectionPlans()]);
   if (!isCurrent()) return null;
   const plans = listItems(planRes);
   const tasks = await completePlanTasks(listItems(taskRes), plans, isCurrent);
@@ -54,4 +56,13 @@ export async function loadTopologySnapshot(isCurrent: CurrentScope) {
   const [clusterRes, appRes, planRes] = await Promise.all([listClusters(), listApplications(true), listProtectionPlans()]);
   if (!isCurrent()) return null;
   return { clusters: listItems(clusterRes), applications: listItems(appRes), plans: listItems(planRes) };
+}
+
+// Cluster cards need persisted DR relationships even on a fresh page load.
+// Inventory and activity remain on demand; roles require only the plan list.
+export async function loadClusterSummarySnapshot(isCurrent: CurrentScope) {
+  if (!isCurrent()) return null;
+  const [clusterRes, planRes] = await Promise.all([listClusters(), listProtectionPlans()]);
+  if (!isCurrent()) return null;
+  return { clusters: listItems(clusterRes), plans: listItems(planRes) };
 }

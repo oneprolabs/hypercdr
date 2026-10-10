@@ -122,7 +122,7 @@ export default function DiagnosticLogsPage({ currentUser, toast, advancedTenancy
     { id: 'correlation', header: 'Task / Request', accessorFn: row => row.taskId || row.requestId || '', size: 170, minSize: 140, cell: info => (info.row.original.taskId || info.row.original.requestId || '-').slice(0, 13), meta: { kind: 'code' } },
   ], [advancedTenancy, currentUser.systemAdmin, tenants]);
 
-  return <motion.div key="diagnostic-logs" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
+  return <motion.div key="diagnostic-logs" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="diagnostic-logs-page space-y-5">
     <PageTitleBar><div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-blue-600"><Terminal size={18} /></div><div><h3 className="text-sm font-black text-slate-900">Diagnostic Logs</h3><p className="mt-1 text-[11px] text-slate-400">Trace platform requests, task stages, and managed-cluster component failures.</p></div></div></PageTitleBar>
     <section className="hbdr-dr-table-card overflow-hidden">
       <div className="flex border-b border-slate-200 bg-white px-4 pt-3" role="tablist" aria-label="Log source">

@@ -32,7 +32,7 @@ export function mapRestorePoint(raw: any): ApiRestorePointView {
     title: `${storageName} · ${raw?.veleroBackupName || raw?.id?.slice(0, 8) || 'restore point'}`,
     time,
     pointType,
-    status: raw?.status || 'available',
+    status: raw?.status || 'unknown',
     sizeBytes: raw?.sizeBytes,
     completedAt: raw?.completedAt,
     expiresAt: raw?.expiresAt,
