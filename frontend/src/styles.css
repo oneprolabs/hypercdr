@@ -28773,3 +28773,12 @@ html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-task-doc
 .premium-app .hbdr-dr-topology.is-compact .hbdr-dr-node.is-offline .hbdr-dr-node-title i {
   background:var(--hc-crit); box-shadow:none;
 }
+/* Keep the two namespace counts readable as one compact metadata line. */
+.premium-app .hbdr-dr-topology.is-compact .hbdr-dr-node {
+  width:180px;
+}
+.premium-app .hbdr-dr-topology.is-compact .hbdr-dr-node > span:nth-child(2) {
+  white-space:nowrap;
+  font-size:10px;
+  line-height:1.5;
+}
