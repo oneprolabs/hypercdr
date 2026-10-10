@@ -252,13 +252,18 @@ func (s *PostgresStore) CreateAuditLog(input AuditLogInput) (AuditLog, error) {
 }
 
 func (s *PostgresStore) ListAuditLogs(limit, offset int) ([]AuditLog, error) {
+	return s.ListTenantAuditLogs("", limit, offset)
+}
+
+// Tenant filtering must precede pagination, including for system administrators.
+func (s *PostgresStore) ListTenantAuditLogs(tenantID string, limit, offset int) ([]AuditLog, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 500
 	}
 	if offset < 0 {
 		offset = 0
 	}
-	rows, err := s.db.Query(`select a.id,a.tenant_id,coalesce(a.actor_id::text,''),coalesce(u.email,''),a.action,a.resource_type,coalesce(a.resource_id::text,''),a.payload,a.created_at from audit_logs a left join users u on u.id=a.actor_id where a.actor_id is not null and a.action not in ('Create Cluster Registration Token','Start Cluster Registration') order by a.created_at desc limit $1 offset $2`, limit, offset)
+	rows, err := s.db.Query(`select a.id,a.tenant_id,coalesce(a.actor_id::text,''),coalesce(u.email,''),a.action,a.resource_type,coalesce(a.resource_id::text,''),a.payload,a.created_at from audit_logs a left join users u on u.id=a.actor_id where a.actor_id is not null and a.action not in ('Create Cluster Registration Token','Start Cluster Registration') and ($3 = '' or a.tenant_id::text = $3) order by a.created_at desc,a.id desc limit $1 offset $2`, limit, offset, tenantID)
 	if err != nil {
 		return nil, err
 	}

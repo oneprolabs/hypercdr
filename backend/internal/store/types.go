@@ -244,6 +244,7 @@ type DiagnosticRepository interface {
 type AuditRepository interface {
 	CreateAuditLog(input AuditLogInput) (AuditLog, error)
 	ListAuditLogs(limit, offset int) ([]AuditLog, error)
+	ListTenantAuditLogs(tenantID string, limit, offset int) ([]AuditLog, error)
 }
 
 // UpgradeRepository defines the persisted upgrade operations.

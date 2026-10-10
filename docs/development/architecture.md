@@ -160,6 +160,11 @@ Tenant administrators cannot read the global administrator list. Enterprise
 extension authorization retains its existing policy boundary. Password updates
 revoke existing sessions, including the caller; real PostgreSQL tests check
 owner isolation, permission denial and session revocation.
+Audit-log queries apply the authenticated tenant inside PostgreSQL before
+limit/offset; newer foreign-tenant history cannot displace a tenant’s page.
+The audit collection has a concrete response contract and mounted-route drift
+check. A real PostgreSQL regression seeds more than 1,000 foreign records and
+checks both ordinary and system-administrator tenant pages.
 Other endpoint payload schemas remain incomplete; this is not yet a
 client-generation contract. Existing error codes and HTTP statuses are preserved;
 JSON errors can also carry the request ID from the response header. English

@@ -155,27 +155,15 @@ func (r *Router) listAuditLogs(w http.ResponseWriter, req *http.Request) {
 	if offset < 0 {
 		offset = 0
 	}
-	items, err := r.store.ListAuditLogs(1000, 0)
+	tenantID := ""
+	if user, ok := requestUser(req); ok {
+		tenantID = user.TenantID
+	}
+	items, err := r.store.ListTenantAuditLogs(tenantID, limit, offset)
 	if err != nil {
 		r.logger.Error("list audit logs failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_audit_logs_failed"})
 		return
-	}
-	visible := items[:0]
-	for _, item := range items {
-		if tenantVisible(req, item.TenantID) {
-			visible = append(visible, item)
-		}
-	}
-	items = visible
-	if offset >= len(items) {
-		items = items[:0]
-	} else {
-		end := offset + limit
-		if end > len(items) {
-			end = len(items)
-		}
-		items = items[offset:end]
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": nonNilSlice(items)})
 }

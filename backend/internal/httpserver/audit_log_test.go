@@ -2,10 +2,14 @@ package httpserver
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"hypercdr-platform/platform/backend/internal/store"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -53,5 +57,86 @@ func TestAuditLogRecordsFailureAndSkipsReads(t *testing.T) {
 	items, _ := repo.ListAuditLogs(10, 0)
 	if len(items) != 1 || items[0].Result != "Failed" || items[0].Message != "Policy is still in use." || items[0].Action != "Delete Policy" {
 		t.Fatalf("unexpected failure audit record: %#v", items)
+	}
+}
+
+func TestAuditLogTenantFilterPrecedesGlobalHistoryAndPagination(t *testing.T) {
+	repo := newTestStore(t)
+	actor := testAdmin(t, repo)
+	var own []string
+	for i := 0; i < 3; i++ {
+		item, err := repo.CreateAuditLog(store.AuditLogInput{ActorID: actor.ID, Actor: actor.Email, Action: "Create Policy", ResourceName: fmt.Sprint(i)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		own = append(own, item.ID)
+	}
+	tenant, err := repo.CreateTenant(store.TenantInput{Name: "audit-foreign", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := repo.CreateUser(tenant.ID, "audit-foreign@example.com", "test-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 1001; i++ {
+		if _, err := repo.CreateAuditLog(store.AuditLogInput{ActorID: foreign.ID, Action: "Create Policy"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	router := &Router{store: repo, logger: slog.Default()}
+	for _, systemAdmin := range []bool{false, true} {
+		actor.SystemAdmin = systemAdmin
+		req := tenantRequest(httptest.NewRequest("GET", "/api/v1/audit-logs?limit=1&offset=1", nil), actor)
+		w := httptest.NewRecorder()
+		router.listAuditLogs(w, req)
+		if w.Code != 200 {
+			t.Fatalf("status %d", w.Code)
+		}
+		var body struct {
+			Items []store.AuditLog `json:"items"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		validateWireObject(t, map[string]any{"items": mustAuditJSON(t, body.Items)}, wireSchema(reflect.TypeFor[listResponse[store.AuditLog]]()))
+		if len(body.Items) != 1 || body.Items[0].ID != own[1] || body.Items[0].TenantID != actor.TenantID {
+			t.Fatalf("tenant page lost: %#v", body.Items)
+		}
+	}
+}
+
+func mustAuditJSON(t *testing.T, items []store.AuditLog) any {
+	t.Helper()
+	raw, err := json.Marshal(items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		t.Fatal(err)
+	}
+	return value
+}
+
+func TestAuditLogContractCoversMountedRoute(t *testing.T) {
+	router := &Router{mux: http.NewServeMux(), productInfo: ProductInfo{Edition: "community"}}
+	router.routes()
+	found := false
+	for _, route := range router.routeContracts {
+		if route.Pattern != "GET /api/v1/audit-logs" {
+			continue
+		}
+		found = true
+		op := map[string]any{"responses": map[string]any{"2XX": map[string]any{}}, "parameters": []any{}}
+		if !applyAuditPayloadContract(route.Pattern, op) {
+			t.Fatal("missing payload contract")
+		}
+		if _, ok := op["responses"].(map[string]any)["200"]; !ok {
+			t.Fatal("missing success shape")
+		}
+	}
+	if !found {
+		t.Fatal("audit route missing")
 	}
 }
