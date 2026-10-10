@@ -1,5 +1,6 @@
+import { useDrTaskEvents } from './use-dr-task-events';
 import { getRestorePointContents } from '../../api/restore-points';
-import { listTasks, getTask, listTaskEvents, createBackupTask, createRecoveryTask, cancelTask, cleanupDrillTask } from '../../api/tasks';
+import { listTasks, createBackupTask, createRecoveryTask, cancelTask, cleanupDrillTask } from '../../api/tasks';
 import { listProtectionPlans, createProtectionPlan, activateProtectionPlan, reconfigureProtectionPlanStorage, deleteProtectionPlan } from '../../api/protection-plans';
 import { listApplications, updateApplicationProtection } from '../../api/applications';
 import { requestClusterInventory, getInventoryRequestStatus } from '../../api/inventory';
@@ -186,7 +187,6 @@ export default function ApplicationDrPage(props: {
   };
   const [syncTaskDetail, setSyncTaskDetail] = useState<{ app: AppItem; task: ApiTask; failure?: ReturnType<typeof taskFailureSummary> } | null>(null);
   const [drTaskEvents, setDrTaskEvents] = useState<Record<string, ApiTaskEvent[]>>({});
-  const refreshedTerminalEventIdsRef = useRef(new Set<string>());
   const [resourceDetail, setResourceDetail] = useState<{ app: AppItem } | null>(null);
   const [resourceRefreshKey, setResourceRefreshKey] = useState('');
   const [resourceRefreshStatus, setResourceRefreshStatus] = useState<{ key: string; status: string; message?: string } | null>(null);
@@ -472,106 +472,7 @@ export default function ApplicationDrPage(props: {
       toast('Failed to reconfigure storage: ' + (error instanceof Error ? error.message : 'unknown error'));
     }
   };
-  useEffect(() => {
-    const ids = displayedDrTaskKey ? displayedDrTaskKey.split('|').filter(Boolean) : [];
-    if (ids.length === 0) return;
-    let cancelled = false;
-    const loadEvents = async () => {
-      const entries = await Promise.all(ids.map(async taskId => {
-        try {
-          const res = await listTaskEvents(taskId);
-          return [taskId, listItems(res)] as const;
-        } catch {
-          return [taskId, null] as const;
-        }
-      }));
-      if (cancelled) return;
-      setDrTaskEvents(prev => {
-        const next = { ...prev };
-        let changed = false;
-        for (const [taskId, events] of entries) {
-          if (!events) continue;
-          const current = prev[taskId] || [];
-          const unchanged = current.length === events.length && current.every((event, index) => (
-            event.id === events[index]?.id
-            && event.level === events[index]?.level
-            && event.message === events[index]?.message
-          ));
-          if (!unchanged) {
-            next[taskId] = events;
-            changed = true;
-          }
-        }
-        return changed ? next : prev;
-      });
-      let observedNewTerminalEvent = false;
-      for (const [, events] of entries) {
-        for (const event of events || []) {
-          if (!['completed', 'backup_completed', 'velero-schedule'].includes(event.reason)) continue;
-          if (refreshedTerminalEventIdsRef.current.has(event.id)) continue;
-          refreshedTerminalEventIdsRef.current.add(event.id);
-          observedNewTerminalEvent = true;
-        }
-      }
-      if (observedNewTerminalEvent) {
-        void refreshPlatformData();
-      }
-    };
-    loadEvents();
-    const timer = hasActiveDisplayedTask ? window.setInterval(loadEvents, 2000) : undefined;
-    return () => {
-      cancelled = true;
-      if (timer) window.clearInterval(timer);
-    };
-  }, [displayedDrTaskKey, hasActiveDisplayedTask, refreshPlatformData]);
-  useEffect(() => {
-    const taskId = syncTaskDetail?.task.id;
-    if (!taskId) return;
-    let cancelled = false;
-    const refreshOpenTask = async () => {
-      try {
-        const [eventResult, latest] = await Promise.all([
-          listTaskEvents(taskId),
-          getTask(taskId),
-        ]);
-        if (cancelled) return;
-        const nextEvents = listItems(eventResult);
-        setDrTaskEvents(prev => {
-          const current = prev[taskId] || [];
-          const unchanged = current.length === nextEvents.length && current.every((event, index) => event.id === nextEvents[index]?.id);
-          return unchanged ? prev : { ...prev, [taskId]: nextEvents };
-        });
-        if (latest) setSyncTaskDetail(prev => {
-          if (prev?.task.id !== taskId) return prev;
-          const currentSignature = JSON.stringify([prev.task.status, prev.task.progress, prev.task.errorCode, prev.task.errorMessage, prev.task.payload]);
-          const nextSignature = JSON.stringify([latest.status, latest.progress, latest.errorCode, latest.errorMessage, latest.payload]);
-          return currentSignature === nextSignature ? prev : { ...prev, task: latest, failure: undefined };
-        });
-      } catch {
-        // Keep the last successful snapshot visible while the next live refresh retries.
-      }
-    };
-    void refreshOpenTask();
-    const timer = window.setInterval(refreshOpenTask, 2000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [syncTaskDetail?.task.id]);
-  useEffect(() => {
-    if (!namespaceDetailTaskId || drTaskEvents[namespaceDetailTaskId]) return;
-    let cancelled = false;
-    void listTaskEvents(namespaceDetailTaskId)
-      .then(result => {
-        if (!cancelled) setDrTaskEvents(prev => ({ ...prev, [namespaceDetailTaskId]: listItems(result) }));
-      })
-      .catch(() => {
-        if (!cancelled) setDrTaskEvents(prev => ({ ...prev, [namespaceDetailTaskId]: [] }));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [namespaceDetailTaskId, drTaskEvents]);
+  useDrTaskEvents({ displayedDrTaskKey, hasActiveDisplayedTask, refreshPlatformData, syncTaskDetail, setSyncTaskDetail, namespaceDetailTaskId, drTaskEvents, setDrTaskEvents });
   const unitMembers = (app: AppItem) => app.memberApps?.length ? app.memberApps : [app];
   const unitNamespaces = (app: AppItem) => unitMembers(app).map(item => item.namespace || item.name);
   const taskForUnit = (tasks: Record<string, ApiTask>, app: AppItem, allowedTypes: string[] = ['backup']) => {
