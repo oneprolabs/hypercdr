@@ -198,7 +198,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: hypercdr-oadp-lock-${{ needs.prepare-release.outputs.image_version }}
           path: /tmp/hypercdr-runtime/oadp-mirror
