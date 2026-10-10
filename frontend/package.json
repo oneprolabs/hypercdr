@@ -20,7 +20,7 @@
     "test:dashboard": "node --experimental-strip-types --test src/features/dashboard/overview-model.test.mjs"
   },
   "dependencies": {
-    "@tailwindcss/vite": "^4.1.14",
+    "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-table": "^8.21.3",
     "@vitejs/plugin-react": "^5.0.4",
     "lucide-react": "^0.546.0",
