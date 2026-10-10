@@ -45,6 +45,7 @@ lint:
 	test -z "$$(gofmt -l $$(find backend agent/comm-agent -name '*.go' -type f))"
 
 verify: lint test
+	python3 -B scripts/tests/deployment-inputs.py
 	python3 -B scripts/tests/dev-provenance.py
 	bash scripts/tests/repository-hygiene.sh
 	bash scripts/tests/blue-green-deploy.sh

@@ -51,9 +51,11 @@ assets and contain no runtime configuration. Manual builds/copies must retain
 matching provenance; otherwise status warns rather than attributing them to
 current source. A dirty build records that fact permanently even after commit.
 
-The current host/systemd development flow remains supported. The existing dev
-Compose file supplies PostgreSQL only. A full container development alternative
-is deferred to issue #7: it must deliberately handle Go restart/rebuild cost,
-persistent module/build caches, debugging, platform portability and database
-migration isolation. Merely adding source mounts would not improve the current
-prebuilt frontend workflow and could reintroduce worktree confusion.
+The host/systemd development flow remains supported. `docker-compose.dev.yml`
+supplies its PostgreSQL dependency. An independent full container alternative
+is now available through `scripts/dev/source-compose.sh`; it builds the API,
+frontend and registration executor from the current checkout and retains its
+own PostgreSQL volume. It uses explicit rebuilds, not bind-mounted live reload,
+and does not replace host provenance reporting or production blue/green.
+See [source container development](../deployment/build-release-install.md#portable-source-development)
+for setup, external manifest requirements, HTTP/network limits and teardown.

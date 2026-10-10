@@ -1,16 +1,14 @@
-.git
-.playwright-cli
-output
-frontend/node_modules
-**/node_modules
-
+*
+!backend/
+!backend/**
+**/.git
 **/.env
 **/.env.*
 **/node_modules*
+**/dist
 **/coverage
 **/test-results
 **/playwright-report
-**/__pycache__
 **/*.log
 **/*.pid
 **/*.key
@@ -19,3 +17,4 @@ frontend/node_modules
 **/kubeconfig*.yaml
 **/kubeconfig*.yml
 **/kubeconfigs/
+**/__pycache__

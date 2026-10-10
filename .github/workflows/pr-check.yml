@@ -5,6 +5,10 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: pr-check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -61,7 +65,42 @@ jobs:
           bash scripts/tests/release-workflow.sh
           bash scripts/tests/oadp-mirror.sh
           bash scripts/tests/pr-review-notification.sh
+      - name: Check development provenance and deployment inputs
+        run: |
+          python3 -B scripts/tests/dev-provenance.py
+          python3 -B scripts/tests/deployment-inputs.py
       - name: Reject generated artifacts
         run: bash scripts/tests/repository-hygiene.sh
       - name: Reject tracked secrets and logs
         run: test -z "$(git ls-files -- ':!third_party/**' '*.log' '*.pid' '*.key' '*.pem' '*.crt')"
+
+  docker:
+    name: Docker build (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: api, context: ./backend, file: ./backend/Dockerfile}
+          - {name: frontend, context: ., file: ./frontend/Dockerfile}
+          - {name: executor, context: ./backend, file: ./backend/cluster-registration-executor.Dockerfile}
+          - {name: agent, context: ./agent/comm-agent, file: ./agent/comm-agent/Dockerfile}
+          - {name: oadp-agent, context: ./agent/comm-agent, file: ./agent/comm-agent/oadp.Dockerfile}
+          - {name: dev-api, context: ., file: ./docker/dev/api.Dockerfile}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: false
+          load: true
+          tags: hypercdr-pr-${{ matrix.name }}:check
+          platforms: linux/amd64
+          cache-from: type=gha,scope=pr-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=pr-${{ matrix.name }}
+      - name: Smoke built API with real PostgreSQL
+        if: ${{ matrix.name == 'api' || matrix.name == 'dev-api' }}
+        run: ./scripts/tests/api-image-smoke.sh hypercdr-pr-${{ matrix.name }}:check

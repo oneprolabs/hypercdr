@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: ${HCDR_IMAGE_REGISTRY:?HCDR_IMAGE_REGISTRY is required}/postgres:16
+    image: ${HCDR_DEV_POSTGRES_IMAGE:-registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:postgres-16}
     container_name: hypercdr-dev-postgres
     environment:
       POSTGRES_DB: hypercdr

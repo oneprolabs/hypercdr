@@ -53,18 +53,29 @@ cp scripts/dev/dev.conf.example ../hypercdr-runtime/environments/community/dev.c
 (cd frontend && npm ci && npm run build)
 ```
 
-## 发布
+## 发布和独立容器开发
 
-发布脚本在源码目录外构建，并使用一个平台版本统一发布 API、前端、升级器和
-comm-agent 镜像。
+生产继续使用 GitHub Release manifest 和现有蓝绿发布流程。PR 镜像检查只构建，
+不推送、不部署。首次安装使用 `deploy/online/install.sh`，不指定版本时选择最新版本。
 
 ```bash
-cp scripts/release/release.conf.example scripts/release/release.conf
-./scripts/release/release-all.sh vYYYYMMDD.N
+curl -fsSL https://raw.githubusercontent.com/oneprolabs/hypercdr/main/deploy/online/install.sh \
+  | sudo bash -s -- --base-url https://platform.example.com:12443 --install-dir /var/lib/hypercdr --yes
 ```
 
-详细流程参考[标准发布流程](docs/deployment/release-flow.zh.md)和
-[安装部署文档](docs/deployment/deployment-guide.zh.md)。
+官网默认不安装，需要时添加 `--install-website`，官网端口为 12445。
+`env.example` 是配置参考，包含占位值，不能替代安装脚本。
+
+独立源码容器开发入口（需将 GitHub Release 的 manifest 下载到源码目录外）：
+
+```bash
+./scripts/dev/source-compose.sh up --manifest ../hypercdr-runtime/release-manifest.json
+./scripts/dev/source-compose.sh ps
+./scripts/dev/source-compose.sh down
+```
+
+默认通过 `http://localhost:13002/login` 访问，采用图片验证码；数据与现有环境隔离。
+详细说明参考[构建与安装文档](docs/deployment/build-release-install.md)。
 
 ## 部署方式
 

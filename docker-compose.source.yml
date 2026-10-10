@@ -1,0 +1,95 @@
+# Independent container development stack; never used by release.yml.
+services:
+  postgres:
+    image: ${HCDR_DEV_POSTGRES_IMAGE:-registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:postgres-16}
+    environment:
+      POSTGRES_DB: hypercdr
+      POSTGRES_USER: hypercdr
+      POSTGRES_PASSWORD: ${HCDR_SOURCE_DB_PASSWORD:?use source-compose.sh}
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    networks: [data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U hypercdr -d hypercdr']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  hypercdr-platform-api:
+    build:
+      context: .
+      dockerfile: docker/dev/api.Dockerfile
+      args:
+        GOPROXY: ${HCDR_SOURCE_GOPROXY:-https://proxy.golang.org,direct}
+    environment:
+      HCDR_HTTP_ADDR: 0.0.0.0:18080
+      HCDR_DATABASE_URL: postgres://hypercdr:${HCDR_SOURCE_DB_PASSWORD:?use source-compose.sh}@postgres:5432/hypercdr?sslmode=disable
+      HCDR_PUBLIC_BASE_URL: ${HCDR_SOURCE_PUBLIC_URL:-http://localhost:13002}
+      HCDR_AGENT_WS_ENDPOINT: ${HCDR_SOURCE_WS_ENDPOINT:-ws://localhost:13002/ws/agent}
+      HCDR_IMAGE_REGISTRY: registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr
+      HCDR_SECRET_KEY: ${HCDR_SOURCE_SECRET_KEY:?use source-compose.sh}
+      HCDR_RELEASE_TOKEN: ${HCDR_SOURCE_RELEASE_TOKEN:?use source-compose.sh}
+      HCDR_RELEASE_MANIFEST_PATH: /releases/release-manifest.json
+      HCDR_REGISTRATION_EXECUTOR_ENDPOINT: http://executor:18082
+      HCDR_REGISTRATION_EXECUTOR_TOKEN: ${HCDR_SOURCE_EXECUTOR_TOKEN:?use source-compose.sh}
+      HCDR_REGISTRATION_SESSION_DIR: /sessions
+      HCDR_AUTH_CHALLENGE_MODE: captcha
+      HCDR_DEPLOY_MODE: development
+    volumes:
+      - ${HCDR_SOURCE_RUNTIME:?use source-compose.sh}/releases:/releases:ro
+      - sessions:/sessions
+    depends_on:
+      postgres: {condition: service_healthy}
+    networks: [data, app, egress]
+    healthcheck:
+      test: [CMD, /usr/local/bin/curl, -f, -o, /dev/null, --connect-timeout, '3', http://127.0.0.1:18080/healthz]
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 12
+  executor:
+    build:
+      context: backend
+      dockerfile: cluster-registration-executor.Dockerfile
+      args:
+        GOPROXY: ${HCDR_SOURCE_GOPROXY:-https://proxy.golang.org,direct}
+    environment:
+      HCDR_DATABASE_URL: postgres://hypercdr:${HCDR_SOURCE_DB_PASSWORD:?use source-compose.sh}@postgres:5432/hypercdr?sslmode=disable
+      HCDR_REGISTRATION_EXECUTOR_TOKEN: ${HCDR_SOURCE_EXECUTOR_TOKEN:?use source-compose.sh}
+      HCDR_REGISTRATION_SESSION_DIR: /sessions
+    volumes: [sessions:/sessions]
+    depends_on:
+      hypercdr-platform-api: {condition: service_healthy}
+    networks: [data, app, egress]
+    read_only: true
+    tmpfs: ['/tmp:size=32m,noexec,nosuid,nodev']
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 60s
+    healthcheck:
+      test: [CMD, /usr/local/bin/curl, -f, -o, /dev/null, --connect-timeout, '3', http://127.0.0.1:18082/healthz]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        NPM_REGISTRY: ${HCDR_SOURCE_NPM_REGISTRY:-https://registry.npmjs.org}
+    ports:
+      - '${HCDR_SOURCE_BIND_IP:-127.0.0.1}:${HCDR_SOURCE_PORT:-13002}:80'
+    depends_on:
+      hypercdr-platform-api: {condition: service_healthy}
+    networks: [app, ingress]
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1/]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+networks:
+  data: {internal: true}
+  app: {internal: true}
+  ingress: {driver: bridge}
+  egress: {driver: bridge}
+volumes:
+  postgres-data:
+  sessions:

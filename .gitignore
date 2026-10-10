@@ -14,10 +14,9 @@ kubeconfigs/
 .dev/
 .build/
 .cache/
-deploy/
-logs/
-backups/
-certs/
+/logs/
+/backups/
+/certs/
 *.log
 *.pid
 
@@ -25,7 +24,7 @@ certs/
 .gocache/
 .gocache-test/
 .gomodcache/
-bin/
+/bin/
 *.test
 *.exe
 
@@ -42,10 +41,10 @@ frontend/coverage/
 
 # Browser automation artifacts
 .playwright-cli/
-output/
+/output/
 
 # Release output and archives
-dist/
+/dist/
 /release/
 *.zip
 *.tar
@@ -69,4 +68,4 @@ Thumbs.db
 *.swp
 *~
 
-bootstrap/release-center/__pycache__/
+**/__pycache__/
