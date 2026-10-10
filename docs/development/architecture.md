@@ -180,6 +180,11 @@ restart/timeout errors. PostgreSQL regressions check empty collection, cached
 coverage without dispatch and offline collection behavior. Diagnostic filtering
 remains tenant-scoped for ordinary users; the existing System Administrator
 cross-tenant diagnostic privilege is explicit rather than silently changed.
+All nine SMTP configuration routes declare concrete payloads and installation-
+wide System Administrator access. Password request fields are write-only;
+response DTOs exclude the stored encrypted credential. Isolated PostgreSQL tests
+cover route-level tenant-administrator denial, credential retention on blank
+updates, duplicate/default conflicts and invalid recipients without sending email.
 Other endpoint payload schemas remain incomplete; this is not yet a
 client-generation contract. Existing error codes and HTTP statuses are preserved;
 JSON errors can also carry the request ID from the response header. English

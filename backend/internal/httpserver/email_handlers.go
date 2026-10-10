@@ -106,7 +106,7 @@ func (r *Router) listEmailSettings(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, 500, map[string]any{"error": "email_settings_failed"})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"items": items})
+	writeJSON(w, 200, listResponse[store.EmailSettings]{Items: nonNilSlice(items)})
 }
 
 func (r *Router) createEmailSettings(w http.ResponseWriter, req *http.Request) {
@@ -195,7 +195,7 @@ func (r *Router) deleteEmailSettings(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, 404, map[string]any{"error": "email_settings_not_found"})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"deleted": true})
+	writeJSON(w, 200, deletedResponse{Deleted: true})
 }
 
 func (r *Router) setDefaultEmailSettings(w http.ResponseWriter, req *http.Request) {
@@ -220,13 +220,11 @@ func (r *Router) sendEmailSettingsTest(w http.ResponseWriter, settings store.Ema
 		return
 	}
 	_ = r.store.UpdateEmailSettingsTestResult(settings.ID, "succeeded", "", now)
-	writeJSON(w, 200, map[string]any{"sent": true, "testedAt": now})
+	writeJSON(w, 200, emailTestResponse{Sent: true, TestedAt: now})
 }
 
 func (r *Router) testEmailSettingsByID(w http.ResponseWriter, req *http.Request) {
-	var body struct {
-		Recipient string `json:"recipient"`
-	}
+	var body emailTestRequest
 	if decodeJSON(req, &body) != nil || !validUserEmail(body.Recipient) {
 		writeJSON(w, 400, map[string]any{"error": "invalid_recipient"})
 		return
@@ -239,9 +237,7 @@ func (r *Router) testEmailSettingsByID(w http.ResponseWriter, req *http.Request)
 	r.sendEmailSettingsTest(w, settings, strings.TrimSpace(body.Recipient))
 }
 func (r *Router) testEmailSettings(w http.ResponseWriter, req *http.Request) {
-	var body struct {
-		Recipient string `json:"recipient"`
-	}
+	var body emailTestRequest
 	if decodeJSON(req, &body) != nil || !validUserEmail(body.Recipient) {
 		writeJSON(w, 400, map[string]any{"error": "invalid_recipient"})
 		return
