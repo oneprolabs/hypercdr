@@ -1,249 +1,66 @@
-<div align="center">
-
 # HyperCDR
 
-[English](README.md) | [中文](README.zh-CN.md)
+[中文](README.zh-CN.md) | English
 
-**Application-centric disaster recovery for Kubernetes**
+HyperCDR is a Kubernetes disaster recovery platform. The control plane manages clusters, protection policies, synchronization, restore points, drills, recovery tasks and component upgrades. Cluster agents connect outbound to the platform and coordinate Velero or the OpenShift OADP path.
 
-</div>
+## Install a released version
 
-**HyperCDR** is a centralized disaster-recovery platform for Kubernetes applications. It connects protected clusters to one control plane, discovers application namespaces and storage, schedules synchronization, creates restore points, and coordinates drills and recovery through Velero.
-
-The platform is designed around observable, database-backed workflows. User actions create tasks first; the control plane then dispatches those tasks to a cluster-side `comm-agent`, receives progress and results, and updates the UI from persisted state. This keeps synchronization, cleanup, drill, recovery, upgrades, and diagnostics traceable from the platform to the cluster.
-
-## Why HyperCDR
-
-Kubernetes backup tools solve the mechanics of moving resources and volume data, but operating disaster recovery across clusters requires more than a backup command. Teams still need to answer which applications are protected, when the next synchronization runs, which restore points are usable, where data is stored, whether a drill succeeded, and which cluster components need an upgrade.
-
-HyperCDR provides that operational layer while using Velero as the cluster-side data-protection engine.
-
-- **Application-centric protection** — manage disaster recovery by cluster and namespace instead of individual backup objects
-- **Three-stage workflow** — progress from discovery, through configuration, to protected and recoverable applications
-- **Policy-driven synchronization** — run interval, daily, weekly, and monthly protection schedules
-- **Restore points and retention** — track successful synchronization results and their cleanup lifecycle
-- **Drill and recovery** — restore to a target cluster without turning platform state into optimistic UI state
-- **Tenant isolation** — isolate clusters and disaster-recovery resources by tenant, with administrator and operator roles
-- **Component lifecycle management** — track and upgrade `comm-agent` and Velero versions per cluster
-- **Diagnostics** — collect platform and cluster logs with task/request correlation for troubleshooting
-- **Pluggable object storage** — support S3-compatible, AWS, Azure, and Google Cloud storage through Velero plugins
-
-## How It Works
-
-```text
-Browser
-  │
-  ▼
-HyperCDR frontend
-  │ REST / WebSocket status
-  ▼
-HyperCDR API ───────── PostgreSQL
-  │                    tasks, policies, restore points,
-  │ secure WebSocket   releases, users, tenants, logs
-  ▼
-comm-agent
-  │ Kubernetes API
-  ▼
-Velero + node-agent ── Object storage
-```
-
-The cluster initiates the connection to the platform, so the control plane does not need inbound administrative access to every managed cluster. The `comm-agent` reports inventory and component versions, executes platform tasks, and coordinates Velero resources. PostgreSQL remains the source of truth for user-visible task and recovery state.
-
-## Core Workflow
-
-1. **Register a cluster** — the platform creates a single-use token and generates the cluster installation command.
-2. **Discover applications** — `comm-agent` reports namespaces, workloads, PVCs, StorageClasses, and component versions.
-3. **Configure protection** — select storage, policy, source application, and target cluster.
-4. **Synchronize** — a manual action or due schedule creates a database task before it is dispatched to the agent.
-5. **Create a restore point** — the platform records a restore point only after the agent reports a successful synchronization.
-6. **Drill or recover** — restore a selected point to the target cluster and follow persisted task progress.
-7. **Retain and clean up** — scheduled cleanup removes expired restore points and their object-storage artifacts.
-
-## Architecture
-
-```text
-hypercdr/
-├── backend/                   # Go control-plane API, scheduler, migrations, upgrader
-│   ├── cmd/                   # platform-api, migration, and upgrader entry points
-│   ├── internal/              # HTTP, task, store, protocol, and diagnostic implementation
-│   └── Dockerfile*            # API and registration-executor runtime images
-├── frontend/                  # React UI and its Nginx runtime Dockerfile
-├── agent/
-│   └── comm-agent/            # Go agent and its runtime Dockerfiles
-├── charts/                    # Control-plane and cluster Helm assets
-├── config/                    # Credential-free Registry profiles
-├── docker/                    # Shared edge Nginx configuration
-├── scripts/                   # Development, Registry, build, release, and verification tools
-├── third_party/
-│   └── velero/                # Pinned HyperCDR Velero source tree
-├── docs/                      # Architecture, protocols, deployment, testing, and operations
-└── api/                       # OpenAPI and WebSocket contract documentation
-```
-
-Generated binaries, frontend assets, release packages, logs, certificates, databases, and other runtime state are kept outside the repository. By default, scripts use the sibling directory:
-
-```text
-../hypercdr-runtime/
-├── build/                     # Versioned build workspaces
-├── cache/                     # Reusable compiler and package caches
-├── environments/             # Isolated Community and Enterprise development state
-├── shared/                    # Shared development certificates and local configuration
-├── services/                 # GitHub Release assets source and runtime data
-└── codex/                    # Codex context and generated validation evidence
-```
-
-## Quick Start
-
-### Prerequisites
-
-- Go 1.25.13
-- Node.js 22 and npm
-- Docker Engine with Docker Compose v2
-- PostgreSQL 16 (provided by Docker for the standard workflows)
-- OpenSSL and curl
-
-### 1. Clone
-
-```bash
-git clone https://github.com/oneprolabs/hypercdr.git
-cd hypercdr
-```
-
-The pinned Velero source is committed under `third_party/velero`; no Git submodule initialization is required.
-
-### 2. Start the development environment
-
-```bash
-mkdir -p ../hypercdr-runtime/environments/community
-cp scripts/dev/dev.conf.example ../hypercdr-runtime/environments/community/dev.conf
-./scripts/dev/start-dev.sh
-```
-
-Check or stop the environment:
-
-```bash
-./scripts/dev/status-dev.sh
-./scripts/dev/stop-dev.sh
-```
-
-Use `./scripts/dev/update-dev.sh api`, `frontend`, or `all` to rebuild the running
-environment from this worktree. `make status` shows each component’s build source,
-commit and time, and warns about a different worktree or unbuilt edits. Python 3
-is required for provenance checks. See [development details](docs/development/platform.md).
-
-Development runtime data remains under `../hypercdr-runtime/environments/community` when services are stopped.
-
-### 3. Run checks
-
-```bash
-make test
-make verify
-```
-
-Or run components independently:
-
-```bash
-cd backend && go test ./...
-cd agent/comm-agent && go test ./...
-cd frontend && npm ci && npm run build
-bash scripts/tests/registry-config.sh
-```
-
-## Common Commands
-
-| Command | Purpose |
-|---|---|
-| `make dev` | Start API, frontend, and development dependencies |
-| `make status` | Show development service status and build provenance |
-| `make update-dev` | Rebuild and restart development services without recreating PostgreSQL |
-| `make stop` | Stop development services without deleting data |
-| `make test` | Test backend, agent, and frontend |
-| `make verify` | Run tests plus shell and repository consistency checks |
-| `./scripts/registry-login.sh` | Log Docker into the active Registry profile |
-| `./scripts/release/release-all.sh --config <path>` | Build, publish, verify, and package a release |
-
-## Registry Profiles
-
-Container Registry endpoints are declared in [`config/registries.conf`](config/registries.conf). `HCDR_ACTIVE_REGISTRY` selects the default profile, and scripts can select another profile without changing source code.
-
-```bash
-./scripts/registry-login.sh
-
-# One-command override for a configured profile
-./scripts/release/release-all.sh --config /absolute/path/to/release.conf
-```
-
-Registry credentials are never stored in `registries.conf` or PostgreSQL. Docker/CI manages publication credentials; Kubernetes image pull secrets are used when a private runtime Registry requires authentication. Public OCI Registries use anonymous pull authorization automatically.
-
-## Build, Release, and Installation
-
-Production uses GitHub Release manifests and the existing blue/green deployment
-flow. PR checks build core images without publishing or deploying them.
+Use a Linux host with Docker Engine/Compose v2, Bash, curl, tar, jq and OpenSSL. Replace the example address with one reachable by browsers and cluster agents.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/oneprolabs/hypercdr/main/deploy/online/install.sh \
-  | sudo bash -s -- \
-    --base-url https://platform.example.com:12443 \
-    --install-dir /var/lib/hypercdr \
-    --yes
+  | sudo bash -s -- --base-url https://platform.example.com:12443 --install-dir /var/lib/hypercdr --yes
 ```
 
-Without `--version`, the installer selects the latest release. Add
-`--install-website` to include the optional website on port 12445.
-The platform uses port 12443. `env.example` is a configuration reference with
-placeholders; it does not replace the installer or prepare TLS/manifest files.
+No version selects the latest GitHub Release; add `--version VERSION` to pin one. The platform uses HTTPS 12443. Add the no-value flag `--install-website` to install the optional website on HTTPS 12445. An external Nginx Proxy Manager or local Harbor is not required. Docker must already be installed.
 
-For an independent development stack built from this checkout, use:
+Initial login is `admin` / `admin123`; change the password before business use. Authentication supports image captcha or Cloudflare Turnstile, according to the installed configuration. Generated TLS certificates are not automatically trusted by browsers.
+
+Read the [installation guide](docs/deployment/deployment-guide.zh.md), [first-use guide](docs/user-guide/first-use.zh.md), [configuration](docs/deployment/configuration.zh.md), and [troubleshooting](docs/operations/troubleshooting.zh.md). Published artifacts are in [GitHub Releases](https://github.com/oneprolabs/hypercdr/releases).
+
+## How it works
+
+```text
+Browser → HTTPS edge → active blue/green frontend + Go API → PostgreSQL
+Cluster agent → outbound WSS → platform tasks and inventory
+Cluster agent → Kubernetes API → Velero / OADP → object storage
+```
+
+PostgreSQL persists business state; there is no MemoryStore fallback. Platform-direct registration additionally requires the registration executor to reach the cluster API using kubeconfig. Command registration runs on a host with that connectivity.
+
+GitHub Release manifests pin component versions. Installation and successful blue/green upgrades activate a local manifest; cluster registration and component upgrades use its component catalog. The host upgrade runner executes platform upgrade tasks. Platform upgrades do not imply that every cluster component has upgraded.
+
+See [current architecture](docs/architecture/control-plane-architecture.md) and [documentation index](docs/README.md). Repository assets do not certify every distribution, driver or deployment topology; consult the relevant compatibility and verification documents.
+
+## Source layout
+
+| Directory | Responsibility |
+|---|---|
+| `backend/` | API, PostgreSQL, migrations, scheduling, upgrades |
+| `frontend/` | React UI and shared components |
+| `agent/comm-agent/` | Cluster communication and task execution |
+| `deploy/online/` | Public installer |
+| `scripts/release/` | Build, packaging, blue/green and lifecycle tools |
+| `website/` | Independent public website |
+| `docker/`, `charts/` | Deployment/image assets; charts are not the online install path |
+| `third_party/velero/` | Pinned source used by component builds |
+| `docs/` | Usage, architecture, deployment and operations |
+
+## Development and contributions
+
+Runtime data, caches, builds and logs belong in the sibling `hypercdr-runtime` directory. Host development uses Go 1.25.13, Node.js 22, Docker/Compose, PostgreSQL and OpenSSL; see [development setup](scripts/dev/README.md). A separate full-container source workflow is documented in [source development](docs/deployment/build-release-install.md#portable-source-development).
 
 ```bash
-./scripts/dev/source-compose.sh up --manifest ../hypercdr-runtime/release-manifest.json
-./scripts/dev/source-compose.sh ps
-./scripts/dev/source-compose.sh down
+make dev
+make status
+make update-dev
+make stop
+make verify
 ```
 
-This defaults to `http://localhost:13002/login`, retains its separate database,
-and does not modify a running production or host development environment.
-See [build, release, and installation details](docs/deployment/build-release-install.md)
-for prerequisites, manifest acquisition, network access and local source builds.
+Backend tests use isolated real PostgreSQL databases. Never point test configuration at a business database. See [test setup](docs/development/platform.md) and [CONTRIBUTING](CONTRIBUTING.md).
 
-## Data and Time Conventions
+Tag releases currently auto-deploy to the CI-configured environment; manual workflow deployment defaults off. PR checks do not publish or deploy. See the [release runbook](docs/deployment/release-flow.zh.md).
 
-- PostgreSQL timestamps are stored in UTC.
-- The UI renders timestamps in the user's selected browser-side time zone.
-- Schedules are normalized for execution and their next-fire timestamps are persisted in UTC.
-- User-visible restore-point names are derived dynamically from task timestamps rather than storing localized time in the database.
-- User-visible task state comes from persisted task and event records, not speculative frontend state.
-
-## Tech Stack
-
-- **Control plane backend**: Go · PostgreSQL · REST · WebSocket
-- **Frontend**: React · TypeScript · Vite · Tailwind CSS
-- **Cluster runtime**: Go `comm-agent` · Kubernetes · Velero · node-agent
-- **Infrastructure**: Docker Compose · Helm · Nginx · OCI Registry
-- **Storage integrations**: S3/AWS · Azure Blob Storage · Google Cloud Storage
-
-## Design Principles
-
-- **Database-backed truth** — tasks and displayed state are persisted before the UI presents them.
-- **Outbound cluster connectivity** — managed clusters connect to the platform, reducing inbound access requirements.
-- **Tenant-scoped resources** — clusters, storage, policies, DR configuration, tasks, restore points, and logs are tenant isolated.
-- **UTC at rest, local at presentation** — timestamps remain unambiguous in storage and adaptable in the UI.
-- **Source-based releases** — HyperCDR and customized Velero images are built from pinned source; runtime artifacts never modify the source tree.
-- **Registry portability** — build, release, installation, registration, and upgrades use the same configurable OCI Registry profile.
-- **Versioned migrations** — database changes are append-only migration history and are applied during installation or upgrade.
-- **Traceable protocols** — platform/agent message and task-state changes update the corresponding documents under `docs/protocols`.
-
-## Documentation
-
-- [Documentation index](docs/README.md)
-- [Architecture overview](docs/architecture/overview.md)
-- [Deployment guide](docs/deployment/deployment-guide.zh.md)
-- [Release flow](docs/deployment/release-flow.zh.md)
-- [Platform-agent protocol](docs/protocols/platform-agent-messages.md)
-- [DR task state machine](docs/protocols/dr-task-state-machine.md)
-- [Logging and diagnostics](docs/operations/logging-design.md)
-- [Contributing](CONTRIBUTING.md)
-
-## Security
-
-Do not commit credentials, kubeconfigs, private keys, certificates, database dumps, runtime logs, generated release artifacts, or customer data. See [SECURITY.md](SECURITY.md) for vulnerability reporting guidance.
+Do not commit credentials, kubeconfigs, private keys, certificates, database backups or runtime artifacts. Report vulnerabilities according to [SECURITY.md](SECURITY.md). See [LICENSE](LICENSE).

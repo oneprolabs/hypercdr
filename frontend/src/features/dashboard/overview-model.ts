@@ -177,3 +177,32 @@ export function buildOverviewModel(input: {
     },
   };
 }
+
+export type PlatformAlert = { id: string; kind: 'cluster' | 'storage' | 'plan' | 'task'; title: string; resource: string; time?: string; timeLabel?: string; detail?: string };
+export function buildPlatformAlerts(input: { clusters: Cluster[]; storage: StorageRepo[]; protectionPlans: ApiProtectionPlan[]; applications: ApiApplication[]; tasks: ApiTask[] }, days: number, now = Date.now()) {
+  const current: PlatformAlert[] = [];
+  const clusterName = (id?: string) => input.clusters.find(cluster => cluster.id === id)?.name || 'Unavailable cluster';
+  const planResource = (plan: ApiProtectionPlan) => {
+    const names = input.applications.filter(app => planAppIds(plan).has(app.id)).map(app => app.namespace || app.name);
+    return `${clusterName(planSourceId(plan, input.applications))} · ${names.join(', ') || 'Protection plan'}`;
+  };
+  for (const cluster of input.clusters) {
+    if (cluster.connectionStatus !== 'online') current.push({ id: `cluster:${cluster.id}`, kind: 'cluster', title: cluster.connectionStatus === 'offline' ? 'Cluster offline' : 'Cluster connection status unknown', resource: cluster.name, time: timestamp(cluster.lastSeenAt) ? cluster.lastSeenAt : undefined, timeLabel: 'Last seen' });
+  }
+  for (const repo of input.storage) {
+    if (repo.status !== 'connected') current.push({ id: `storage:${repo.id}`, kind: 'storage', title: repo.status === 'warning' ? 'Storage connection unavailable' : 'Storage connection status unknown', resource: repo.name, time: timestamp(repo.lastValidatedAt) ? repo.lastValidatedAt : undefined, timeLabel: 'Last checked' });
+  }
+  for (const plan of input.protectionPlans) {
+    if (['configuration_failed', 'cleanup_failed'].includes(plan.status || '')) current.push({ id: `plan:${plan.id}`, kind: 'plan', title: plan.status === 'cleanup_failed' ? 'Protection cleanup failed' : 'Protection configuration failed', resource: planResource(plan), time: timestamp(plan.updatedAt) ? plan.updatedAt : undefined, timeLabel: 'Updated', detail: plan.warning });
+    const latest = selectPointedPlanTask(input.tasks.filter(task => liveTask(task) && task.type === 'backup' && planIdOf(task) === plan.id), plan.latestSyncTaskId);
+    if (latest && failedTask(latest.status)) current.push({ id: `backup:${plan.id}`, kind: 'task', title: 'Latest backup failed', resource: planResource(plan), time: taskTime(latest), timeLabel: 'Failed', detail: latest.errorMessage });
+  }
+  const recent: PlatformAlert[] = tasksInRange(input.tasks.filter(task => liveTask(task) && failedTask(task.status) && ['backup', 'restore', 'drill', 'takeover'].includes(task.type)), days, now)
+    .sort((a, b) => timestamp(taskTime(b)) - timestamp(taskTime(a)))
+    .map(task => {
+      const plan = input.protectionPlans.find(plan => plan.id === planIdOf(task));
+      const app = input.applications.find(app => app.id === task.appId);
+      return { id: task.id, kind: 'task', title: `${({ backup: 'Backup', restore: 'Restore', drill: 'DR drill', takeover: 'Takeover' })[task.type] || task.type} failed`, resource: plan ? planResource(plan) : `${clusterName(task.clusterId)}${app ? ` · ${app.namespace || app.name}` : ''}`, time: taskTime(task), timeLabel: 'Failed', detail: task.errorMessage };
+    });
+  return { current, recent };
+}

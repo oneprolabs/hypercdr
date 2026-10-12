@@ -1993,6 +1993,8 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
                   productInfo={productInfo}
                   openDr={() => openView('applications')}
                   openOperations={() => openView('operations')}
+                  openClusters={() => openView('clusters')}
+                  openStorage={() => openView('storage')}
                   clusterContext={(
                     <ClusterContextCard
                       compact

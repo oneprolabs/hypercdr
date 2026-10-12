@@ -514,42 +514,11 @@ Rules:
   `syncedBytes`, `speedBytesPerSecond`, `percent`, `etaSeconds`.
 - Final backup size detail is included only in the backup terminal event.
 
-### 3.2 Cancel Task: `platform.task.cancel`
+### 3.2 Task cancellation
 
-Purpose: reserved for cancelling an unfinished task. Until cancellation is
-implemented end to end, stop/cancel must not be treated as successful
-completion.
+The current HTTP cancellation entry is `POST /api/v1/tasks/{id}/cancel`, implemented in `backend/internal/httpserver/task_handlers.go`. Active registration tasks and backup/sync tasks have distinct cancellation paths; other task types return `task_cancel_unsupported`. Queued registration can become `canceled` immediately, while executing work enters `canceling` and requires executor completion. Backup cancellation creates a separate cancel task dispatched through the task engine. Acceptance is not proof that the original work has stopped.
 
-Current not-implemented response:
-
-```json
-{
-  "version": "v1",
-  "messageId": "msg_agent_error_cancel_001",
-  "messageKind": "response",
-  "type": "agent.message.error",
-  "tenantId": "tenant_id",
-  "clusterId": "source_cluster_id",
-  "agentId": "agent_id",
-  "timestamp": "2026-07-01T00:05:00Z",
-  "payload": {
-    "ackMessageId": "msg_cancel_001",
-    "ackType": "platform.task.cancel",
-    "taskId": "task_cancel_001",
-    "commandId": "cmd_cancel_001",
-    "errorCode": "UNSUPPORTED_MESSAGE",
-    "message": "task cancellation is not implemented",
-    "retryable": false
-  }
-}
-```
-
-Rules:
-
-- Current version should return `agent.message.error`, not silently ignore it.
-- Once implemented, cancellation itself must have accepted and terminal events.
-- The original task must enter a clear `cancelled` or `failed` state, not
-  masquerade as `succeeded`.
+Use `task_dispatch.go`, the agent protocol structs and cancellation contract tests as the authoritative payload/state definitions; a generic reserved `platform.task.cancel` example is not the implemented API contract.
 
 ### 3.3 Request Inventory: `platform.inventory.request`
 

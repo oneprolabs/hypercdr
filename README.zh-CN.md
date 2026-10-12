@@ -2,90 +2,45 @@
 
 [English](README.md) | 中文
 
-HyperCDR 是面向 Kubernetes 的容器容灾平台。中控平台统一管理保护策略、数据同步、
-恢复点、容灾演练、恢复操作、组件升级和诊断日志；集群侧 `comm-agent` 通过出站连接
-接入平台，并协调 Velero 在各业务集群中执行备份和恢复。
+HyperCDR 是 Kubernetes 容器容灾平台，提供集群管理、保护策略、同步、恢复点、容灾演练、恢复任务及组件升级。集群 Agent 主动连接平台，协调 Velero 或 OpenShift OADP 执行任务。
 
-## 系统架构
+## 安装发布版
 
-```text
-浏览器
-  -> HyperCDR 前端
-  -> HyperCDR API + PostgreSQL
-  -> 安全 WebSocket
-  -> comm-agent
-  -> Velero + node-agent
-  -> 对象存储
-```
-
-## 代码目录
-
-```text
-backend/                  Go 中控后端、调度器、迁移和升级器
-frontend/                 React + TypeScript 中控前端
-agent/comm-agent/         Go 集群通信与任务执行 Agent
-charts/                   中控平台和业务集群 Helm Chart
-docker/                   容器镜像定义和运行配置
-scripts/                  开发、构建、Harbor、发布和验证脚本
-third_party/velero/        HyperCDR 固定版本的 Velero 源码
-docs/                     架构、协议、部署和运维资料
-```
-
-本地运行数据、构建产物、日志、证书、数据库文件和 kubeconfig 不属于源码。开发脚本
-默认将这些内容保存到源码同级的 `hypercdr-runtime` 目录。
-
-## 本地开发
-
-依赖 Go 1.25.13、Node.js 22、Docker Compose v2、PostgreSQL 16 和 OpenSSL。
-
-```bash
-cp scripts/dev/dev.conf.example ../hypercdr-runtime/environments/community/dev.conf
-./scripts/dev/start-dev.sh
-./scripts/dev/status-dev.sh
-./scripts/dev/stop-dev.sh
-```
-
-分别验证各组件：
-
-```bash
-(cd backend && go test ./...)
-(cd agent/comm-agent && go test ./...)
-(cd frontend && npm ci && npm run build)
-```
-
-## 发布和独立容器开发
-
-生产继续使用 GitHub Release manifest 和现有蓝绿发布流程。PR 镜像检查只构建，
-不推送、不部署。首次安装使用 `deploy/online/install.sh`，不指定版本时选择最新版本。
+Linux 主机需预装 Docker Engine/Compose v2、Bash、curl、tar、jq 和 OpenSSL。替换为浏览器及业务集群能访问的地址：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/oneprolabs/hypercdr/main/deploy/online/install.sh \
   | sudo bash -s -- --base-url https://platform.example.com:12443 --install-dir /var/lib/hypercdr --yes
 ```
 
-官网默认不安装，需要时添加 `--install-website`，官网端口为 12445。
-`env.example` 是配置参考，包含占位值，不能替代安装脚本。
+不指定版本使用最新 GitHub Release；增加 `--version VERSION` 可固定版本。中控使用 HTTPS 12443。官网默认不安装，增加无参数开关 `--install-website` 后使用 HTTPS 12445。不依赖 Nginx Proxy Manager 或本地 Harbor，安装器不会安装 Docker。
 
-独立源码容器开发入口（需将 GitHub Release 的 manifest 下载到源码目录外）：
+首次登录为 `admin` / `admin123`，请修改初始密码。验证码可配置为图片验证码或 Cloudflare Turnstile，以安装配置为准。自动生成的 TLS 证书不会自动成为浏览器信任的证书。
+
+按[安装指南](docs/deployment/deployment-guide.zh.md) → [首次使用](docs/user-guide/first-use.zh.md)完成注册、保护和恢复验证。另见[配置参考](docs/deployment/configuration.zh.md)、[故障排查](docs/operations/troubleshooting.zh.md)、[GitHub Releases](https://github.com/oneprolabs/hypercdr/releases)。
+
+## 架构与版本
+
+浏览器通过 Edge 访问活动蓝/绿前端与 Go API；PostgreSQL 保存业务状态，无 MemoryStore 回退。集群 Agent 使用出站 WSS 上报资源并执行任务。Install for me 注册还需要平台注册执行器通过 kubeconfig 访问集群 API；命令方式在具备该网络访问的主机执行。
+
+GitHub Release manifest 固定组件版本，安装和成功蓝绿升级激活本地清单，集群注册及组件升级读取该清单。宿主机升级执行器负责平台升级任务；平台升级不代表所有集群组件已经升级。详见[当前架构](docs/architecture/control-plane-architecture.zh.md)和[文档入口](docs/README.md)。
+
+代码中的部署资产不等同于所有集群版本、存储驱动和拓扑都已通过验证；请核对专项适配范围。
+
+## 代码与开发
+
+`backend/` 为后端，`frontend/` 为中控界面，`agent/comm-agent/` 为集群 Agent，`deploy/online/` 为在线安装入口，`scripts/release/` 为发布及生命周期工具，`website/` 为独立官网，`third_party/velero/` 保留组件构建使用的源码，`docker/` 和 `charts/` 为部署资产。在线安装采用 Compose，不使用 Helm Chart。
+
+运行数据、缓存、日志和构建产物放在源码同级 `hypercdr-runtime`。宿主机开发使用 Go 1.25.13、Node.js 22、Docker/Compose、PostgreSQL 和 OpenSSL，参见[开发说明](scripts/dev/README.md)。独立源码容器运行见[构建与安装](docs/deployment/build-release-install.md)。
 
 ```bash
-./scripts/dev/source-compose.sh up --manifest ../hypercdr-runtime/release-manifest.json
-./scripts/dev/source-compose.sh ps
-./scripts/dev/source-compose.sh down
+make dev
+make status
+make update-dev
+make stop
+make verify
 ```
 
-默认通过 `http://localhost:13002/login` 访问，采用图片验证码；数据与现有环境隔离。
-详细说明参考[构建与安装文档](docs/deployment/build-release-install.md)。
+后端测试使用独立真实 PostgreSQL 数据库，不能连接业务数据库。详见[测试说明](docs/development/platform.md)及[贡献指南](CONTRIBUTING.md)。tag 发布当前会部署到 CI 配置的环境；手动工作流默认不部署，PR 检查不发布、不部署。见[发布流程](docs/deployment/release-flow.zh.md)。
 
-## 部署方式
-
-- 独立主机：使用 `docker-compose.yml` 和 GitHub Release 安装器。
-- Kubernetes 中控平台：使用 `charts/hypercdr-platform`。
-- 业务集群组件：以平台生成的注册安装器为准；`charts/hypercdr-agent` 暂为未来受支持 Chart 的保留位置。
-
-独立主机正式安装默认将持久化数据保存到 `/var/lib/hypercdr`。
-
-## 文档与安全
-
-文档入口为 [docs/README.md](docs/README.md)。禁止提交密码、kubeconfig、私钥、
-证书、数据库备份、运行日志或客户数据。安全问题报告方式见 [SECURITY.md](SECURITY.md)。
+不要提交密码、kubeconfig、私钥、证书、备份或运行产物。安全报告见 [SECURITY.md](SECURITY.md)，许可见 [LICENSE](LICENSE)。

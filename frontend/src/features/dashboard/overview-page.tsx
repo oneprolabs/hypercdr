@@ -1,11 +1,12 @@
 import React from 'react';
 import { AlertCircle, ArchiveX, CheckCircle2, ChevronDown, ClockAlert, History, Lock, ShieldAlert } from 'lucide-react';
 import DRTopologyView from '../clusters/dr-topology-view';
+import type { PlatformAlert } from './overview-model';
 import type { Cluster } from '../clusters/types';
 import { buildDRTopology } from '../clusters/dr-topology';
 import type { ApiApplication, ApiPolicy, ApiProtectionPlan, ApiRestorePointView, ApiTask, StorageRepo } from '../recovery/types';
 import { formatDateTime } from '../../lib/date-time';
-import { buildOverviewModel, activeTask, failedTask, taskCounts, tasksInRange, taskTime, timestamp } from './overview-model';
+import { buildOverviewModel, buildPlatformAlerts, activeTask, failedTask, taskCounts, tasksInRange, taskTime, timestamp } from './overview-model';
 
 type ProductInfo = { product?: string; edition?: string; license?: { mode?: string; status?: string; detail?: string } };
 const ranges = [{ label: 'Last 24 hours', days: 1 }, { label: 'Last 7 days', days: 7 }, { label: 'Last 30 days', days: 30 }];
@@ -17,7 +18,7 @@ export function OverviewPage(props: {
   cluster: Cluster | null; clusters: Cluster[]; storage: StorageRepo[]; tasks: ApiTask[];
   restorePoints: ApiRestorePointView[]; policies: ApiPolicy[]; protectionPlans: ApiProtectionPlan[];
   applications: ApiApplication[]; productInfo: ProductInfo | null;
-  openDr: () => void; openOperations: () => void; clusterContext: React.ReactNode;
+  openDr: () => void; openOperations: () => void; openClusters: () => void; openStorage: () => void; clusterContext: React.ReactNode;
 }) {
   const { cluster, clusters, productInfo, openDr, openOperations, clusterContext } = props;
   const [rangeOpen, setRangeOpen] = React.useState(false);
@@ -47,12 +48,19 @@ export function OverviewPage(props: {
   const targets = model.targets;
   const singleTarget = targets.length === 1 && model.missingTargets === 0 ? targets[0] : null;
   const targetTitle = singleTarget?.name || (targets.length + model.missingTargets ? `${targets.length + model.missingTargets} targets` : 'N/A');
-  const globalAlerts = [
-    platform.offline ? `${platform.offline} cluster${platform.offline === 1 ? '' : 's'} offline` : null,
-    platform.unknownClusters ? `${platform.unknownClusters} cluster connection status unknown` : null,
-    platform.unavailableStorage ? `${platform.unavailableStorage} storage repositor${platform.unavailableStorage === 1 ? 'y' : 'ies'} unavailable` : null,
-    platform.unknownStorage ? `${platform.unknownStorage} storage repository status unknown` : null,
-  ].filter((item): item is string => Boolean(item));
+  const alerts = buildPlatformAlerts(props, ranges[rangeIndex].days, model.now);
+  const [alertTab, setAlertTab] = React.useState<'current' | 'recent'>('current');
+  const activityRef = React.useRef<HTMLDivElement>(null);
+  const [activityHeight, setActivityHeight] = React.useState<number>();
+  React.useEffect(() => {
+    const element = activityRef.current;
+    if (!element) return;
+    const update = () => setActivityHeight(element.getBoundingClientRect().height);
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    update();
+    return () => observer.disconnect();
+  }, []);
   const clusterAlerts = [
     cluster?.connectionStatus === 'offline' ? 'Source cluster offline' : null,
     cluster && !['online', 'offline'].includes(cluster.connectionStatus || '') ? 'Source connection status unknown' : null,
@@ -65,7 +73,7 @@ export function OverviewPage(props: {
   ].filter((item): item is string => Boolean(item));
 
   return (
-    <div className="hbdr-dashboard hbdr-dashboard-zones hbdr-dashboard-design-canvas hbdr-dashboard-scoped">
+    <div className="hbdr-dashboard hbdr-dashboard-zones hbdr-dashboard-design-canvas hbdr-dashboard-scoped" style={{ '--hbdr-activity-height': activityHeight ? `${activityHeight}px` : undefined } as React.CSSProperties}>
       <div className="hbdr-dashboard-scope-columns">
         <section className="hbdr-dashboard-platform-column" aria-label="Platform overview">
           <header className="hbdr-dashboard-scope-heading"><div><h2>Platform overview</h2><p>Shared resources across all clusters</p></div></header>
@@ -79,8 +87,15 @@ export function OverviewPage(props: {
             <div className="hbdr-dashboard-topology-statuses"><span><i />{topologyStatuses.healthy || 0} Healthy</span><span><i className="is-warning" />{topologyStatuses.warning || 0} Degraded</span><span><i className="is-critical" />{topologyStatuses.failed || 0} Failed</span>{Boolean(topologyStatuses.configuring) && <span>{topologyStatuses.configuring} Configuring</span>}</div>
             <div className="hbdr-dashboard-topology-body">{clusters.length ? <DRTopologyView compact clusters={clusters} model={topology} selectedRelationshipId={selectedRelationship} selectedClusterId={selectedTopologyCluster || cluster?.id || null} onSelectRelationship={relationship => setSelectedRelationship(relationship.id)} onSelectCluster={setSelectedTopologyCluster} /> : <ScopeEmpty label="No registered clusters" />}</div>
           </section>
-          <DashboardPanel title="Platform alerts" detailAction={openOperations}>
-            <IssueList items={globalAlerts} empty="No current platform issues" onDetails={openOperations} />
+          <DashboardPanel title="Platform alerts" className="hbdr-dashboard-platform-alerts" detailAction={openOperations}>
+            <div className="hbdr-dashboard-alert-tabs" role="tablist" aria-label="Platform alerts">
+              <button type="button" role="tab" id="platform-alert-current" aria-controls="platform-alert-content" aria-selected={alertTab === 'current'} onClick={() => setAlertTab('current')}>Current issues <span>{alerts.current.length}</span></button>
+              <button type="button" role="tab" id="platform-alert-recent" aria-controls="platform-alert-content" aria-selected={alertTab === 'recent'} onClick={() => setAlertTab('recent')}>Recent failures <span>{alerts.recent.length}</span></button>
+            </div>
+            <div className="hbdr-dashboard-platform-alert-content" id="platform-alert-content" role="tabpanel" aria-labelledby={`platform-alert-${alertTab}`}>
+              {alertTab === 'recent' && <p className="hbdr-dashboard-alert-history-caption">{ranges[rangeIndex].label} · Historical failures, not current issues</p>}
+              <PlatformAlertList items={alerts[alertTab]} empty={alertTab === 'current' ? 'No current platform issues' : 'No failed tasks in the selected range'} onDetails={item => { if (item.kind === 'cluster') props.openClusters(); else if (item.kind === 'storage') props.openStorage(); else if (item.kind === 'plan') openDr(); else openOperations(); }} />
+            </div>
             <div className="hbdr-platform-license-summary"><Lock size={16} aria-hidden="true" /><div><strong>{productInfo?.edition || 'Edition unavailable'} · {productInfo?.license?.status?.replace(/-/g, ' ') || 'License status unavailable'}</strong><p>{productInfo?.license?.detail || productInfo?.license?.mode || 'No license metadata available'}</p></div></div>
           </DashboardPanel>
         </section>
@@ -116,15 +131,20 @@ export function OverviewPage(props: {
             <DashboardPanel title="DR site" detailAction={openDr}><ScopeValue value={targetTitle} label="Target cluster" />{singleTarget ? <><ScopeLine label="Kubernetes" value={singleTarget.version || 'N/A'} /><ScopeLine label="Nodes / Namespaces" value={`${singleTarget.nodes} / ${singleTarget.applications}`} /></> : <ScopeLine label="Online / Offline / Missing" value={`${targets.filter(target => target.connectionStatus === 'online').length} / ${model.targetOffline} / ${model.missingTargets}`} />}</DashboardPanel>
           </div>
           <DashboardPanel title="Cluster alerts" detailAction={openDr}><IssueList items={clusterAlerts} empty={cluster ? 'No current cluster issues' : 'No cluster selected'} onDetails={openDr} /></DashboardPanel>
-          <DashboardPanel title="Synchronization & recovery activity" className="hbdr-dashboard-scope-activity" detailAction={openOperations}>
+          <div ref={activityRef} className="hbdr-dashboard-activity-measure"><DashboardPanel title="Synchronization & recovery activity" className="hbdr-dashboard-scope-activity" detailAction={openOperations}>
             <div className="hbdr-dashboard-scope-activity-controls"><p>{cluster?.name || 'No cluster selected'} · {ranges[rangeIndex].label}</p><div className="hbdr-dashboard-range-wrap" ref={rangeRef}><button type="button" className={`hbdr-dashboard-design-range ${rangeOpen ? 'is-open' : ''}`} aria-haspopup="listbox" aria-expanded={rangeOpen} onClick={() => setRangeOpen(open => !open)}>{ranges[rangeIndex].label}<ChevronDown size={13} /></button>{rangeOpen && <div className="hbdr-dashboard-range-menu" role="listbox" aria-label="Activity time range">{ranges.map((range, index) => <button type="button" key={range.days} role="option" aria-selected={rangeIndex === index} className={rangeIndex === index ? 'is-active' : ''} onClick={() => { setRangeIndex(index); setRangeOpen(false); }}>{range.label}</button>)}</div>}</div></div>
             <div className="hbdr-dashboard-scope-history" aria-live="polite"><div><h3>Synchronization</h3><ScopeLine label="Total runs" value={backupHistory.total} /><ScopeLine label="Succeeded / Failed / Running" value={`${backupHistory.succeeded} / ${backupHistory.failed} / ${backupHistory.running}`} />{Boolean(backupHistory.canceled + backupHistory.unknown) && <ScopeLine label="Canceled / Other" value={`${backupHistory.canceled} / ${backupHistory.unknown}`} />}</div><div><h3>Recovery & drills</h3><ScopeLine label="Total / Success rate" value={`${recoveryCounts.total} / ${recoverySuccess}`} /><ScopeLine label="Drill / Restore / Takeover" value={`${recoveryHistory.filter(task => task.type === 'drill').length} / ${recoveryHistory.filter(task => task.type === 'restore').length} / ${recoveryHistory.filter(task => task.type === 'takeover').length}`} /><ScopeLine label="Running / Failed" value={`${recoveryCounts.running} / ${recoveryCounts.failed}`} /></div></div>
             <div className="hbdr-dashboard-scope-events"><h3>Recent activity</h3>{events.length ? <table aria-label="Recent cluster activity"><thead><tr><th>Task</th><th>Status</th><th>Time</th></tr></thead><tbody>{events.map(task => <tr key={task.id}><td>{taskTypeLabel(task.type)}</td><td><span className={`hbdr-dashboard-task-state ${failedTask(task.status) ? 'is-failed' : activeTask(task.status) ? 'is-running' : ''}`}>{failedTask(task.status) ? <AlertCircle size={13} /> : activeTask(task.status) ? <History size={13} /> : <CheckCircle2 size={13} />}{taskStatusLabel(task.status)}</span></td><td>{formatDateTime(taskTime(task))}</td></tr>)}</tbody></table> : <ScopeEmpty label="No task events in the selected range" />}</div>
-          </DashboardPanel>
+          </DashboardPanel></div>
         </section>
       </div>
     </div>
   );
+}
+
+function PlatformAlertList({ items, empty, onDetails }: { items: PlatformAlert[]; empty: string; onDetails: (item: PlatformAlert) => void }) {
+  if (!items.length) return <div className="hbdr-dashboard-alert-empty"><CheckCircle2 size={20} /><p>{empty}</p><small>Across all registered clusters</small></div>;
+  return <div className="hbdr-dashboard-platform-alert-list">{items.map(item => <button type="button" className="hbdr-dashboard-platform-alert-row" key={item.id} onClick={() => onDetails(item)}><AlertCircle size={15} aria-hidden="true" /><span><strong>{item.title}</strong><span>{item.resource}</span>{item.time && <small>{item.timeLabel}: {formatDateTime(item.time)}</small>}{item.detail && <small>{item.detail}</small>}</span><ChevronDown size={13} aria-hidden="true" /></button>)}</div>;
 }
 
 function ProtectionGap({ icon: Icon, label, value, unit }: { icon: typeof AlertCircle; label: string; value: number; unit: string }) {

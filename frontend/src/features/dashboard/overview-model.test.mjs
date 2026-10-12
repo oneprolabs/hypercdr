@@ -109,3 +109,27 @@ test('protection gaps count configured namespaces missing their own available po
   assert.equal(buildOverviewModel({ ...data, restorePoints: [{ ...point, expiresAt: at(1) }] }).namespacesWithoutPoints, 2);
   assert.equal(buildOverviewModel({ ...data, restorePoints: [{ ...point, protectionPlanId: 'other' }] }).namespacesWithoutPoints, 2);
 });
+
+test('platform alerts distinguish resolved historical failures from current issues', async () => {
+  const { buildPlatformAlerts } = await import('./overview-model.ts');
+  const failed = { id: 'failed', clusterId: 'source', protectionPlanId: 'plan', type: 'backup', status: 'failed', createdAt: at(3) };
+  const success = { ...failed, id: 'success', status: 'succeeded', createdAt: at(1) };
+  const data = input({ storage: [{ id: 'related', name: 'repo', status: 'connected' }], tasks: [failed, success], protectionPlans: [{ ...plan, latestSyncTaskId: 'success' }] });
+  const alerts = buildPlatformAlerts(data, 1, now);
+  assert.equal(alerts.current.length, 0);
+  assert.equal(alerts.recent.length, 1);
+  assert.equal(buildPlatformAlerts({ ...data, protectionPlans: [{ ...plan, latestSyncTaskId: 'failed' }] }, 1, now).current.length, 1);
+  assert.equal(buildPlatformAlerts({ ...data, tasks: [{ ...failed, payload: { archivedClusterId: 'source' } }] }, 1, now).recent.length, 0);
+  assert.equal(buildPlatformAlerts({ ...data, tasks: [{ ...failed, createdAt: at(25) }] }, 1, now).recent.length, 0);
+  assert.equal(buildPlatformAlerts({ ...data, tasks: [{ ...failed, createdAt: at(25) }] }, 7, now).recent.length, 1);
+});
+
+test('platform alerts include actual resource names and omit fabricated timestamps', async () => {
+  const { buildPlatformAlerts } = await import('./overview-model.ts');
+  const data = input({ clusters: [{ ...cluster('source'), connectionStatus: 'offline' }], storage: [{ id: 'related', name: 'test-repo', status: 'warning' }], protectionPlans: [{ ...plan, status: 'configuration_failed' }] });
+  const alerts = buildPlatformAlerts(data, 1, now);
+  assert.equal(alerts.current.length, 3);
+  assert.equal(alerts.current.find(a => a.kind === 'storage').resource, 'test-repo');
+  assert.equal(alerts.current.find(a => a.kind === 'cluster').time, undefined);
+  assert.match(alerts.current.find(a => a.kind === 'plan').resource, /payments/);
+});

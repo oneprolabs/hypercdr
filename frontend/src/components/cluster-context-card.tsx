@@ -49,6 +49,7 @@ export default function ClusterContextCard(props: {
     <div className={`relative hbdr-cluster-context-wrap ${pickerOpen ? 'z-[110]' : ''}`}>
       <button
         type="button"
+        aria-expanded={pickerOpen}
         onClick={() => setPickerOpen(!pickerOpen)}
         className={`hbdr-cluster-context ${compact ? 'hbdr-cluster-context-compact' : ''} ${cluster ? 'hbdr-cluster-context-active' : 'hbdr-cluster-context-empty'} ${isClusterOffline ? 'hbdr-cluster-context-offline' : ''}`}
       >

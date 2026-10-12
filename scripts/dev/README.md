@@ -5,10 +5,10 @@ with Vite preview. Vite terminates HTTPS/WSS and proxies to the backend over
 HTTP. Restart development mode after changing frontend source. By default it
 reuses the standard platform PostgreSQL container when
 one is available, preserving the current users, tenants, clusters, and other
-platform data. It is separate from the standard release and Bootstrap flow.
+platform data. It is separate from the standard release flow.
 
-Runtime files are stored outside the source tree under `/data/hypercdr-runtime/environments/community`.
-Go/npm caches remain under `/data/hypercdr-runtime/cache`.
+Runtime files are stored outside the source tree under `../hypercdr-runtime/environments/community`.
+Go/npm caches remain under `../hypercdr-runtime/cache`.
 The backend and frontend run as transient `hypercdr-dev-api` and
 `hypercdr-dev-frontend` systemd services; no permanent unit files are installed.
 The frontend source is copied into the external runtime workspace before npm
@@ -16,13 +16,13 @@ dependencies and build output are generated. The source repository is not
 modified by development startup.
 
 ```bash
-cd /data/hypercdr-main
-./start-dev.sh
-./status-dev.sh
-./stop-dev.sh
+cd /path/to/hypercdr
+./scripts/dev/start-dev.sh
+./scripts/dev/status-dev.sh
+./scripts/dev/stop-dev.sh
 ```
 
-The first start creates `/data/hypercdr-runtime/environments/community/dev.conf` from
+The first start creates `../hypercdr-runtime/environments/community/dev.conf` from
 `dev.conf.example`. Edit the external file for host-specific settings.
 
 Set `HCDR_GOOGLE_CLIENT_ID` and `HCDR_GOOGLE_CLIENT_SECRET` there to enable
@@ -37,10 +37,9 @@ to the reset form; never enable that option on a public deployment.
 Development endpoints:
 
 ```text
-Frontend:  https://192.168.8.149:3002
+Frontend:  https://<reachable-host>:3002
 Backend:   http://127.0.0.1:18080 (internal development proxy target)
-Agent WSS: wss://192.168.8.149:3002/ws/agent
+Agent WSS: wss://<reachable-host>:3002/ws/agent
 ```
 
-Do not run development mode and the standard Compose control plane at the same
-time because they use the same host ports.
+Development normally uses 3002 while production uses 12443. Check configured ports and database reuse before running both: different ports do not imply isolated data. Use source-compose for an independent database.

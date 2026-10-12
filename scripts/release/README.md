@@ -1,6 +1,6 @@
 # HyperCDR Build and Release Guide
 
-This directory contains the control-plane build, image publishing, installer packaging, installation, and operations scripts. Bootstrap only provides the Portal UI and distribution assets; it does not build platform images or the platform installer.
+This directory contains the control-plane build, image publishing, installer packaging, installation, and operations scripts.
 
 The public online installation entry point is `deploy/online/install.sh`. It is
 kept outside this release-tool directory so users can run it directly from the
@@ -10,11 +10,7 @@ then delegates to the packaged platform installer.
 ## Recommended command
 
 ```bash
-cd /data/hypercdr-main/scripts/release
-cp release.secrets.conf.example release.secrets.conf
-chmod 600 release.secrets.conf
-# Populate the Alibaba registry credentials and Turnstile Secret Key.
-./release-all.sh --config ./release.conf
+./scripts/release/release-all.sh --config /absolute/path/outside-checkout/release.conf
 ```
 
 `release.conf` contains `RELEASE_VERSION`, non-secret registry/build settings,
@@ -31,7 +27,7 @@ consistent. The private installer embeds the deployment Secret Key so a new
 installation uses Turnstile immediately. Protect the archive as a credential-
 bearing artifact and distribute it only through trusted channels.
 
-`release-all.sh` is the complete release entry point. It builds all control-plane and runtime images, pushes them, mirrors Velero/OADP assets, generates the complete `release-manifest.json`, creates the platform installer archive and SHA256 checksum, and publishes immutable assets through GitHub Actions. Use `--skip-register` for the initial seed release.
+`release-all.sh` is the complete release entry point. It builds all control-plane and runtime images, pushes them, mirrors Velero/OADP assets, generates the complete `release-manifest.json`, creates the platform installer archive and SHA256 checksum. GitHub Actions publishes public Release assets separately.
 
 GitHub releases run backend, agent, and frontend checks before publishing images.
 `release.yml` builds the five application images from the Dockerfiles in

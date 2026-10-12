@@ -1,18 +1,9 @@
 # Architecture
 
-- [Control-plane architecture](control-plane-architecture.md)
-- [中控平台架构设计（中文）](control-plane-architecture.zh.md)
-
-The control plane owns business orchestration, state management, and task
-scheduling. The cluster-side agent connects to the control plane, collects
-cluster inventory, receives tasks, and drives Velero through the Kubernetes API.
-
-Core design principles:
-
-- The control plane does not directly access managed Kubernetes API servers.
-- Agents connect outbound to the control plane, which works better with NAT,
-  private networks, multi-cloud environments, and multiple data centers.
-- PostgreSQL is the only persistent database in Phase 1.
-- Velero uses a pinned stable release. HyperCDR does not modify Velero source
-  code in the platform repository.
-- In the business model, an application maps to a Kubernetes namespace.
+- [Current system architecture](control-plane-architecture.md)
+- [当前中控架构（中文）](control-plane-architecture.zh.md)
+- [Cluster registration](cluster-registration-v2.md)
+- [Database and migrations](../database/schema.md)
+- [Implementation boundaries](../development/architecture.md)
+- [Upgrade verification semantics](upgrade-lifecycle.md)
+- [Agent design](../agent/agent-design.md)

@@ -14,7 +14,7 @@ existing installation. There is no separate upgrade archive.
 This is a small online-image installer, not a fully offline image bundle. Copy
 the archive to the host; the installer still pulls images from the configured
 registry. The installer does not require a separate release service or token;
-required for this workflow. Registry authentication, if required, is separate.
+Registry authentication, if required, is separate.
 
 The private installer may contain the Cloudflare Turnstile deployment Secret
 Key in `install-config.sh`. Store the archive with restricted permissions and

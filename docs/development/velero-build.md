@@ -6,13 +6,13 @@ Current baseline:
 
 - Upstream Velero version: `v1.18.2`
 - Upstream commit: `c253c7fe37d78c9b7e55c68544f7c5b2608712d8`
-- HyperCDR runtime image tag: `hypercdr/velero:v1.18.2-hcdr.2`
+- Deployed runtime image: use the active release manifest; historical fix tags are not the current deployment source.
 - Source directory: `third_party/velero/`
 
 The HyperCDR platform repository does not build Velero as part of the platform
 or agent build. The runtime image is built from the source in this repository
 with the upstream Dockerfile workflow. Platform deployment consumes that published image and the
-bundled CRDs kept in `hypercdr-platform/platform/backend/internal/veleroassets`.
+bundled CRDs kept in `backend/internal/veleroassets`.
 
 HyperCDR builds use the upstream Dockerfile and are published with an immutable
 `v1.18.2-hcdr.N` tag. Future source extensions are maintained in this
@@ -35,8 +35,7 @@ cd /data/hypercdr-main/third_party/velero
 
 The script verifies the recorded upstream commit, builds with the upstream
 multi-stage Dockerfile, validates all four runtime binaries and the `cnb:cnb`
-runtime user, and only then pushes the image. Re-running a build from unchanged
-source and build arguments must produce the same image digest.
+runtime user, and only then pushes the image. Use the published digest as the immutable deployment identity; do not assume a rebuild has an identical digest.
 
 Velero v1.18 uses Kopia for all new file-system backups and CSI data movement.
 The upstream image still includes Restic 0.15 solely so v1.18 can restore and

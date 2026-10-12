@@ -1,8 +1,7 @@
-# Helm charts
+# Helm assets
 
-- `hypercdr-platform/` deploys the Community control plane.
-- `hypercdr-agent/` deploys the shared managed-cluster agent components.
+`hypercdr-platform/` contains Kubernetes platform deployment assets. The current public installer and blue/green lifecycle use Docker Compose, not this chart.
 
-Charts contain portable defaults only. Cluster credentials, private Registry
-credentials, certificates, and environment-specific values must remain outside
-the repository.
+`hypercdr-agent/` is a reserved chart directory, not a complete supported agent installation chart. Use the platform-generated cluster registration installer.
+
+Credentials, certificates and runtime values belong outside the checkout. Do not infer support or validation from the presence of a chart directory.

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Archive, Check, Filter, RefreshCw, Settings, X } from 'lucide-react';
+import React, { useEffect, useId, useRef, useState } from 'react';
+import { Archive, Check, ChevronDown, Filter, RefreshCw, Settings, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 
 export type ListToolbarChoice = { value:string; label:string; count?:number };
@@ -44,7 +44,20 @@ export default function ListToolbarControls(props: {
     setVisibleColumns,
     onRefresh,
   } = props;
-  const [openPanel, setOpenPanel] = useState<'tags' | 'filters' | 'columns' | null>(null);
+  const [openPanel, setOpenPanel] = useState<'query' | 'tags' | 'filters' | 'columns' | null>(null);
+  const queryMenuId = useId();
+  const queryTrigger = useRef<HTMLButtonElement>(null);
+  const queryOptions = useRef<Array<HTMLButtonElement | null>>([]);
+  useEffect(() => {
+    if (openPanel === 'query') {
+      const index = queryFields.findIndex(field => field.value === queryField);
+      queryOptions.current[Math.max(0, index)]?.focus();
+    }
+  }, [openPanel, queryField, queryFields]);
+  const closeQueryMenu = () => {
+    setOpenPanel(null);
+    queryTrigger.current?.focus();
+  };
   const [draftColumnFilters, setDraftColumnFilters] = useState<Record<string, string>>({});
   const activeBadgeCount = activeTags.length + activeFilters.length;
   const resetListTools = () => {
@@ -96,9 +109,32 @@ export default function ListToolbarControls(props: {
 
   return (
     <div className="hbdr-dr-query-group">
-      <select aria-label="Query Field" value={queryField} onChange={event => setQueryField(event.target.value)}>
-        {queryFields.map(field => <option key={field.value} value={field.value}>{field.label}</option>)}
-      </select>
+      <div className="hbdr-query-field">
+        <button ref={queryTrigger} type="button" className="hbdr-query-field-trigger" aria-label="Query Field" aria-haspopup="listbox" aria-expanded={openPanel === 'query'} aria-controls={openPanel === 'query' ? queryMenuId : undefined}
+          onClick={() => setOpenPanel(openPanel === 'query' ? null : 'query')}
+          onKeyDown={event => { if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setOpenPanel('query'); } }}>
+          <span>{queryFields.find(field => field.value === queryField)?.label || 'Select field'}</span><ChevronDown size={14} />
+        </button>
+        {openPanel === 'query' && <>
+          <div className="hbdr-list-tool-backdrop" onClick={() => setOpenPanel(null)} />
+          <div id={queryMenuId} role="listbox" aria-label="Search fields" className="hbdr-query-field-menu" onKeyDown={event => {
+            if (event.key === 'Escape') { event.preventDefault(); closeQueryMenu(); }
+            if (event.key === 'Tab') setOpenPanel(null);
+            if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+              event.preventDefault();
+              const index = queryOptions.current.findIndex(option => option === document.activeElement);
+              const count = queryFields.length;
+              const next = event.key === 'Home' ? 0 : event.key === 'End' ? count - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + count) % count;
+              queryOptions.current[next]?.focus();
+            }
+          }}>
+            {queryFields.map((field, index) => <button key={field.value} ref={node => { queryOptions.current[index] = node; }} type="button" role="option" aria-selected={field.value === queryField} tabIndex={field.value === queryField ? 0 : -1}
+              onClick={() => { setQueryField(field.value); closeQueryMenu(); }}>
+              <span>{field.label}</span>{field.value === queryField && <Check size={13} />}
+            </button>)}
+          </div>
+        </>}
+      </div>
       <label className="hbdr-dr-search"><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Enter search text" /></label>
       <button
         type="button"

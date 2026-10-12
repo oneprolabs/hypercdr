@@ -9,5 +9,5 @@ extension package.
   embedded Velero asset implementations.
 - `pkg/platform/` is the supported public assembly boundary used by Enterprise.
 
-Run `go test ./...` from this directory. Generated binaries and Go caches must
-be written under `../hypercdr-runtime`, not into the module tree.
+Run `./scripts/test-backend.sh` from the repository root for isolated PostgreSQL tests. See [test setup](../docs/development/platform.md). Generated binaries and Go caches must
+be written under the repository sibling `hypercdr-runtime`, not into the module tree.

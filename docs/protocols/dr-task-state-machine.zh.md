@@ -477,83 +477,11 @@ Restore Point 是源集群 Velero 备份完成后，在中控平台生成的持�
 - 进度 event 只携带轻量进度指标：`progress`、`totalBytes`、`syncedBytes`、`speedBytesPerSecond`、`percent`、`etaSeconds`。
 - 备份任务的最终 size 明细只放在 `operation=backup` 的 `agent.task.completed` 终态事件中。
 
-### 3.2 取消任务：`platform.task.cancel`
+### 3.2 Task cancellation
 
-用途：预留。用于平台取消尚未完成的任务。取消协议未端到端实现前，不能把 stop/cancel 当作成功完成。
+The current HTTP cancellation entry is `POST /api/v1/tasks/{id}/cancel`, implemented in `backend/internal/httpserver/task_handlers.go`. Active registration tasks and backup/sync tasks have distinct cancellation paths; other task types return `task_cancel_unsupported`. Queued registration can become `canceled` immediately, while executing work enters `canceling` and requires executor completion. Backup cancellation creates a separate cancel task dispatched through the task engine. Acceptance is not proof that the original work has stopped.
 
-请求消息：
-
-```json
-{
-  "version": "v1",
-  "messageId": "msg_cancel_001",
-  "messageKind": "request",
-  "type": "platform.task.cancel",
-  "tenantId": "tenant_id",
-  "clusterId": "source_cluster_id",
-  "agentId": "agent_id",
-  "timestamp": "2026-07-01T00:05:00Z",
-  "payload": {
-    "taskId": "task_cancel_001",
-    "commandId": "cmd_cancel_001",
-    "targetTaskId": "task_backup_001",
-    "targetCommandId": "cmd_backup_001",
-    "reason": "user requested cancellation"
-  }
-}
-```
-
-当前未实现时的失败响应：
-
-```json
-{
-  "version": "v1",
-  "messageId": "msg_agent_error_cancel_001",
-  "messageKind": "response",
-  "type": "agent.message.error",
-  "tenantId": "tenant_id",
-  "clusterId": "source_cluster_id",
-  "agentId": "agent_id",
-  "timestamp": "2026-07-01T00:05:00Z",
-  "payload": {
-    "ackMessageId": "msg_cancel_001",
-    "ackType": "platform.task.cancel",
-    "taskId": "task_cancel_001",
-    "commandId": "cmd_cancel_001",
-    "errorCode": "UNSUPPORTED_MESSAGE",
-    "message": "task cancellation is not implemented",
-    "retryable": false
-  }
-}
-```
-
-取消实现后的成功响应：
-
-```json
-{
-  "version": "v1",
-  "messageId": "msg_cancel_accepted_001",
-  "messageKind": "response",
-  "type": "agent.task.accepted",
-  "tenantId": "tenant_id",
-  "clusterId": "source_cluster_id",
-  "agentId": "agent_id",
-  "timestamp": "2026-07-01T00:05:01Z",
-  "payload": {
-    "ackMessageId": "msg_cancel_001",
-    "ackType": "platform.task.cancel",
-    "taskId": "task_cancel_001",
-    "commandId": "cmd_cancel_001",
-    "acceptedAt": "2026-07-01T00:05:01Z"
-  }
-}
-```
-
-规则：
-
-- 当前版本应返回 `agent.message.error`，不能静默忽略。
-- 取消实现后，取消任务自身也必须有 accepted 和终态事件。
-- 被取消的原任务应进入明确的 `cancelled` 或 `failed`，不能伪装成 `succeeded`。
+Use `task_dispatch.go`, the agent protocol structs and cancellation contract tests as the authoritative payload/state definitions; a generic reserved `platform.task.cancel` example is not the implemented API contract.
 
 ### 3.3 请求 Inventory：`platform.inventory.request`
 

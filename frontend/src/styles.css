@@ -16,11 +16,14 @@
 }
 
 :root {
+  color-scheme: light;
   --hc-bg: #f5f6f9;
   --hc-surface: #ffffff;
   --hc-sunken: #f0f2f6;
   --hc-border: #e1e4eb;
   --hc-border-strong: #c9cfda;
+  --hc-border-interaction: var(--hc-border);
+  --hc-border-strong-interaction: var(--hc-border-strong);
   --hc-text: #171b24;
   --hc-text-2: #565e70;
   --hc-text-3: #858c9c;
@@ -31,11 +34,14 @@
 }
 
 :root[data-theme='dark'] {
+  color-scheme: dark;
   --hc-bg: #0d1015;
   --hc-surface: #161a21;
   --hc-sunken: #11151b;
-  --hc-border: #242a34;
-  --hc-border-strong: #39414f;
+  --hc-border: #343d4b;
+  --hc-border-strong: #465264;
+  --hc-border-interaction: #242a34;
+  --hc-border-strong-interaction: #39414f;
   --hc-text: #e7ebf1;
   --hc-text-2: #99a3b3;
   --hc-text-3: #6b7586;
@@ -26448,7 +26454,7 @@ html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dr-action-primary {
   box-shadow: none !important;
 }
 .premium-app.hbdr-workspace .cluster-card-premium:hover {
-  border-color: color-mix(in srgb, var(--hc-accent) 50%, var(--hc-border)) !important;
+  border-color: color-mix(in srgb, var(--hc-accent) 50%, var(--hc-border-interaction)) !important;
   box-shadow: 0 6px 18px rgb(27 38 55 / 8%) !important;
 }
 .premium-app.hbdr-workspace .cluster-card-premium .cluster-card-action-button:hover {
@@ -26470,7 +26476,7 @@ html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dr-action-primary {
 }
 .premium-app.hbdr-workspace .hbdr-stage-card:hover,
 .premium-app.hbdr-workspace .hbdr-stage-card.hbdr-dr-stage-active {
-  border-color: color-mix(in srgb, var(--hc-accent) 55%, var(--hc-border));
+  border-color: color-mix(in srgb, var(--hc-accent) 55%, var(--hc-border-interaction));
   background: color-mix(in srgb, var(--hc-accent) 6%, var(--hc-surface));
 }
 .premium-app.hbdr-workspace .hbdr-dr-stage-copy h4 { color: var(--hc-text); }
@@ -28374,7 +28380,7 @@ html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-action-b
 }
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-action-button:hover,
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-action-button[aria-expanded='true'] {
-  background:var(--hc-surface-2,var(--hc-border)) !important;
+  background:var(--hc-surface-2,var(--hc-border-interaction)) !important;
   color:var(--hc-text) !important;
   border-color:var(--hc-accent) !important;
 }
@@ -28384,7 +28390,7 @@ html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-action-m
   box-shadow:0 14px 32px rgba(0,0,0,.32) !important;
 }
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-action-menu button { color:var(--hc-text-2) !important; }
-html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-action-menu button:hover { background:var(--hc-surface-2,var(--hc-border)) !important; color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-action-menu button:hover { background:var(--hc-surface-2,var(--hc-border-interaction)) !important; color:var(--hc-text) !important; }
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-action-menu button.text-rose-600 { color:var(--hc-crit) !important; }
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .cluster-card-action-menu button.text-rose-600:hover { background:color-mix(in srgb,var(--hc-crit) 12%,var(--hc-surface)) !important; }
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-dr-resource-summary-chip {
@@ -28394,7 +28400,7 @@ html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr
   box-shadow:none !important;
 }
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-dr-resource-summary-chip:hover {
-  background:var(--hc-surface-2,var(--hc-border)) !important;
+  background:var(--hc-surface-2,var(--hc-border-interaction)) !important;
   border-color:var(--hc-accent) !important;
   color:var(--hc-text) !important;
 }
@@ -28442,7 +28448,7 @@ html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .clus
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .cluster-default-button-active,
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .cluster-default-button-active:hover {
   background:color-mix(in srgb,var(--hc-accent) 16%,var(--hc-surface)) !important;
-  border-color:color-mix(in srgb,var(--hc-accent) 50%,var(--hc-border)) !important;
+  border-color:color-mix(in srgb,var(--hc-accent) 50%,var(--hc-border-interaction)) !important;
   color:var(--hc-accent) !important;
 }
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-filter-drawer-body .hbdr-advanced-filter-box {
@@ -28483,7 +28489,7 @@ html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content table thead button:hover,
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-dr-namespace-link:hover,
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content button[aria-label='Edit cluster name']:hover {
-  background:var(--hc-surface-2,var(--hc-border)) !important;
+  background:var(--hc-surface-2,var(--hc-border-interaction)) !important;
   color:var(--hc-accent) !important;
 }
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content :is(.hbdr-stage-card,.hbdr-application-stage):hover {
@@ -28494,7 +28500,7 @@ html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content :is(.
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-dashboard-health-filter button:hover,
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-dashboard-events button:hover,
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content [role='tab'][aria-selected]:hover {
-  background:var(--hc-surface-2,var(--hc-border)) !important;
+  background:var(--hc-surface-2,var(--hc-border-interaction)) !important;
   color:var(--hc-accent) !important;
 }
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-card-grid .cluster-card-premium {
@@ -28502,7 +28508,7 @@ html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-card-gri
   box-shadow:0 0 0 1px rgba(255,255,255,.025),0 8px 22px rgba(0,0,0,.16) !important;
 }
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-card-grid .cluster-card-premium:hover {
-  border-color:color-mix(in srgb,var(--hc-accent) 60%,var(--hc-border-strong)) !important;
+  border-color:color-mix(in srgb,var(--hc-accent) 60%,var(--hc-border-strong-interaction)) !important;
   box-shadow:0 0 0 1px color-mix(in srgb,var(--hc-accent) 20%,transparent),0 12px 28px rgba(0,0,0,.22) !important;
 }
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-dr-main-table .hbdr-dr-status {
@@ -28512,7 +28518,7 @@ html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr
 }
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-dr-main-table .hbdr-dr-status:is(.hbdr-dr-status-ok,.hbdr-dr-status-active,.hbdr-dr-status-running) {
   background:color-mix(in srgb,var(--hc-ok) 12%,var(--hc-surface)) !important;
-  border-color:color-mix(in srgb,var(--hc-ok) 35%,var(--hc-border)) !important;
+  border-color:color-mix(in srgb,var(--hc-ok) 35%,var(--hc-border-interaction)) !important;
   color:var(--hc-ok) !important;
 }
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-dr-main-table .hbdr-dr-status:hover {
@@ -28559,7 +28565,7 @@ html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-resource-drawer 
   color:var(--hc-text) !important;
 }
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-resource-modal-head button:hover {
-  background:var(--hc-border) !important;
+  background:var(--hc-border-interaction) !important;
   color:var(--hc-text) !important;
 }
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-resource-overview-strip,
@@ -28579,7 +28585,7 @@ html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr
   color:var(--hc-accent) !important;
 }
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-resource-inventory-item:nth-child(odd) { background:var(--hc-sunken) !important; }
-html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-resource-inventory-item:hover { background:var(--hc-border) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-resource-inventory-item:hover { background:var(--hc-border-interaction) !important; }
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content :is(.hbdr-resource-overview-strip,.hbdr-resource-inventory-resource,.hbdr-resource-inventory-divider,.hbdr-resource-detail-empty) strong,
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content .hbdr-resource-inventory-divider span { color:var(--hc-text) !important; }
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .premium-content :is(.hbdr-resource-overview-strip,.hbdr-resource-inventory-resource,.hbdr-resource-inventory-divider,.hbdr-resource-inventory-type,.hbdr-resource-inventory-detail-text,.hbdr-resource-inventory-columns,.hbdr-resource-detail-empty) :is(em,span),
@@ -28598,7 +28604,7 @@ html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-resource-drawer-
   color:var(--hc-text-2) !important;
 }
 html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-resource-drawer-head button:hover {
-  background:var(--hc-border) !important;
+  background:var(--hc-border-interaction) !important;
   border-color:var(--hc-accent) !important;
   color:var(--hc-text) !important;
 }
@@ -28678,7 +28684,7 @@ html[data-theme='dark'] #root .premium-app .hbdr-cluster-role-badges .is-target 
   .hbdr-namespace-detail-tabs button.is-active span, .hbdr-app-detail-icon,
   .hbdr-namespace-task-icon, .hbdr-task-purpose) {
   background: color-mix(in srgb, var(--hc-accent) 12%, var(--hc-surface));
-  border-color: color-mix(in srgb, var(--hc-accent) 35%, var(--hc-border));
+  border-color: color-mix(in srgb, var(--hc-accent) 35%, var(--hc-border-interaction));
   color: var(--hc-accent);
 }
 :root[data-theme='dark'] #root .premium-app .hbdr-app-detail-drawer :is(
@@ -28963,3 +28969,147 @@ html[data-theme='dark'] #root .hbdr-dashboard-scoped .hbdr-dr-edge-label:hover {
   border-radius:4px;
 }
 #root .hbdr-dashboard-scoped .hbdr-dr-topology.is-compact .hbdr-dr-topology-canvas { background:transparent; }
+/* Match the platform alert panel to the entire cluster activity card. */
+#root .hbdr-dashboard-scoped .hbdr-dashboard-platform-column > .hbdr-dashboard-platform-alerts {
+  display:flex !important; flex-direction:column; height:var(--hbdr-activity-height,380px) !important; flex:none; min-height:0 !important; overflow:hidden;
+}
+#root .hbdr-dashboard-scoped .hbdr-dashboard-activity-measure { min-width:0; }
+#root .hbdr-dashboard-scoped .hbdr-dashboard-alert-tabs { display:flex; gap:20px; margin-top:10px; border-bottom:1px solid var(--hc-border); flex:none; }
+#root .hbdr-dashboard-scoped .hbdr-dashboard-alert-tabs button { display:flex; align-items:center; gap:8px; padding:10px 0; border:0; border-bottom:2px solid transparent; background:transparent; font:inherit; font-size:12px; font-weight:400; color:var(--hc-text-2); }
+#root .hbdr-dashboard-scoped .hbdr-dashboard-alert-tabs button[aria-selected='true'] { color:var(--hc-accent); border-bottom-color:var(--hc-accent); }
+#root .hbdr-dashboard-scoped .hbdr-dashboard-alert-tabs button:hover { color:var(--hc-text); }
+#root .hbdr-dashboard-scoped .hbdr-dashboard-alert-tabs button span { font-variant-numeric:tabular-nums; }
+#root .hbdr-dashboard-scoped .hbdr-dashboard-platform-alert-content { flex:1; min-height:0; overflow:auto; scrollbar-width:thin; }
+#root .hbdr-dashboard-scoped .hbdr-dashboard-alert-history-caption { margin:12px 0 4px; color:var(--hc-text-3); font-size:11px; }
+#root .hbdr-dashboard-scoped .hbdr-dashboard-platform-alert-row { display:flex; align-items:flex-start; width:100%; gap:10px; padding:13px 0; border:0; border-bottom:1px solid var(--hc-border); background:transparent; text-align:left; color:var(--hc-text-2); font:inherit; font-size:12px; }
+#root .hbdr-dashboard-scoped .hbdr-dashboard-platform-alert-row:hover { background:var(--hc-sunken); }
+#root .hbdr-dashboard-scoped .hbdr-dashboard-platform-alert-row > svg { flex:none; margin-top:3px; color:var(--hc-warn); }
+#root .hbdr-dashboard-scoped .hbdr-dashboard-platform-alert-row > svg:last-child { margin-left:auto; transform:rotate(-90deg); color:var(--hc-text-3); }
+#root .hbdr-dashboard-scoped .hbdr-dashboard-platform-alert-row > span { display:flex; flex-direction:column; gap:5px; min-width:0; overflow-wrap:anywhere; }
+#root .hbdr-dashboard-scoped .hbdr-dashboard-platform-alert-row strong { font-weight:500; color:var(--hc-text); }
+#root .hbdr-dashboard-scoped .hbdr-dashboard-platform-alert-row small { color:var(--hc-text-3); font-size:11px; }
+#root .hbdr-dashboard-scoped .hbdr-dashboard-alert-empty { height:100%; min-height:110px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:8px; color:var(--hc-text-2); font-size:12px; text-align:center; padding:16px; }
+#root .hbdr-dashboard-scoped .hbdr-dashboard-alert-empty svg { color:var(--hc-ok); }
+#root .hbdr-dashboard-scoped .hbdr-dashboard-alert-empty p { margin:0; }
+#root .hbdr-dashboard-scoped .hbdr-dashboard-alert-empty small { font-size:11px; color:var(--hc-text-3); }
+#root .hbdr-dashboard-scoped .hbdr-dashboard-platform-alerts .hbdr-platform-license-summary { flex:none; }
+/* The stretched panel stays stable; overflowing graph content scrolls inside it. */
+#root .hbdr-dashboard-scoped .hbdr-dashboard-platform-column > .hbdr-dashboard-zone-topology { flex:1 1 340px; min-height:340px !important; }
+#root .hbdr-dashboard-scoped .hbdr-dashboard-topology-body { min-height:0; overflow:auto; scrollbar-width:thin; }
+#root .hbdr-dashboard-scoped .hbdr-dashboard-topology-body > .hbdr-dr-topology { flex:none; }
+@media(max-width:1000px) {
+  #root .hbdr-dashboard-scoped .hbdr-dashboard-platform-column > .hbdr-dashboard-platform-alerts { height:360px !important; }
+  #root .hbdr-dashboard-scoped .hbdr-dashboard-platform-column > .hbdr-dashboard-zone-topology { height:360px !important; flex:none; }
+}
+
+/* Slightly clearer topology grid in dark mode only. */
+html[data-theme='dark'] #root .hbdr-dashboard-scoped .hbdr-dashboard-topology-body {
+  background-image:linear-gradient(to right,color-mix(in srgb,var(--hc-border) 50%,transparent) 1px,transparent 1px),linear-gradient(to bottom,color-mix(in srgb,var(--hc-border) 50%,transparent) 1px,transparent 1px);
+}
+
+/* Native menus must inherit the workspace theme before their first paint. */
+#root .premium-login { color-scheme:dark; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace select {
+  color-scheme:dark;
+  background-color:var(--hc-surface) !important;
+  color:var(--hc-text-2) !important;
+  border-color:var(--hc-border-strong) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace select:not(:disabled):is(:hover,:focus,:active) {
+  background-color:var(--hc-sunken) !important;
+  color:var(--hc-text) !important;
+  border-color:var(--hc-accent) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace select :is(option,optgroup) {
+  background-color:var(--hc-surface);
+  color:var(--hc-text);
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace select option:disabled { color:var(--hc-text-3); }
+
+/* Override legacy light hover gradients on the shared cluster context card. */
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-context {
+  background:var(--hc-surface) !important;
+  color:var(--hc-text) !important;
+  border-color:var(--hc-border-strong) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-context:is(:hover,:focus-visible,[aria-expanded='true']) {
+  background:color-mix(in srgb,var(--hc-accent) 10%,var(--hc-surface)) !important;
+  color:var(--hc-text) !important;
+  border-color:var(--hc-accent) !important;
+  box-shadow:0 0 0 1px color-mix(in srgb,var(--hc-accent) 25%,transparent) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-context-icon {
+  background:transparent !important;
+  color:var(--hc-accent) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-context-title { color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-context-meta { color:var(--hc-text-2) !important; }
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-list-tool-popover,
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-list-tool-head {
+  background:var(--hc-surface) !important;
+  color:var(--hc-text) !important;
+  border-color:var(--hc-border-strong) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-list-tool-options button {
+  background:transparent !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-list-tool-options button:is(:hover,:focus-visible,.is-selected) {
+  background:color-mix(in srgb,var(--hc-accent) 12%,var(--hc-surface)) !important;
+  color:var(--hc-text) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-list-tool-options button em {
+  background:var(--hc-sunken) !important;
+  color:var(--hc-text-2) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-picker-row > button:first-child {
+  background:transparent !important;
+  color:var(--hc-text) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-cluster-picker-row:is(:hover,.hbdr-cluster-picker-row-active) {
+  background:color-mix(in srgb,var(--hc-accent) 10%,var(--hc-surface)) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-list-tool-head strong {
+  color:var(--hc-text-2) !important;
+}
+
+/* Search-field menus render in the app, avoiding native popup theme flashes. */
+#root .premium-app.hbdr-workspace .hbdr-query-field { position:relative; flex:0 0 148px; min-width:0; }
+#root .premium-app.hbdr-workspace .hbdr-query-field-trigger {
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  width:100% !important; height:32px; padding:0 10px !important;
+  border:1px solid var(--hc-border-strong) !important; border-radius:2px !important;
+  background:var(--hc-surface) !important; color:var(--hc-text-2) !important;
+  font:400 12px 'IBM Plex Sans',sans-serif !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-query-field-trigger:is(:hover,:focus-visible,[aria-expanded='true']) {
+  background:var(--hc-sunken) !important; color:var(--hc-text) !important; border-color:var(--hc-accent) !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-query-field-menu {
+  position:absolute; top:calc(100% + 4px); left:0; z-index:45; width:max-content; min-width:100%; max-width:280px; max-height:320px; overflow:auto;
+  padding:4px; border:1px solid var(--hc-border-strong); border-radius:4px;
+  background:var(--hc-surface); color:var(--hc-text); box-shadow:0 8px 24px rgb(0 0 0 / 18%);
+}
+#root .premium-app.hbdr-workspace .hbdr-query-field-menu button {
+  display:flex; align-items:center; justify-content:space-between; gap:16px; width:100% !important; height:auto; min-height:30px;
+  padding:6px 9px !important; border:0 !important; border-radius:2px !important;
+  background:transparent !important; color:var(--hc-text-2) !important; font:400 12px 'IBM Plex Sans',sans-serif !important;
+  text-align:left; box-shadow:none !important;
+}
+#root .premium-app.hbdr-workspace .hbdr-query-field-menu button:is(:hover,:focus-visible,[aria-selected='true']) {
+  background:color-mix(in srgb,var(--hc-accent) 12%,var(--hc-surface)) !important; color:var(--hc-text) !important; outline:none;
+}
+
+/* A single themed border replaces the legacy pale inset edges. */
+#root .premium-app.hbdr-workspace .premium-content .hbdr-dr-query-group .hbdr-dr-search {
+  border-color:var(--hc-border-strong) !important;
+  border-top-color:var(--hc-border-strong) !important;
+  border-bottom-color:var(--hc-border-strong) !important;
+  box-shadow:none !important;
+}
+#root .premium-app.hbdr-workspace .premium-content .hbdr-dr-query-group .hbdr-dr-search:focus-within {
+  border-color:var(--hc-accent) !important;
+  border-top-color:var(--hc-accent) !important;
+  border-bottom-color:var(--hc-accent) !important;
+  box-shadow:none !important;
+}
