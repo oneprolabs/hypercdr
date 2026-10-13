@@ -1554,11 +1554,19 @@ agent.task.failed     response 或 event：接收失败时是 response，执行�
 
 #### 资源范围选择（Velero v1.18+）
 
-保护计划的 `resourceSelection` 是新的用户配置：`mode=all` 表示不传资源过滤字段；`mode=custom` 将 namespace-scoped 与 cluster-scoped 类型分别下发到 Backup/Schedule 的 `includedNamespaceScopedResources` 与 `includedClusterScopedResources`。`custom` 时不得同时下发旧的 `includedResources`、`excludedResources` 或 `includeClusterResources`。
+保护计划的 `resourceSelection` 保持现有协议模式：
 
-Restore CR 没有上述按范围拆分的字段。恢复向导仍按两个范围展示资源类型，但在下发 Restore 时合并为 `includedResources`，并在选择了 cluster-scoped 类型时设置 `includeClusterResources=true`。
+- `mode=all`：默认应用范围，使用既有 `includeClusterResources=false`，不设置 scoped 资源过滤字段。
+- `mode=exclude`（Custom / All types, with exclusions）：`namespaceScoped` 存储排除类型；Backup 与 Schedule 的 `includedNamespaceScopedResources=["*"]`、`excludedNamespaceScopedResources` 为所选类型、`excludedClusterScopedResources=["*"]`。Event 排除同时覆盖 core 与 `events.k8s.io` 两种 API 表示。
+- `mode=custom`（Custom / Selected types only）：沿用历史包含语义，`namespaceScoped` 映射到 `includedNamespaceScopedResources`。若没有历史 cluster-scoped 选择，则设置 `excludedClusterScopedResources=["*"]`；历史非空 `clusterScoped` 仍映射到 `includedClusterScopedResources`。空包含范围会被 UI 和 API 拒绝。
 
-历史 Filter 计划迁移为 `mode=custom`：原 `includedResources` 归入 namespace-scoped 类型。旧 `excludedResources` 与标签过滤不再保留，避免与 Velero v1.18 的 scoped 字段混用。
+Custom 的两种模式不得同时下发旧的 `includedResources`、`excludedResources` 或 `includeClusterResources`。当前应用向导仅编辑 namespace-scoped 类型；多 namespace 仍采用默认范围，OpenShift OADP 当前仅支持默认范围。
+
+Custom 表格展示资源类型、实际对象数量、最终 Included/Excluded 范围。PVC 的 Volume 标签仅标识资源类别，不保证卷数据备份；未知对象数量展示 `—`。切换模式与 Default 保留当前向导内的草稿，已选但不在最新 inventory 中的类型仍可查看和取消。
+
+Restore CR 没有 Backup 的 scoped 字段；恢复向导保持现有排除交互，将所选类型下发到通用 `excludedResources`，而不是复用 Backup 的 scoped 字段。备份范围控制备份内容，不自动设置恢复过滤器。
+
+历史 `mode=custom` 计划保持包含语义，不作为排除列表显示；本次不迁移或修改现有数据库记录。
 
 `velero` 字段用于描述 agent 观测到的 Velero 对象状态。目标上应逐步从 `map` 收敛为稳定结构。
 

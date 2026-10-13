@@ -251,6 +251,17 @@ func resourceReferences(object map[string]any) ([]string, []string) {
 		switch typed := value.(type) {
 		case map[string]any:
 			for childKey, child := range typed {
+				if childKey == "initContainers" {
+					if containers, ok := child.([]any); ok {
+						for _, container := range containers {
+							if isVeleroRestoreWaitContainer(container) {
+								continue
+							}
+							walk(container, childKey)
+						}
+						continue
+					}
+				}
 				walk(child, childKey)
 			}
 		case []any:
@@ -286,4 +297,22 @@ func resourceReferences(object map[string]any) ([]string, []string) {
 	slices.Sort(imageList)
 	slices.Sort(storageList)
 	return imageList, storageList
+}
+
+// Match Velero's injected helper identity, not its registry or image tag.
+// Business init containers (even ones using the same image) remain mappable.
+func isVeleroRestoreWaitContainer(value any) bool {
+	container, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	name, _ := container["name"].(string)
+	if name != "restore-wait" && name != "restic-wait" {
+		return false
+	}
+	command, _ := container["command"].([]any)
+	if len(command) == 0 {
+		return false
+	}
+	return command[0] == "/velero-restore-helper" || command[0] == "/velero-restic-restore-helper"
 }

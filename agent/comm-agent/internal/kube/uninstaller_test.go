@@ -2,6 +2,7 @@ package kube
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -349,4 +350,40 @@ func assertPatchedFinalizers(t *testing.T, actions []k8stesting.Action, gvr sche
 		return
 	}
 	t.Fatalf("expected finalizer patch for %s", name)
+}
+
+func TestUninstallKeepsAgentPermissionUntilLastAPIRequest(t *testing.T) {
+	for _, namespace := range []string{"hypercdr-agent", "openshift-adp"} {
+		for _, deleteNamespace := range []bool{false, true} {
+			t.Run(namespace+map[bool]string{false: "/keep-namespace", true: "/delete-namespace"}[deleteNamespace], func(t *testing.T) {
+				own := scopedRBACName("hypercdr-agent", namespace)
+				client := fake.NewSimpleClientset(
+					&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}},
+					&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: own, UID: types.UID("own-role")}},
+					&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: own}},
+					&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "openshift-adp-metrics-reader"}},
+					&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "openshift-adp-metrics-reader"}},
+				)
+				revoked := false
+				client.PrependReactor("*", "*", func(a k8stesting.Action) (bool, runtime.Object, error) {
+					if revoked {
+						return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: a.GetResource().Resource}, "", errors.New("Agent permission already revoked"))
+					}
+					if a.GetVerb() == "delete" {
+						name := a.(k8stesting.DeleteAction).GetName()
+						if name == own && (a.GetResource().Resource == "clusterroles" || a.GetResource().Resource == "clusterrolebindings") {
+							revoked = true
+						}
+					}
+					return false, nil, nil
+				})
+				if err := NewKubernetesUninstallerWithClient(client).Uninstall(context.Background(), UninstallOptions{Namespace: namespace, DeleteNamespace: deleteNamespace}); err != nil {
+					t.Fatal(err)
+				}
+				if !revoked {
+					t.Fatal("Agent role was not removed")
+				}
+			})
+		}
+	}
 }

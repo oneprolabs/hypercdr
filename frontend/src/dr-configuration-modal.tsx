@@ -12,7 +12,7 @@ import {
   ShieldCheck,
   X,
 } from 'lucide-react';
-import { ScopedResourceSelector, type ScopedResourceOption, type ScopedResourceSelection } from './components/scoped-resource-selector';
+import { ScopedResourceSelector, type ScopedResourceOption, type ScopedResourceSelection, resourceSelectionValid as isResourceSelectionValid } from './components/scoped-resource-selector';
 
 export type ProtectWizardStep = 1 | 2 | 3 | 4 | 5 | 6;
 
@@ -366,7 +366,7 @@ export function DrConfigurationModal(props: Props) {
     }));
   }, [multiNamespaceFilterDisabled, protectConfig.resourceSelection.mode, setProtectConfig]);
 
-  const resourceSelectionValid = true;
+  const resourceSelectionValid = multiNamespaceFilterDisabled || isResourceSelectionValid(protectConfig.resourceSelection);
   const selectedTargetCluster = targetClusterOptions.find(cluster => cluster.name === protectConfig.targetCluster);
   const targetCompatible = !selectedTargetCluster || selectedTargetCluster.compatible;
   const canSave = Boolean(resourceSelectionValid && protectConfig.storageId && targetCompatible && (protectConfig.targetCluster || targetClusterOptions.length === 0));
@@ -688,6 +688,7 @@ export function DrConfigurationModal(props: Props) {
                       <em>Full backup</em>
                     </div> : <ScopedResourceSelector
                       purpose="backup"
+                      customUnavailableReason={targetClusterOptions.find(cluster => cluster.isCurrent)?.clusterType === 'openshift' ? 'OpenShift OADP currently supports the default scope only.' : undefined}
                       value={protectConfig.resourceSelection}
                       onChange={resourceSelection => setProtectConfig(prev => ({
                         ...prev,

@@ -21,7 +21,7 @@ import { RecoveryWizardModal, type BackupContentResource, type RecoveryWizardCon
 import { HyperTable, type HyperTableColumn } from '../../components/table';
 import { SearchBar } from '../../components/search-bar';
 import ListToolbarControls from '../../components/list-toolbar-controls';
-import type { ScopedResourceOption } from '../../components/scoped-resource-selector';
+import { resourceSelectionValid, type ScopedResourceOption, type ScopedResourceSelection } from '../../components/scoped-resource-selector';
 import { formatDateTime, formatLocalDateTime } from '../../lib/date-time';
 import { clusterCompatibilityMessage, clustersAreDRCompatible } from '../../lib/cluster-compatibility';
 import type { AppItem, Cluster, DRSupportSummary, ResourceCategory, ResourceCategoryKey } from '../clusters/types';
@@ -107,7 +107,7 @@ export default function ApplicationDrPage(props: {
     includeRules: [] as Array<{ group: string; resource: string; name: string; version: string; labels: string }>,
     includedResources: [] as string[],
     includeAllResources: true,
-    resourceSelection: { mode: 'all' as const, namespaceScoped: [] as string[], clusterScoped: [] as string[] },
+    resourceSelection: { mode: 'all', namespaceScoped: [], clusterScoped: [] } as ScopedResourceSelection,
     labelSelector: { matchLabels: {} as Record<string, string>, matchExpressions: [] as Array<{ key: string; operator: string; values: string[] }> },
     excludedResources: [] as string[],
     storageType: 'local',
@@ -2165,6 +2165,23 @@ export default function ApplicationDrPage(props: {
       toast('Select one protected application to modify protection');
       return;
     }
+    const selectedApp = apps.find(item => item.name === selectedRunApps[0]);
+    const plan = selectedApp ? protectionPlanForApp(selectedApp) : undefined;
+    if (plan) {
+      setProtectConfig(prev => ({
+        ...prev,
+        resourceSelection: {
+          mode: plan.resourceSelection?.mode || 'all',
+          namespaceScoped: [...(plan.resourceSelection?.namespaceScoped || [])],
+          clusterScoped: [...(plan.resourceSelection?.clusterScoped || [])],
+        },
+        scope: 'all',
+        includeAllResources: !plan.resourceSelection || plan.resourceSelection.mode === 'all',
+        includedResources: [],
+        excludedResources: [],
+        labelSelector: { matchLabels: {}, matchExpressions: [] },
+      }));
+    }
     setResourceCatalogLoaded(discoveredResourceOptions.namespaceScoped.length > 0);
     setProtectWizardMode('modify');
     setProtectWizardStep(1);
@@ -2354,6 +2371,12 @@ export default function ApplicationDrPage(props: {
     const effectiveResourceSelection = targetNamespaces.size > 1
       ? { mode: 'all' as const, namespaceScoped: [] as string[], clusterScoped: [] as string[] }
       : protectConfig.resourceSelection;
+    if (!resourceSelectionValid(effectiveResourceSelection)) {
+      toast('Select at least one resource type to include');
+      protectSubmittingRef.current = false;
+      setProtectSubmitting(false);
+      return;
+    }
     if (!currentClusterId) {
       toast('Select a source cluster first');
       protectSubmittingRef.current = false;

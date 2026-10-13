@@ -115,11 +115,16 @@ func BuildBackupManifest(input BackupBuildInput) (BackupManifest, error) {
 		manifest.Spec.ExcludedClusterScopedResources = []string{"*"}
 		manifest.Spec.IncludeClusterResources = nil
 	} else if input.Command.ResourceSelection.Mode == "custom" {
-		// Backward compatibility for plans created before exclusion mode existed.
+		// "custom" is the existing include-list protocol mode, also used by
+		// the Selected types only editor. No selected cluster types means
+		// application-only scope, including for plugin-added dependencies.
 		manifest.Spec.IncludedResources = nil
 		manifest.Spec.ExcludedResources = nil
 		manifest.Spec.IncludedNamespaceScopedResources = input.Command.ResourceSelection.NamespaceScoped
 		manifest.Spec.IncludedClusterScopedResources = input.Command.ResourceSelection.ClusterScoped
+		if len(input.Command.ResourceSelection.ClusterScoped) == 0 {
+			manifest.Spec.ExcludedClusterScopedResources = []string{"*"}
+		}
 		manifest.Spec.IncludeClusterResources = nil
 	}
 	if len(input.Command.LabelSelector.MatchLabels) > 0 || len(input.Command.LabelSelector.MatchExpressions) > 0 {

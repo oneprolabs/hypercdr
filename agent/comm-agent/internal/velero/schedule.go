@@ -121,11 +121,15 @@ func BuildScheduleManifest(input ScheduleBuildInput) (ScheduleManifest, error) {
 		template.ExcludedClusterScopedResources = []string{"*"}
 		template.IncludeClusterResources = nil
 	} else if input.Command.ResourceSelection.Mode == "custom" {
-		// Backward compatibility for plans created before exclusion mode existed.
+		// Keep the existing include-list protocol and the same application-only
+		// boundary as an immediate backup.
 		template.IncludedResources = nil
 		template.ExcludedResources = nil
 		template.IncludedNamespaceScopedResources = input.Command.ResourceSelection.NamespaceScoped
 		template.IncludedClusterScopedResources = input.Command.ResourceSelection.ClusterScoped
+		if len(input.Command.ResourceSelection.ClusterScoped) == 0 {
+			template.ExcludedClusterScopedResources = []string{"*"}
+		}
 		template.IncludeClusterResources = nil
 	}
 	return ScheduleManifest{

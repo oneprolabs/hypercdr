@@ -684,7 +684,7 @@ export default function ClusterPage(props: {
   };
 
   const finishUnregisterCluster = async () => {
-    if (!unregisterTarget) return;
+    if (!unregisterTarget || (forceRemoveEnabled && forceRemoveConfirmation.trim() !== 'Yes')) return;
     setUnregistering(true);
     setUnregisterSubmitError('');
     if (forceRemoveEnabled) {
@@ -1252,7 +1252,7 @@ export default function ClusterPage(props: {
                 </section>
 
                 <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm">
-                  <div className="flex items-center justify-between"><strong className="text-slate-900">Readiness check</strong><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${unregisterPrecheck?.allowed ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{unregisterPrecheckLoading ? 'Checking' : unregisterPrecheck?.allowed ? 'Ready' : 'Blocked'}</span></div>
+                  <div className="flex items-center justify-between"><strong className="text-slate-900">Readiness check</strong><span className={`hbdr-unregister-readiness-status ${unregisterPrecheckLoading ? 'is-checking' : unregisterPrecheck?.allowed ? 'is-ready' : 'is-blocked'} rounded-full px-2 py-0.5 text-[10px] font-bold ${unregisterPrecheck?.allowed ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{unregisterPrecheckLoading ? 'Checking' : unregisterPrecheck?.allowed ? 'Ready' : 'Blocked'}</span></div>
                   {unregisterPrecheck && <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-500"><span>Source configurations <strong className="text-slate-800">{unregisterPrecheck.sourcePlanCount}</strong></span><span>Target references <strong className="text-slate-800">{unregisterPrecheck.targetPlanCount}</strong></span><span>Restore points <strong className="text-slate-800">{unregisterPrecheck.restorePointCount}</strong></span><span>Active tasks <strong className="text-slate-800">{unregisterPrecheck.activeTaskCount}</strong></span></div>}
                   {unregisterPrecheck?.blockers.map(blocker => <p key={blocker} className="mt-2 rounded bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">{blocker}</p>)}
                   {(unregisterPrecheck?.restorePointCount || unregisterPrecheck?.sourcePlanCount || unregisterPrecheck?.targetPlanCount) ? <label className="mt-3 flex items-start gap-2 border-t border-slate-100 pt-3 text-xs text-slate-600"><input type="checkbox" checked={deleteBackupData} onChange={event=>setDeleteBackupData(event.target.checked)} disabled={unregistering||forceRemoveEnabled} className="mt-0.5"/><span><strong className="block text-slate-800">Clean up related data</strong>{unregisterPrecheck.sourcePlanCount ? 'This cluster is a DR source. Its DR configurations, restore points, and backup data will be removed. ' : ''}{unregisterPrecheck.targetPlanCount ? 'This cluster is a DR target. Other source configurations and backup data will be preserved; only their default target will be cleared. ' : ''}Business namespaces, workloads, and PVCs will not be deleted.</span></label> : unregisterPrecheck?.objectStorageNeeded ? <p className="mt-3 border-t border-slate-100 pt-3 text-xs leading-5 text-blue-700"><strong className="block text-blue-800">Historical storage data detected</strong>The cluster storage prefix will be checked and cleaned automatically before unregister.</p> : <p className="mt-3 border-t border-slate-100 pt-3 text-xs text-emerald-700">This cluster has never used object storage. Object storage will not be accessed.</p>}
@@ -1280,7 +1280,7 @@ export default function ClusterPage(props: {
                     <div className="mt-4 border-t border-rose-200 pt-4">
                       <p className="text-xs leading-5 text-rose-800">This bypasses the agent and removes platform records only. Kubernetes resources and backup objects are not deleted and may require manual cleanup.</p>
                       <label className="mt-3 block text-xs font-semibold text-slate-700">
-                        Type <span className="font-mono text-rose-700">{unregisterTarget.name === 'unknown-cluster' ? unregisterTarget.id : unregisterTarget.name}</span> to confirm
+                        Type <span className="font-mono text-rose-700">Yes</span> to confirm
                         <input
                           value={forceRemoveConfirmation}
                           onChange={event => setForceRemoveConfirmation(event.target.value)}
@@ -1304,7 +1304,7 @@ export default function ClusterPage(props: {
               <div className="hbdr-filter-drawer-actions hbdr-unregister-drawer-actions">
                   <button onClick={closeUnregister} disabled={unregistering} className="rounded-xl px-5 py-2 font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60">Cancel</button>
                   <button
-                    disabled={unregistering || unregisterPrecheckLoading || (!forceRemoveEnabled && ((!unregisterPrecheck?.agentOnline || Boolean(unregisterPrecheck?.activeTaskCount) || Boolean(unregisterPrecheck?.unregisterActive)) || ((!unregisterPrecheck?.allowed || Boolean(unregisterPrecheck?.restorePointCount)) && !deleteBackupData))) || (forceRemoveEnabled && forceRemoveConfirmation !== (unregisterTarget.name === 'unknown-cluster' ? unregisterTarget.id : unregisterTarget.name))}
+                    disabled={unregistering || unregisterPrecheckLoading || (!forceRemoveEnabled && ((!unregisterPrecheck?.agentOnline || Boolean(unregisterPrecheck?.activeTaskCount) || Boolean(unregisterPrecheck?.unregisterActive)) || ((!unregisterPrecheck?.allowed || Boolean(unregisterPrecheck?.restorePointCount)) && !deleteBackupData))) || (forceRemoveEnabled && forceRemoveConfirmation.trim() !== 'Yes')}
                     onClick={finishUnregisterCluster}
                     className="rounded-xl bg-rose-600 px-6 py-2 font-bold text-white shadow-lg shadow-rose-200 transition-all hover:bg-rose-700 active:scale-95 disabled:cursor-not-allowed disabled:bg-rose-300 disabled:shadow-none"
                   >

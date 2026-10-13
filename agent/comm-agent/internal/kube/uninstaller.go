@@ -113,13 +113,9 @@ func (u *KubernetesUninstaller) Uninstall(ctx context.Context, options Uninstall
 			errs = append(errs, err)
 		}
 	} else {
-		for _, name := range uninstallAgentClusterRBACNames(options.Namespace) {
-			if err := u.client.RbacV1().ClusterRoleBindings().Delete(ctx, name, metav1.DeleteOptions{}); ignoreNotFound(err) != nil {
-				errs = append(errs, err)
-			}
-			if err := u.client.RbacV1().ClusterRoles().Delete(ctx, name, metav1.DeleteOptions{}); ignoreNotFound(err) != nil {
-				errs = append(errs, err)
-			}
+		// Establish cascade ownership before revoking our own authorization.
+		if err := u.deleteAgentClusterRBACWithOwnerCascade(ctx, options.Namespace); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
@@ -371,21 +367,19 @@ func veleroCRDNames() []string {
 }
 
 func uninstallExternalClusterRBACNames(namespace string, deleteVelero bool) []string {
+	var names []string
 	if deleteVelero {
-		return []string{scopedRBACName("hypercdr-velero", namespace)}
+		names = append(names, scopedRBACName("hypercdr-velero", namespace))
 	}
-	return nil
-}
-
-func uninstallAgentClusterRBACNames(namespace string) []string {
-	names := []string{scopedRBACName("hypercdr-agent", namespace)}
 	if namespace == "openshift-adp" {
-		// OLM creates this cluster-scoped role from the qualified OADP CSV but
-		// does not consistently garbage-collect it when the CSV namespace is
-		// removed. It belongs to HyperCDR's dedicated OADP installation.
 		names = append(names, "openshift-adp-metrics-reader")
 	}
 	return names
+}
+
+func uninstallAgentClusterRBACNames(namespace string) []string {
+	// Only our own authorization belongs in the final self-removal phase.
+	return []string{scopedRBACName("hypercdr-agent", namespace)}
 }
 
 func scopedRBACName(baseName, namespace string) string {

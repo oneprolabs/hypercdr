@@ -58,3 +58,19 @@ func TestResourceReferencesDoesNotExposeSecretData(t *testing.T) {
 		t.Fatalf("images=%v storage=%v", images, storage)
 	}
 }
+
+func TestResourceReferencesIgnoresOnlyVeleroRestoreHelpers(t *testing.T) {
+	for _, name := range []string{"restore-wait", "restic-wait"} {
+		images, _ := resourceReferences(map[string]any{"spec": map[string]any{
+			"containers": []any{map[string]any{"name": "app", "image": "app:v1"}},
+			"initContainers": []any{
+				map[string]any{"name": name, "command": []any{"/velero-restore-helper"}, "image": "old.registry/velero:v1"},
+				map[string]any{"name": "business-init", "image": "business:v1"},
+				map[string]any{"name": "restore-wait", "command": []any{"/business-init"}, "image": "custom:v1"},
+			},
+		}})
+		if !reflect.DeepEqual(images, []string{"app:v1", "business:v1", "custom:v1"}) {
+			t.Fatalf("%s: images=%v", name, images)
+		}
+	}
+}

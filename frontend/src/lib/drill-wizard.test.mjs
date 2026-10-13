@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {drillNamespaceError,drillScopeError} from './drill-wizard.ts';
+test('drill validates Kubernetes namespace names',()=>{for(const name of ['','Uppercase','with space','-bad','bad-', 'x'.repeat(64)])assert.ok(drillNamespaceError(name));for(const name of ['demo-mysql-csi-drill','a','db-123'])assert.equal(drillNamespaceError(name),'');});
+test('custom restore cannot omit every resource or bypass failed inspection',()=>{assert.ok(drillScopeError('exclude',['pods','services'],['pods','services'],true,false,''));assert.equal(drillScopeError('exclude',['pods'],['pods','services'],true,false,''),'');assert.ok(drillScopeError('exclude',[],[],false,false,''));assert.ok(drillScopeError('all',[],[],true,false,'failed'));assert.ok(drillScopeError('all',[],[],false,true,''));});

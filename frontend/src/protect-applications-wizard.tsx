@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronLeft, ChevronRight, Plus, Search, ShieldCheck, X } from 'lucide-react';
 import { apiGet, apiDelete, apiPost } from './api/client';
 import type { Props, ProtectWizardStep } from './dr-configuration-modal';
-import { ScopedResourceSelector } from './components/scoped-resource-selector';
+import { ScopedResourceSelector, resourceSelectionValid, type ScopedResourceDrafts } from './components/scoped-resource-selector';
 import { createPolicy, defaultPolicyForm } from './features/policies/policy-form-model';
 import { PolicyFormFields } from './features/policies/policy-form-fields';
 import { StorageCreateFields } from './features/storage/storage-create-fields';
@@ -18,7 +18,6 @@ const steps = [
   ['Target', 'Recovery cluster'],
   ['Storage', 'Backup repository'],
   ['Policy', 'Schedule and retention'],
-  ['Hooks', 'Optional'],
   ['Review', 'Confirm configuration'],
 ] as const;
 type RegistrationType = 'native-kubernetes' | 'huaweicloud-cce' | 'openshift';
@@ -28,6 +27,8 @@ type RegistrationTask = { id: string; status: string; progress?: number; errorMe
 
 /** New guided flow; the existing DR configuration modal remains available separately. */
 export function ProtectApplicationsWizard(props: Props & { onResourcesChanged: () => Promise<unknown> }) {
+  const scopeDrafts = useRef<ScopedResourceDrafts>({});
+  useEffect(() => { if (!props.open) scopeDrafts.current = {}; }, [props.open]);
   const [policyQuery, setPolicyQuery] = useState('');
   const [targetQuery, setTargetQuery] = useState('');
   const [storageQuery, setStorageQuery] = useState('');
@@ -44,6 +45,16 @@ export function ProtectApplicationsWizard(props: Props & { onResourcesChanged: (
   const [commandCopied, setCommandCopied] = useState(false);
   const [registrationWatchStarted, setRegistrationWatchStarted] = useState(false);
   const [caCommandCopied, setCaCommandCopied] = useState(false);
+  useEffect(() => {
+    if (!commandCopied) return;
+    const timer = window.setTimeout(() => setCommandCopied(false), 1800);
+    return () => window.clearTimeout(timer);
+  }, [commandCopied]);
+  useEffect(() => {
+    if (!caCommandCopied) return;
+    const timer = window.setTimeout(() => setCaCommandCopied(false), 1800);
+    return () => window.clearTimeout(timer);
+  }, [caCommandCopied]);
   const installCommandRef = useRef<HTMLTextAreaElement>(null);
   const registryCACommandRef = useRef<HTMLTextAreaElement>(null);
   const [registrationBaseline, setRegistrationBaseline] = useState<string[]>([]);
@@ -123,13 +134,14 @@ export function ProtectApplicationsWizard(props: Props & { onResourcesChanged: (
   const selectedTarget = props.targetClusterOptions.find(cluster => cluster.name === props.protectConfig.targetCluster);
   const selectedRepo = props.storage.find(repo => repo.id === props.protectConfig.storageId);
   const selectedPolicy = props.policyOptions.find(policy => policy.id === props.protectConfig.policy);
-  const canNext = props.step === 1 || props.step === 5 || props.step === 6
+  const scopeValid = props.targetCount > 1 || resourceSelectionValid(props.protectConfig.resourceSelection);
+  const canNext = scopeValid && (props.step === 1 || props.step === 5
     || props.step === 2 && Boolean(selectedTarget?.compatible && selectedTarget.connectionStatus === 'online')
     || props.step === 3 && Boolean(selectedRepo)
-    || props.step === 4 && Boolean(selectedPolicy);
+    || props.step === 4 && Boolean(selectedPolicy));
   const goNext = () => {
     if (!canNext || props.submitting) return;
-    if (props.step === 6) props.onFinish();
+    if (props.step === 5) props.onFinish();
     else props.setStep((props.step + 1) as ProtectWizardStep);
   };
   const openCreate = (kind: 'target' | 'storage' | 'policy') => {
@@ -236,16 +248,36 @@ export function ProtectApplicationsWizard(props: Props & { onResourcesChanged: (
           })}
         </nav>
         <main className="hbdr-protect-wizard-content">
-          {props.step === 1 && <section><h3>Application scope</h3><p>Review the namespaces and choose which resources this protection plan will include.</p>{props.targetCount > 1 && <div className="hbdr-protect-wizard-scope-summary"><div className="hbdr-protect-wizard-summary"><strong>{props.targetSummary}</strong><span>{props.targetNames.join(', ')}</span></div><fieldset className="hbdr-protect-wizard-scope-mode"><legend>Protection mode</legend><label><input type="radio" name="wizard-scope-mode" checked={!props.protectConfig.mergeNamespaces} onChange={() => props.setProtectConfig(prev => ({ ...prev, mergeNamespaces: false }))}/><span><strong>Independent</strong><small>Protect each namespace as its own application scope.</small></span></label><label><input type="radio" name="wizard-scope-mode" checked={Boolean(props.protectConfig.mergeNamespaces)} onChange={() => props.setProtectConfig(prev => ({ ...prev, mergeNamespaces: true, scope: 'all', includeAllResources: true, includedResources: [], excludedResources: [], labelSelector: { matchLabels: {}, matchExpressions: [] }, resourceSelection: { mode: 'all', namespaceScoped: [], clusterScoped: [] } }))}/><span><strong>Merge</strong><small>Protect all selected namespaces together as one scope.</small></span></label></fieldset></div>}{props.targetCount > 1 ? <p>Multi-namespace protection always includes all application resources.</p> : <ScopedResourceSelector purpose="backup" value={props.protectConfig.resourceSelection} onChange={resourceSelection => props.setProtectConfig(prev => ({ ...prev, scope: 'all', includeAllResources: resourceSelection.mode === 'all', resourceSelection, includedResources: [], excludedResources: [], labelSelector: { matchLabels: {}, matchExpressions: [] } }))} namespaceResources={props.namespaceResourceOptions || []} customResourcesLoaded={props.customResourcesLoaded} onRequestCustomResources={props.onRequestCustomResources} />}</section>}
+          {props.step === 1 && <section><h3>Application scope</h3><p>Review the namespaces and choose which resources this protection plan will include.</p>{props.targetCount > 1 && <div className="hbdr-protect-wizard-scope-summary"><div className="hbdr-protect-wizard-summary"><strong>{props.targetSummary}</strong><span>{props.targetNames.join(', ')}</span></div><fieldset className="hbdr-protect-wizard-scope-mode"><legend>Protection mode</legend><label><input type="radio" name="wizard-scope-mode" checked={!props.protectConfig.mergeNamespaces} onChange={() => props.setProtectConfig(prev => ({ ...prev, mergeNamespaces: false }))}/><span><strong>Independent</strong><small>Protect each namespace as its own application scope.</small></span></label><label><input type="radio" name="wizard-scope-mode" checked={Boolean(props.protectConfig.mergeNamespaces)} onChange={() => props.setProtectConfig(prev => ({ ...prev, mergeNamespaces: true, scope: 'all', includeAllResources: true, includedResources: [], excludedResources: [], labelSelector: { matchLabels: {}, matchExpressions: [] }, resourceSelection: { mode: 'all', namespaceScoped: [], clusterScoped: [] } }))}/><span><strong>Merge</strong><small>Protect all selected namespaces together as one scope.</small></span></label></fieldset></div>}{props.targetCount > 1 ? <p>Multi-namespace protection always includes all application resources.</p> : <ScopedResourceSelector purpose="backup" drafts={scopeDrafts} customUnavailableReason={props.targetClusterOptions.find(cluster => cluster.isCurrent)?.clusterType === 'openshift' ? 'OpenShift OADP currently supports the default scope only.' : undefined} value={props.protectConfig.resourceSelection} onChange={resourceSelection => props.setProtectConfig(prev => ({ ...prev, scope: 'all', includeAllResources: resourceSelection.mode === 'all', resourceSelection, includedResources: [], excludedResources: [], labelSelector: { matchLabels: {}, matchExpressions: [] } }))} namespaceResources={props.namespaceResourceOptions || []} customResourcesLoaded={props.customResourcesLoaded} onRequestCustomResources={props.onRequestCustomResources} />}</section>}
           {props.step === 2 && <section><h3>Target cluster</h3><p>Choose a compatible recovery cluster. Registration can be started without leaving this wizard.</p><div className="hbdr-protect-wizard-selection-tools"><label><Search size={17}/><input value={targetQuery} onChange={event => setTargetQuery(event.target.value)} placeholder="Search clusters" /></label><div><button type="button" onClick={() => void props.onResourcesChanged()}>Refresh</button><button type="button" onClick={() => openCreate('target')}><Plus size={15} />Register cluster</button></div></div><div className="hbdr-protect-wizard-options">{targets.map(cluster => <label key={cluster.id} className={props.protectConfig.targetCluster === cluster.name ? 'is-selected' : ''}><input type="radio" name="target-cluster" checked={props.protectConfig.targetCluster === cluster.name} disabled={!cluster.compatible} onChange={() => props.setProtectConfig(prev => ({ ...prev, targetCluster: cluster.name }))}/><span className="hbdr-protect-wizard-card-copy"><span className="hbdr-protect-wizard-card-heading"><strong>{cluster.name}</strong><em>{cluster.connectionStatus || 'Unknown'}</em></span><small title={`${cluster.clusterType || 'Kubernetes'} · ${cluster.version} · ${cluster.region} · ${cluster.nodes} nodes · ${cluster.namespaces ?? '—'} namespaces · ${cluster.applications} applications${cluster.compatible ? '' : ` · ${cluster.incompatibilityReason || 'Incompatible cluster'}`}`}>{cluster.clusterType || 'Kubernetes'} · {cluster.version} · {cluster.region} · {cluster.nodes} nodes · {cluster.namespaces ?? '—'} namespaces · {cluster.applications} applications{!cluster.compatible && ` · ${cluster.incompatibilityReason || 'Incompatible cluster'}`}</small></span></label>)}{targets.length === 0 && <p>No clusters match the search.</p>}</div><div className="hbdr-protect-wizard-pagination"><span>Showing {targets.length} of {props.targetClusterOptions.length} clusters</span></div></section>}
           {props.step === 3 && <section><h3>Backup repository</h3><p>Select a repository for recovery points or create one within this flow.</p><div className="hbdr-protect-wizard-selection-tools"><label><Search size={17}/><input value={storageQuery} onChange={event => setStorageQuery(event.target.value)} placeholder="Search repositories" /></label><div><button type="button" onClick={() => openCreate('storage')}><Plus size={15} />New storage</button></div></div><div className="hbdr-protect-wizard-options">{repositories.map(repo => <label key={repo.id} className={props.protectConfig.storageId === repo.id ? 'is-selected' : ''}><input type="radio" name="storage-repo" checked={props.protectConfig.storageId === repo.id} onChange={() => props.setProtectConfig(prev => ({ ...prev, storageId: repo.id }))}/><span className="hbdr-protect-wizard-card-copy"><span className="hbdr-protect-wizard-card-heading"><strong>{repo.name}</strong><em>{repo.type}</em></span><small title={`Bucket / path: ${repo.bucket || '—'} · Endpoint: ${repo.endpoint || '—'}`}>Bucket / path: {repo.bucket || '—'} · Endpoint: {repo.endpoint || '—'}</small></span></label>)}{repositories.length === 0 && <p>No repositories match the search.</p>}</div><div className="hbdr-protect-wizard-pagination"><span>Showing {repositories.length} of {props.storage.length} repositories</span></div></section>}
           {props.step === 4 && <section><h3>Protection policy</h3><p>Pick the schedule and retention rule these namespaces will follow. Both can be changed later without re-running the wizard.</p><div className="hbdr-protect-wizard-policy-tools"><label><Search size={17}/><input value={policyQuery} onChange={event => { setPolicyQuery(event.target.value); setPolicyPage(1); }} placeholder="Search policies" /></label><button type="button" onClick={() => openCreate('policy')}><Plus size={15}/>New policy</button></div><div className="hbdr-protect-wizard-options">{pagePolicies.map(policy => <label key={policy.id} className={props.protectConfig.policy === policy.id ? 'is-selected' : ''}><input type="radio" name="protection-policy" checked={props.protectConfig.policy === policy.id} onChange={() => props.setProtectConfig(prev => ({ ...prev, policy: policy.id }))}/><span className="hbdr-protect-wizard-card-copy"><span className="hbdr-protect-wizard-card-heading"><strong>{policy.name}</strong><em>{policy.type}</em></span><small title={`Schedule: ${policy.schedule} · Retention: ${policy.retention} · ${policy.status} · ${policy.bound ? `${policy.bound} applications bound` : 'No applications bound'}`}>Schedule: {policy.schedule} · Retention: {policy.retention} · {policy.status} · {policy.bound ? `${policy.bound} applications bound` : 'No applications bound'}</small></span></label>)}{policies.length === 0 && <p>No policies match the search.</p>}</div><div className="hbdr-protect-wizard-pagination"><span>Showing {policies.length ? (currentPage - 1) * pageSize + 1 : 0}–{Math.min(currentPage * pageSize, policies.length)} of {policies.length}</span><div><button type="button" disabled={currentPage === 1} onClick={() => setPolicyPage(currentPage - 1)} aria-label="Previous policy page"><ChevronLeft size={16}/></button><span>{currentPage} / {pageCount}</span><button type="button" disabled={currentPage === pageCount} onClick={() => setPolicyPage(currentPage + 1)} aria-label="Next policy page"><ChevronRight size={16}/></button></div></div></section>}
-          {props.step === 5 && <section><h3>Hooks</h3><p>Pre- and post-operation scripts are optional. This platform version does not support script execution yet.</p><div className="hbdr-protect-wizard-summary">No hooks will be added to this plan.</div></section>}
-          {props.step === 6 && <section><h3>Review protection</h3><p>Check the selections before creating the protection plan.</p><dl className="hbdr-protect-wizard-review"><div><dt>Applications</dt><dd>{props.targetNames.join(', ')}</dd></div><div><dt>Target cluster</dt><dd>{selectedTarget?.name || '—'}</dd></div><div><dt>Storage</dt><dd>{selectedRepo?.name || '—'}</dd></div><div><dt>Policy</dt><dd>{selectedPolicy?.name || '—'}</dd></div><div><dt>Hooks</dt><dd>None</dd></div></dl></section>}
+          {props.step === 5 && <section><h3>Review protection</h3><p>Check the selections before creating the protection plan.</p><div className="hbdr-protect-review-groups"><section aria-label="Scope settings"><h4><span>1</span>Scope</h4><dl>
+            <div><dt>Applications</dt><dd>{props.targetNames.join(', ')}</dd></div>
+            {props.targetCount > 1 && <div><dt>Protection mode</dt><dd>{props.protectConfig.mergeNamespaces ? 'Merge namespaces into one application scope' : 'Independent protection for each namespace'}</dd></div>}
+            <div><dt>Resource scope</dt><dd>{props.targetCount > 1 || props.protectConfig.resourceSelection.mode === 'all' ? 'Default' : 'Custom'}
+              {props.targetCount > 1 || props.protectConfig.resourceSelection.mode === 'all' ? <small>All namespace-scoped resource types are included. New resource types are included automatically. Cluster-scoped resources are excluded.</small> : <>
+                <small>{props.protectConfig.resourceSelection.mode === 'custom' ? 'Selected types only' : 'All types, with exclusions'}</small>
+                <small>{props.protectConfig.resourceSelection.mode === 'custom' ? 'Included types' : 'Excluded types'}:</small>
+                {props.protectConfig.resourceSelection.namespaceScoped.length ? props.protectConfig.resourceSelection.namespaceScoped.map(key => {
+                  const resource = props.namespaceResourceOptions?.find(item => item.key === key);
+                  return <span className="hbdr-protect-review-resource" key={key}>{resource ? `${resource.label} · ${key}` : key}</span>;
+                }) : <small>{props.protectConfig.resourceSelection.mode === 'custom' ? 'None selected' : 'None · All namespace-scoped resource types included'}</small>}
+                <small>{props.protectConfig.resourceSelection.mode === 'custom' ? 'New resource types are excluded until selected.' : 'New resource types are included automatically.'}</small>
+                <small>Cluster-scoped resources: {props.protectConfig.resourceSelection.mode === 'custom' && props.protectConfig.resourceSelection.clusterScoped.length ? props.protectConfig.resourceSelection.clusterScoped.join(', ') : 'Excluded'}</small>
+              </>}
+            </dd></div>
+</dl></section><section aria-label="Target settings"><h4><span>2</span>Target</h4><dl>
+            <div><dt>Target cluster</dt><dd>{selectedTarget?.name || '—'}<small>{selectedTarget ? `${selectedTarget.clusterType || 'Kubernetes'} · ${selectedTarget.version} · ${selectedTarget.connectionStatus || 'Unknown'}` : ''}</small></dd></div>
+</dl></section><section aria-label="Storage settings"><h4><span>3</span>Storage</h4><dl>
+            <div><dt>Storage</dt><dd>{selectedRepo?.name || '—'}<small>{selectedRepo ? `${selectedRepo.type} · Bucket / path: ${selectedRepo.bucket || '—'}` : ''}</small><small>{selectedRepo?.endpoint || ''}</small></dd></div>
+</dl></section><section aria-label="Policy settings"><h4><span>4</span>Policy</h4><dl>
+            <div><dt>Policy</dt><dd>{selectedPolicy?.name || '—'}<small>{selectedPolicy ? `Schedule: ${selectedPolicy.schedule} · Retention: ${selectedPolicy.retention}` : ''}</small></dd></div>
+          </dl></section></div></section>}
 
         </main>
       </div>
-      <footer className="hbdr-protect-wizard-footer"><span>Step {props.step} of 6</span><div><button type="button" onClick={closeWizard}>Cancel</button><button type="button" disabled={props.step === 1} onClick={() => props.setStep((props.step - 1) as ProtectWizardStep)}>Back</button><button type="button" className="is-primary" disabled={!canNext || props.submitting} onClick={goNext}>{props.step === 6 ? props.submitting ? 'Saving…' : 'Create protection' : 'Next'}<ChevronRight size={16}/></button></div></footer>
+      <footer className="hbdr-protect-wizard-footer"><span>Step {props.step} of 5</span><div><button type="button" onClick={closeWizard}>Cancel</button><button type="button" disabled={props.step === 1} onClick={() => props.setStep((props.step - 1) as ProtectWizardStep)}>Back</button><button type="button" className="is-primary" disabled={!canNext || props.submitting} onClick={goNext}>{props.step === 5 ? props.submitting ? 'Saving…' : 'Create protection' : 'Next'}<ChevronRight size={16}/></button></div></footer>
       {inlineCreate === 'policy' && <ResourceCreateDrawer title="New DR Policy" kind="policy" onClose={() => closeInline()} actions={<><button type="button" disabled={creationBusy || !policyForm.name.trim()} onClick={() => void createResource()}>{creationBusy ? 'Saving...' : 'Save Policy'}</button><button type="button" onClick={() => closeInline()}>Cancel</button></>}><PolicyFormFields policyForm={policyForm} setPolicyForm={setPolicyForm} />{creationError && <p role="alert">{creationError}</p>}</ResourceCreateDrawer>}
       {inlineCreate === 'storage' && storageDraft && <ResourceCreateDrawer title="New Storage Repository" kind="storage" onClose={() => closeInline()} actions={<><button type="button" disabled={creationBusy || !storageReady(storageDraft)} onClick={() => void createResource()}>{creationBusy ? 'Saving...' : 'Save Storage'}</button><button type="button" onClick={() => closeInline()}>Cancel</button></>}><StorageCreateFields draft={storageDraft} setDraft={setStorageDraft} testResult={storageTestResult} testing={creationBusy} onTest={() => void testStorageDraft()} />{creationError && <p role="alert">{creationError}</p>}</ResourceCreateDrawer>}
       {inlineCreate === 'target' && <ResourceCreateDrawer title="Register New Cluster" kind="cluster" onClose={() => closeInline()} actions={registrationMode === 'command' ? <><button type="button" className="is-primary" onClick={() => closeInline(true)}>Continue in Background</button><button type="button" onClick={() => closeInline()}>Cancel</button></> : <button type="button" onClick={() => closeInline()}>Cancel</button>}>

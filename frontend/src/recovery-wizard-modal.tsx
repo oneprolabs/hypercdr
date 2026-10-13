@@ -1,4 +1,7 @@
 import React, { useEffect } from 'react';
+import { RecoverySelect } from './components/recovery-select';
+import { recoveryApplicationImages } from './lib/recovery-images';
+import { drillSteps, drillNamespaceError, drillScopeError } from './lib/drill-wizard';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertCircle,
@@ -253,6 +256,11 @@ export function RecoveryWizardModal(props: Props) {
     loadContents,
   } = props;
 
+  const [drillStep, setDrillStep] = React.useState(0);
+  const contentRequest = React.useRef(0);
+  const inspectedPoint = React.useRef('');
+  useEffect(() => { if (open) { setDrillStep(0); inspectedPoint.current = ''; } return () => { contentRequest.current++; }; }, [open]);
+
   const [advancedOpen, setAdvancedOpen] = React.useState(false);
   const [contents, setContents] = React.useState<BackupContentResource[]>([]);
   const [contentsLoading, setContentsLoading] = React.useState(false);
@@ -265,6 +273,7 @@ export function RecoveryWizardModal(props: Props) {
     if (open) {
       setImageMappingHistory(readImageMappingHistory());
       setSubmitError('');
+      if (mode === 'drill') { setContents([]); setContentsLoading(false); setContentsError(''); setAdvancedOpen(false); }
     }
   }, [open]);
 
@@ -282,7 +291,7 @@ export function RecoveryWizardModal(props: Props) {
   const restoresToOriginalNamespace = config.namespaceMode === 'original' || targetNamespace === sourceNamespace;
   const targetClusterOption = clusterOptions.find(item => item.name === config.targetCluster);
   const backupStorageClasses = Array.from(new Set(contents.flatMap(item => item.storageClasses || []))).sort();
-  const backupImages = Array.from(new Set(contents.flatMap(item => item.images || []))).sort();
+  const backupImages = recoveryApplicationImages(contents);
   const backupServicePorts = contents.filter(item => item.kind === 'Service').flatMap(item => (item.servicePorts || []).map(port => ({ service: item.name, ...port, key: `${item.name}|${port.port}|${port.protocol || 'TCP'}` }))).sort((a,b) => a.service.localeCompare(b.service) || a.port-b.port);
   const restorePointUnavailable = Boolean(contentsError && /restore.?point.?not.?found|no longer available/i.test(contentsError));
   const nodePortEntries = Object.entries(config.serviceNodePortMappings || {});
@@ -312,7 +321,7 @@ export function RecoveryWizardModal(props: Props) {
   const sourcePoints = pointsBySource[config.sourceType];
 
   useEffect(() => {
-    if (!config.contentCatalogLoaded || backupStorageClasses.length === 0) return;
+    if ((mode === 'drill' && !advancedOpen) || !config.contentCatalogLoaded || backupStorageClasses.length === 0) return;
     const targetStorageClasses = new Set((targetClusterOption?.storageClasses || []).map(item => item.name));
     const next = { ...(config.storageClassMappings || {}) };
     let changed = false;
@@ -323,7 +332,7 @@ export function RecoveryWizardModal(props: Props) {
       }
     });
     if (changed) updateConfig({ storageClassMappings: next });
-  }, [backupStorageClasses.join('\u0000'), config.contentCatalogLoaded, config.targetCluster]);
+  }, [backupStorageClasses.join('\u0000'), config.contentCatalogLoaded, config.targetCluster, advancedOpen, mode]);
 
   const updateConfig = (patch: Partial<RecoveryWizardConfig>) => {
     setConfig(prev => (prev ? { ...prev, ...patch } : prev));
@@ -331,21 +340,24 @@ export function RecoveryWizardModal(props: Props) {
 
   const loadCustomResources = async () => {
     if (!config.pointId || !loadContents) return false;
+    const request = ++contentRequest.current;
     setContentsLoading(true); setContentsError('');
     updateConfig({ contentCatalogLoaded: false, persistentDataExpected: false, forceStart: false });
     try {
       const result = await loadContents(config.pointId);
+      if (request !== contentRequest.current) return false;
       const resources = result.resources || [];
       setContents(resources);
       updateConfig({ contentCatalogLoaded: true, persistentDataExpected: resources.some(item => ['PersistentVolumeClaim', 'PersistentVolume', 'VolumeSnapshot'].includes(item.kind)) });
       return true;
     } catch (error) {
+      if (request !== contentRequest.current) return false;
       setContents([]);
       updateConfig({ contentCatalogLoaded: false });
       setContentsError(error instanceof Error ? error.message : 'Restore point contents could not be loaded.');
       return false;
     } finally {
-      setContentsLoading(false);
+      if (request === contentRequest.current) setContentsLoading(false);
     }
   };
 
@@ -397,7 +409,11 @@ export function RecoveryWizardModal(props: Props) {
   };
 
   const choosePoint = (point: RecoveryPoint) => {
+    if (mode === 'drill' && point.id !== config.pointId) {
+      contentRequest.current++; inspectedPoint.current = ''; setContents([]); setContentsError(''); setContentsLoading(false);
+    }
     updateConfig({
+      ...(mode === 'drill' && point.id !== config.pointId ? { contentCatalogLoaded:false, resourceSelection:{mode:'all' as const, namespaceScoped:[], clusterScoped:[]}, excludedResources:[], includedResources:[], storageClassMappings:{}, imageMappings:{}, serviceNodePortMappings:{} } : {}),
       pointId: point.id,
       sourceType: pointSourceType(point),
       storageProfileMode: pointSourceType(point) === 'snapshot' ? 'original' : config.storageProfileMode,
@@ -428,6 +444,7 @@ export function RecoveryWizardModal(props: Props) {
     const targetMode = inferTargetMode(targetCluster, config.namespaceMode, currentTargetClusterName);
     updateConfig({
       targetCluster,
+      ...(mode === 'drill' ? { storageClassMappings:{} } : {}),
       targetMode,
       originalNamespaceConfirmed: false,
       ...targetBehaviorPatch(targetMode, config.namespaceMode),
@@ -485,6 +502,20 @@ export function RecoveryWizardModal(props: Props) {
     });
   };
 
+  useEffect(() => {
+    if (!open || mode !== 'drill' || drillStep < 2 || !config.pointId || inspectedPoint.current === config.pointId) return;
+    inspectedPoint.current = config.pointId;
+    void loadCustomResources();
+  }, [open, mode, drillStep, config.pointId]);
+
+  const scopeBlocker = drillScopeError(restoreSelection.mode, restoreSelection.namespaceScoped, restoreNamespaceOptions.map(item => item.key), config.contentCatalogLoaded, contentsLoading, contentsError);
+  const stepBlocker = drillStep === 0 ? (!config.pointId || !sourcePoints.some(point => point.id === config.pointId) ? 'Select an available restore point.' : '')
+    : drillStep === 1 ? (!targetClusterOption || !targetClusterOption.compatible ? 'Select a compatible target cluster.' : drillNamespaceError(targetNamespace) || (restoresToOriginalNamespace && !config.originalNamespaceConfirmed ? 'Confirm the original namespace restore risk.' : ''))
+    : drillStep === 2 ? scopeBlocker || (nodePortError ? 'Each NodePort must be unique and between 30000 and 32767.' : '') : '';
+  const goNext = () => { if (stepBlocker) { setSubmitError(stepBlocker); return; } setSubmitError(''); setDrillStep(step => Math.min(3,step+1)); };
+  const selectedPoint = points.find(point => point.id === config.pointId);
+  const excludedTypes = restoreNamespaceOptions.filter(item => restoreSelection.namespaceScoped.includes(item.key));
+
   const submitLabel = mode === 'drill' ? 'Start Drill' : 'Start Takeover';
   const title = mode === 'drill' ? 'DR Drill' : 'DR Takeover';
   const HeaderIcon = mode === 'drill' ? ShieldCheck : Target;
@@ -492,7 +523,7 @@ export function RecoveryWizardModal(props: Props) {
   return (
     <AnimatePresence>
       {open && (
-        <div className="hbdr-protect-modal">
+        <div className={`hbdr-protect-modal ${mode === 'drill' ? 'hbdr-protect-wizard-backdrop' : ''}`}>
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -505,9 +536,9 @@ export function RecoveryWizardModal(props: Props) {
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 32 }}
             transition={{ duration: 0.18, ease: 'easeOut' }}
-            className="hbdr-filter-drawer hbdr-protect-dialog hbdr-protect-dialog-v2 hbdr-protect-drawer hbdr-recovery-dialog"
+            className={mode === 'drill' ? 'hbdr-protect-wizard hbdr-recovery-dialog hbdr-drill-wizard' : 'hbdr-filter-drawer hbdr-protect-dialog hbdr-protect-dialog-v2 hbdr-protect-drawer hbdr-recovery-dialog'} role="dialog" aria-modal="true" aria-label={title}
           >
-            <div className="hbdr-protect-header">
+            <div className={mode === 'drill' ? 'hbdr-protect-wizard-header' : 'hbdr-protect-header'}>
               <div className="hbdr-protect-title-wrap">
                 <div className="hbdr-protect-title-icon"><HeaderIcon size={22} /></div>
                 <div>
@@ -520,9 +551,12 @@ export function RecoveryWizardModal(props: Props) {
               </div>
             </div>
 
-            <div className="hbdr-protect-body hbdr-recovery-body">
+            <div className={mode === 'drill' ? 'hbdr-protect-wizard-body' : 'hbdr-recovery-legacy-body'}>
+              {mode === 'drill' && <nav className="hbdr-protect-wizard-steps" aria-label="Drill steps">{drillSteps.map(([label,detail],index) => <button key={label} type="button" className={drillStep === index ? 'is-current' : ''} disabled={submitting || index > drillStep} onClick={() => {setDrillStep(index);setSubmitError('');}} aria-current={drillStep === index ? 'step' : undefined}><span>{index+1}</span><span><strong>{label}</strong><small>{detail}</small></span></button>)}</nav>}
+            <div className={mode === 'drill' ? 'hbdr-protect-wizard-content hbdr-recovery-body' : 'hbdr-protect-body hbdr-recovery-body'}>
+              {mode === 'drill' && <div className="hbdr-drill-step-heading"><h3>{drillSteps[drillStep][0]}</h3><p>{['Choose the backup used for this drill.','Choose where to restore the application.','Choose resource types and optional environment mappings.','Confirm the settings before starting the drill.'][drillStep]}</p></div>}
               <div className="hbdr-recovery-single-page">
-                <div className="hbdr-protect-section">
+                <div className="hbdr-protect-section" hidden={mode === 'drill' && drillStep !== 0}>
                   <div className="hbdr-protect-section-title">
                     <strong>Restore point</strong>
                   </div>
@@ -548,7 +582,8 @@ export function RecoveryWizardModal(props: Props) {
                       </div>
                     </label>}
                     <label>
-                      <select
+                      <RecoverySelect
+                        aria-label="Restore point"
                         value={config.pointId}
                         onChange={event => {
                           const point = sourcePoints.find(item => item.id === event.target.value);
@@ -562,12 +597,14 @@ export function RecoveryWizardModal(props: Props) {
                             {point.time}
                           </option>
                         ))}
-                      </select>
+                      </RecoverySelect>
                     </label>
                   </div>
                 </div>
 
-                <div className="hbdr-protect-section">
+                {mode === 'drill' && drillStep === 0 && <section className="hbdr-drill-point-meta"><dl><div><dt>Source cluster</dt><dd>{currentClusterName}</dd></div><div><dt>Namespace</dt><dd>{sourceNamespace}</dd></div><div><dt>Backup time</dt><dd>{selectedPoint?.time || 'Not selected'}</dd></div><div><dt>Restore point status</dt><dd>{selectedPoint?.status || 'Unknown'}</dd></div></dl><p>The selected backup is restored into the target namespace. Source workloads are not modified.</p></section>}
+
+                <div className="hbdr-protect-section" hidden={mode === 'drill' && drillStep !== 1}>
                   <div className="hbdr-protect-section-title">
                     <strong>Target</strong>
                   </div>
@@ -578,7 +615,8 @@ export function RecoveryWizardModal(props: Props) {
                         <div className="hbdr-recovery-target-section">
                           <label className="hbdr-recovery-plain-field">
                             <span>Target cluster</span>
-                            <select
+                            <RecoverySelect
+                              aria-label="Target cluster"
                               aria-describedby="hbdr-recovery-target-compatibility"
                               value={config.targetCluster}
                               onChange={event => chooseTargetCluster(event.target.value)}
@@ -588,7 +626,7 @@ export function RecoveryWizardModal(props: Props) {
                                   {!cluster.compatible ? 'Unavailable — ' : ''}{cluster.name}{cluster.name === currentTargetClusterName ? ' / Current' : ''}{cluster.name === configuredTargetCluster ? ' / Configured target' : ''}{!cluster.compatible ? ' · incompatible type' : ''}
                                 </option>
                               ))}
-                            </select>
+                            </RecoverySelect>
                           </label>
                         </div>
                         {clusterOptions.some(cluster => !cluster.compatible) && <p id="hbdr-recovery-target-compatibility" className="hbdr-config-compatibility-note"><span aria-hidden="true">!</span><span><strong>Some targets are unavailable.</strong> {clusterCompatibilityMessage(currentClusterOption?.clusterType)}</span></p>}
@@ -644,12 +682,14 @@ export function RecoveryWizardModal(props: Props) {
                   </div>
                 </div>
 
-                <div className="hbdr-protect-section hbdr-recovery-scope-section">
+                <div className="hbdr-protect-section hbdr-recovery-scope-section" hidden={mode === 'drill' && drillStep !== 2}>
                   <div className="hbdr-protect-section-title">
                     <strong>Restore scope</strong>
                     <span>Choose the Kubernetes resource types restored from this point.</span>
                   </div>
                   <ScopedResourceSelector
+                    key={mode === 'drill' ? config.pointId : undefined}
+                    detailedRestore={mode === 'drill'}
                     purpose="restore"
                     value={restoreSelection}
                     onChange={updateRestoreSelection}
@@ -671,7 +711,7 @@ export function RecoveryWizardModal(props: Props) {
                   )}
                 </div>
 
-                <div className="hbdr-protect-section hbdr-recovery-advanced">
+                <div className="hbdr-protect-section hbdr-recovery-advanced" hidden={mode === 'drill' && drillStep !== 2}>
                   <label className="hbdr-recovery-advanced-toggle">
                     <span><strong>Advanced options</strong><em>Mappings and conflict handling</em></span>
                     <input
@@ -680,6 +720,7 @@ export function RecoveryWizardModal(props: Props) {
                       onChange={event => {
                         const nextOpen = event.target.checked;
                         setAdvancedOpen(nextOpen);
+                        if (mode === 'drill' && !nextOpen) updateConfig({ storageClassMappings:{}, imageMappings:{}, serviceNodePortMappings:{} });
                         // Advanced mappings depend on the restore-point catalog, but
                         // keep that inspection lazy so opening the wizard stays fast.
                         if (nextOpen && !config.contentCatalogLoaded && !contentsLoading) {
@@ -702,7 +743,7 @@ export function RecoveryWizardModal(props: Props) {
                       )}
                       <section>
                         <header><strong>Environment mappings</strong><span>Leave blank to preserve the value stored in the backup.</span></header>
-                        {backupStorageClasses.map(source => <label className="hbdr-recovery-mapping" key={`sc-${source}`}><span>StorageClass <b>{source}</b></span><select value={config.storageClassMappings?.[source] || ''} onChange={event => updateMapping('storageClassMappings', source, event.target.value)}><option value="">Keep original</option>{(targetClusterOption?.storageClasses || []).map(item => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label>)}
+                        {backupStorageClasses.map(source => <label className="hbdr-recovery-mapping" key={`sc-${source}`}><span>StorageClass <b>{source}</b></span><RecoverySelect value={config.storageClassMappings?.[source] || ''} onChange={event => updateMapping('storageClassMappings', source, event.target.value)}><option value="">Keep original</option>{(targetClusterOption?.storageClasses || []).map(item => <option key={item.name} value={item.name}>{item.name}</option>)}</RecoverySelect></label>)}
                         {backupImages.map((source, index) => <label className="hbdr-recovery-image-mapping" key={`image-${source}`}>
                           <span><em>Source image</em><b title={source}>{source}</b></span>
                           <span><em>Target image</em><input list={`hbdr-image-history-${index}`} autoComplete="off" title={config.imageMappings?.[source] || ''} value={config.imageMappings?.[source] || ''} onChange={event => updateMapping('imageMappings', source, event.target.value)} placeholder="Keep original image" />
@@ -740,6 +781,16 @@ export function RecoveryWizardModal(props: Props) {
                   )}
                 </div>
 
+                {mode === 'drill' && drillStep === 3 && <div className="hbdr-protect-review-groups hbdr-drill-review">
+                  <section><h4><span>1</span>Restore Point</h4><dl><div><dt>Source application</dt><dd>{currentClusterName} / {sourceNamespace}</dd></div><div><dt>Restore point</dt><dd>{selectedPoint?.time || config.pointId}</dd></div></dl></section>
+                  <section><h4><span>2</span>Target</h4><dl><div><dt>Cluster</dt><dd>{config.targetCluster}</dd></div><div><dt>Namespace</dt><dd>{targetNamespace}</dd></div><div><dt>Recovery mode</dt><dd>{restoresToOriginalNamespace ? 'Original namespace · Replace existing resources' : 'Clone to new namespace'}</dd></div></dl></section>
+                  <section><h4><span>3</span>Restore Options</h4><dl><div><dt>Restore scope</dt><dd>{restoreSelection.mode === 'all' ? 'Default' : 'Custom'}<small>{restoreSelection.mode === 'all' ? 'Restore all namespace-scoped resource types. Cluster-scoped resources are excluded.' : `Restore namespace-scoped resource types except the ${excludedTypes.length} excluded types below. Cluster-scoped resources are excluded.`}</small>{restoreSelection.mode !== 'all' && <small>Excluded types: {excludedTypes.map(item => item.label).join(', ') || 'None'}</small>}</dd></div><div><dt>Advanced options</dt><dd>{advancedOpen ? <>Enabled
+                      <div className="hbdr-review-mapping-group"><small>StorageClass mappings</small>{backupStorageClasses.length ? backupStorageClasses.map(source => <small className="hbdr-review-mapping-entry" key={source}>{source} → {config.storageClassMappings[source] || source}</small>) : <small className="hbdr-review-mapping-entry">None in backup</small>}</div>
+                      <div className="hbdr-review-mapping-group"><small>Business image mappings</small>{backupImages.length ? backupImages.map(source => <small className="hbdr-review-mapping-entry" key={source}>{source} → {config.imageMappings[source] || 'Keep original'}</small>) : <small className="hbdr-review-mapping-entry">None in backup</small>}</div>
+                      <div className="hbdr-review-mapping-group"><small>Service NodePorts</small>{backupServicePorts.length ? backupServicePorts.map(port => <small className="hbdr-review-mapping-entry" key={port.key}>{port.service}:{port.port} → {config.serviceNodePortMappings[port.key] || 'Automatic'}</small>) : <small className="hbdr-review-mapping-entry">None in backup</small>}</div>
+                    </> : 'Not enabled'}</dd></div></dl></section>
+                </div>}
+
                 {submitError && (
                   <div ref={submitErrorRef} className="hbdr-recovery-submit-error" role="alert" aria-live="assertive">
                     <AlertCircle size={17} aria-hidden="true" />
@@ -753,22 +804,26 @@ export function RecoveryWizardModal(props: Props) {
               </div>
             </div>
 
-            <div className="hbdr-protect-footer">
-			  {readinessBlockers > 0 && (
+            </div>
+            <div className={mode === 'drill' ? 'hbdr-protect-wizard-footer' : 'hbdr-protect-footer'}>
+			  {readinessBlockers > 0 && (mode !== 'drill' || drillStep === 3) && (
 				<label className="hbdr-recovery-confirm-check" title={`${readinessBlockers} blocking readiness finding${readinessBlockers === 1 ? '' : 's'}`}>
 				  <input type="checkbox" checked={config.forceProceed} onChange={event => updateConfig({ forceProceed: event.target.checked })} />
 				  <span>I understand the identified risks and want to proceed anyway.</span>
 				</label>
 			  )}
+              {mode === 'drill' && <span className="hbdr-drill-step-counter">Step {drillStep+1} of 4</span>}
+              <div className="hbdr-recovery-footer-actions">
               <button type="button" onClick={onClose} disabled={submitting}>Cancel</button>
-              <button
+              {mode === 'drill' && drillStep > 0 && <button type="button" disabled={submitting} onClick={() => {setDrillStep(step => step-1);setSubmitError('');}}>Back</button>}
+              {mode === 'drill' && drillStep < 3 ? <button type="button" className="hbdr-protect-primary is-primary" disabled={submitting || contentsLoading} onClick={goNext}>Next</button> : <button
                 type="button"
-                className="hbdr-protect-primary"
+                className={mode === 'drill' ? 'hbdr-protect-primary is-primary' : 'hbdr-protect-primary'}
                 disabled={submitting}
                 onClick={async () => {
                   if (submitting) return;
-                  if (submissionBlocker) {
-                    setSubmitError(submissionBlocker);
+                  if (submissionBlocker || (mode === 'drill' && (scopeBlocker || drillNamespaceError(targetNamespace)))) {
+                    setSubmitError(submissionBlocker || scopeBlocker || drillNamespaceError(targetNamespace));
                     window.requestAnimationFrame(() => submitErrorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
                     return;
                   }
@@ -784,7 +839,8 @@ export function RecoveryWizardModal(props: Props) {
                 }}
               >
                 <Play size={15} />{submitting ? 'Submitting…' : submitLabel}
-              </button>
+              </button>}
+              </div>
             </div>
           </motion.div>
         </div>
