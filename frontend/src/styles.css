@@ -23519,6 +23519,29 @@ html[data-theme='dark'] .premium-app.hbdr-workspace .hbdr-dr-reference-table-tit
   margin-top: 6px;
 }
 
+html[data-theme='dark'] #root .hbdr-task-detail-error {
+  background: #191e27;
+  border-color: #593540;
+  border-left-color: var(--hc-crit);
+  color: #d6dce5;
+}
+
+html[data-theme='dark'] #root .hbdr-task-detail-error header small {
+  color: #a5afbe;
+}
+
+html[data-theme='dark'] #root .hbdr-task-detail-error :is(strong, b) {
+  color: var(--hc-crit);
+}
+
+html[data-theme='dark'] #root .hbdr-task-detail-error :is(span, p) {
+  color: #d6dce5;
+}
+
+html[data-theme='dark'] #root .hbdr-task-detail-error section {
+  border-top-color: #593540;
+}
+
 .hbdr-task-stage-groups {
   display: grid;
   padding: 14px 8px 10px;
@@ -29335,3 +29358,74 @@ html[data-theme='dark'] #root .hbdr-unregister-drawer .hbdr-unregister-force > d
 html[data-theme='dark'] #root .hbdr-unregister-drawer .hbdr-unregister-drawer-title-icon { background:color-mix(in srgb,#ef7777 12%,var(--hc-surface)) !important; color:#ef9999 !important; border-color:var(--hc-border-strong) !important; }
 html[data-theme='dark'] #root .hbdr-unregister-drawer .hbdr-unregister-drawer-actions button:last-child:not(:disabled) { background:var(--hc-accent) !important; border-color:var(--hc-accent) !important; color:#fff !important; }
 html[data-theme='dark'] #root .hbdr-unregister-drawer .hbdr-unregister-drawer-actions button:last-child:not(:disabled):hover { background:color-mix(in srgb,var(--hc-accent) 85%,#fff) !important; }
+/* Cluster detail summary surfaces follow the selected dark theme. */
+html[data-theme='dark'] #root .hbdr-cluster-detail-drawer :is(.hbdr-cluster-overview-grid,.hbdr-cluster-key-values) { background:var(--hc-sunken) !important; }
+html[data-theme='dark'] #root .hbdr-cluster-detail-drawer :is(.hbdr-cluster-overview-grid,.hbdr-cluster-key-values) > div { background:var(--hc-surface) !important; border-color:var(--hc-border-strong) !important; }
+html[data-theme='dark'] #root .hbdr-cluster-detail-drawer :is(.hbdr-cluster-overview-grid,.hbdr-cluster-key-values) strong,
+html[data-theme='dark'] #root .hbdr-cluster-detail-drawer .hbdr-cluster-detail-section-head h4 { color:var(--hc-text) !important; }
+html[data-theme='dark'] #root .hbdr-cluster-detail-drawer :is(.hbdr-cluster-overview-grid,.hbdr-cluster-key-values) span,
+html[data-theme='dark'] #root .hbdr-cluster-detail-drawer :is(.hbdr-cluster-detail-section-head p,.hbdr-cluster-detail-section-head > span,.hbdr-cluster-resource-note,.hbdr-cluster-resource-status-line) { color:var(--hc-text-2) !important; }
+html[data-theme='dark'] #root .hbdr-cluster-detail-drawer .hbdr-hyper-table-scroll { border-color:var(--hc-border-strong) !important; }
+
+/* DR task cells: keep hover surfaces and running progress within the dark palette. */
+html[data-theme='dark'] #root .premium-app.hbdr-workspace :is(.hbdr-dr-task-error,.hbdr-dr-task-failed) {
+  color: var(--hc-crit) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-dr-task-error-title :is(strong,b) {
+  color: var(--hc-crit) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace button:is(.hbdr-dr-task-error,.hbdr-dr-task-failed):is(:hover,:focus-visible) {
+  background: color-mix(in srgb, var(--hc-crit) 10%, var(--hc-surface)) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--hc-crit) 10%, var(--hc-surface)) !important;
+  border-radius: 5px;
+  outline: none;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-dr-task-error:is(:hover,:focus-visible) .hbdr-dr-task-error-title :is(strong,b) {
+  color: var(--hc-crit) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-task-status-clickable:is(:hover, :focus-visible) {
+  background: color-mix(in srgb, var(--hc-accent) 12%, var(--hc-surface)) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--hc-accent) 12%, var(--hc-surface)) !important;
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-task-status-inline-track {
+  background: var(--hc-border-strong);
+}
+html[data-theme='dark'] #root .premium-app.hbdr-workspace .hbdr-task-status-inline-track b {
+  background: var(--hc-accent);
+}
+
+/* The sync and recovery log drawer uses the same typography as its parent. */
+#root .hbdr-dr-task-log-drawer { font-family: 'IBM Plex Sans', sans-serif; }
+#root .hbdr-dr-task-log-drawer .hbdr-timeline-title { font-weight: 600; }
+#root .hbdr-dr-task-log-drawer .hbdr-task-detail-events .hbdr-timeline-title { font-weight: 400; }
+#root .hbdr-dr-task-log-drawer .hbdr-task-final-result strong { font-weight: 600; }
+#root .hbdr-dr-task-log-drawer .hbdr-task-final-result span { font-weight: 400; }
+html[data-theme='dark'] #root .hbdr-dr-task-log-drawer .hbdr-task-detail-section {
+  background: var(--hc-surface); border-color: var(--hc-border-strong);
+}
+html[data-theme='dark'] #root .hbdr-dr-task-log-drawer .hbdr-timeline-title { color: var(--hc-text); }
+html[data-theme='dark'] #root .hbdr-dr-task-log-drawer :is(.hbdr-task-log-detail, time, .hbdr-task-final-result small) { color: var(--hc-text-2); }
+html[data-theme='dark'] #root .hbdr-dr-task-log-drawer .hbdr-timeline-rail { background: var(--hc-border-strong); }
+html[data-theme='dark'] #root .hbdr-dr-task-log-drawer .hbdr-task-detail-events::after { border-color: var(--hc-border-strong); }
+html[data-theme='dark'] #root .hbdr-dr-task-log-drawer .hbdr-timeline-marker.is-in_progress {
+  background: var(--hc-sunken); color: var(--hc-accent); border-color: var(--hc-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--hc-accent) 15%, var(--hc-surface));
+}
+html[data-theme='dark'] #root .hbdr-dr-task-log-drawer .hbdr-timeline-marker.is-not_started { background: var(--hc-sunken); border-color: var(--hc-border-strong); }
+html[data-theme='dark'] #root .hbdr-dr-task-log-drawer .hbdr-task-final-result {
+  background: var(--hc-sunken); border-color: var(--hc-border-strong); border-left-color: #65c99a;
+}
+html[data-theme='dark'] #root .hbdr-dr-task-log-drawer .hbdr-task-final-result :is(strong, span) { color: #8edbb1; }
+html[data-theme='dark'] #root .hbdr-dr-task-log-drawer .hbdr-task-final-result.is-running { border-left-color: var(--hc-accent); }
+html[data-theme='dark'] #root .hbdr-dr-task-log-drawer .hbdr-task-final-result.is-running :is(strong, span) { color: var(--hc-text); }
+html[data-theme='dark'] #root .hbdr-dr-task-log-drawer .hbdr-task-final-result.is-failed { border-left-color: var(--hc-danger, #ef7777); }
+html[data-theme='dark'] #root .hbdr-dr-task-log-drawer :is(.hbdr-task-final-result.is-failed strong,.hbdr-task-final-result.is-failed span,.hbdr-timeline-item.is-failed > .hbdr-timeline-content > .hbdr-timeline-title,.hbdr-task-detail-events li) { color: var(--hc-danger, #ef7777); }
+html[data-theme='dark'] #root .hbdr-dr-task-log-drawer .hbdr-task-final-result.is-warning { border-left-color: #e6b55c; }
+html[data-theme='dark'] #root .hbdr-dr-task-log-drawer .hbdr-task-final-result.is-warning :is(strong, span) { color: #e6b55c; }
+
+/* Recovery errors share the product semantic error color in both themes. */
+#root .hbdr-task-detail-error :is(strong,b),
+#root .premium-app.hbdr-workspace :is(.hbdr-dr-task-error,.hbdr-dr-task-failed),
+#root .premium-app.hbdr-workspace .hbdr-dr-task-error-title :is(strong,b),
+#root .premium-app.hbdr-workspace .hbdr-dr-task-error:is(:hover,:focus-visible) .hbdr-dr-task-error-title :is(strong,b) {
+  color: var(--hc-crit) !important;
+}

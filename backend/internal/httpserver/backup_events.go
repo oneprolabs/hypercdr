@@ -546,6 +546,17 @@ func taskProgressPayloadPatch(payload protocol.TaskProgressPayload) map[string]a
 		progress["etaSeconds"] = payload.EtaSeconds
 		patch["etaSeconds"] = payload.EtaSeconds
 	}
+	// Known transfer samples include zero values so stale speed/ETA cannot persist.
+	if payload.TotalBytes > 0 {
+		progress["syncedBytes"] = payload.SyncedBytes
+		progress["percent"] = payload.Percent
+		progress["speedBytesPerSecond"] = payload.SpeedBytesPerSecond
+		progress["etaSeconds"] = payload.EtaSeconds
+		patch["syncedBytes"] = payload.SyncedBytes
+		patch["percent"] = payload.Percent
+		patch["speedBytesPerSecond"] = payload.SpeedBytesPerSecond
+		patch["etaSeconds"] = payload.EtaSeconds
+	}
 	if len(progress) > 0 {
 		patch["progressMetrics"] = progress
 	}

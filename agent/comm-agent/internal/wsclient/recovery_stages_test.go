@@ -2,7 +2,9 @@ package wsclient
 
 import (
 	"errors"
+	"hypercdr-platform/agent/comm-agent/internal/kube"
 	"testing"
+	"time"
 
 	"hypercdr-platform/agent/comm-agent/pkg/protocol"
 )
@@ -119,5 +121,56 @@ func TestRestoreVolumeFailureDetailsPreservesStartTimeout(t *testing.T) {
 	}}})
 	if code != "RESTORE_VOLUME_START_TIMEOUT" || message != "pod volume restore pvr-a did not start within 10m0s" {
 		t.Fatalf("got (%q, %q)", code, message)
+	}
+}
+
+func TestRecoveryStagesIgnoreWeightedPercentAndMissingMarkers(t *testing.T) {
+	for _, progress := range []int{2, 90, 95, 100} {
+		p := withRecoveryStages(protocol.TaskDispatchPayload{Type: "drill"}, map[string]any{"restoreCache": map[string]any{"usable": true}}, progress, "running", "", "")
+		want := []string{"running", "pending", "pending", "pending", "pending", "pending"}
+		for i, stage := range p["recoveryStages"].([]map[string]any) {
+			if stage["status"] != want[i] {
+				t.Fatalf("percent %d stage %v = %v", progress, stage["id"], stage["status"])
+			}
+		}
+	}
+}
+func TestRecoveryDataRequiresCompletedVolumes(t *testing.T) {
+	p := map[string]any{"status": map[string]any{"phase": "InProgress", "raw": map[string]any{"progress": map[string]any{"totalItems": 23, "itemsRestored": 23}}}, "volumeProgress": map[string]any{"itemCount": 2, "completedCount": 0, "allTotalsKnown": true, "bytesDone": 950, "totalBytes": 1000}}
+	stages := withRecoveryStages(protocol.TaskDispatchPayload{Type: "drill"}, p, 95, "running", "", "")["recoveryStages"].([]map[string]any)
+	if stages[1]["status"] != "succeeded" || stages[2]["status"] != "running" {
+		t.Fatalf("stages %#v", stages)
+	}
+	if got := recoveryTransferPercent(p); got != 95 {
+		t.Fatalf("percent %d", got)
+	}
+	p["volumeProgress"].(map[string]any)["completedCount"] = 2
+	if !recoveryDataComplete(p) {
+		t.Fatal("completed volumes not detected")
+	}
+}
+
+func TestRestoreStatusDoesNotInventProgress(t *testing.T) {
+	for _, phase := range []string{"New", "InProgress", "Finalizing", "Completed", "Failed", "Unknown"} {
+		_, _, progress, _, _ := restoreStatusResult(kube.ManifestStatus{Phase: phase}, time.Hour)
+		if progress != 0 {
+			t.Fatalf("phase %s fabricated progress %d", phase, progress)
+		}
+	}
+}
+
+func TestRecoveryTransferPercentUsesOnlyKnownBytes(t *testing.T) {
+	for _, tc := range []struct {
+		volume map[string]any
+		want   int
+	}{
+		{map[string]any{"allTotalsKnown": true, "totalBytes": 100, "bytesDone": 0}, 0},
+		{map[string]any{"allTotalsKnown": true, "totalBytes": 100, "bytesDone": 47}, 47},
+		{map[string]any{"allTotalsKnown": false, "totalBytes": 100, "bytesDone": 47}, 0},
+		{map[string]any{"allTotalsKnown": true, "totalBytes": 100, "bytesDone": 100}, 100},
+	} {
+		if got := recoveryTransferPercent(map[string]any{"volumeProgress": tc.volume}); got != tc.want {
+			t.Fatalf("got %d want %d", got, tc.want)
+		}
 	}
 }

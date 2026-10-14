@@ -34,11 +34,11 @@ func TestRestoreVolumeProgressReportsMissingPVCOnlyAfterGracePeriod(t *testing.T
 	}
 }
 
-func TestRestoreVolumeProgressReportsStartTimeoutAfterGracePeriod(t *testing.T) {
+func TestRestoreVolumeProgressKeepsQueuedVolumeAfterGracePeriod(t *testing.T) {
 	progress := restoreVolumeProgressForAge(t, restoreVolumeStartGrace+time.Minute, false)
 	got := progress.Items[0]
-	if got.Phase != "FailedValidation" || got.ErrorCode != "RESTORE_VOLUME_START_TIMEOUT" {
-		t.Fatalf("item = %#v, want start timeout", got)
+	if got.Phase != "" || got.ErrorCode != "" {
+		t.Fatalf("item = %#v, want queued volume to remain retryable", got)
 	}
 	if got.ElapsedSeconds < int64(restoreVolumeStartGrace/time.Second) {
 		t.Fatalf("elapsedSeconds = %d, want at least grace period", got.ElapsedSeconds)

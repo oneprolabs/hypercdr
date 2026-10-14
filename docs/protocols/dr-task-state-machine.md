@@ -2282,3 +2282,13 @@ update:
 - frontend UI state mapping.
 - platform API filtering and refresh rules.
 - this document.
+
+### Recovery progress semantics
+
+Restore, Drill, takeover and failback stages are derived from observed Velero, volume and workload state, never from weighted percentages. Preparation, resource restoration, readiness, validation and finalization display descriptions without a percentage. Only persistent-data transfer displays 0–100%, calculated from processed bytes / total bytes when all volume totals are known. Unknown totals display indeterminate progress, not a fabricated percentage. Transfer completion does not mean application recovery succeeded; the terminal task status determines success. Known zero-valued samples must overwrite previous metrics, including speed and ETA.
+
+### Agent availability during Kubernetes API outages
+
+Inventory and Velero event collection run independently of heartbeat delivery. Accepted registration credentials remain usable in memory while Secret persistence retries with bounded exponential backoff; persistence failures do not terminate task observation. Reconnecting agents recover existing task observations from their durable ledger rather than create another Backup or Restore. Transient Kubernetes reads retry until the existing task deadline, which remains the bounded limit. The DR list and details distinguish disconnected agents and delayed updates (90 seconds without a task status sample), retain the last reported transfer bar and byte counts with a delay warning and the last update time. A delay warning is not proof of task failure.
+
+Queued PodVolumeRestore objects do not fail solely because their creation age exceeds ten minutes. Confirmed missing PVC dependencies still fail after the grace period; task deadlines and observed transfer stalls bound waiting. Target Kubernetes API failures have a dedicated failure classification, while original Velero evidence remains available.

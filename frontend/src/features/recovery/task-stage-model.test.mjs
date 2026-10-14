@@ -128,3 +128,9 @@ test('timeline reveals stages only after execution reaches them', () => {
   assert.deepEqual(reached.map(group => group.id), ['preparing_restore', 'restoring_resources', 'restoring_data']);
   assert.equal(reached.some(group => group.status === 'not_started'), false);
 });
+
+test('current byte-transfer snapshot takes precedence over old resource event', () => {
+ const current = task('running', {payload: {lastStatusAt: '2026-08-26T01:00:03Z', recoveryStages: recoveryStages.map(([id,name]) => ({id,name,status: ['restoring_resources','restoring_data'].includes(id) ? 'running' : id === 'preparing_restore' ? 'succeeded' : 'pending'}))}});
+ const groups = groupTaskEventsByStage(current, [event('1','accepted','2026-08-26T01:00:00Z')]);
+ assert.equal(groups.find(group => group.id === 'restoring_data').status, 'in_progress');
+});

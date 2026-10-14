@@ -1,6 +1,6 @@
 import { useDrTaskEvents } from './use-dr-task-events';
 import { getRestorePointContents } from '../../api/restore-points';
-import { listTasks, createBackupTask, createRecoveryTask, cancelTask, cleanupDrillTask } from '../../api/tasks';
+import { getTask, listTasks, createBackupTask, createRecoveryTask, cancelTask, cleanupDrillTask } from '../../api/tasks';
 import { listProtectionPlans, createProtectionPlan, activateProtectionPlan, reconfigureProtectionPlanStorage, deleteProtectionPlan } from '../../api/protection-plans';
 import { listApplications, updateApplicationProtection } from '../../api/applications';
 import { requestClusterInventory, getInventoryRequestStatus } from '../../api/inventory';
@@ -185,7 +185,27 @@ export default function ApplicationDrPage(props: {
       setLiveAppTasks(updater);
     }
   };
-  const [syncTaskDetail, setSyncTaskDetail] = useState<{ app: AppItem; task: ApiTask; failure?: ReturnType<typeof taskFailureSummary> } | null>(null);
+  const [refreshedDrTasks, setRefreshedDrTasks] = useState<Record<string, ApiTask>>({});
+  const [syncTaskDetail, updateSyncTaskDetail] = useState<{ app: AppItem; task: ApiTask; failure?: ReturnType<typeof taskFailureSummary> } | null>(null);
+  const [taskDetailLoading, setTaskDetailLoading] = useState(false);
+  const [taskDetailLoadError, setTaskDetailLoadError] = useState(false);
+  const taskDetailRequestRef = useRef(0);
+  const setSyncTaskDetail: React.Dispatch<React.SetStateAction<typeof syncTaskDetail>> = value => {
+    if (typeof value === 'function') { updateSyncTaskDetail(value); return; }
+    const request = ++taskDetailRequestRef.current;
+    if (!value) { setTaskDetailLoading(false); updateSyncTaskDetail(null); return; }
+    updateSyncTaskDetail(value);
+    setTaskDetailLoading(true);
+    setTaskDetailLoadError(false);
+    void getTask(value.task.id).then(latest => {
+      if (request !== taskDetailRequestRef.current) return;
+      setRefreshedDrTasks(prev => ({ ...prev, [latest.id]: latest }));
+      updateSyncTaskDetail({ ...value, task: latest });
+      setTaskDetailLoading(false);
+    }).catch(() => {
+      if (request === taskDetailRequestRef.current) { setTaskDetailLoading(false); setTaskDetailLoadError(true); }
+    });
+  };
   const [drTaskEvents, setDrTaskEvents] = useState<Record<string, ApiTaskEvent[]>>({});
   const [resourceDetail, setResourceDetail] = useState<{ app: AppItem } | null>(null);
   const [resourceRefreshKey, setResourceRefreshKey] = useState('');
@@ -472,7 +492,7 @@ export default function ApplicationDrPage(props: {
       toast('Failed to reconfigure storage: ' + (error instanceof Error ? error.message : 'unknown error'));
     }
   };
-  useDrTaskEvents({ displayedDrTaskKey, hasActiveDisplayedTask, refreshPlatformData, syncTaskDetail, setSyncTaskDetail, namespaceDetailTaskId, drTaskEvents, setDrTaskEvents });
+  useDrTaskEvents({ displayedDrTaskKey, hasActiveDisplayedTask, refreshPlatformData, syncTaskDetail, setSyncTaskDetail, namespaceDetailTaskId, drTaskEvents, setDrTaskEvents, setRefreshedTasks: setRefreshedDrTasks });
   const unitMembers = (app: AppItem) => app.memberApps?.length ? app.memberApps : [app];
   const unitNamespaces = (app: AppItem) => unitMembers(app).map(item => item.namespace || item.name);
   const taskForUnit = (tasks: Record<string, ApiTask>, app: AppItem, allowedTypes: string[] = ['backup']) => {
@@ -492,7 +512,8 @@ export default function ApplicationDrPage(props: {
       : allowedTypes.some(type => ['drill', 'restore', 'takeover'].includes(type))
         ? plan?.latestRecoveryTaskId
         : '';
-    return selectPointedPlanTask(matching, latestTaskId);
+    const selected = selectPointedPlanTask(matching, latestTaskId);
+    return selected ? refreshedDrTasks[selected.id] || selected : undefined;
   };
   const recoveryTaskForUnit = (app: AppItem) => taskForUnit(recoveryTasks, app, ['restore', 'drill', 'takeover']);
   useEffect(() => {
@@ -1550,7 +1571,7 @@ export default function ApplicationDrPage(props: {
       });
     }
     return columns;
-  }, [allVisibleSelected, selectedNames, visibleRunColumns, tags, syncTasks, liveRecoveryTasks, liveRestorePoints, protectionPlans, platformTasks]);
+  }, [allVisibleSelected, selectedNames, visibleRunColumns, tags, syncTasks, liveRecoveryTasks, liveRestorePoints, protectionPlans, platformTasks, refreshedDrTasks, drTaskEvents]);
   const singleSelectedApp = selectedNames.length === 1 ? currentRows.find(app => app.name === selectedNames[0]) || apps.find(app => app.name === selectedNames[0]) || null : null;
   const selectedRunRows = selectedRunApps
     .map(name => protectedRows.find(app => app.name === name) || apps.find(app => app.name === name))
@@ -1824,20 +1845,16 @@ export default function ApplicationDrPage(props: {
       const waitingForAgent = sourceClusterOffline || (task.errorCode || '').toUpperCase() === 'AGENT_OFFLINE';
       const display = taskStatusDisplay(task, events);
       if (waitingForAgent) {
-        const failure = {
-          code: normalizeErrorCode('AGENT_OFFLINE'),
-          title: 'Cluster is offline',
-          description: 'Reconnecting to source cluster agent. Pending tasks will resume automatically.',
-          fullText: `Source cluster ${sourceCluster?.name || sourceClusterId || ''} agent is offline. The task will resume after the WebSocket connection is restored.`,
-        };
-        return (
-          <TaskErrorStatus code={failure.code} title={failure.title} description={failure.description} detail={failure.fullText}
-            onClick={event => { event.stopPropagation(); setSyncTaskDetail({ app, task, failure }); }} />
-        );
+        return renderTaskStatusCell({
+          stage: 'Agent connection interrupted',
+          detail: `${display.detail} · Agent connection interrupted. Last update: ${formatDateTime(String(task.payload?.lastStatusAt || task.startedAt || task.createdAt))}`,
+          progress: display.progress,
+          onDetails: event => { event.stopPropagation(); setSyncTaskDetail({ app, task }); },
+        });
       }
       return renderTaskStatusCell({
         stage: display.stage,
-        detail: display.detail,
+        detail: progressFreshnessDetail(task, clusters.find(cluster => cluster.id === task.clusterId), display.detail),
         progress: display.progress,
         onDetails: event => { event.stopPropagation(); setSyncTaskDetail({ app, task }); },
       });
@@ -1877,7 +1894,7 @@ export default function ApplicationDrPage(props: {
       const display = taskStatusDisplay(task, events);
       return renderTaskStatusCell({
         stage: display.stage,
-        detail: display.detail,
+        detail: progressFreshnessDetail(task, clusters.find(cluster => cluster.id === task.clusterId), display.detail),
         progress: display.progress,
         onDetails: event => { event.stopPropagation(); setSyncTaskDetail({ app, task }); },
       });
@@ -3015,19 +3032,22 @@ export default function ApplicationDrPage(props: {
         {syncTaskDetail && (
           <div className="fixed inset-0 z-[230]">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSyncTaskDetail(null)} className="absolute inset-0 bg-slate-900/15" />
-            <motion.aside initial={{ opacity: 0, x: 34 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 34 }} transition={{ duration: 0.18, ease: 'easeOut' }} className="hbdr-filter-drawer" role="dialog" aria-modal="true" aria-labelledby="dr-config-error-title">
+            <motion.aside initial={{ opacity: 0, x: 34 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 34 }} transition={{ duration: 0.18, ease: 'easeOut' }} className="hbdr-filter-drawer hbdr-dr-task-log-drawer" role="dialog" aria-modal="true" aria-labelledby="dr-config-error-title">
               <div className="hbdr-filter-drawer-head">
-                <div><strong id="dr-config-error-title">DR Configuration Error</strong><span>{syncTaskDetail.app.name} · {syncTaskDetail.task.id}</span></div>
-                <button type="button" onClick={() => setSyncTaskDetail(null)} aria-label="Close DR configuration error details"><X size={18} /></button>
+                <div><strong id="dr-config-error-title">{syncTaskDetail.task.type === 'storage-sync' ? 'DR Configuration Details' : ['drill', 'restore', 'takeover'].includes(syncTaskDetail.task.type) ? 'Recovery Details' : 'Sync Details'}</strong><span>{syncTaskDetail.app.name} · {syncTaskDetail.task.id}</span></div>
+                <button type="button" onClick={() => setSyncTaskDetail(null)} aria-label="Close task details"><X size={18} /></button>
               </div>
               <div className="hbdr-filter-drawer-body">
             {(() => {
+              if (taskDetailLoading) return <p className="hbdr-task-detail-empty" role="status">Loading current task details…</p>;
+              if (taskDetailLoadError) return <p className="hbdr-task-detail-empty" role="alert">Unable to load current task details. Close and try again.</p>;
               const events = drTaskEvents[syncTaskDetail.task.id] || [];
               const failure = syncTaskDetail.failure || taskFailureSummary(syncTaskDetail.task, events);
               const details = taskFailureDetails(syncTaskDetail.task, events);
               const showError = isFailedStatus(syncTaskDetail.task.status) || taskHasWarning(syncTaskDetail.task);
               return (
                 <div className="hbdr-sync-detail">
+                  {isActiveTaskStatus(syncTaskDetail.task.status) && progressIsStale(syncTaskDetail.task, clusters.find(cluster => cluster.id === syncTaskDetail.task.clusterId)) && <p className="hbdr-task-detail-empty" role="status">{progressFreshnessDetail(syncTaskDetail.task, clusters.find(cluster => cluster.id === syncTaskDetail.task.clusterId), '')}</p>}
                   <TaskProcessTimeline task={syncTaskDetail.task} events={events} />
                   {showError && <TaskErrorDetailBlock failure={failure} details={details} />}
                   <TaskFinalResult task={syncTaskDetail.task} events={events} />
@@ -3114,4 +3134,15 @@ export default function ApplicationDrPage(props: {
       </AnimatePresence>
     </>
   );
+}
+
+function progressIsStale(task: ApiTask, cluster?: Cluster): boolean {
+ const last = Date.parse(String(task.payload?.lastStatusAt || task.startedAt || task.createdAt));
+ return cluster?.connectionStatus === 'offline' || (Number.isFinite(last) && Date.now() - last > 90000);
+}
+function progressFreshnessDetail(task: ApiTask, cluster: Cluster | undefined, fallback: string): string {
+ if (!progressIsStale(task, cluster)) return fallback;
+ const last = String(task.payload?.lastStatusAt || task.startedAt || task.createdAt);
+ const description = cluster?.connectionStatus === 'offline' ? 'Agent disconnected; showing last reported progress.' : 'Progress update delayed; task completion is not yet confirmed.';
+ return `${fallback ? `${fallback} · ` : ''}${description} Last update: ${formatDateTime(last)}`;
 }

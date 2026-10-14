@@ -40,6 +40,19 @@ func TestTaskProgressPayloadPatchClearsTransferProgressDuringReadiness(t *testin
 	}
 }
 
+func TestTaskProgressPayloadPatchPreservesKnownZeroSample(t *testing.T) {
+	patch := taskProgressPayloadPatch(protocol.TaskProgressPayload{TotalBytes: 100})
+	metrics := mapFromAny(patch["progressMetrics"])
+	for _, key := range []string{"syncedBytes", "percent", "speedBytesPerSecond", "etaSeconds"} {
+		if _, ok := metrics[key]; !ok {
+			t.Fatalf("missing zero metric %s", key)
+		}
+		if _, ok := patch[key]; !ok {
+			t.Fatalf("missing zero payload value %s", key)
+		}
+	}
+}
+
 func TestAgentCredentialReconnect(t *testing.T) {
 	repo := newTestStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -2317,5 +2330,19 @@ func TestResourceSelectionPayloadAcceptsInMemoryAndJSONShapes(t *testing.T) {
 				t.Fatalf("resourceSelectionPayload() = %#v, want %#v", got, want)
 			}
 		})
+	}
+}
+
+func TestSizeProgressAcceptsNewObservationAfterAgentRestart(t *testing.T) {
+	now := time.Now().UTC()
+	current := map[string]any{"sequence": 99, "observedAt": now.Format(time.RFC3339Nano)}
+	if staleSizeProgress(current, &protocol.SizeProgressV2{Sequence: 1, ObservedAt: now.Add(time.Second)}) {
+		t.Fatal("new observation rejected after sequence reset")
+	}
+	if !staleSizeProgress(current, &protocol.SizeProgressV2{Sequence: 100, ObservedAt: now.Add(-time.Second)}) {
+		t.Fatal("older observation accepted")
+	}
+	if !staleSizeProgress(map[string]any{"sequence": 99}, &protocol.SizeProgressV2{Sequence: 1}) {
+		t.Fatal("legacy sequence ordering ignored")
 	}
 }

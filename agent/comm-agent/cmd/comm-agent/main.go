@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -145,6 +146,13 @@ func main() {
 		go watchHandoverDeadline(ctx, logger, handoverManager, cfg.Namespace)
 	}
 
+	var persistCancel context.CancelFunc
+	var persistMu sync.Mutex
+	defer func() {
+		if persistCancel != nil {
+			persistCancel()
+		}
+	}()
 	for {
 		client := wsclient.NewWithRuntimeDependencies(cfg, logger, applier, collector, uninstaller)
 		accepted, err := client.Register()
@@ -167,14 +175,20 @@ func main() {
 		cfg.AgentCredential = accepted.AgentCredential
 		cfg.InstallToken = ""
 		if credentialStore != nil {
-			if err := credentialStore.Save(context.Background(), kube.AgentCredential{
-				ClusterID:  accepted.ClusterID,
-				Credential: accepted.AgentCredential,
-			}); err != nil {
-				logger.Error("failed to persist agent credential", "error", err)
-				os.Exit(1)
+			// Credential persistence is retried independently of task observation.
+			// Cancel the previous writer before replacing its credential snapshot.
+			if persistCancel != nil {
+				persistCancel()
 			}
-			logger.Info("agent credential persisted", "secret", cfg.CredentialSecretName)
+			persistCtx, cancel := context.WithCancel(ctx)
+			persistCancel = cancel
+			go func(credential kube.AgentCredential) {
+				persistMu.Lock()
+				defer persistMu.Unlock()
+				persistCredentialWithRetry(persistCtx, logger, credentialStore, credential, time.Second)
+			}(kube.AgentCredential{
+				ClusterID: accepted.ClusterID, Credential: accepted.AgentCredential,
+			})
 		}
 
 		if err := client.RunHeartbeat(); err != nil {
@@ -237,5 +251,26 @@ func waitForRetry(ctx context.Context, logger *slog.Logger) bool {
 		return false
 	case <-timer.C:
 		return true
+	}
+}
+
+func persistCredentialWithRetry(ctx context.Context, logger *slog.Logger, store kube.CredentialStore, credential kube.AgentCredential, delay time.Duration) {
+	for ctx.Err() == nil {
+		attemptCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err := store.Save(attemptCtx, credential)
+		cancel()
+		if err == nil {
+			logger.Info("agent credential persisted")
+			return
+		}
+		logger.Warn("credential persistence unavailable; agent continues with accepted credential and retries", "error", err)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		delay = min(delay*2, 30*time.Second)
 	}
 }

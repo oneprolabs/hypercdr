@@ -281,7 +281,7 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 			}
 			if incoming := progress.Payload.SizeProgressV2; incoming != nil {
 				current := mapFromAny(existing.Payload["sizeProgressV2"])
-				if currentSequence := int64FromAny(current["sequence"]); currentSequence > 0 && incoming.Sequence > 0 && incoming.Sequence <= currentSequence {
+				if staleSizeProgress(current, incoming) {
 					continue
 				}
 			}
@@ -604,4 +604,14 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 			r.logger.Warn("unsupported agent message", "cluster_id", clusterID, "type", meta.Type)
 		}
 	}
+}
+
+// Observation time survives agent restarts; the in-process sequence does not.
+func staleSizeProgress(current map[string]any, incoming *protocol.SizeProgressV2) bool {
+	observed := parseTimeFromAny(current["observedAt"])
+	if !incoming.ObservedAt.IsZero() && !observed.IsZero() {
+		return !incoming.ObservedAt.After(observed)
+	}
+	sequence := int64FromAny(current["sequence"])
+	return sequence > 0 && incoming.Sequence > 0 && incoming.Sequence <= sequence
 }

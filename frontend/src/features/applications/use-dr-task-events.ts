@@ -8,7 +8,8 @@ type TaskDetail = { app: AppItem; task: ApiTask; failure?: ReturnType<typeof tas
 
 // Own task-event refresh lifetime independently of the page's rendering and
 // mutations. Cleanup prevents delayed responses from updating a closed page.
-export function useDrTaskEvents({ displayedDrTaskKey, hasActiveDisplayedTask, refreshPlatformData, syncTaskDetail, setSyncTaskDetail, namespaceDetailTaskId, drTaskEvents, setDrTaskEvents }: {
+export function useDrTaskEvents({ displayedDrTaskKey, hasActiveDisplayedTask, refreshPlatformData, syncTaskDetail, setSyncTaskDetail, namespaceDetailTaskId, drTaskEvents, setDrTaskEvents, setRefreshedTasks }: {
+  setRefreshedTasks: Dispatch<SetStateAction<Record<string, ApiTask>>>;
   displayedDrTaskKey: string;
   hasActiveDisplayedTask: boolean;
   refreshPlatformData: () => Promise<unknown>;
@@ -23,16 +24,25 @@ export function useDrTaskEvents({ displayedDrTaskKey, hasActiveDisplayedTask, re
     const ids = displayedDrTaskKey ? displayedDrTaskKey.split('|').filter(Boolean) : [];
     if (ids.length === 0) return;
     let cancelled = false;
+    let loading = false;
     const loadEvents = async () => {
+      if (loading) return;
+      loading = true;
       const entries = await Promise.all(ids.map(async taskId => {
         try {
-          const res = await listTaskEvents(taskId);
-          return [taskId, listItems(res)] as const;
+          const [res, task] = await Promise.all([listTaskEvents(taskId), getTask(taskId)]);
+          return [taskId, listItems(res), task] as const;
         } catch {
-          return [taskId, null] as const;
+          return [taskId, null, null] as const;
         }
       }));
+      loading = false;
       if (cancelled) return;
+      setRefreshedTasks(prev => {
+        const next = { ...prev };
+        for (const [taskId, , task] of entries) if (task) next[taskId] = task;
+        return next;
+      });
       setDrTaskEvents(prev => {
         const next = { ...prev };
         let changed = false;
@@ -88,6 +98,7 @@ export function useDrTaskEvents({ displayedDrTaskKey, hasActiveDisplayedTask, re
           const unchanged = current.length === nextEvents.length && current.every((event, index) => event.id === nextEvents[index]?.id);
           return unchanged ? prev : { ...prev, [taskId]: nextEvents };
         });
+        if (latest) setRefreshedTasks(prev => ({ ...prev, [taskId]: latest }));
         if (latest) setSyncTaskDetail(prev => {
           if (prev?.task.id !== taskId) return prev;
           const currentSignature = JSON.stringify([prev.task.status, prev.task.progress, prev.task.errorCode, prev.task.errorMessage, prev.task.payload]);

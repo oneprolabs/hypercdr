@@ -94,7 +94,7 @@ function taskEventStageId(event: ApiTaskEvent, recovery: boolean, storageSync = 
   // readiness polls are incorrectly grouped back under persistent data.
   const eventStages = [event.payload?.recoveryStages, event.payload?.velero?.recoveryStages]
     .find(value => Array.isArray(value)) as Array<Record<string, unknown>> | undefined;
-  const snapshotStage = eventStages?.find(stage => ['running', 'in_progress', 'failed'].includes(String(stage.status || '').toLowerCase()));
+  const snapshotStage = eventStages?.find(stage => String(stage.status || '').toLowerCase() === 'failed') || [...(eventStages || [])].reverse().find(stage => ['running', 'in_progress'].includes(String(stage.status || '').toLowerCase()));
   if (snapshotStage?.id) return String(snapshotStage.id);
   if (reason === 'application_ready' || reason.includes('validation')) return 'application_validation';
   if (reason === 'application_readiness_check_started' || reason.includes('readiness') || reason.includes('workload') || code.includes('WORKLOAD')) return 'waiting_for_workloads';
@@ -139,14 +139,13 @@ export function groupTaskEventsByStage(task: ApiTask, events: ApiTaskEvent[]): T
     (eventMap.get(stageID) || eventMap.get(definitions[0].id))?.push(event);
   });
   const snapshotCurrentStageID = recovery
-    ? snapshots.find(stage => ['running', 'in_progress', 'failed'].includes(stage.status))?.id || ''
+    ? (snapshots.find(stage => stage.status === 'failed') || [...snapshots].reverse().find(stage => ['running', 'in_progress'].includes(stage.status)))?.id || ''
     : '';
-  // The newest event for this task is the freshest execution signal.  Stage
-  // snapshots can legitimately lag one polling cycle, so they must not move
-  // the timeline backwards (which caused the status to flicker between
-  // stages). Use the event stage first and only fall back to the snapshot when
-  // no event identifies a stage.
-  const currentStageID = (currentEvent ? taskEventStageId(currentEvent, recovery, storageSync) : '') || snapshotCurrentStageID;
+  // Persisted task snapshots are refreshed alongside events. Prefer the
+  // current observed stage; historical events must not move it backwards.
+  const snapshotIsCurrent = Boolean(task.payload?.lastStatusAt) && (!currentEvent || Date.parse(String(task.payload.lastStatusAt)) >= Date.parse(currentEvent.createdAt));
+  const eventStageID = currentEvent ? taskEventStageId(currentEvent, recovery, storageSync) : '';
+  const currentStageID = snapshotIsCurrent ? snapshotCurrentStageID || eventStageID : eventStageID || snapshotCurrentStageID;
   const taskFailed = isFailedStatus(task.status);
   const taskActive = isActiveTaskStatus(task.status);
   const taskSucceeded = !taskActive && !taskFailed && ['succeeded', 'completed', 'success'].includes(String(task.status || '').toLowerCase());

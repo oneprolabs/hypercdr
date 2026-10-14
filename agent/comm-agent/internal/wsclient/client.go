@@ -70,6 +70,7 @@ type Client struct {
 		kube.VeleroRuntimeManager
 		kube.ComponentLogCollector
 	}
+	inventoryMu       sync.RWMutex
 	lastInventory     inventory.Snapshot
 	backupSamples     map[string][]volumeProgressSample
 	backupEvents      map[string]string
@@ -199,7 +200,9 @@ func (c *Client) Register() (protocol.RegisterAcceptedPayload, error) {
 				c.logger.Warn("failed to collect registration inventory", "error", collectErr)
 			}
 		} else {
+			c.inventoryMu.Lock()
 			c.lastInventory = snapshot
+			c.inventoryMu.Unlock()
 			clusterSummary = snapshot.Report.Cluster
 			if clusterSummary.Name == "" {
 				clusterSummary.Name = c.cfg.ClusterName
@@ -396,6 +399,7 @@ func (c *Client) RunHeartbeat() error {
 
 	stopCh := make(chan os.Signal, 1)
 	signal.Notify(stopCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(stopCh)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	veleroTicker := time.NewTicker(5 * time.Second)
@@ -403,9 +407,39 @@ func (c *Client) RunHeartbeat() error {
 	outboxTicker := time.NewTicker(30 * time.Second)
 	defer outboxTicker.Stop()
 
-	if err := c.sendInventory(true); err != nil {
-		c.logger.Warn("initial inventory collection failed; heartbeat will continue until inventory recovers", "error", err)
-	}
+	inventoryRequests := make(chan struct{}, 1)
+	workerCtx, stopWorkers := context.WithCancel(context.Background())
+	defer stopWorkers()
+	go func() {
+		initial := true
+		for {
+			select {
+			case <-workerCtx.Done():
+				return
+			case <-inventoryRequests:
+				if err := c.collectAndSendInventory(true, !initial); err != nil {
+					c.logger.Warn("inventory collection unavailable; heartbeat remains independent", "error", err)
+				} else {
+					initial = false
+				}
+			}
+		}
+	}()
+	inventoryRequests <- struct{}{}
+	veleroRequests := make(chan struct{}, 1)
+	go func() {
+		for {
+			select {
+			case <-workerCtx.Done():
+				return
+			case <-veleroRequests:
+				if err := c.sendVeleroBackupEvents(workerCtx); err != nil {
+					c.logger.Warn("velero observation unavailable; heartbeat remains independent", "error", err)
+				}
+			}
+		}
+	}()
+
 	if err := c.sendHeartbeat(false); err != nil {
 		return err
 	}
@@ -419,25 +453,17 @@ func (c *Client) RunHeartbeat() error {
 	for {
 		select {
 		case <-ticker.C:
-			snapshot, err := c.collector.Collect()
-			changed := false
-			if err != nil {
-				c.logger.Warn("inventory collection failed; heartbeat will continue with last known inventory", "error", err)
-			} else {
-				changed = snapshot.Hash != c.lastInventory.Hash
-				if changed {
-					c.lastInventory = snapshot
-					if err := c.writeInventory(snapshot.Report); err != nil {
-						return err
-					}
-				}
+			select {
+			case inventoryRequests <- struct{}{}:
+			default:
 			}
-			if err := c.sendHeartbeat(changed); err != nil {
+			if err := c.sendHeartbeat(false); err != nil {
 				return err
 			}
 		case <-veleroTicker.C:
-			if err := c.sendVeleroBackupEvents(context.Background()); err != nil {
-				c.logger.Warn("failed to send velero backup events", "error", err)
+			select {
+			case veleroRequests <- struct{}{}:
+			default:
 			}
 		case <-outboxTicker.C:
 			c.resendPendingEvents()
@@ -617,7 +643,9 @@ func (c *Client) handleInventoryRequest(request protocol.Message[protocol.Invent
 	report.Reason = request.Payload.Reason
 	report.Namespace = request.Payload.Namespace
 	report.Velero.RecentBackups = c.filterInventoryBackups(report.Velero.RecentBackups)
+	c.inventoryMu.Lock()
 	c.lastInventory = snapshot
+	c.inventoryMu.Unlock()
 	message := protocol.NewMessage(protocol.MessageKindResponse, protocol.MessageAgentInventoryReport, c.cfg.ClusterID, c.cfg.AgentID, report)
 	if err := c.writeJSON(message); err != nil {
 		c.logger.Warn("failed to send inventory request response", "request_id", request.Payload.RequestID, "error", err)
@@ -1463,7 +1491,7 @@ func (c *Client) executeRestoreTask(task protocol.TaskDispatchPayload) {
 				"enabled": cache.Enabled, "usable": cache.Usable, "storageClass": cache.StorageClass,
 				"residentThresholdMB": cache.ResidentThresholdMB, "cacheLimitMB": cache.CacheLimitMB,
 			},
-		}, 2, cache.Message)
+		}, 0, cache.Message)
 	}
 	if err := c.restoreExec.SubmitRestore(context.Background(), manifest); err != nil {
 		_ = c.sendTaskFailed(task, restoreSubmitErrorCode(err), err.Error())
@@ -1481,16 +1509,16 @@ func (c *Client) executeRestoreTask(task protocol.TaskDispatchPayload) {
 		return
 	}
 	steps := []struct {
-		progress int
+		prepared bool
 		message  string
 	}{
-		{15, task.Type + " command accepted"},
-		{45, "Restore operation prepared."},
-		{75, task.Type + " resources running"},
+		{false, task.Type + " command accepted"},
+		{true, "Restore operation prepared."},
+		{true, task.Type + " resources running"},
 	}
 	for _, step := range steps {
 		time.Sleep(500 * time.Millisecond)
-		if err := c.sendTaskProgress(task, restoreVeleroPayload(manifest, step.progress >= 45), step.progress, step.message); err != nil {
+		if err := c.sendTaskProgress(task, restoreVeleroPayload(manifest, step.prepared), 0, step.message); err != nil {
 			c.logger.Error("failed to send task progress", "task_id", task.TaskID, "error", err)
 			return
 		}
@@ -2062,8 +2090,7 @@ func (c *Client) pollVeleroStatus(task protocol.TaskDispatchPayload, object kube
 			continue
 		}
 		if err := c.sendTaskProgress(task, payload, progress, message); err != nil {
-			c.logger.Error("failed to send task progress", "task_id", task.TaskID, "error", err)
-			return
+			c.logger.Warn("failed to send task progress; continuing observation", "task_id", task.TaskID, "error", err)
 		}
 		time.Sleep(interval)
 	}
@@ -2073,7 +2100,7 @@ func (c *Client) pollRestoreStatus(task protocol.TaskDispatchPayload, object kub
 	c.pollVeleroStatusWithSuccess(task, object, basePayload, restoreStatusResult, func(payload map[string]any, message string) {
 		if task.Restore != nil && len(task.Restore.ImageMappings) > 0 {
 			payload["imageMappingStage"] = "running"
-			if err := c.sendTaskProgress(task, payload, 92, "Persistent data restoration completed; applying durable workload image mappings."); err != nil {
+			if err := c.sendTaskProgress(task, payload, 0, "Persistent data restoration completed; applying durable workload image mappings."); err != nil {
 				// Progress delivery is advisory. A temporary control-plane or
 				// WebSocket outage must not stop the durable restore workflow.
 				// The next progress snapshot or the reliable terminal event will
@@ -2214,6 +2241,14 @@ func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, 
 				return
 			}
 			message, payload = c.enrichVeleroFailure(context.Background(), object, payload, status, message)
+			if object.Kind == "Restore" && isTargetClusterAPIUnavailable(status, message) {
+				code = "TARGET_CLUSTER_API_UNAVAILABLE"
+				message = "Target cluster Kubernetes API was unavailable during restoration. Verify target cluster control-plane health and review the last reported volume progress before retrying."
+				payload["failureClassification"] = map[string]any{
+					"kind":      "target_cluster_api_unavailable",
+					"retryable": true,
+				}
+			}
 			if code == "" {
 				code = object.Kind + "_FAILED"
 			}
@@ -2236,16 +2271,29 @@ func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, 
 			c.failRestoreTask(task, object, object.Kind+"_STATUS_TIMEOUT", "timed out waiting for Velero "+object.Kind+" to complete", nil)
 			return
 		}
-		if usesVolumeProgress(object) && !volumeReady {
-			time.Sleep(interval)
-			continue
-		}
 		if err := c.sendTaskProgress(task, payload, progress, message); err != nil {
-			c.logger.Error("failed to send task progress", "task_id", task.TaskID, "error", err)
-			return
+			c.logger.Warn("failed to send task progress; continuing observation", "task_id", task.TaskID, "error", err)
 		}
 		time.Sleep(interval)
 	}
+}
+
+// isTargetClusterAPIUnavailable identifies transport failures reported by
+// Velero when it cannot reach the target Kubernetes API. These are transient
+// control-plane failures and should be presented separately from restore-data
+// or manifest errors.
+func isTargetClusterAPIUnavailable(status kube.ManifestStatus, message string) bool {
+	text := strings.ToLower(strings.Join([]string{status.Message, status.Reason, message, fmt.Sprint(status.Raw)}, " "))
+	for _, needle := range []string{
+		"connection refused", "unexpected eof", "connection reset", "no route to host",
+		"network is unreachable", "i/o timeout", "context deadline exceeded",
+		"the api server may have been down", "apiserver may have been down",
+	} {
+		if strings.Contains(text, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 // failRestoreTask preserves the ordering required for a safe Drill failure:
@@ -2405,7 +2453,7 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, o
 	}
 	startPayload := cloneVeleroPayload(basePayload)
 	startPayload["readinessStage"] = "started"
-	if err := c.sendTaskProgress(task, startPayload, 95, "Resource and volume data restoration completed; restored application readiness validation started."); err != nil {
+	if err := c.sendTaskProgress(task, startPayload, 0, "Resource and volume data restoration completed; restored application readiness validation started."); err != nil {
 		c.logger.Warn("failed to send restore readiness start event; continuing readiness checks", "task_id", task.TaskID, "error", err)
 	}
 	for {
@@ -2433,7 +2481,7 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, o
 				} else {
 					payload["applicationValidationStage"] = "skipped"
 				}
-				if err := c.sendTaskProgress(task, payload, 99, "Restored application readiness validation completed successfully."); err != nil {
+				if err := c.sendTaskProgress(task, payload, 0, "Restored application readiness validation completed successfully."); err != nil {
 					c.logger.Warn("failed to send restore readiness success event; sending reliable completion", "task_id", task.TaskID, "error", err)
 				}
 				if err := c.sendTaskCompleted(task, payload, restoreMessage+"; restored application is ready"); err != nil {
@@ -2445,7 +2493,7 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, o
 				c.failRestoreTask(task, object, "RESTORE_READINESS_TIMEOUT", "timed out waiting for restored application readiness", map[string]any{"velero": payload})
 				return
 			}
-			if err := c.sendTaskProgress(task, payload, 95, restoreReadinessProgressMessage(readiness)); err != nil {
+			if err := c.sendTaskProgress(task, payload, 0, restoreReadinessProgressMessage(readiness)); err != nil {
 				c.logger.Warn("failed to send restore readiness progress; continuing readiness checks", "task_id", task.TaskID, "error", err)
 			}
 		} else {
@@ -2453,7 +2501,7 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, o
 				c.failRestoreTask(task, object, "RESTORE_READINESS_READ_FAILED", err.Error(), map[string]any{"velero": payload})
 				return
 			}
-			if err := c.sendTaskProgress(task, payload, 90, "waiting for restored namespace to be created"); err != nil {
+			if err := c.sendTaskProgress(task, payload, 0, "waiting for restored namespace to be created"); err != nil {
 				c.logger.Warn("failed to send restore readiness progress; continuing readiness checks", "task_id", task.TaskID, "error", err)
 			}
 		}
@@ -2710,20 +2758,20 @@ func backupStatusResult(status kube.ManifestStatus, elapsed time.Duration) (bool
 	}
 }
 
-func restoreStatusResult(status kube.ManifestStatus, elapsed time.Duration) (bool, bool, int, string, string) {
+func restoreStatusResult(status kube.ManifestStatus, _ time.Duration) (bool, bool, int, string, string) {
 	switch status.Phase {
 	case "Completed":
-		return true, true, 90, "Resource restoration completed successfully.", ""
+		return true, true, 0, "Resource restoration completed successfully.", ""
 	case "FailedValidation", "Failed", "PartiallyFailed":
-		return true, false, 100, "velero restore failed", "RESTORE_FAILED"
+		return true, false, 0, "velero restore failed", "RESTORE_FAILED"
 	case "InProgress":
-		return false, false, 70, "Application resource restoration is in progress.", ""
+		return false, false, 0, "Application resource restoration is in progress.", ""
 	case "Finalizing", "FinalizingPartiallyFailed":
-		return false, false, 85, "Resource restoration finalization is in progress.", ""
+		return false, false, 0, "Resource restoration finalization is in progress.", ""
 	case "New":
-		return false, false, 30, "Restore operation queued.", ""
+		return false, false, 0, "Restore operation queued.", ""
 	default:
-		return false, false, progressFromElapsed(elapsed), "Waiting for the restore operation to start.", ""
+		return false, false, 0, "Waiting for the restore operation to start.", ""
 	}
 }
 
@@ -3725,6 +3773,9 @@ func (c *Client) sendTaskAccepted(task protocol.TaskDispatchPayload) error {
 }
 
 func (c *Client) sendTaskProgress(task protocol.TaskDispatchPayload, veleroPayload map[string]any, progress int, text string) error {
+	if isRecoveryTask(task.Type) {
+		progress = recoveryTransferPercent(veleroPayload)
+	}
 	veleroPayload = withRecoveryStages(task, veleroPayload, progress, "running", "", text)
 	metrics := taskProgressMetrics(veleroPayload)
 	sizeProgress := sizeProgressV2(task, veleroPayload, metrics)
@@ -3917,7 +3968,39 @@ func (c *Client) sendTaskFailedWithDetails(task protocol.TaskDispatchPayload, co
 	return c.sendReliableEvent(message)
 }
 
-func withRecoveryStages(task protocol.TaskDispatchPayload, payload map[string]any, progress int, outcome string, errorCode string, message string) map[string]any {
+// Recovery stages use observed evidence rather than weighted percentages.
+func recoveryResourcesComplete(payload map[string]any) bool {
+	if displayEvidenceValue(payload["readinessStage"]) != "" || displayEvidenceValue(payload["imageMappingStage"]) != "" {
+		return true
+	}
+	status := wsMapFromAny(payload["status"])
+	phase := displayEvidenceValue(status["phase"])
+	if phase == "Completed" || phase == "PartiallyFailed" {
+		return true
+	}
+	counts := wsMapFromAny(wsMapFromAny(status["raw"])["progress"])
+	total := int64FromAny(counts["totalItems"])
+	return total > 0 && int64FromAny(counts["itemsRestored"]) >= total
+}
+func recoveryDataComplete(payload map[string]any) bool {
+	if displayEvidenceValue(payload["readinessStage"]) != "" || displayEvidenceValue(payload["imageMappingStage"]) != "" {
+		return true
+	}
+	volume := wsMapFromAny(payload["volumeProgress"])
+	count := int64FromAny(volume["itemCount"])
+	return count > 0 && int64FromAny(volume["completedCount"]) == count && int64FromAny(volume["failedCount"]) == 0
+}
+func recoveryTransferPercent(payload map[string]any) int {
+	volume := wsMapFromAny(payload["volumeProgress"])
+	total := int64FromAny(volume["totalBytes"])
+	done := int64FromAny(volume["bytesDone"])
+	if volume["allTotalsKnown"] != true || total <= 0 {
+		return 0
+	}
+	return int(max(int64(0), min(int64(100), done*100/total)))
+}
+
+func withRecoveryStages(task protocol.TaskDispatchPayload, payload map[string]any, _ int, outcome string, errorCode string, message string) map[string]any {
 	if !isRecoveryTask(task.Type) {
 		return payload
 	}
@@ -3938,17 +4021,23 @@ func withRecoveryStages(task protocol.TaskDispatchPayload, payload map[string]an
 		case "failed":
 			return recoveryFailureStageStatus(id, errorCode)
 		}
-		readinessStage := strings.TrimSpace(fmt.Sprint(result["readinessStage"]))
+		readinessStage := displayEvidenceValue(result["readinessStage"])
 		switch id {
 		case "preparing_restore":
+			if len(wsMapFromAny(result["status"])) == 0 && len(wsMapFromAny(result["volumeProgress"])) == 0 && !recoveryResourcesComplete(result) {
+				return "running"
+			}
 			return "succeeded"
 		case "restoring_resources":
-			if readinessStage != "" || progress >= 90 {
+			if len(wsMapFromAny(result["status"])) == 0 && !recoveryResourcesComplete(result) {
+				return "pending"
+			}
+			if recoveryResourcesComplete(result) {
 				return "succeeded"
 			}
 			return "running"
 		case "restoring_data":
-			if readinessStage != "" || progress >= 90 {
+			if recoveryDataComplete(result) {
 				return "succeeded"
 			}
 			if len(wsMapFromAny(result["volumeProgress"])) > 0 {
@@ -3967,7 +4056,7 @@ func withRecoveryStages(task protocol.TaskDispatchPayload, payload map[string]an
 			}
 			return "pending"
 		case "application_validation":
-			validationStage := strings.TrimSpace(fmt.Sprint(result["applicationValidationStage"]))
+			validationStage := displayEvidenceValue(result["applicationValidationStage"])
 			if validationStage != "" {
 				return validationStage
 			}
@@ -4113,12 +4202,22 @@ func manifestPayload(kind string, name string, namespace string) map[string]any 
 }
 
 func (c *Client) sendInventory(full bool) error {
+	return c.collectAndSendInventory(full, false)
+}
+
+func (c *Client) collectAndSendInventory(full bool, onlyChanged bool) error {
 	snapshot, err := c.collector.Collect()
 	if err != nil {
 		return err
 	}
 	snapshot.Report.Full = full
+	c.inventoryMu.Lock()
+	if onlyChanged && snapshot.Hash == c.lastInventory.Hash {
+		c.inventoryMu.Unlock()
+		return nil
+	}
 	c.lastInventory = snapshot
+	c.inventoryMu.Unlock()
 	return c.writeInventory(snapshot.Report)
 }
 
@@ -4167,7 +4266,9 @@ func (c *Client) filterInventoryBackups(backups []map[string]any) []map[string]a
 }
 
 func (c *Client) sendHeartbeat(_ bool) error {
+	c.inventoryMu.RLock()
 	snapshot := c.lastInventory
+	c.inventoryMu.RUnlock()
 	veleroStatus := snapshot.Report.Velero.Status
 	if veleroStatus == "" {
 		veleroStatus = "unknown"

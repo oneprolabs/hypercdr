@@ -440,11 +440,9 @@ func (a *DynamicManifestApplier) getVolumeProgress(ctx context.Context, namespac
 					progress.ErrorCode = "RESTORE_VOLUME_DEPENDENCY_MISSING"
 				}
 			}
-			if resource.Kind == "PodVolumeRestore" && progress.Phase == "" && age >= restoreVolumeStartGrace {
-				progress.Phase = "FailedValidation"
-				progress.Message = fmt.Sprintf("volume data restoration did not start within %s; verify that the restored PVC exists, is bound, and can be mounted by a target node", restoreVolumeStartGrace)
-				progress.ErrorCode = "RESTORE_VOLUME_START_TIMEOUT"
-			}
+			// Queued restores may legitimately wait behind another volume for
+			// longer than this grace period. Only confirmed dependency failures
+			// above are terminal; the task deadline bounds an otherwise idle queue.
 			result.Items = append(result.Items, progress)
 			result.BytesDone += progress.BytesDone
 			if progress.IncrementalKnown {

@@ -116,8 +116,9 @@ export function formatPercent(value: number): string {
 
 export function latestVolumeProgress(events?: ApiTaskEvent[]): VolumeProgressInfo | null {
   if (!events?.length) return null;
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const progress = events[index]?.payload?.velero?.volumeProgress;
+  const ordered = [...events].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  for (let index = ordered.length - 1; index >= 0; index -= 1) {
+    const progress = ordered[index]?.payload?.velero?.volumeProgress;
     if (!progress || typeof progress !== 'object') continue;
     return {
       operation: typeof progress.operation === 'string' ? progress.operation : undefined,
@@ -140,6 +141,11 @@ export function latestVolumeProgress(events?: ApiTaskEvent[]): VolumeProgressInf
 }
 
 export function taskProgressInfo(task: ApiTask, events?: ApiTaskEvent[]): VolumeProgressInfo | null {
+  const persisted = task.payload?.volumeProgress;
+  if (persisted && typeof persisted === 'object') {
+    const current = latestVolumeProgress([{ id: task.id, taskId: task.id, level: 'info', reason: 'progress', message: '', createdAt: String(task.payload?.lastStatusAt || task.createdAt), payload: { velero: { volumeProgress: persisted } } }]);
+    return current;
+  }
   const metrics = task.payload?.progressMetrics && typeof task.payload.progressMetrics === 'object'
     ? task.payload.progressMetrics
     : task.payload || {};
@@ -180,39 +186,6 @@ export type TaskActivity = {
   label: string;
   transferring: boolean;
 };
-
-export function taskWorkflowProgress(task: ApiTask, events: ApiTaskEvent[] | undefined): number {
-  const type = String(task.type || '').toLowerCase();
-  const status = String(task.status || '').toLowerCase();
-  if (['succeeded', 'completed', 'success'].includes(status)) return 100;
-  const recovery = ['drill', 'restore', 'takeover'].includes(type);
-  const reasons = new Set((events || []).map(event => String(event.reason || '').toLowerCase()));
-  const volume = taskProgressInfo(task, events);
-  const volumePercent = volume?.knownTotal ? Math.max(0, Math.min(100, volume.percent)) : 0;
-  const candidates = [2];
-
-  if (reasons.has('storage_preflight_started')) candidates.push(5);
-  if (reasons.has('storage_preflight_succeeded') || reasons.has('storage_preflight_skipped')) candidates.push(7);
-  if (reasons.has('dispatched')) candidates.push(8);
-  if (reasons.has('accepted')) candidates.push(10);
-
-  if (recovery) {
-    if (volumePercent > 0) candidates.push(10 + volumePercent * 0.6);
-    if (reasons.has('restore_completed')) candidates.push(78);
-    if (reasons.has('application_readiness_check_started')) candidates.push(88);
-    if (reasons.has('application_ready')) candidates.push(95);
-    const stages = Array.isArray(task.payload?.recoveryStages) ? task.payload.recoveryStages : [];
-    if (stages.some((stage: any) => stage?.id === 'restoring_resources' && stage?.status === 'succeeded')) candidates.push(78);
-    if (stages.some((stage: any) => stage?.id === 'waiting_for_workloads' && stage?.status !== 'pending')) candidates.push(88);
-    if (stages.some((stage: any) => stage?.id === 'application_validation' && stage?.status !== 'pending')) candidates.push(95);
-    if (status === 'finalizing' || reasons.has('finalizing')) candidates.push(98);
-  } else {
-    if (volumePercent > 0) candidates.push(10 + volumePercent * 0.75);
-    if (reasons.has('backup_completed')) candidates.push(90);
-    if (status === 'finalizing' || reasons.has('finalizing')) candidates.push(95);
-  }
-  return Math.min(99, Math.max(...candidates));
-}
 
 export function taskCurrentActivity(task: ApiTask, events: ApiTaskEvent[] | undefined): TaskActivity {
   const type = String(task.type || '').toLowerCase();
@@ -410,6 +383,13 @@ export const ERROR_MESSAGE_CATALOG: ErrorMessageDefinition[] = [
     title: 'Cancel sync failed',
     description: 'The running sync task could not be canceled.',
     detail: 'The platform could not complete the Velero backup delete request. Check the source cluster agent, Velero DeleteBackupRequest, and Backup CR status.',
+  },
+  {
+    code: 'TARGET_CLUSTER_API_UNAVAILABLE',
+    aliases: ['TARGET_API_UNAVAILABLE'],
+    title: 'Target cluster API unavailable',
+    description: 'The target cluster Kubernetes API was temporarily unavailable during restore.',
+    detail: 'Check target cluster control-plane health and the last reported volume progress before retrying. Source application and backup data were preserved.',
   },
   {
     code: '140001',
@@ -710,6 +690,8 @@ export function TaskProcessTimeline({ task, events }: { task: ApiTask; events: A
   const visibleEvents = keyTaskEvents(events.filter(event => !event.taskId || event.taskId === task.id));
   const stageGroups = groupTaskEventsByStage(task, visibleEvents);
   const reachedStages = reachedTaskStages(stageGroups);
+  const transferProgress = taskProgressInfo(task, events) || latestVolumeProgress(events);
+  const transferStage = ['drill', 'restore', 'takeover'].includes(task.type) ? 'restoring_data' : 'backing_up_data';
   return (
     <div className="hbdr-task-detail-section">
       <div className="hbdr-task-stage-groups" aria-label="Task stages" aria-live="polite">
@@ -720,6 +702,12 @@ export function TaskProcessTimeline({ task, events }: { task: ApiTask; events: A
             title={stage.name}
             className="hbdr-task-stage-group"
           >
+            {stage.id === transferStage && transferProgress?.knownTotal && (
+              <div className="hbdr-task-status-detail hbdr-task-log-progress" role="status" aria-live="polite">
+                <i className="hbdr-task-status-inline-track"><b style={{ width: `${Math.max(0, Math.min(100, transferProgress.percent))}%` }} /></i>
+                <span>{formatPercent(transferProgress.percent)}% · {formatBytes(transferProgress.bytesDone)} / {formatBytes(transferProgress.totalBytes)}{transferProgress.speedBytesPerSecond > 0 ? ` · ${formatBytesPerSecond(transferProgress.speedBytesPerSecond)}` : ''}</span>
+              </div>
+            )}
             {stage.events.length > 0 && (
               <div className="hbdr-task-detail-events" aria-label={`${stage.name} events`}>
                 {stage.events.map(event => (
@@ -812,7 +800,7 @@ export function taskStatusDisplay(task: ApiTask, events: ApiTaskEvent[]): TaskSt
   // Persisted recoveryStages are authoritative. Event reasons such as
   // `progress` are intentionally generic and can otherwise keep selecting the
   // completed data-transfer stage after readiness validation has started.
-  const current = groups.find(group => group.status === 'in_progress') || groups.find(group => group.status === 'failed') || groups.find(group => group.currentEventId);
+  const current = groups.find(group => group.status === 'failed') || groups.find(group => group.currentEventId && group.status === 'in_progress') || [...groups].reverse().find(group => group.status === 'in_progress') || groups.find(group => group.currentEventId);
   const latest = latestVisibleTaskEvent(visible);
   const fallback = current?.id === 'waiting_for_workloads'
     ? 'Waiting for restored workloads and pods to become ready.'
@@ -821,10 +809,6 @@ export function taskStatusDisplay(task: ApiTask, events: ApiTaskEvent[]): TaskSt
   const dataStage = recovery ? 'restoring_data' : 'backing_up_data';
   const dataTransfer = current?.id === dataStage;
   const progress = dataTransfer ? taskProgressInfo(task, visible) : null;
-  const taskPercent = Number(task.progress);
-  const fallbackPercent = dataTransfer && Number.isFinite(taskPercent)
-    ? Math.max(0, Math.min(100, taskPercent))
-    : undefined;
   const detail = dataTransfer && progress?.knownTotal && progress.totalBytes > 0
     ? `${formatBytes(progress.bytesDone)} / ${formatBytes(progress.totalBytes)}${progress.speedBytesPerSecond > 0 ? ` · ${formatBytesPerSecond(progress.speedBytesPerSecond)}` : ''}`
     : fallback;
@@ -832,7 +816,7 @@ export function taskStatusDisplay(task: ApiTask, events: ApiTaskEvent[]): TaskSt
     stage: current?.name || (recovery ? 'Preparing Restore' : 'Preparing Backup'),
     detail,
     progress: dataTransfer
-      ? (progress?.knownTotal ? Math.max(0, Math.min(100, progress.percent)) : fallbackPercent)
+      ? (progress?.knownTotal ? Math.max(0, Math.min(100, progress.percent)) : undefined)
       : undefined,
     dataTransfer,
   };
@@ -886,13 +870,7 @@ export function productTaskMessage(message: string): string {
 }
 
 export function TaskFinalResult({ task, events }: { task: ApiTask; events: ApiTaskEvent[] }) {
-  if (isActiveTaskStatus(task.status)) return (
-    <div className="hbdr-task-final-result is-running">
-      <small>Final result</small>
-      <strong>Task is still running</strong>
-      <span>The final result will be available when all required stages finish.</span>
-    </div>
-  );
+  if (isActiveTaskStatus(task.status)) return null;
   const failed = isFailedStatus(task.status);
   const warning = taskHasWarning(task);
   const lastEvent = latestVisibleTaskEvent(events);
