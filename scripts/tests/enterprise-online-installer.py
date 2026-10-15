@@ -7,6 +7,7 @@ VERSION = 'v1.0.117.20261014-ent.2'
 with tempfile.TemporaryDirectory(prefix='enterprise-installer-', dir=os.environ.get('HCDR_RUNTIME_ROOT')) as d:
     work = pathlib.Path(d)
     (work/'bin').mkdir()
+    (work/'bin/id').write_text('#!/bin/sh\necho 0\n')
     (work/'bin/docker').write_text('#!/bin/sh\nexit 0\n')
     (work/'bin/curl').write_text('''#!/usr/bin/env python3
 import os,sys,pathlib
