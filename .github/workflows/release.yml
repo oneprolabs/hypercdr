@@ -1,7 +1,7 @@
 name: Build and Publish Release
 on:
   push:
-    tags: ['v*']
+    tags: ['v*', '!v*-ent.*']
   workflow_dispatch:
     inputs:
       version: {description: 'Release version in MAJOR.MINOR.PATCH.YYYYMMDD format', required: true}
