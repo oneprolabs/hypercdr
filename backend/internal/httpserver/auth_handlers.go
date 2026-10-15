@@ -217,7 +217,14 @@ func (r *Router) updateCurrentUserTheme(w http.ResponseWriter, req *http.Request
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_theme"})
 		return
 	}
-	updated, found, err := r.store.SetUserTheme(u.ID, body.Theme)
+	provider, supported := r.identityProvider.(interface {
+		SetTheme(context.Context, string, string) (EditionIdentity, bool, error)
+	})
+	if !supported {
+		writeJSON(w, http.StatusNotImplemented, map[string]any{"error": "theme_preference_unsupported"})
+		return
+	}
+	updated, found, err := provider.SetTheme(req.Context(), u.ID, body.Theme)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "theme_update_failed"})
 		return
@@ -226,7 +233,7 @@ func (r *Router) updateCurrentUserTheme(w http.ResponseWriter, req *http.Request
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "user_not_found"})
 		return
 	}
-	writeJSON(w, http.StatusOK, identityFromStore(updated))
+	writeJSON(w, http.StatusOK, updated)
 }
 func (r *Router) changeOwnPassword(w http.ResponseWriter, req *http.Request) {
 	u, ok := requestUser(req)

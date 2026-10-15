@@ -127,6 +127,7 @@ func WithEditionMeteringObserver(observer EditionMeteringObserver) RouterOption 
 }
 
 type ExtensionRoute struct {
+	Public  bool
 	Pattern string
 	Handler func(http.ResponseWriter, *http.Request, EditionPrincipal)
 }
@@ -297,8 +298,20 @@ func (r *Router) mountExtensionRoutes() {
 		if strings.TrimSpace(route.Pattern) == "" || route.Handler == nil {
 			panic("invalid edition extension route")
 		}
-		r.routeContracts = append(r.routeContracts, RouteContract{Pattern: route.Pattern, Scope: "edition-policy"})
+		scope := "edition-policy"
+		if route.Public {
+			parts := strings.Split(route.Pattern, " ")
+			if len(parts) != 2 || (parts[0] != "GET" && parts[0] != "POST") || !strings.HasPrefix(parts[1], "/api/v1/enterprise/auth/") || strings.ContainsAny(parts[1], "{}?*\t\r\n") {
+				panic("public edition routes must be exact GET/POST Enterprise auth endpoints")
+			}
+			scope = "public"
+		}
+		r.routeContracts = append(r.routeContracts, RouteContract{Pattern: route.Pattern, Scope: scope})
 		r.mux.HandleFunc(route.Pattern, func(w http.ResponseWriter, req *http.Request) {
+			if route.Public {
+				route.Handler(w, req, EditionPrincipal{})
+				return
+			}
 			user, ok := requestUser(req)
 			if !ok {
 				writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "authentication_required"})

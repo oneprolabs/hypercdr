@@ -38,7 +38,7 @@ func (r *Router) withAccessLog(next http.Handler) http.Handler {
 			"response_bytes", recorder.bytes,
 		)
 		if duration >= 500 {
-			r.logger.Info("slow http request", "method", req.Method, "path", req.URL.Path, "query", req.URL.RawQuery, "request_id", requestID, "duration_ms", duration, "response_bytes", recorder.bytes)
+			r.logger.Info("slow http request", "method", req.Method, "path", req.URL.Path, "query", accessLogQuery(req), "request_id", requestID, "duration_ms", duration, "response_bytes", recorder.bytes)
 		}
 		if strings.HasPrefix(req.URL.Path, "/api/v1/") && !strings.HasPrefix(req.URL.Path, "/api/v1/diagnostic-logs") && (status >= 400 || req.Method != http.MethodGet) {
 			operation := req.Method + " " + req.URL.Path
@@ -98,4 +98,12 @@ func (w *diagnosticResponseWriter) Write(body []byte) (int, error) {
 	written, err := w.ResponseWriter.Write(body)
 	w.bytes += written
 	return written, err
+}
+
+// Authentication URLs can carry OAuth codes and one-time recovery tokens.
+func accessLogQuery(req *http.Request) string {
+	if strings.Contains(req.URL.Path, "/auth/") {
+		return "[redacted]"
+	}
+	return req.URL.RawQuery
 }

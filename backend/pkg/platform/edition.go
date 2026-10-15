@@ -68,8 +68,14 @@ type Identity struct {
 	Status             string `json:"status"`
 	AuthProvider       string `json:"authProvider"`
 	TimeZone           string `json:"timeZone,omitempty"`
+	Theme              string `json:"theme,omitempty"`
 	SystemAdmin        bool   `json:"systemAdmin,omitempty"`
 	MustChangePassword bool   `json:"mustChangePassword"`
+}
+
+// IdentityThemeProvider persists appearance in the edition-owned identity store.
+type IdentityThemeProvider interface {
+	SetTheme(context.Context, string, string) (Identity, bool, error)
 }
 
 type IdentitySession struct {
@@ -156,6 +162,8 @@ type Migration struct {
 // password-change, administrator, and system-administrator checks applicable
 // to the request path. Edition handlers must still enforce their own RBAC.
 type Route struct {
+	// Public is restricted to exact edition-owned authentication endpoints.
+	Public  bool
 	Pattern string
 	Handler func(http.ResponseWriter, *http.Request, Principal)
 }

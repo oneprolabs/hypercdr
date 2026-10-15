@@ -93,7 +93,7 @@ func (r *Router) apiSchema(w http.ResponseWriter, req *http.Request) {
 			}
 		}
 		security := []any{map[string]any{"bearerAuth": []string{}}}
-		if route.Scope == "public-or-token" {
+		if route.Scope == "public-or-token" || route.Scope == "public" {
 			security = []any{}
 		}
 		if allowsReleaseToken(method, path) {

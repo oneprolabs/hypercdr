@@ -1,3 +1,4 @@
+import { HyperCDRMark } from './components/hypercdr-mark';
 import { sessionMutationScope } from './app/session-mutation';
 import { replaceApplicationTags } from './api/applications';
 import { listTasks, listTaskEvents } from './api/tasks';
@@ -758,7 +759,7 @@ function createUuid() {
   });
 }
 
-export type HyperCDRAppProps = { modules?: HyperCDRFrontendModule[] };
+export type HyperCDRAppProps = { modules?: HyperCDRFrontendModule[]; loginSupplement?: React.ReactNode };
 
 type ApiProductInfo = {
   product?: string;
@@ -771,7 +772,7 @@ type ApiProductInfo = {
   capabilities?: Record<string, { enabled?: boolean }>;
 };
 
-export default function App({ modules = [] }: HyperCDRAppProps) {
+export default function App({ modules = [], loginSupplement }: HyperCDRAppProps) {
   const extensionModules = useMemo(() => validateFrontendModules(modules), [modules]);
   // Enterprise-owned modules are an edition boundary even before capability
   // discovery finishes. Never flash the Community fallback while product-info
@@ -1676,32 +1677,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
 
             <div className="hbdr-login-hero">
               <div className="hbdr-login-hero-icon">
-                <svg viewBox="0 0 128 128" aria-hidden="true" className="hypercdr-mark">
-                  <defs>
-                    <linearGradient id="hcdr-mark-frame" x1="24" y1="28" x2="104" y2="100" gradientUnits="userSpaceOnUse">
-                      <stop offset="0" stopColor="#ffcf3d" />
-                      <stop offset="0.48" stopColor="#67e8f9" />
-                      <stop offset="1" stopColor="#6d7cff" />
-                    </linearGradient>
-                    <linearGradient id="hcdr-mark-core" x1="42" y1="42" x2="88" y2="88" gradientUnits="userSpaceOnUse">
-                      <stop offset="0" stopColor="#67e8f9" />
-                      <stop offset="1" stopColor="#ffcf3d" />
-                    </linearGradient>
-                    <filter id="hcdr-mark-soft-glow" x="-25%" y="-25%" width="150%" height="150%">
-                      <feGaussianBlur stdDeviation="4" result="blur" />
-                      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.35 0 0 0 0 0.68 0 0 0 0 1 0 0 0 0.50 0" />
-                      <feMerge>
-                        <feMergeNode />
-                        <feMergeNode in="SourceGraphic" />
-                      </feMerge>
-                    </filter>
-                  </defs>
-                  <path d="M64 18 101 39v50l-37 21-37-21V39l37-21Z" fill="rgba(7,10,18,0.84)" stroke="url(#hcdr-mark-frame)" strokeWidth="5" filter="url(#hcdr-mark-soft-glow)" />
-                  <rect x="47" y="45" width="15" height="15" rx="4" fill="#67e8f9" />
-                  <rect x="66" y="45" width="15" height="15" rx="4" fill="#ffffff" opacity="0.92" />
-                  <rect x="47" y="64" width="15" height="15" rx="4" fill="#ffffff" opacity="0.92" />
-                  <rect x="66" y="64" width="15" height="15" rx="4" fill="#ffcf3d" />
-                </svg>
+                <HyperCDRMark />
               </div>
               <div className="hbdr-login-hero-copy">
                 <div className="hbdr-login-hero-title"><span>Hyper</span>CDR</div>
@@ -1788,6 +1764,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
               </button>
               {authFlow === 'login' ? <>
                 <div className="hbdr-login-forgot"><button type="button" onClick={() => switchAuthFlow('forgot')}>Forgot password?</button></div>
+                {loginSupplement}
                 <p className="hbdr-login-eula">By continuing, you agree to our Terms and Privacy Policy.</p>
               </> : <div className="hbdr-login-signup hbdr-auth-back">Already have an account? <button type="button" onClick={() => switchAuthFlow('login')}>Back to Sign In</button></div>}
             </div>
@@ -1846,7 +1823,7 @@ export default function App({ modules = [] }: HyperCDRAppProps) {
             <h1>HyperCDR</h1>
           </div>
           <nav>
-            {topNav.filter(item => item.key !== 'settings' || authSession?.user.role === 'admin').map(item => {
+            {topNav.filter(item => item.key !== 'settings' || authSession?.user.role === 'admin' || visibleExtensionModules.some(module => module.navigation.group === 'settings')).map(item => {
               const requiresOnboarding = ['dr', 'ops', 'config'].includes(item.key) && onboarding !== 'ready';
               const isConfig = item.key === 'config';
               const showBadge = isConfig && onboarding === 'register';

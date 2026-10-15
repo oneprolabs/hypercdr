@@ -3,6 +3,7 @@ package platform
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -211,6 +212,7 @@ func editionRoutes(items []Route) []httpserver.ExtensionRoute {
 		handler := item.Handler
 		result = append(result, httpserver.ExtensionRoute{
 			Pattern: item.Pattern,
+			Public:  item.Public,
 			Handler: func(w http.ResponseWriter, req *http.Request, principal httpserver.EditionPrincipal) {
 				handler(w, req, Principal{ID: principal.ID, TenantID: principal.TenantID, Email: principal.Email, Role: principal.Role, SystemAdmin: principal.SystemAdmin})
 			},
@@ -319,7 +321,7 @@ func (a identityProviderAdapter) ResetPassword(ctx context.Context, token, passw
 	return a.provider.ResetPassword(ctx, token, password)
 }
 func editionIdentity(identity Identity) httpserver.EditionIdentity {
-	return httpserver.EditionIdentity{ID: identity.ID, TenantID: identity.TenantID, TenantName: identity.TenantName, Email: identity.Email, DisplayName: identity.DisplayName, Role: identity.Role, Status: identity.Status, AuthProvider: identity.AuthProvider, TimeZone: identity.TimeZone, SystemAdmin: identity.SystemAdmin, MustChangePassword: identity.MustChangePassword}
+	return httpserver.EditionIdentity{ID: identity.ID, TenantID: identity.TenantID, TenantName: identity.TenantName, Email: identity.Email, DisplayName: identity.DisplayName, Role: identity.Role, Status: identity.Status, AuthProvider: identity.AuthProvider, TimeZone: identity.TimeZone, Theme: identity.Theme, SystemAdmin: identity.SystemAdmin, MustChangePassword: identity.MustChangePassword}
 }
 
 func utcLogTime(_ []string, attr slog.Attr) slog.Attr {
@@ -327,4 +329,13 @@ func utcLogTime(_ []string, attr slog.Attr) slog.Attr {
 		attr.Value = slog.TimeValue(attr.Value.Time().UTC())
 	}
 	return attr
+}
+
+func (a identityProviderAdapter) SetTheme(ctx context.Context, id, theme string) (httpserver.EditionIdentity, bool, error) {
+	provider, ok := a.provider.(IdentityThemeProvider)
+	if !ok {
+		return httpserver.EditionIdentity{}, false, fmt.Errorf("edition identity provider does not support theme preferences")
+	}
+	identity, found, err := provider.SetTheme(ctx, id, theme)
+	return editionIdentity(identity), found, err
 }

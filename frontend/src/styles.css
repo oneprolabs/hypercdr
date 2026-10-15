@@ -29429,3 +29429,11 @@ html[data-theme='dark'] #root .hbdr-dr-task-log-drawer .hbdr-task-final-result.i
 #root .premium-app.hbdr-workspace .hbdr-dr-task-error:is(:hover,:focus-visible) .hbdr-dr-task-error-title :is(strong,b) {
   color: var(--hc-crit) !important;
 }
+
+/* Keep the language glyph visible on both workspace surfaces. */
+.premium-app.hbdr-workspace > aside.premium-sidebar > div:last-child .hbdr-language-tooltip .hbdr-language-switch-compact {
+  color: var(--hc-text-2) !important;
+}
+.premium-app.hbdr-workspace > aside.premium-sidebar > div:last-child .hbdr-language-tooltip .hbdr-language-switch-compact > svg {
+  color: inherit !important;
+}

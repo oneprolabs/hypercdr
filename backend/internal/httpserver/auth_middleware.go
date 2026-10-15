@@ -11,6 +11,12 @@ func (r *Router) withPlatformAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		path := req.URL.Path
 		publicAuth := publicAPIPath(path)
+		for _, route := range r.extensionRoutes {
+			if route.Public && route.Pattern == req.Method+" "+path {
+				publicAuth = true
+				break
+			}
+		}
 		if !strings.HasPrefix(path, "/api/v1/") || publicAuth || path == "/api/v1/agent-tokens/validate" {
 			next.ServeHTTP(w, req)
 			return

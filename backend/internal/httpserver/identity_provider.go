@@ -61,3 +61,8 @@ func (p storeIdentityProvider) ResetPassword(_ context.Context, token, password 
 	}
 	return err == nil, err
 }
+
+func (p storeIdentityProvider) SetTheme(_ context.Context, id, theme string) (EditionIdentity, bool, error) {
+	user, found, err := p.store.SetUserTheme(id, theme)
+	return identityFromStore(user), found, err
+}
