@@ -6,12 +6,14 @@ export type ReleaseNoteEntry = { audience: ReleaseNoteAudience; en: string; 'zh-
 export type ReleaseNotesManifest = {
   version: string;
   releaseDate: string;
+  gitCommit?: string;
   categories: Record<ReleaseNoteCategory, ReleaseNoteEntry[]>;
 };
 
 const embeddedManifest = manifest as ReleaseNotesManifest;
 export const releaseNotesManifest: ReleaseNotesManifest = {
   ...embeddedManifest,
+  gitCommit: import.meta.env.VITE_HCDR_GIT_COMMIT || undefined,
   version: import.meta.env.VITE_HCDR_RELEASE_VERSION || embeddedManifest.version,
   releaseDate: import.meta.env.VITE_HCDR_RELEASE_DATE || embeddedManifest.releaseDate,
 };

@@ -76,8 +76,8 @@ docker_manifest_verify_or_warn() {
 
 require_version() {
   local version="${1:-}"
-  [[ -n "${version}" ]] || die "version is required, for example 1.0.0.20260901"
-  [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ || "${version}" =~ ^v[0-9]{8}\.[0-9]+$ ]] || die "version must match MAJOR.MINOR.PATCH.YYYYMMDD, got ${version}"
+  [[ -n "${version}" ]] || die "version is required, for example ce-v0.0.0"
+  [[ "${version}" =~ ^ce-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ || "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ || "${version}" =~ ^v[0-9]{8}\.[0-9]+$ ]] || die "version must match ce-vMAJOR.MINOR.PATCH (or a historical release), got ${version}"
 }
 
 require_cmd() {

@@ -4,6 +4,8 @@
 
 HyperCDR is a Kubernetes disaster recovery platform. The control plane manages clusters, protection policies, synchronization, restore points, drills, recovery tasks and component upgrades. Cluster agents connect outbound to the platform and coordinate Velero or the OpenShift OADP path.
 
+Community supports self-service email registration, Google sign-in and organization invitations. Each account belongs to one organization; DR resources are isolated by organization. Configure system SMTP for verification/invitations and optional Google credentials as described in the [configuration guide](docs/deployment/configuration.zh.md).
+
 ## Install a released version
 
 Use a Linux host with Docker Engine/Compose v2, Bash, curl, tar, jq and OpenSSL. Replace the example address with one reachable by browsers and cluster agents.
@@ -64,3 +66,9 @@ Backend tests use isolated real PostgreSQL databases. Never point test configura
 Tag releases currently auto-deploy to the CI-configured environment; manual workflow deployment defaults off. PR checks do not publish or deploy. See the [release runbook](docs/deployment/release-flow.zh.md).
 
 Do not commit credentials, kubeconfigs, private keys, certificates, database backups or runtime artifacts. Report vulnerabilities according to [SECURITY.md](SECURITY.md). See [LICENSE](LICENSE).
+
+## Release version policy
+
+Community tags use `ce-vMAJOR.MINOR.PATCH`, starting at `ce-v0.0.0`. Enterprise tags use `ee-vMAJOR.MINOR.PATCH`, starting at `ee-v0.0.0`; the two editions advance independently. Dates and Git commits are build metadata, not version suffixes. Historical releases remain valid explicit installation and rollback targets. The new prefixed numbering era follows historical releases even though its numeric portion starts at zero.
+
+Enterprise pins the Community source commit and published component release in `community.lock`. Changing an Enterprise version does not change that dependency automatically. A missing dependency release fails validation rather than silently substituting another build.

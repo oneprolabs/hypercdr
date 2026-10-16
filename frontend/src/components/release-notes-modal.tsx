@@ -20,8 +20,8 @@ export function ReleaseNotesModal({ open, isAdmin, onClose }: { open: boolean; i
         <button type="button" onClick={onClose} aria-label="Close"><X size={17} /></button>
       </header>
       <div className="hbdr-release-notes-version">
-        <div><small>Current version</small><strong>HyperCDR {releaseNotesManifest.version}</strong></div>
-        <div><small>Release date</small><strong>{releaseNotesManifest.releaseDate || 'Development build'}</strong></div>
+        <div><small>Current version</small><strong>HyperCDR {releaseNotesManifest.version.replace(/^ce-v/, 'Community ').replace(/^ee-v/, 'Enterprise ')}</strong></div>
+        <div><small>Release date</small><strong>{releaseNotesManifest.releaseDate || 'Development build'}{releaseNotesManifest.gitCommit && <span> · {releaseNotesManifest.gitCommit.slice(0, 12)}</span>}</strong></div>
       </div>
       <div className="hbdr-release-notes-content">
         {groups.map(group => {

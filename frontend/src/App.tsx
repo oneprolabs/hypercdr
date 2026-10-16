@@ -146,7 +146,7 @@ import {
   latestTaskForRestorePoint, restorePointIsScheduled, restorePointListStatus,
   restorePointNamespaces, taskMatchesRestorePoint, taskStatusLabel,
 } from './features/restore-points/restore-point-support';
-import { validateFrontendModules, type ExtensionViewId, type HyperCDRFrontendModule } from './app/extensions';
+import { type FrontendModuleContext, validateFrontendModules, type ExtensionViewId, type HyperCDRFrontendModule } from './app/extensions';
 
 const lazyWithUpgradeRecovery = <T extends React.ComponentType<any>>(loader: () => Promise<{ default: T }>) => React.lazy(async () => {
   const reloadKey = 'hypercdr.lazy-module-reload';
@@ -759,7 +759,7 @@ function createUuid() {
   });
 }
 
-export type HyperCDRAppProps = { modules?: HyperCDRFrontendModule[]; loginSupplement?: React.ReactNode };
+export type HyperCDRAppProps = { modules?: HyperCDRFrontendModule[]; loginSupplement?: React.ReactNode; profileComponent?: React.ComponentType<FrontendModuleContext>; profileLabel?: string };
 
 type ApiProductInfo = {
   product?: string;
@@ -772,7 +772,7 @@ type ApiProductInfo = {
   capabilities?: Record<string, { enabled?: boolean }>;
 };
 
-export default function App({ modules = [], loginSupplement }: HyperCDRAppProps) {
+export default function App({ modules = [], loginSupplement, profileComponent: ProfileComponent, profileLabel = 'Basic Information' }: HyperCDRAppProps) {
   const extensionModules = useMemo(() => validateFrontendModules(modules), [modules]);
   // Enterprise-owned modules are an edition boundary even before capability
   // discovery finishes. Never flash the Community fallback while product-info
@@ -1884,7 +1884,7 @@ export default function App({ modules = [], loginSupplement }: HyperCDRAppProps)
                 </div>
                 <button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); openView('profile'); }}>
                   <Settings size={16} />
-                  <span>Basic Information</span>
+                  <span>{profileLabel}</span>
                 </button>
                 <div className="hbdr-account-theme-options" role="group" aria-label="Appearance">
                   <span className="hbdr-account-theme-label">Appearance</span>
@@ -1959,6 +1959,7 @@ export default function App({ modules = [], loginSupplement }: HyperCDRAppProps)
             {view === 'dashboard' && (
               <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                 <React.Suspense fallback={<PageLoadFallback />}><LazyOverviewPage
+                  organizationScoped={!authSession?.user.systemAdmin}
                   cluster={dashboardCluster}
                   clusters={clusters}
                   storage={storage}
@@ -2160,8 +2161,9 @@ export default function App({ modules = [], loginSupplement }: HyperCDRAppProps)
             {view === 'email_settings' && authSession?.user.systemAdmin && <React.Suspense fallback={<PageLoadFallback />}><LazyEmailSettingsPage currentUser={authSession.user} toast={setToast} /></React.Suspense>}
             {view === 'upgrades' && authSession?.user.systemAdmin && <React.Suspense fallback={<PageLoadFallback />}><LazyUpgradeManagementPage isAdmin={authSession.user.systemAdmin} toast={setToast} refreshPlatformData={() => refreshPlatformData()} /></React.Suspense>}
             {view === 'users' && authSession?.user.systemAdmin && !productCapabilities.advancedIdentity?.enabled && <React.Suspense fallback={<PageLoadFallback />}><LazyCommunityUserManagementPage currentUser={authSession.user} toast={setToast} /></React.Suspense>}
-            {view === 'profile' && authSession && <React.Suspense fallback={<PageLoadFallback />}><LazyProfilePage session={authSession} setSession={next => { sessionMutationScope(resourceSessionOwnerRef, next.session.token)(() => { setAuthSession(next); writeStoredAuthSession(next); }); }} toast={message => { sessionMutationScope(resourceSessionOwnerRef, authSession.session.token)(() => setToast(message)); }} /></React.Suspense>}
-            {authSession && visibleExtensionModules.map(module => view === module.view ? <React.Suspense key={module.id} fallback={<PageLoadFallback />}><module.component currentUser={authSession.user} clusters={liveApiClusters} toast={setToast} /></React.Suspense> : null)}
+            {view === 'profile' && authSession && ProfileComponent && <ProfileComponent currentUser={authSession.user} clusters={liveApiClusters} toast={setToast} onCurrentUserChange={user => { sessionMutationScope(resourceSessionOwnerRef, authSession.session.token)(() => { const next = { ...authSession, user }; setAuthSession(next); writeStoredAuthSession(next); }); }} />}
+            {view === 'profile' && authSession && !ProfileComponent && <React.Suspense fallback={<PageLoadFallback />}><LazyProfilePage session={authSession} setSession={next => { sessionMutationScope(resourceSessionOwnerRef, next.session.token)(() => { setAuthSession(next); writeStoredAuthSession(next); }); }} toast={message => { sessionMutationScope(resourceSessionOwnerRef, authSession.session.token)(() => setToast(message)); }} /></React.Suspense>}
+            {authSession && visibleExtensionModules.map(module => view === module.view ? <React.Suspense key={module.id} fallback={<PageLoadFallback />}><module.component currentUser={authSession.user} clusters={liveApiClusters} toast={setToast} onCurrentUserChange={user => { sessionMutationScope(resourceSessionOwnerRef, authSession.session.token)(() => { const next = { ...authSession, user }; setAuthSession(next); writeStoredAuthSession(next); }); }} /></React.Suspense> : null)}
           </AnimatePresence>
         </section>
       </main>

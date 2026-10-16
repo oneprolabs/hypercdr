@@ -42,7 +42,7 @@ import json,re,sys
 releases=json.load(open(sys.argv[1])); assert isinstance(releases,list)
 for r in releases:
  t=r['tag_name']
- if r.get('draft') or r.get('prerelease') or not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}-ent\.[0-9]+',t): continue
+ if r.get('draft') or r.get('prerelease') or not re.fullmatch(r'(?:ee-v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)|v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}-ent\.[0-9]+)',t): continue
  names={a['name'] for a in r.get('assets',[])}
  if {f'hypercdr-enterprise-installer-{t}.tar.gz',f'hypercdr-enterprise-installer-{t}.sha256'} <= names:
   print(t); break
@@ -55,7 +55,7 @@ PYTHON
   trap - EXIT
   [[ -n "$VERSION" ]] || { echo 'No public Enterprise installer release found' >&2; exit 1; }
 fi
-[[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}-ent\.[0-9]+$ ]] || { echo 'Invalid Enterprise release tag' >&2; exit 1; }
+[[ "$VERSION" =~ ^ee-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ || "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}-ent\.[0-9]+$ ]] || { echo 'Invalid Enterprise release tag' >&2; exit 1; }
 echo "Install Enterprise $VERSION at $BASE_URL in $INSTALL_DIR"
 if [[ "$YES" != true ]]; then
   read -r -p 'Continue? [y/N] ' answer </dev/tty

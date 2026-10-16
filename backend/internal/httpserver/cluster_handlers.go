@@ -196,6 +196,11 @@ func deriveRestoreCachePolicy(storageClasses []store.ClusterStorageClass) store.
 }
 
 func upgradeTargetIsNewer(currentVersion, targetVersion string, digestMismatch bool) bool {
+	currentEdition, _, currentKnown := releaseVersionIdentity(currentVersion)
+	targetEdition, _, targetKnown := releaseVersionIdentity(targetVersion)
+	if currentKnown && targetKnown && currentEdition != targetEdition {
+		return false
+	}
 	comparison, comparable := compareNumericVersions(targetVersion, currentVersion)
 	if !comparable {
 		return digestMismatch
@@ -228,6 +233,20 @@ func veleroUpgradeIsAvailable(cluster store.Cluster, target store.ComponentRelea
 }
 
 func compareNumericVersions(left, right string) (int, bool) {
+	leftEdition, leftEpoch, leftKnown := releaseVersionIdentity(left)
+	rightEdition, rightEpoch, rightKnown := releaseVersionIdentity(right)
+	if leftKnown && rightKnown {
+		if leftEdition != rightEdition {
+			return 0, false
+		}
+		if leftEpoch != rightEpoch {
+			if leftEpoch > rightEpoch {
+				return 1, true
+			}
+			return -1, true
+		}
+	}
+
 	leftParts := numericVersionParts(left)
 	rightParts := numericVersionParts(right)
 	if len(leftParts) == 0 || len(rightParts) == 0 {
@@ -1541,4 +1560,25 @@ func (r *Router) dataProtectionNamespaceForCluster(clusterID string) string {
 		return "openshift-adp"
 	}
 	return r.agentNamespace()
+}
+
+var editionReleaseVersionPattern = regexp.MustCompile(`^(ce|ee)-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+
+// Edition-prefixed releases start a new numbering era after legacy 1.x builds.
+func releaseVersionIdentity(version string) (string, int, bool) {
+	version = strings.TrimSpace(version)
+	if editionReleaseVersionPattern.MatchString(version) && strings.HasPrefix(version, "ce-v") {
+		return "community", 1, true
+	}
+	if editionReleaseVersionPattern.MatchString(version) && strings.HasPrefix(version, "ee-v") {
+		return "enterprise", 1, true
+	}
+	value := strings.TrimPrefix(version, "v")
+	if len(value) == 0 || value[0] < '0' || value[0] > '9' {
+		return "", 0, false
+	}
+	if strings.Contains(value, "-ent.") {
+		return "enterprise", 0, true
+	}
+	return "community", 0, true
 }

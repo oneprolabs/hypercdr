@@ -27,7 +27,7 @@ The first start creates `../hypercdr-runtime/environments/community/dev.conf` fr
 
 Set `HCDR_GOOGLE_CLIENT_ID` and `HCDR_GOOGLE_CLIENT_SECRET` there to enable
 Google sign-in. The OAuth client must allow
-`https://<host>:3002/api/v1/auth/google/callback` as a redirect URI.
+`https://<development-domain>:3002/api/v1/saas/auth/google/callback` as a redirect URI.
 
 Password reset links are delivered through `HCDR_SMTP_*` in deployed
 environments. Trusted local development may use
@@ -43,3 +43,5 @@ Agent WSS: wss://<reachable-host>:3002/ws/agent
 ```
 
 Development normally uses 3002 while production uses 12443. Check configured ports and database reuse before running both: different ports do not imply isolated data. Use source-compose for an independent database.
+
+Google Web OAuth requires a registered domain or localhost redirect; an ordinary LAN IP is not accepted. Configure the default system SMTP for email verification and invitations. Community accounts belong to exactly one organization.

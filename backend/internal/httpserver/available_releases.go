@@ -83,6 +83,9 @@ func (r *Router) listAvailableReleases(w http.ResponseWriter, req *http.Request)
 		if item.Draft || item.Prerelease || strings.TrimSpace(item.TagName) == "" {
 			continue
 		}
+		if !releaseTagMatchesEdition(item.TagName, r.productInfo.Edition) {
+			continue
+		}
 		version := strings.TrimPrefix(item.TagName, "v")
 		publishedAt, _ := time.Parse(time.RFC3339, item.PublishedAt)
 		entry := store.PlatformRelease{ID: item.TagName, Version: version, ReleaseNotes: item.Body, Status: "published", PublishedAt: publishedAt}
@@ -144,4 +147,14 @@ func (r *Router) listAvailableReleases(w http.ResponseWriter, req *http.Request)
 	r.releaseCatalogFailure = time.Time{}
 	r.releaseCatalogMu.Unlock()
 	writeJSON(w, http.StatusOK, availableReleaseResponse{Items: nonNilSlice(items), Cached: false})
+}
+
+// The public delivery repository contains both editions. Never offer the other
+// edition as an upgrade, including historical Enterprise tags.
+func releaseTagMatchesEdition(tag, edition string) bool {
+	enterprise := strings.HasPrefix(tag, "ee-v") || strings.Contains(tag, "-ent.")
+	if edition == "enterprise" {
+		return enterprise
+	}
+	return !enterprise && (strings.HasPrefix(tag, "ce-v") || strings.HasPrefix(tag, "v"))
 }

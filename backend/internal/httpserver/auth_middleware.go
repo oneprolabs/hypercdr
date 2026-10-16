@@ -11,6 +11,10 @@ func (r *Router) withPlatformAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		path := req.URL.Path
 		publicAuth := publicAPIPath(path)
+		// Edition-scoped metadata must pass through session authentication.
+		if path == "/api/v1/product-info" && r.scopedLicenseProvider != nil && strings.HasPrefix(strings.TrimSpace(req.Header.Get("Authorization")), "Bearer ") {
+			publicAuth = false
+		}
 		for _, route := range r.extensionRoutes {
 			if route.Public && route.Pattern == req.Method+" "+path {
 				publicAuth = true

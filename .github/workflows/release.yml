@@ -1,10 +1,11 @@
 name: Build and Publish Release
+run-name: Community Release · ${{ inputs.version || github.ref_name }}
 on:
   push:
-    tags: ['v*', '!v*-ent.*']
+    tags: ['ce-v*', 'v*', '!v*-ent.*']
   workflow_dispatch:
     inputs:
-      version: {description: 'Release version in MAJOR.MINOR.PATCH.YYYYMMDD format', required: true}
+      version: {description: 'Community release tag, for example ce-v0.0.0', required: true}
       registry_profile: {description: 'Profile from config/registries.conf', required: true, default: aliyun_acr}
       deploy: {description: 'Deploy the published version to the configured environment', required: true, default: false, type: boolean}
 # A newer immutable release supersedes an older queued build. Keeping the
@@ -33,7 +34,8 @@ jobs:
           profile="${{ inputs.registry_profile }}"
           ref="${GITHUB_SHA}"
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then version="${GITHUB_REF_NAME#v}"; ref="${GITHUB_REF_NAME}"; profile="aliyun_acr"; fi
-          [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ ]] || { echo "invalid release version: ${version}" >&2; exit 2; }
+          [[ "${version}" =~ ^ce-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ || "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ ]] || { echo "invalid release version: ${version}" >&2; exit 2; }
+          if [[ "$version" == ce-v* ]]; then test "$(cat VERSION)" = "$version"; fi
           source scripts/lib/registry-config.sh
           load_registry_profile config/registries.conf "${profile}"
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
@@ -255,14 +257,14 @@ jobs:
       - name: Publish installer assets to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: v${{ needs.prepare-release.outputs.image_version }}
+          RELEASE_TAG: ${{ startsWith(needs.prepare-release.outputs.image_version, 'ce-v') && needs.prepare-release.outputs.image_version || format('v{0}', needs.prepare-release.outputs.image_version) }}
           RELEASE_DIR: /tmp/hypercdr-runtime/releases/community/${{ needs.prepare-release.outputs.image_version }}
         run: |
           set -euo pipefail
           test -s "${RELEASE_DIR}/hypercdr-installer-${{ needs.prepare-release.outputs.image_version }}.tar.gz"
           test -s "${RELEASE_DIR}/hypercdr-installer-${{ needs.prepare-release.outputs.image_version }}.sha256"
           test -s "${RELEASE_DIR}/release-manifest.json"
-          gh release view "${RELEASE_TAG}" >/dev/null 2>&1 || gh release create "${RELEASE_TAG}" --generate-notes
+          gh release view "${RELEASE_TAG}" >/dev/null 2>&1 || gh release create "${RELEASE_TAG}" --generate-notes --latest
           gh release upload "${RELEASE_TAG}" \
             "${RELEASE_DIR}/hypercdr-installer-${{ needs.prepare-release.outputs.image_version }}.tar.gz" \
             "${RELEASE_DIR}/hypercdr-installer-${{ needs.prepare-release.outputs.image_version }}.sha256" \
@@ -325,7 +327,7 @@ jobs:
             fetch_asset scripts/lib/registry-config.sh
             chmod +x "${source_path}/scripts/release/deploy-blue-green.sh"
             mkdir -p "${deploy_path}/releases/${{ needs.publish.outputs.image_version }}"
-            curl -fsSL "https://github.com/${{ github.repository }}/releases/download/v${{ needs.publish.outputs.image_version }}/release-manifest.json" \
+            curl -fsSL "https://github.com/${{ github.repository }}/releases/download/${{ startsWith(needs.publish.outputs.image_version, 'ce-v') && needs.publish.outputs.image_version || format('v{0}', needs.publish.outputs.image_version) }}/release-manifest.json" \
               -o "${deploy_path}/releases/${{ needs.publish.outputs.image_version }}/release-manifest.json"
             if curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${ref}/website/index.html" -o "${deploy_path}/website/index.html.tmp"; then
               mkdir -p "${deploy_path}/website"

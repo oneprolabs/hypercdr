@@ -57,6 +57,7 @@ type Router struct {
 	schedulerOnce          sync.Once
 	productInfo            ProductInfo
 	productInfoProvider    func() ProductInfo
+	scopedLicenseProvider  func(context.Context, EditionPrincipal) (any, error)
 	editionAuthorizer      EditionAuthorizer
 	editionAdmission       EditionAdmissionController
 	editionMetering        EditionMeteringObserver
@@ -215,12 +216,29 @@ const (
 
 var cleanObjectStoragePrefix = deleteObjectStoragePrefix
 
-func (r *Router) getProductInfo(w http.ResponseWriter, _ *http.Request) {
+func (r *Router) getProductInfo(w http.ResponseWriter, req *http.Request) {
+	current := r.productInfo
 	if r.productInfoProvider != nil {
-		writeJSON(w, http.StatusOK, r.productInfoProvider())
-		return
+		current = r.productInfoProvider()
 	}
-	writeJSON(w, http.StatusOK, r.productInfo)
+	if r.scopedLicenseProvider != nil {
+		actor, authenticated := requestUser(req)
+		if !authenticated {
+			current.License = map[string]string{"mode": "runtime", "status": "unknown", "detail": "Sign in to view license information"}
+			writeJSON(w, http.StatusOK, current)
+			return
+		}
+		license, err := r.scopedLicenseProvider(req.Context(), EditionPrincipal{ID: actor.ID, TenantID: actor.TenantID, Email: actor.Email, Role: actor.Role, SystemAdmin: actor.SystemAdmin})
+		if err != nil {
+			writeJSON(w, 503, map[string]any{"error": "license_status_unavailable"})
+			return
+		}
+		current.License = license
+	}
+	writeJSON(w, http.StatusOK, current)
+}
+func WithScopedLicenseStatusProvider(provider func(context.Context, EditionPrincipal) (any, error)) RouterOption {
+	return func(router *Router) { router.scopedLicenseProvider = provider }
 }
 
 func WithProductInfoProvider(provider func() ProductInfo) RouterOption {
@@ -301,8 +319,8 @@ func (r *Router) mountExtensionRoutes() {
 		scope := "edition-policy"
 		if route.Public {
 			parts := strings.Split(route.Pattern, " ")
-			if len(parts) != 2 || (parts[0] != "GET" && parts[0] != "POST") || !strings.HasPrefix(parts[1], "/api/v1/enterprise/auth/") || strings.ContainsAny(parts[1], "{}?*\t\r\n") {
-				panic("public edition routes must be exact GET/POST Enterprise auth endpoints")
+			if len(parts) != 2 || (parts[0] != "GET" && parts[0] != "POST") || !(strings.HasPrefix(parts[1], "/api/v1/enterprise/auth/") || strings.HasPrefix(parts[1], "/api/v1/saas/auth/")) || strings.ContainsAny(parts[1], "{}?*\t\r\n") {
+				panic("public edition routes must be exact GET/POST identity auth endpoints")
 			}
 			scope = "public"
 		}

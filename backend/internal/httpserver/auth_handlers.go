@@ -188,6 +188,10 @@ func (r *Router) updateCurrentUser(w http.ResponseWriter, req *http.Request) {
 	if strings.TrimSpace(body.Email) == "" {
 		body.Email = u.Email
 	}
+	if !strings.EqualFold(strings.TrimSpace(body.Email), u.Email) {
+		writeJSON(w, 400, map[string]any{"error": "verified_email_immutable", "message": "Your verified sign-in email cannot be changed here."})
+		return
+	}
 	timeZone := u.TimeZone
 	if body.TimeZone != nil {
 		timeZone = strings.TrimSpace(*body.TimeZone)

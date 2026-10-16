@@ -129,4 +129,18 @@ if FAKE_EDGE_READY_FAIL=true FAKE_RUNNING_FILE="${RUNTIME_DIR}/running" \
 fi
 grep -Fxq blue "${RUNTIME_DIR}/.active_color"
 
+# Reset numbering must preserve both historical and prefixed rollback targets.
+for version in ce-v0.0.0 ce-v0.0.1; do
+  FAKE_RUNNING_FILE="${RUNTIME_DIR}/running" HCDR_INSTALL_DIR="${RUNTIME_DIR}" \
+    HCDR_COMPOSE_FILE="${RUNTIME_DIR}/docker-compose.yaml" \
+    HCDR_POST_SWITCH_OBSERVE_SECONDS=0 HCDR_OLD_COLOR_DRAIN_SECONDS=0 \
+    HCDR_HEALTH_INTERVAL=0 PATH="${FAKE_BIN}:${PATH}" \
+    "${ROOT_DIR}/scripts/release/deploy-blue-green.sh" "$version"
+done
+grep -Fxq ce-v0.0.0 "${RUNTIME_DIR}/.rollback_version"
+FAKE_RUNNING_FILE="${RUNTIME_DIR}/running" HCDR_INSTALL_DIR="${RUNTIME_DIR}" \
+  HCDR_COMPOSE_FILE="${RUNTIME_DIR}/docker-compose.yaml" PATH="${FAKE_BIN}:${PATH}" \
+  "${ROOT_DIR}/scripts/release/deploy-blue-green.sh" --rollback
+grep -Fq 'platform-api-ce-v0.0.0' "${RUNTIME_DIR}/.env"
+
 echo "blue-green deploy helper tests passed"

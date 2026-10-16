@@ -60,9 +60,14 @@ if [[ -z "$VERSION" ]]; then
   VERSION="$(curl -fsSL "${api_url}/latest" | sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p' | head -1)"
 fi
 [[ -n "$VERSION" ]] || fail "could not resolve a GitHub Release version"
-VERSION="${VERSION#v}"
+case "$VERSION" in
+ ce-v*) RELEASE_TAG="$VERSION" ;;
+ v*) RELEASE_TAG="$VERSION"; VERSION="${VERSION#v}" ;;
+ *) RELEASE_TAG="v$VERSION" ;;
+esac
+[[ "$VERSION" =~ ^ce-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ || "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ ]] || fail "invalid Community version"
 asset="hypercdr-installer-${VERSION}.tar.gz"
-release_json="$(curl -fsSL "${api_url}/tags/v${VERSION}")" || fail "could not read GitHub Release metadata"
+release_json="$(curl -fsSL "${api_url}/tags/${RELEASE_TAG}")" || fail "could not read GitHub Release metadata"
 asset_api_url="$(printf '%s' "${release_json}" | jq -er --arg name "${asset}" '.assets[] | select(.name == $name) | .url' | head -1 || true)"
 if [[ -z "${asset_api_url}" ]]; then
   assets_url="$(printf '%s' "${release_json}" | jq -er '.assets_url')" || fail "GitHub Release metadata has no assets endpoint"

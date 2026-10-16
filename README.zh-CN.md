@@ -4,6 +4,8 @@
 
 HyperCDR 是 Kubernetes 容器容灾平台，提供集群管理、保护策略、同步、恢复点、容灾演练、恢复任务及组件升级。集群 Agent 主动连接平台，协调 Velero 或 OpenShift OADP 执行任务。
 
+社区版支持邮箱自助注册、Google 登录及组织邀请。一个账号只属于一个组织，业务资源按组织隔离。邮箱验证和邀请需要平台配置默认 SMTP；Google 凭据及回调配置参见[配置参考](docs/deployment/configuration.zh.md)。
+
 ## 安装发布版
 
 Linux 主机需预装 Docker Engine/Compose v2、Bash、curl、tar、jq 和 OpenSSL。替换为浏览器及业务集群能访问的地址：
@@ -44,3 +46,9 @@ make verify
 后端测试使用独立真实 PostgreSQL 数据库，不能连接业务数据库。详见[测试说明](docs/development/platform.md)及[贡献指南](CONTRIBUTING.md)。tag 发布当前会部署到 CI 配置的环境；手动工作流默认不部署，PR 检查不发布、不部署。见[发布流程](docs/deployment/release-flow.zh.md)。
 
 不要提交密码、kubeconfig、私钥、证书、备份或运行产物。安全报告见 [SECURITY.md](SECURITY.md)，许可见 [LICENSE](LICENSE)。
+
+## 发布版本规则
+
+社区版标签采用 `ce-v主版本.次版本.补丁版本`，从 `ce-v0.0.0` 开始；企业版采用 `ee-v主版本.次版本.补丁版本`，从 `ee-v0.0.0` 开始，两者独立递增。日期和 Git 提交号保留为构建元数据，不加入版本号。历史版本仍支持指定安装和回滚；升级比较会将新前缀版本视为历史编号之后的新阶段，不会因为数字从零开始而误判为旧版本。
+
+企业版通过 `community.lock` 固定社区版源码提交和已发布的组件版本，不要求两版版本号相同。依赖版本不存在时发布校验失败，不会静默替换或自动触发社区版发布。

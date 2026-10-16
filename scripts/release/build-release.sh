@@ -105,7 +105,7 @@ if [[ "${COMPONENT}" == all || "${COMPONENT}" == frontend ]]; then
   log "Building ${PLATFORM_FRONTEND_IMAGE}"
   docker_build_with_retry "${PLATFORM_FRONTEND_IMAGE}" --platform linux/amd64 -f "${ROOT_DIR}/frontend/Dockerfile" \
     --build-arg "NPM_REGISTRY=${NPM_REGISTRY}" \
-    --build-arg "VERSION=${VERSION}" --build-arg "RELEASE_DATE=$(date -u +%Y/%m/%d)" "${ROOT_DIR}"
+    --build-arg "VERSION=${VERSION}" --build-arg "RELEASE_DATE=$(date -u +%Y/%m/%d)" --build-arg "GIT_COMMIT=${GIT_COMMIT}" "${ROOT_DIR}"
 fi
 
 if [[ "${COMPONENT}" == all || "${COMPONENT}" == agents ]]; then

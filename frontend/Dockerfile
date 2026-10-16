@@ -8,7 +8,8 @@ RUN npm ci --registry="${NPM_REGISTRY}"
 COPY frontend/ ./
 ARG VERSION
 ARG RELEASE_DATE
-RUN VITE_HCDR_RELEASE_VERSION="${VERSION}" VITE_HCDR_RELEASE_DATE="${RELEASE_DATE}" \
+ARG GIT_COMMIT
+RUN VITE_HCDR_RELEASE_VERSION="${VERSION}" VITE_HCDR_RELEASE_DATE="${RELEASE_DATE}" VITE_HCDR_GIT_COMMIT="${GIT_COMMIT}" \
     npm run build -- --outDir /app/dist --emptyOutDir \
     && css="$(find /app/dist/assets -maxdepth 1 -name '*.css' -print -quit)" \
     && test -s "${css}" \

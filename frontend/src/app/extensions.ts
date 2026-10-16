@@ -8,6 +8,7 @@ export type FrontendModuleContext = {
   currentUser: ApiLoginResponse['user'];
   clusters: Array<{ id: string; tenantId: string; name: string; connectionStatus: string }>;
   toast: (message: string) => void;
+  onCurrentUserChange?: (user: ApiLoginResponse['user']) => void;
 };
 
 export type FrontendModuleVisibilityContext = {

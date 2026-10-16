@@ -610,3 +610,23 @@ func captchaImageDataURL(code string) string {
 </svg>`, code[0], code[1], code[2], code[3])
 	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(svg))
 }
+
+// WithSystemEmailBinder shares the system administrator's live email configuration
+// with edition workflows; credentials remain inside the shared router.
+func WithSystemEmailBinder(bind func(func() bool, func(context.Context, string, string, string) error)) RouterOption {
+	return func(r *Router) {
+		if bind == nil {
+			return
+		}
+		bind(func() bool { _, ok := r.effectiveEmailSettings(); return ok }, func(ctx context.Context, to, subject, body string) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			settings, ok := r.effectiveEmailSettings()
+			if !ok {
+				return fmt.Errorf("system email is not configured")
+			}
+			return r.sendConfiguredEmail(settings, to, subject, body)
+		})
+	}
+}

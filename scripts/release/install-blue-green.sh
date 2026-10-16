@@ -68,7 +68,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ ]] || { echo "invalid version: $VERSION" >&2; exit 2; }
+[[ "$VERSION" =~ ^ce-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ || "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ ]] || { echo "invalid version: $VERSION" >&2; exit 2; }
 [[ "$BASE_URL" == https://* ]] || { echo "--base-url must use https://" >&2; exit 2; }
 [[ -n "$REGISTRY" ]] || { echo "--registry is required" >&2; exit 2; }
 [[ "$INSTALL_DIR" == /* && "$INSTALL_DIR" != / ]] || { echo "--install-dir must be an absolute non-root path" >&2; exit 2; }
@@ -197,6 +197,11 @@ AUTH_MODE="$(read_env HCDR_AUTH_CHALLENGE_MODE)"; AUTH_MODE="${AUTH_MODE:-turnst
 TURNSTILE_SITE_KEY="$(read_env HCDR_TURNSTILE_SITE_KEY)"
 TURNSTILE_SECRET_KEY="$(read_env HCDR_TURNSTILE_SECRET_KEY)"
 
+SAAS_MODE="$(read_env HCDR_DEPLOYMENT_MODE)"; SAAS_MODE="${SAAS_MODE:-${HCDR_DEPLOYMENT_MODE:-saas}}"
+SAAS_SIGNUP="$(read_env HCDR_SAAS_SIGNUP_ENABLED)"; SAAS_SIGNUP="${SAAS_SIGNUP:-${HCDR_SAAS_SIGNUP_ENABLED:-true}}"
+GOOGLE_ID="$(read_env HCDR_GOOGLE_CLIENT_ID)"; GOOGLE_ID="${GOOGLE_ID:-${HCDR_GOOGLE_CLIENT_ID:-}}"
+GOOGLE_SECRET="$(read_env HCDR_GOOGLE_CLIENT_SECRET)"; GOOGLE_SECRET="${GOOGLE_SECRET:-${HCDR_GOOGLE_CLIENT_SECRET:-}}"
+
 cat >"${INSTALL_DIR}/.env.tmp" <<EOF
 HCDR_DOMAIN=${DOMAIN}
 HCDR_BASE_URL=${BASE_URL}
@@ -227,6 +232,10 @@ HCDR_REGISTRATION_EXECUTOR_TOKEN=${EXECUTOR_TOKEN}
 HCDR_DEPLOY_MODE=docker-compose
 HCDR_TLS_ENABLED=false
 # Supported values: image (built-in image CAPTCHA) or turnstile (Cloudflare Turnstile).
+HCDR_DEPLOYMENT_MODE=${SAAS_MODE}
+HCDR_SAAS_SIGNUP_ENABLED=${SAAS_SIGNUP}
+HCDR_GOOGLE_CLIENT_ID=${GOOGLE_ID}
+HCDR_GOOGLE_CLIENT_SECRET=${GOOGLE_SECRET}
 HCDR_AUTH_CHALLENGE_MODE=${AUTH_MODE}
 HCDR_TURNSTILE_SITE_KEY=${TURNSTILE_SITE_KEY}
 HCDR_TURNSTILE_SECRET_KEY=${TURNSTILE_SECRET_KEY}

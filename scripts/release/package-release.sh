@@ -43,8 +43,8 @@ if [[ -z "${VERSION}" || "${VERSION}" == "-h" || "${VERSION}" == "--help" ]]; th
   exit 2
 fi
 
-if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ && ! "${VERSION}" =~ ^v[0-9]{8}\.[0-9]+$ ]]; then
-  echo "version must match MAJOR.MINOR.PATCH.YYYYMMDD, got ${VERSION}" >&2
+if [[ ! "${VERSION}" =~ ^ce-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ && ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ && ! "${VERSION}" =~ ^v[0-9]{8}\.[0-9]+$ ]]; then
+  echo "version must match ce-vMAJOR.MINOR.PATCH (or a historical release), got ${VERSION}" >&2
   exit 2
 fi
 
@@ -127,7 +127,7 @@ esac
 } >> "${package_dir}/install-config.sh"
 chmod 600 "${package_dir}/install-config.sh"
 
-sed -i -E "s/(v[0-9]{8}\.[0-9]+|[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8})/${VERSION}/g" \
+sed -i -E "s/(ce-v[0-9]+\.[0-9]+\.[0-9]+|v[0-9]{8}\.[0-9]+|[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8})/${VERSION}/g" \
   "${package_dir}/install-platform.sh" \
   "${package_dir}/install-config.sh" \
   "${package_dir}/check-harbor.sh" \

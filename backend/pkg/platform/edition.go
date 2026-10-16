@@ -220,20 +220,23 @@ type Options struct {
 	Edition Edition
 	// AgentNamespace pins an edition to its isolated in-cluster control-plane
 	// namespace. When set, it is authoritative over legacy persisted settings.
-	AgentNamespace         string
-	Capabilities           map[string]Capability
-	License                LicenseStatus
-	LicenseStatusProvider  LicenseStatusProvider
-	Authorizer             Authorizer
-	AdmissionController    AdmissionController
-	MeteringObserver       MeteringObserver
-	IdentityProvider       IdentityProvider
-	AuditSink              AuditSink
-	DiagnosticSink         DiagnosticSink
-	DiagnosticLogRetention time.Duration
-	Migrations             []Migration
-	Routes                 []Route
-	RuntimeBinder          func(AgentTaskDispatcher)
+	AgentNamespace              string
+	Capabilities                map[string]Capability
+	License                     LicenseStatus
+	LicenseStatusProvider       LicenseStatusProvider
+	ScopedLicenseStatusProvider func(context.Context, Principal) (LicenseStatus, error)
+	Authorizer                  Authorizer
+	AdmissionController         AdmissionController
+	MeteringObserver            MeteringObserver
+	IdentityProvider            IdentityProvider
+	AuditSink                   AuditSink
+	DiagnosticSink              DiagnosticSink
+	DiagnosticLogRetention      time.Duration
+	Migrations                  []Migration
+	Routes                      []Route
+	RuntimeBinder               func(AgentTaskDispatcher)
+	// EmailBinder exposes the live system SMTP configuration without exposing credentials.
+	EmailBinder func(configured func() bool, send func(context.Context, string, string, string) error)
 }
 
 func CommunityOptions() Options {
@@ -244,6 +247,7 @@ func CommunityOptions() Options {
 			"basicDiagnostics": {ID: "basicDiagnostics", Enabled: true, Source: "community"},
 			"basicAudit":       {ID: "basicAudit", Enabled: true, Source: "community"},
 			"basicIdentity":    {ID: "basicIdentity", Enabled: true, Source: "community"},
+			"basicSaaS":        {ID: "basicSaaS", Enabled: true, Source: "community"},
 			"advancedIdentity": {ID: "advancedIdentity", Enabled: false, Source: "enterprise"},
 			"advancedTenancy":  {ID: "advancedTenancy", Enabled: false, Source: "enterprise"},
 			"advancedAudit":    {ID: "advancedAudit", Enabled: false, Source: "enterprise"},
@@ -255,10 +259,8 @@ func CommunityOptions() Options {
 	}
 }
 
-// communityAuthorizer keeps the open-source edition on its fixed default
-// tenant while retaining local administrator and operator user management.
-// Tenant reads remain available because user-management responses reference
-// the default tenant metadata.
+// Organization onboarding and membership use the scoped SaaS routes.
+// Legacy platform administration routes cannot reassign a user between organizations.
 type communityAuthorizer struct{}
 
 func (communityAuthorizer) Authorize(_ context.Context, request AuthorizationRequest) AuthorizationDecision {
@@ -266,11 +268,11 @@ func (communityAuthorizer) Authorize(_ context.Context, request AuthorizationReq
 		return AuthorizationDecision{
 			Allowed: false,
 			Code:    "community_single_administrator",
-			Message: "HyperCDR Community uses one built-in administrator. Multi-user and tenant management are available in HyperCDR Enterprise.",
+			Message: "Use Organization and Members to manage your organization.",
 		}
 	}
 	if strings.HasPrefix(request.Path, "/api/v1/users") && request.Method != http.MethodGet && request.Method != http.MethodPatch && !(request.Method == http.MethodPost && strings.HasSuffix(request.Path, "/password")) {
-		return AuthorizationDecision{Allowed: false, Code: "community_single_administrator", Message: "HyperCDR Community cannot create or delete additional users."}
+		return AuthorizationDecision{Allowed: false, Code: "community_single_administrator", Message: "Use organization invitations to add members."}
 	}
 	return AuthorizationDecision{Allowed: true}
 }

@@ -25,7 +25,7 @@ run_once() {
   job="$(api "${API_URL}/api/v1/platform/upgrades" | jq -c '[.items[] | select(.status == "queued")] | .[0] // empty')" || return 1
   [[ -n "$job" ]] || return 0
   id="$(jq -r .id <<<"$job")"; version="$(jq -r .targetVersion <<<"$job")"
-  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ ]] || return 1
+  [[ "$version" =~ ^ce-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ || "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ ]] || return 1
   release="$(api "${API_URL}/api/v1/platform/releases/$(jq -r .releaseId <<<"$job")")" || return 1
   jq -e --arg version "$version" '(.version == $version) and (.componentManifest | type == "object" and length > 0)' <<<"$release" >/dev/null || return 1
   update_job "$id" running preparing 5 || return 1

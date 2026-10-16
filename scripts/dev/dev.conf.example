@@ -26,7 +26,7 @@ HCDR_LOG_LEVEL=debug
 HCDR_PASSWORD_RESET_REVEAL_TOKEN=true
 
 # Google OAuth (optional). Authorized redirect URI:
-# https://192.168.8.149:3002/api/v1/auth/google/callback
+# https://192.168.8.149:3002/api/v1/saas/auth/google/callback
 # HCDR_GOOGLE_CLIENT_ID=
 # HCDR_GOOGLE_CLIENT_SECRET=
 
@@ -36,3 +36,7 @@ HCDR_PASSWORD_RESET_REVEAL_TOKEN=true
 # HCDR_SMTP_USERNAME=
 # HCDR_SMTP_PASSWORD=
 # HCDR_SMTP_FROM=HyperCDR <noreply@example.com>
+
+# Self-service registration; configure system SMTP in Settings.
+HCDR_DEPLOYMENT_MODE=saas
+HCDR_SAAS_SIGNUP_ENABLED=true

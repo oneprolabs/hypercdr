@@ -1,7 +1,7 @@
 export { default as HyperCDRApp } from './App';
-export { ArrowRightLeft, Building2, KeyRound, ScrollText, ShieldCheck, Terminal, Users } from 'lucide-react';
+export { ArrowRightLeft, Building2, KeyRound, ScrollText, ShieldCheck, Terminal, Users, UserRound } from 'lucide-react';
 export { apiDelete, apiGet, apiHeaders, apiPatch, apiPost, apiPut, ensureApiResponse } from './api/client';
-export { readStoredAuthSession, writeStoredAuthSession } from './auth/session';
+export { readStoredAuthSession, writeStoredAuthSession, clearStoredAuthSession } from './auth/session';
 export type { ApiLoginResponse } from './auth/types';
 export { EditField } from './components/edit-field';
 export { ModalFrame } from './components/modal-frame';
@@ -18,3 +18,5 @@ export {
 } from './app/extensions';
 
 export { HyperCDRMark } from './components/hypercdr-mark';
+
+export { PublicAuthPage, SaaSLoginSupplement, configureSaaSAuth, publicRequest } from './features/saas/saas-auth';

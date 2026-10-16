@@ -97,7 +97,7 @@ func Run(options Options) error {
 		return current
 	}
 	handler := httpserver.NewRouterWithProductInfo(cfg, logger, repo, productInfo,
-		editionAuthorizer(options.Authorizer), httpserver.WithEditionAdmissionController(editionAdmissionController(options.AdmissionController)), httpserver.WithEditionMeteringObserver(editionMeteringObserver(options.MeteringObserver)), httpserver.WithProductInfoProvider(productInfoProvider), httpserver.WithDiagnosticLogRetention(options.DiagnosticLogRetention), httpserver.WithExtensionRoutes(editionRoutes(options.Routes)), httpserver.WithIdentityProvider(editionIdentityProvider(options.IdentityProvider)), httpserver.WithAuditSink(editionAuditSink(options.AuditSink)), httpserver.WithEditionRuntimeBinder(editionRuntimeBinder(options.RuntimeBinder)))
+		editionAuthorizer(options.Authorizer), httpserver.WithEditionAdmissionController(editionAdmissionController(options.AdmissionController)), httpserver.WithEditionMeteringObserver(editionMeteringObserver(options.MeteringObserver)), httpserver.WithProductInfoProvider(productInfoProvider), httpserver.WithScopedLicenseStatusProvider(scopedLicenseStatusProvider(options.ScopedLicenseStatusProvider)), httpserver.WithDiagnosticLogRetention(options.DiagnosticLogRetention), httpserver.WithExtensionRoutes(editionRoutes(options.Routes)), httpserver.WithIdentityProvider(editionIdentityProvider(options.IdentityProvider)), httpserver.WithAuditSink(editionAuditSink(options.AuditSink)), httpserver.WithEditionRuntimeBinder(editionRuntimeBinder(options.RuntimeBinder)), httpserver.WithSystemEmailBinder(options.EmailBinder))
 	// Stop workers before closing PostgreSQL, including startup/server failures.
 	if closer, ok := handler.(interface{ Close(context.Context) error }); ok {
 		defer func() {
@@ -338,4 +338,13 @@ func (a identityProviderAdapter) SetTheme(ctx context.Context, id, theme string)
 	}
 	identity, found, err := provider.SetTheme(ctx, id, theme)
 	return editionIdentity(identity), found, err
+}
+
+func scopedLicenseStatusProvider(provider func(context.Context, Principal) (LicenseStatus, error)) func(context.Context, httpserver.EditionPrincipal) (any, error) {
+	if provider == nil {
+		return nil
+	}
+	return func(ctx context.Context, p httpserver.EditionPrincipal) (any, error) {
+		return provider(ctx, Principal{ID: p.ID, TenantID: p.TenantID, Email: p.Email, Role: p.Role, SystemAdmin: p.SystemAdmin})
+	}
 }

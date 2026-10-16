@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { apiGet, apiPost } from '../../api/client';
+import { compareReleaseVersions } from './release-version';
 import { SearchBar } from '../../components/search-bar';
 
 type ApiList<T> = { items: T[] };
@@ -108,7 +109,6 @@ export default function UpgradeManagementPage({ isAdmin, toast, refreshPlatformD
     }
   };
 
-  const compareReleaseVersions = (left: string, right: string) => left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' });
   const currentPlatformVersion = platformVersion?.version || '';
   const latestPlatformRelease = platformReleases
     .filter(item => !currentPlatformVersion || compareReleaseVersions(item.version, currentPlatformVersion) > 0)

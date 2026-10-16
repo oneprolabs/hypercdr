@@ -217,7 +217,7 @@ rollback_color() {
     jq -e --arg version "$rollback_version" '.version == $version' "$rollback_manifest" >/dev/null || die "rollback manifest version mismatch"
     set_env_value "$ENV_FILE" "HCDR_${target^^}_RELEASE_MANIFEST_PATH" "/deploy/releases/${rollback_version}/release-manifest.json"
   fi
-  if [[ "${rollback_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ ]]; then
+  if [[ "${rollback_version}" =~ ^ce-v[0-9]+\.[0-9]+\.[0-9]+$ || "${rollback_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ ]]; then
     set_env_value "$ENV_FILE" "PLATFORM_API_${target^^}_IMAGE" "$(image_ref "${registry}" "platform-api" "${rollback_version}")"
     set_env_value "$ENV_FILE" "PLATFORM_FRONTEND_${target^^}_IMAGE" "$(image_ref "${registry}" "platform-frontend" "${rollback_version}")"
     load_runtime_env
@@ -302,7 +302,7 @@ deploy_version() {
     switch_traffic "$current" "$candidate" || die "Nginx rejected the blue/green switch; $current remains active"
   fi
   printf '%s\n' "$candidate" > "${INSTALL_DIR}/.active_color"
-  if [[ "$first_install" != true && "${previous_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ ]]; then
+  if [[ "$first_install" != true && ( "${previous_version}" =~ ^ce-v[0-9]+\.[0-9]+\.[0-9]+$ || "${previous_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ ) ]]; then
     printf '%s\n' "${previous_version}" > "${INSTALL_DIR}/.rollback_version"
     chmod 600 "${INSTALL_DIR}/.rollback_version"
   fi
@@ -342,7 +342,7 @@ main() {
   if [[ "${1:-}" == --start-current ]]; then start_current; return; fi
   local version="${1:-}"
   version="${version#v}"
-  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ ]] || die "version must match MAJOR.MINOR.PATCH.YYYYMMDD"
+  [[ "$version" =~ ^ce-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ || "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ ]] || die "version must match ce-vMAJOR.MINOR.PATCH or a historical release"
   deploy_version "$version"
 }
 

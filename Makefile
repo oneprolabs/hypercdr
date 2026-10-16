@@ -52,6 +52,7 @@ verify: lint test
 	bash scripts/tests/blue-green-deploy.sh
 	bash scripts/tests/blue-green-compose.sh
 	bash scripts/tests/release-workflow.sh
+	python3 -B scripts/tests/release-version-install.py
 	bash scripts/tests/oadp-mirror.sh
 	bash scripts/tests/pr-review-notification.sh
 	git diff --check -- . ':!third_party/velero'

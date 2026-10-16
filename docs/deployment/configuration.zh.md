@@ -24,3 +24,19 @@ Compose 未指定验证码模式时默认 turnstile；源码 env.example 示例�
 Turnstile 同时要求浏览器访问 Cloudflare 控件、API 出站访问校验服务及有效的站点配置。captcha 不需要 Cloudflare 凭据。
 
 修改配置后需按安装目录 Compose 配置重建受影响容器，单纯刷新页面或 restart 现有容器不会重新载入 Compose 环境变量。不要通过手工改镜像标签替代蓝绿升级。
+
+## 社区版注册与组织
+
+社区版支持邮箱注册、Google 登录和组织邀请。一个账号只能属于一个组织；自行注册会创建组织并成为管理员，通过邀请注册会加入邀请指定的组织。没有组织切换功能。组织管理员通过 Settings → Organization / Members 管理本组织，不能修改平台 SMTP 或其他组织的数据。
+
+| 配置 | 用途 |
+|---|---|
+| `HCDR_DEPLOYMENT_MODE` | `saas`（默认）或 `private`；private 关闭公开注册 |
+| `HCDR_SAAS_SIGNUP_ENABLED` | 是否允许自行注册创建组织，默认 true；关闭后仍可接受明确的邀请 |
+| `HCDR_GOOGLE_CLIENT_ID` / `HCDR_GOOGLE_CLIENT_SECRET` | Google OAuth Web 应用凭据；必须同时配置，未配置时隐藏入口 |
+
+邮箱验证和邀请通过平台管理员在 SMTP 页面设置的默认配置发送，未配置时注册页明确显示不可发送邮件。Google 回调填写 `HCDR_PUBLIC_BASE_URL` 加 `/api/v1/saas/auth/google/callback`，例如 `https://app.hypercdr.com/api/v1/saas/auth/google/callback`。回调必须与 Google Cloud 中登记的地址完全一致；不要将 Client Secret 写入前端或提交到仓库。局域网 IP 不是 Google 常规 Web OAuth 的有效回调域名，开发验证需要域名或 localhost 转发。
+
+Google 登录校验签名、issuer、audience、有效期、已验证邮箱、state、nonce、PKCE 和发起浏览器。同邮箱密码账号不会自动绑定 Google；必须登录后在 Sign-in & Security 验证密码再绑定。账号登录邮箱不可通过个人设置直接改为未经验证的邮箱。
+
+新注册用户默认浅色主题；用户主题偏好存储在账号中。登录/注册页保持统一深色风格。

@@ -15,12 +15,15 @@ const taskStatusLabel = (status: string) => ({ succeeded: 'Succeeded', completed
 const daysAgo = (time: number | null, now: number) => time ? `${Math.max(0, Math.floor((now - time) / 86400000))}d ago` : 'N/A';
 
 export function OverviewPage(props: {
+  organizationScoped?: boolean;
   cluster: Cluster | null; clusters: Cluster[]; storage: StorageRepo[]; tasks: ApiTask[];
   restorePoints: ApiRestorePointView[]; policies: ApiPolicy[]; protectionPlans: ApiProtectionPlan[];
   applications: ApiApplication[]; productInfo: ProductInfo | null;
   openDr: () => void; openOperations: () => void; openClusters: () => void; openStorage: () => void; clusterContext: React.ReactNode;
 }) {
   const { cluster, clusters, productInfo, openDr, openOperations, clusterContext } = props;
+ const scopeTitle=props.organizationScoped?'Organization overview':'Platform overview';
+ const alertsTitle=props.organizationScoped?'Organization alerts':'Platform alerts';
   const [rangeOpen, setRangeOpen] = React.useState(false);
   const [rangeIndex, setRangeIndex] = React.useState(0);
   const rangeRef = React.useRef<HTMLDivElement>(null);
@@ -75,8 +78,8 @@ export function OverviewPage(props: {
   return (
     <div className="hbdr-dashboard hbdr-dashboard-zones hbdr-dashboard-design-canvas hbdr-dashboard-scoped" style={{ '--hbdr-activity-height': activityHeight ? `${activityHeight}px` : undefined } as React.CSSProperties}>
       <div className="hbdr-dashboard-scope-columns">
-        <section className="hbdr-dashboard-platform-column" aria-label="Platform overview">
-          <header className="hbdr-dashboard-scope-heading"><div><h2>Platform overview</h2><p>Shared resources across all clusters</p></div></header>
+        <section className="hbdr-dashboard-platform-column" aria-label={scopeTitle}>
+          <header className="hbdr-dashboard-scope-heading"><div><h2>{scopeTitle}</h2><p>{props.organizationScoped?'Resources across your organization’s clusters':'Shared resources across all clusters'}</p></div></header>
           <div className="hbdr-dashboard-platform-metrics">
             <DashboardPanel title="Registered clusters"><ScopeValue value={platform.registered} label={`${platform.online} online · ${platform.offline} offline`} />{platform.unknownClusters > 0 && <ScopeLine label="Unknown" value={platform.unknownClusters} />}</DashboardPanel>
             <DashboardPanel title="Protection plans"><ScopeValue value={platform.plans} label="Across all clusters" /></DashboardPanel>
@@ -87,14 +90,14 @@ export function OverviewPage(props: {
             <div className="hbdr-dashboard-topology-statuses"><span><i />{topologyStatuses.healthy || 0} Healthy</span><span><i className="is-warning" />{topologyStatuses.warning || 0} Degraded</span><span><i className="is-critical" />{topologyStatuses.failed || 0} Failed</span>{Boolean(topologyStatuses.configuring) && <span>{topologyStatuses.configuring} Configuring</span>}</div>
             <div className="hbdr-dashboard-topology-body">{clusters.length ? <DRTopologyView compact clusters={clusters} model={topology} selectedRelationshipId={selectedRelationship} selectedClusterId={selectedTopologyCluster || cluster?.id || null} onSelectRelationship={relationship => setSelectedRelationship(relationship.id)} onSelectCluster={setSelectedTopologyCluster} /> : <ScopeEmpty label="No registered clusters" />}</div>
           </section>
-          <DashboardPanel title="Platform alerts" className="hbdr-dashboard-platform-alerts" detailAction={openOperations}>
-            <div className="hbdr-dashboard-alert-tabs" role="tablist" aria-label="Platform alerts">
+          <DashboardPanel title={alertsTitle} className="hbdr-dashboard-platform-alerts" detailAction={openOperations}>
+            <div className="hbdr-dashboard-alert-tabs" role="tablist" aria-label={alertsTitle}>
               <button type="button" role="tab" id="platform-alert-current" aria-controls="platform-alert-content" aria-selected={alertTab === 'current'} onClick={() => setAlertTab('current')}>Current issues <span>{alerts.current.length}</span></button>
               <button type="button" role="tab" id="platform-alert-recent" aria-controls="platform-alert-content" aria-selected={alertTab === 'recent'} onClick={() => setAlertTab('recent')}>Recent failures <span>{alerts.recent.length}</span></button>
             </div>
             <div className="hbdr-dashboard-platform-alert-content" id="platform-alert-content" role="tabpanel" aria-labelledby={`platform-alert-${alertTab}`}>
               {alertTab === 'recent' && <p className="hbdr-dashboard-alert-history-caption">{ranges[rangeIndex].label} · Historical failures, not current issues</p>}
-              <PlatformAlertList items={alerts[alertTab]} empty={alertTab === 'current' ? 'No current platform issues' : 'No failed tasks in the selected range'} onDetails={item => { if (item.kind === 'cluster') props.openClusters(); else if (item.kind === 'storage') props.openStorage(); else if (item.kind === 'plan') openDr(); else openOperations(); }} />
+              <PlatformAlertList items={alerts[alertTab]} empty={alertTab === 'current' ? props.organizationScoped ? 'No current organization issues' : 'No current platform issues' : 'No failed tasks in the selected range'} onDetails={item => { if (item.kind === 'cluster') props.openClusters(); else if (item.kind === 'storage') props.openStorage(); else if (item.kind === 'plan') openDr(); else openOperations(); }} />
             </div>
             <div className="hbdr-platform-license-summary"><Lock size={16} aria-hidden="true" /><div><strong>{productInfo?.edition || 'Edition unavailable'} · {productInfo?.license?.status?.replace(/-/g, ' ') || 'License status unavailable'}</strong><p>{productInfo?.license?.detail || productInfo?.license?.mode || 'No license metadata available'}</p></div></div>
           </DashboardPanel>
