@@ -2,6 +2,10 @@
 # Run backend tests against PostgreSQL without touching any platform database.
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Match the API image's standalone module: a workspace sum must not hide
+# missing backend dependency declarations or checksums.
+export GOWORK=off
+export GOFLAGS="${GOFLAGS:-} -mod=readonly"
 if [[ $# -eq 0 ]]; then set -- ./...; fi
 if [[ -n "${HCDR_TEST_DATABASE_URL:-}" ]]; then
   cd "${ROOT_DIR}/backend"
