@@ -53,11 +53,28 @@ type platformPrecheckResponse struct {
 	Checks         []platformPrecheckItem `json:"checks"`
 	CurrentVersion string                 `json:"currentVersion"`
 }
+type platformAccessRequest struct {
+	PublicURL string `json:"publicUrl"`
+}
+type platformAccessResponse struct {
+	Source              string `json:"source"`
+	RestartRequired     bool   `json:"restartRequired"`
+	PublicURL           string `json:"publicUrl"`
+	GoogleCallback      string `json:"googleCallback"`
+	VerificationExample string `json:"verificationExample"`
+	InvitationExample   string `json:"invitationExample"`
+}
 
 func platformPayloadContract(pattern string) (payloadContract, int, bool) {
 	c := payloadContract{}
 	status := 200
 	switch pattern {
+	case "GET /api/v1/platform/access", "PATCH /api/v1/platform/access":
+		c.Response = reflect.TypeFor[platformAccessResponse]()
+		if pattern == "PATCH /api/v1/platform/access" {
+			c.Request = reflect.TypeFor[platformAccessRequest]()
+			c.Required = []string{"publicUrl"}
+		}
 	case "GET /api/v1/platform/version":
 		c.Response = reflect.TypeFor[platformVersionResponse]()
 	case "GET /api/v1/platform/available-releases":

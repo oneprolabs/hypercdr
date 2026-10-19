@@ -74,3 +74,12 @@
 @media(max-width:640px) { .ee-account-body { margin:0; } }
 
 .ee-invite-form input[readonly] { background:var(--hc-sunken); color:var(--hc-text-2); }
+
+.ee-invite-form .hc-access-confirm span { display:flex; align-items:flex-start; gap:10px; line-height:1.6; }
+.ee-invite-form .hc-access-confirm input[type="checkbox"] { width:16px; height:16px; flex:0 0 16px; padding:0; margin-top:3px; accent-color:var(--hc-accent); }
+
+html[data-theme] #root .hc-platform-access h4 { color:var(--hc-text) !important; }
+html[data-theme] #root .hc-platform-access input[type="url"] { background:var(--hc-surface) !important; color:var(--hc-text) !important; border-color:var(--hc-border) !important; }
+html[data-theme] #root .hc-platform-access input[type="url"]:hover { border-color:var(--hc-border-strong) !important; }
+html[data-theme] #root .hc-platform-access input[type="url"]:focus { border-color:var(--hc-accent) !important; }
+html[data-theme] #root .hc-platform-access button:disabled { opacity:.5; cursor:not-allowed; }

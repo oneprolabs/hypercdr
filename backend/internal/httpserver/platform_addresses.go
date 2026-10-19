@@ -6,6 +6,11 @@ import (
 )
 
 func (r *Router) publicBaseURL(req *http.Request) string {
+	if r.store != nil {
+		if settings, found, err := r.store.GetPlatformSettings(); err == nil && found && settings.PublicEndpoint != "" {
+			return settings.PublicEndpoint
+		}
+	}
 	if r.cfg.PublicBaseURL != "" {
 		return r.cfg.PublicBaseURL
 	}

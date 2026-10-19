@@ -84,35 +84,46 @@ func New(db *sql.DB, cfg Config, identity IdentityProvider) *Service {
 	return s
 }
 func (s *Service) Routes() []platform.Route {
-	const p = "/api/v1/saas/auth"
+	const auth = "/api/v1/saas/auth"
 	routes := []platform.Route{}
-	public := func(pattern string, h http.HandlerFunc) {
-		routes = append(routes, platform.Route{Pattern: pattern, Public: true, Handler: func(w http.ResponseWriter, r *http.Request, _ platform.Principal) { s.public(w, r, h) }})
+	public := func(pattern string, h func(*Service, http.ResponseWriter, *http.Request)) {
+		routes = append(routes, platform.Route{Pattern: pattern, Public: true, Handler: func(w http.ResponseWriter, r *http.Request, _ platform.Principal) {
+			s.withCurrentOrigin(w, r, func(current *Service) {
+				current.public(w, r, func(w http.ResponseWriter, r *http.Request) { h(current, w, r) })
+			})
+		}})
 	}
-	public("GET "+p+"/config", s.configuration)
-	public("POST "+p+"/signup/request", s.requestSignup)
-	public("POST "+p+"/signup/verification", s.verificationInfo)
-	public("POST "+p+"/complete", s.complete)
-	public("POST "+p+"/invitation", s.invitationInfo)
-	public("POST "+p+"/google/start", s.googleStart)
-	public("GET "+p+"/google/callback", s.googleCallback)
-	public("POST "+p+"/google/session", s.googleSession)
-	public("POST "+p+"/google/profile", s.googleProfile)
-	routes = append(routes, platform.Route{Pattern: "GET /api/v1/saas/organization", Handler: s.organization}, platform.Route{Pattern: "PATCH /api/v1/saas/organization", Handler: s.organization}, platform.Route{Pattern: "GET /api/v1/saas/members", Handler: s.members}, platform.Route{Pattern: "PATCH /api/v1/saas/members/{id}", Handler: s.updateMember}, platform.Route{Pattern: "GET /api/v1/saas/invitations", Handler: s.listInvitations}, platform.Route{Pattern: "POST /api/v1/saas/invitations", Handler: s.invite}, platform.Route{Pattern: "POST /api/v1/saas/invitations/{id}/revoke", Handler: s.revokeInvitation}, platform.Route{Pattern: "POST /api/v1/saas/google/link", Handler: s.linkGoogle}, platform.Route{Pattern: "GET /api/v1/saas/google/identity", Handler: s.googleIdentity})
-	for i := range routes {
-		if !routes[i].Public {
-			handler := routes[i].Handler
-			routes[i].Handler = func(w http.ResponseWriter, r *http.Request, p platform.Principal) {
-				w.Header().Set("Cache-Control", "no-store")
-				r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
-				if r.Method != "GET" && r.Header.Get("Origin") != s.cfg.Origin {
-					problem(w, 403, "origin_not_allowed", "Reload the page and try again.")
+	private := func(pattern string, h func(*Service, http.ResponseWriter, *http.Request, platform.Principal)) {
+		routes = append(routes, platform.Route{Pattern: pattern, Handler: func(w http.ResponseWriter, r *http.Request, p platform.Principal) {
+			w.Header().Set("Cache-Control", "no-store")
+			r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+			s.withCurrentOrigin(w, r, func(current *Service) {
+				if r.Method != "GET" && r.Header.Get("Origin") != current.cfg.Origin {
+					originProblem(w, current.cfg.Origin)
 					return
 				}
-				handler(w, r, p)
-			}
-		}
+				h(current, w, r, p)
+			})
+		}})
 	}
+	public("GET "+auth+"/config", (*Service).configuration)
+	public("POST "+auth+"/signup/request", (*Service).requestSignup)
+	public("POST "+auth+"/signup/verification", (*Service).verificationInfo)
+	public("POST "+auth+"/complete", (*Service).complete)
+	public("POST "+auth+"/invitation", (*Service).invitationInfo)
+	public("POST "+auth+"/google/start", (*Service).googleStart)
+	public("GET "+auth+"/google/callback", (*Service).googleCallback)
+	public("POST "+auth+"/google/session", (*Service).googleSession)
+	public("POST "+auth+"/google/profile", (*Service).googleProfile)
+	private("GET /api/v1/saas/organization", (*Service).organization)
+	private("PATCH /api/v1/saas/organization", (*Service).organization)
+	private("GET /api/v1/saas/members", (*Service).members)
+	private("PATCH /api/v1/saas/members/{id}", (*Service).updateMember)
+	private("GET /api/v1/saas/invitations", (*Service).listInvitations)
+	private("POST /api/v1/saas/invitations", (*Service).invite)
+	private("POST /api/v1/saas/invitations/{id}/revoke", (*Service).revokeInvitation)
+	private("POST /api/v1/saas/google/link", (*Service).linkGoogle)
+	private("GET /api/v1/saas/google/identity", (*Service).googleIdentity)
 	return routes
 }
 func (s *Service) public(w http.ResponseWriter, r *http.Request, h http.HandlerFunc) {
@@ -120,7 +131,7 @@ func (s *Service) public(w http.ResponseWriter, r *http.Request, h http.HandlerF
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	if r.Method == "POST" {
 		if r.Header.Get("Origin") != s.cfg.Origin {
-			problem(w, 403, "origin_not_allowed", "Reload the page and try again.")
+			originProblem(w, s.cfg.Origin)
 			return
 		}
 		if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
@@ -142,7 +153,7 @@ func (s *Service) allow(ctx context.Context, key string, max int, ttl time.Durat
 	return err == nil && n <= max
 }
 func (s *Service) configuration(w http.ResponseWriter, r *http.Request) {
-	respond(w, 200, map[string]any{"saas": s.cfg.SaaS, "signupEnabled": s.cfg.Signup, "emailConfigured": s.mailConfigured(), "googleEnabled": s.google != nil})
+	respond(w, 200, map[string]any{"publicUrl": s.cfg.Origin, "saas": s.cfg.SaaS, "signupEnabled": s.cfg.Signup, "emailConfigured": s.mailConfigured(), "googleEnabled": s.google != nil})
 }
 func respond(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")

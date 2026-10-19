@@ -69,7 +69,7 @@ func (r *Router) withPlatformAuth(next http.Handler) http.Handler {
 			return
 		}
 		communityUserManagement := r.productInfo.Edition == "community" && strings.HasPrefix(path, "/api/v1/users")
-		if (requiresSystemAdmin(req) || communityUserManagement) && !user.SystemAdmin {
+		if (requiresSystemAdmin(req) || communityUserManagement || path == "/api/v1/platform/access") && !user.SystemAdmin {
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": "system_administrator_required", "message": "System administrator permission is required."})
 			return
 		}

@@ -717,6 +717,7 @@ EOF
     install -m 0755 "${SCRIPT_DIR}/start-platform.sh" "${install_dir}/start-platform.sh"
     install -m 0755 "${SCRIPT_DIR}/stop-platform.sh" "${install_dir}/stop-platform.sh"
     install -m 0755 "${SCRIPT_DIR}/restart-platform.sh" "${install_dir}/restart-platform.sh"
+    install -m 0755 "${SCRIPT_DIR}/configure-public-url.sh" "${install_dir}/configure-public-url.sh"
     install -m 0755 "${SCRIPT_DIR}/uninstall-platform.sh" "${install_dir}/uninstall-platform.sh"
     install -m 0755 "${SCRIPT_DIR}/uninstall.sh" "${install_dir}/uninstall.sh"
     install -m 0644 "${SCRIPT_DIR}/PLATFORM-LIFECYCLE.md" "${install_dir}/PLATFORM-LIFECYCLE.md"

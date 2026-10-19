@@ -11,12 +11,14 @@ ARG VERSION
 ARG GIT_COMMIT
 ARG BUILD_TIME
 RUN go build -trimpath -ldflags="-s -w -X hypercdr-platform/platform/backend/internal/buildinfo.Version=${VERSION} -X hypercdr-platform/platform/backend/internal/buildinfo.GitCommit=${GIT_COMMIT} -X hypercdr-platform/platform/backend/internal/buildinfo.BuildTime=${BUILD_TIME}" -o /out/platform-api ./cmd/platform-api \
-    && go build -trimpath -ldflags="-s -w" -o /out/platform-migrate ./cmd/platform-migrate
+    && go build -trimpath -ldflags="-s -w" -o /out/platform-migrate ./cmd/platform-migrate \
+    && go build -trimpath -ldflags="-s -w" -o /out/platform-configure-url ./cmd/platform-configure-url
 
 FROM debian:bookworm-slim
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /out/platform-api /usr/local/bin/platform-api
 COPY --from=builder /out/platform-migrate /usr/local/bin/platform-migrate
+COPY --from=builder /out/platform-configure-url /usr/local/bin/platform-configure-url
 ENV HCDR_HTTP_ADDR=0.0.0.0:18080
 EXPOSE 18080
 ENTRYPOINT ["/usr/local/bin/platform-api"]

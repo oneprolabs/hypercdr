@@ -6,7 +6,7 @@ import { organizationRole } from './organization-terms';
 let base = '/api/v1/saas/auth';
 let editionLabel = 'Community';
 export function configureSaaSAuth(apiBase: string, edition: string) { base=apiBase;editionLabel=edition; }
-type AuthConfig = { saas: boolean; signupEnabled: boolean; emailConfigured: boolean; googleEnabled: boolean };
+type AuthConfig = { publicUrl?:string; saas: boolean; signupEnabled: boolean; emailConfigured: boolean; googleEnabled: boolean };
 export async function publicRequest<T>(path: string, body?: unknown): Promise<T> {
   // Public onboarding intentionally uses fetch because no session exists yet.
   // eslint-disable-next-line no-restricted-globals
@@ -57,6 +57,7 @@ export function SaaSLoginSupplement() {
     {new URLSearchParams(window.location.search).get('password_changed') === '1' && <p className="ee-auth-notice" role="status">Password updated. Sign in with your new password.</p>}
     {(error || configError) && <p className="hbdr-login-error" role="alert">{error || configError}</p>}
     {config?.googleEnabled && <><div className="ee-auth-divider"><span>or</span></div><GoogleButton onError={setError} /></>}
+    {config?.publicUrl && config.publicUrl!==window.location.origin && <p className="ee-auth-description">Use the <a href={config.publicUrl+'/login'}>official platform entry</a> for registration and Google sign-in. Platform administrators can update Settings → Access &amp; Login.</p>}
     {config?.signupEnabled && <div className="hbdr-login-signup">New to HyperCDR? <a href="/signup">Create an account</a></div>}
   </div>;
 }
@@ -125,6 +126,7 @@ export function PublicAuthPage() {
     } catch (e) { setError(e instanceof Error ? e.message : 'The request could not be completed.'); }
     finally { setBusy(false); }
   }
+  const addressMismatch=!!config?.publicUrl && config.publicUrl!==window.location.origin;
   const unavailable = !joining && !exchanging && config && !config.signupEnabled;
   const title = exchanging ? 'Signing you in' : joining ? 'Join your organization' : verified ? 'Create your organization' : 'Create your account';
   return <main className="ee-public-auth"><div className="ee-auth-container">
@@ -145,7 +147,8 @@ export function PublicAuthPage() {
             <label>Confirm password<div className="ee-auth-input"><LockKeyhole size={16} /><input type={visible ? 'text' : 'password'} required autoComplete="new-password" value={confirmation} onChange={e => setConfirmation(e.target.value)} minLength={8} maxLength={72} placeholder="Re-enter your password" /></div></label>
           </>}
         </>}
-        <button className="ee-auth-primary" type="submit" disabled={busy || (!verified && cooldown > 0) || Boolean(!verified && !config?.emailConfigured) || Boolean((joining || token || google) && !verified)}>{busy ? (verified ? 'Please wait…' : 'Sending verification email…') : !verified && cooldown > 0 ? `Resend in ${cooldown}s` : verified ? joining ? 'Accept invitation' : 'Create organization' : 'Send verification email'}</button>
+        <button className="ee-auth-primary" type="submit" disabled={addressMismatch || busy || (!verified && cooldown > 0) || Boolean(!verified && !config?.emailConfigured) || Boolean((joining || token || google) && !verified)}>{busy ? (verified ? 'Please wait…' : 'Sending verification email…') : !verified && cooldown > 0 ? `Resend in ${cooldown}s` : verified ? joining ? 'Accept invitation' : 'Create organization' : 'Send verification email'}</button>
+        {addressMismatch && <p className="ee-auth-description" role="status">This address differs from the configured platform address. <a href={config.publicUrl+'/signup'}>Open the official registration page</a>, or ask the platform administrator to update Settings → Access &amp; Login.</p>}
         {!verified && !joining && config && !config.emailConfigured && <p className="ee-auth-description">Email registration is not configured. Contact the platform administrator.</p>}
       </form>}
       {joining && !token && !google && <p className="ee-auth-notice">Open the invitation link from your email to join your organization.</p>}

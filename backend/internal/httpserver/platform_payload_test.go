@@ -45,7 +45,7 @@ func TestPlatformPayloadContractsMountedAndAuthentication(t *testing.T) {
 			t.Fatalf("missing %s", route.Pattern)
 		}
 	}
-	if count != 9 {
+	if count != 11 {
 		t.Fatalf("coverage %d", count)
 	}
 	run := func(method, path, body, bearer, pipeline string, status int) map[string]any {

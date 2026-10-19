@@ -422,7 +422,7 @@ func (r *Router) effectiveEmailSettings() (store.EmailSettings, bool) {
 	return store.EmailSettings{Enabled: true, Host: r.cfg.SMTPHost, Port: port, Security: "starttls", Username: r.cfg.SMTPUsername, PasswordCiphertext: password, SenderName: fromName, SenderEmail: fromEmail}, true
 }
 func (r *Router) sendPasswordResetEmail(settings store.EmailSettings, recipient, token string) error {
-	base := strings.TrimRight(r.cfg.PublicBaseURL, "/")
+	base := strings.TrimRight(r.publicBaseURL(&http.Request{Header: http.Header{}}), "/")
 	resetURL := base + "/?auth=reset&reset_token=" + url.QueryEscape(token)
 	return r.sendConfiguredEmail(settings, recipient, "Reset your HyperCDR password", "Use this link within 15 minutes to reset your HyperCDR password:\r\n"+resetURL+"\r\n\r\nIf you did not request this, you can ignore this email.")
 }
@@ -513,7 +513,7 @@ func (r *Router) googleStart(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "google_state_failed"})
 		return
 	}
-	callback := r.cfg.PublicBaseURL + "/api/v1/auth/google/callback"
+	callback := r.publicBaseURL(req) + "/api/v1/auth/google/callback"
 	q := url.Values{"client_id": {r.cfg.GoogleClientID}, "redirect_uri": {callback}, "response_type": {"code"}, "scope": {"openid email profile"}, "state": {state}, "prompt": {"select_account"}}
 	http.Redirect(w, req, "https://accounts.google.com/o/oauth2/v2/auth?"+q.Encode(), http.StatusFound)
 }
@@ -525,7 +525,7 @@ func (r *Router) googleCallback(w http.ResponseWriter, req *http.Request) {
 		http.Redirect(w, req, "/?auth_error=google_state", http.StatusFound)
 		return
 	}
-	callback := r.cfg.PublicBaseURL + "/api/v1/auth/google/callback"
+	callback := r.publicBaseURL(req) + "/api/v1/auth/google/callback"
 	form := url.Values{"code": {req.URL.Query().Get("code")}, "client_id": {r.cfg.GoogleClientID}, "client_secret": {r.cfg.GoogleClientSecret}, "redirect_uri": {callback}, "grant_type": {"authorization_code"}}
 	ctx, cancel := context.WithTimeout(req.Context(), 10*time.Second)
 	defer cancel()

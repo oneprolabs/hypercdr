@@ -324,8 +324,10 @@ jobs:
             fetch_asset docker/nginx/edge.conf
             fetch_asset docker/nginx/upstream.conf.default
             fetch_asset scripts/release/deploy-blue-green.sh
+            fetch_asset scripts/release/configure-public-url.sh
             fetch_asset scripts/lib/registry-config.sh
             chmod +x "${source_path}/scripts/release/deploy-blue-green.sh"
+            chmod +x "${source_path}/scripts/release/configure-public-url.sh"
             mkdir -p "${deploy_path}/releases/${{ needs.publish.outputs.image_version }}"
             curl -fsSL "https://github.com/${{ github.repository }}/releases/download/${{ startsWith(needs.publish.outputs.image_version, 'ce-v') && needs.publish.outputs.image_version || format('v{0}', needs.publish.outputs.image_version) }}/release-manifest.json" \
               -o "${deploy_path}/releases/${{ needs.publish.outputs.image_version }}/release-manifest.json"
@@ -362,3 +364,4 @@ jobs:
               install -m 0644 "${source_path}/scripts/lib/registry-config.sh" "${deploy_path}/registry-config.sh"
               HCDR_INSTALL_DIR="${deploy_path}" "${deploy_path}/deploy-blue-green.sh" '${{ needs.publish.outputs.image_version }}'
             fi
+            install -m 0755 "${source_path}/scripts/release/configure-public-url.sh" "${deploy_path}/configure-public-url.sh"

@@ -32,6 +32,7 @@ required on the target host.
 | `install-platform.sh` | Lower-level installer used by both entry points |
 | `upgrade-local.sh` | Entry point for an existing Docker installation |
 | `release-manifest.json` | Release version and component image metadata |
+| `configure-public-url.sh` | Update the canonical platform address in the database without restarting the API |
 | `compose.yaml` | Docker Compose template |
 | `config/registries.conf` | Registry profiles |
 | `start-platform.sh`, `stop-platform.sh`, `restart-platform.sh` | Service lifecycle helpers |
@@ -238,3 +239,17 @@ If the readiness check fails, retain the logs and backups and investigate before
 retrying. Do not downgrade images blindly after database migrations. Restore
 requires the matching configuration, image versions, and a compatible database
 backup. See `PLATFORM-LIFECYCLE.md` for lifecycle and uninstall details.
+
+## Change from an IP address to a domain
+
+After DNS, TLS and the reverse proxy are ready, a platform administrator can use
+Settings → Access & Login. Alternatively, run on the installation host:
+
+```bash
+sudo /var/lib/hypercdr/configure-public-url.sh https://app.example.com
+```
+
+Both entry points validate and persist the same database setting. Changes take
+effect immediately and survive upgrades; `.env` supplies only the initial
+address. Update Google Console redirect URIs separately. Existing Agent endpoints
+and previously sent email links are not rewritten.
