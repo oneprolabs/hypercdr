@@ -153,7 +153,7 @@ now have payload contracts. Inspection wire types are shared with the isolated
 executor. Token checks declare body-token authentication and purpose restrictions;
 real PostgreSQL tests cover repeated validation, expiration and cross-purpose denial.
 Community user-management routes also share request/response DTOs and declare
-password constraints, recovery-email format and structured error responses.
+password constraints, and structured error responses. SaaS account email binding uses a separate confirmation workflow; login usernames and verified bound emails are separate attributes on users, with globally unambiguous login addresses.
 The middleware requires a system administrator for Community user routes;
 mutations additionally require the authenticated administrator’s own ID.
 Tenant administrators cannot read the global administrator list. Enterprise

@@ -1,6 +1,8 @@
 export type ApiLoginResponse = {
   user: {
     id: string;
+    username?: string;
+    emailVerifiedAt?: string;
     email: string;
     displayName?: string;
     role: string;

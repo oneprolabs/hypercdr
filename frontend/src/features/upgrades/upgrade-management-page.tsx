@@ -39,45 +39,56 @@ export default function UpgradeManagementPage({ isAdmin, toast, refreshPlatformD
   const [platformReleases, setPlatformReleases] = useState<ApiPlatformRelease[]>([]);
   const [platformUpgrades, setPlatformUpgrades] = useState<ApiPlatformUpgrade[]>([]);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [catalogError, setCatalogError] = useState('');
 
-  const load = useCallback(async () => {
+  const loadCatalog = useCallback(async () => {
     setLoading(true);
+    setCatalogError('');
     try {
-      const [runtime, platformReleaseRes, platformUpgradeRes] = await Promise.all([apiGet<ApiPlatformVersion>('/api/v1/platform/version'), apiGet<ApiList<ApiPlatformRelease>>('/api/v1/platform/available-releases'), apiGet<ApiList<ApiPlatformUpgrade>>('/api/v1/platform/upgrades')]);
-      setPlatformVersion(runtime); setPlatformReleases(listItems(platformReleaseRes)); setPlatformUpgrades(listItems(platformUpgradeRes));
+      const response = await apiGet<ApiList<ApiPlatformRelease>>('/api/v1/platform/available-releases');
+      setPlatformReleases(listItems(response));
     } catch (error) {
-      toast(error instanceof Error ? error.message : 'Failed to load component releases');
+      setCatalogError(error instanceof Error ? error.message : 'Could not load available releases.');
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, []);
+
+  const load = useCallback(async () => {
+    // Local version/history must remain usable even when GitHub is slow or offline.
+    await Promise.allSettled([
+      apiGet<ApiPlatformVersion>('/api/v1/platform/version').then(setPlatformVersion).catch(error => toast(error.message)),
+      apiGet<ApiList<ApiPlatformUpgrade>>('/api/v1/platform/upgrades').then(response => setPlatformUpgrades(listItems(response))).catch(error => toast(error.message)),
+      loadCatalog(),
+    ]);
+  }, [toast, loadCatalog]);
 
   useEffect(() => { void load(); }, [load]);
 
+  const upgrading = platformUpgrades.some(job => !['succeeded', 'failed', 'cancelled', 'rolled_back'].includes(job.status));
   useEffect(() => {
     let cancelled = false;
+    let inFlight = false;
     const pollUpgradeState = async () => {
+      if (inFlight || document.hidden) return;
+      inFlight = true;
       try {
-        const [runtime, releaseRes, upgradeRes] = await Promise.all([
+        const [runtime, upgrades] = await Promise.all([
           apiGet<ApiPlatformVersion>('/api/v1/platform/version'),
-          apiGet<ApiList<ApiPlatformRelease>>('/api/v1/platform/available-releases'),
           apiGet<ApiList<ApiPlatformUpgrade>>('/api/v1/platform/upgrades'),
         ]);
         if (cancelled) return;
         setPlatformVersion(runtime);
-        setPlatformReleases(listItems(releaseRes));
-        setPlatformUpgrades(listItems(upgradeRes));
+        setPlatformUpgrades(listItems(upgrades));
       } catch {
-        // The API is expected to be briefly unavailable while its container is replaced.
-        // Keep retrying so progress resumes without requiring a browser refresh.
+        // Preserve the last known state while the API is replaced during upgrade.
+      } finally {
+        inFlight = false;
       }
     };
-    const timer = window.setInterval(pollUpgradeState, 2000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, []);
+    const timer = window.setInterval(pollUpgradeState, upgrading ? 2000 : 10000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [upgrading]);
 
   const startPlatformUpgrade = async (release: ApiPlatformRelease) => {
     setBusy(`upgrade-${release.id}`);
@@ -127,17 +138,18 @@ export default function UpgradeManagementPage({ isAdmin, toast, refreshPlatformD
   return (
     <motion.div key="upgrades" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="upgrade-management-page space-y-5">
       <SearchBar title="Upgrade" desc="Check versions, start upgrades, and follow their progress." action="Refresh" onAction={() => void load()} />
+      {catalogError && <p role="status" className="text-sm text-slate-500">Available releases could not be loaded. Local version and upgrade history remain available. <button type="button" className="hbdr-dr-action-secondary" disabled={loading} onClick={() => void loadCatalog()}>Retry release catalog</button></p>}
       <section className="hbdr-section-card overflow-hidden">
         <div className="hbdr-section-toolbar"><div><h3>Platform</h3><p>HyperCDR management platform</p></div>{isAdmin && <button type="button" className="hbdr-dr-action-secondary" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen(value => !value)}>{advancedOpen ? 'Hide Release Management' : 'Release Management'}</button>}</div>
         <div className="grid items-center gap-3 px-5 py-4 md:grid-cols-[minmax(180px,1.2fr)_minmax(150px,1fr)_minmax(150px,1fr)_120px]">
           <strong className="text-sm text-slate-900">HyperCDR Platform</strong>
           <div><span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Current version</span><span className="mt-1 block text-sm font-semibold text-slate-700">{platformVersion?.version || 'Unknown'}</span></div>
-          <div><span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Latest version</span><span className="mt-1 block text-sm font-bold text-slate-900">{platformUpdateAvailable ? latestPlatformRelease?.version : platformVersion?.version || latestPlatformRelease?.version || 'Not available'}</span></div>
+          <div><span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Latest version</span><span className="mt-1 block text-sm font-bold text-slate-900">{loading ? 'Checking…' : catalogError ? 'Unavailable' : latestPlatformRelease?.version || 'Not available'}</span></div>
           {activePlatformUpgrade
             ? <span className="justify-self-start rounded-full bg-blue-50 px-3 py-1.5 text-[10px] font-black text-blue-700 md:justify-self-end">Upgrading...</span>
             : isAdmin && latestPlatformRelease && platformUpdateAvailable
               ? <button type="button" disabled={busy===`upgrade-${latestPlatformRelease.id}`} onClick={()=>void startPlatformUpgrade(latestPlatformRelease)} className="justify-self-start rounded bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50 md:justify-self-end">{busy===`upgrade-${latestPlatformRelease.id}` ? 'Starting...' : 'Upgrade'}</button>
-              : <span className="justify-self-start rounded-full bg-emerald-50 px-3 py-1.5 text-[10px] font-black text-emerald-700 md:justify-self-end">Up to date</span>}
+              : <span className={`justify-self-start rounded-full px-3 py-1.5 text-[10px] font-black md:justify-self-end ${loading || catalogError ? 'bg-slate-50 text-slate-500' : 'bg-emerald-50 text-emerald-700'}`}>{loading ? 'Checking…' : catalogError ? 'Check unavailable' : 'Up to date'}</span>}
         </div>
         {activePlatformUpgrade && <div className="border-t border-slate-100 px-5 py-4"><div className="flex items-center justify-between text-xs"><strong>{activePlatformUpgrade.fromVersion} → {activePlatformUpgrade.targetVersion}</strong><span className="text-slate-500">{activePlatformUpgrade.progress}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-blue-600 transition-all" style={{width:`${activePlatformUpgrade.progress}%`}} /></div><p className="mt-2 text-xs text-slate-500">{activePlatformUpgrade.step}</p></div>}
         {advancedOpen && <div className="border-t border-slate-100 px-5 py-4"><div className="mb-3"><h4 className="text-xs font-black text-slate-800">Registered HyperCDR releases</h4><p className="mt-1 text-xs text-slate-500">Release packages are registered by the build pipeline with a complete immutable component manifest.</p></div><div className="space-y-2">{platformReleases.map(release=><div key={release.id} className="rounded-lg border border-slate-100 bg-white px-3 py-3"><div className="flex items-center justify-between"><strong className="text-xs text-slate-800">HyperCDR {release.version}</strong><span className={`rounded-full px-2 py-0.5 text-[9px] font-black uppercase ${release.status === 'active' ? 'bg-emerald-50 text-emerald-700' : release.status === 'candidate' ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>{release.status}</span></div><div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{Object.entries(release.componentManifest || {}).map(([name, component])=><div key={name} className="min-w-0 rounded-md bg-slate-50 px-2.5 py-2"><span className="block truncate text-[10px] font-bold text-slate-600">{name}</span><span className="mt-0.5 block truncate text-[10px] text-slate-500">{component.version}</span><span className="mt-0.5 block font-mono text-[9px] text-slate-400">sha256:{shortDigest(component.imageDigest)}</span></div>)}</div></div>)}{!platformReleases.length&&<p className="py-4 text-center text-xs text-slate-400">{loading ? 'Loading releases…' : 'No complete release package has been registered.'}</p>}</div></div>}

@@ -1,9 +1,10 @@
 package saas
 
 import (
-	"database/sql"
+	"github.com/google/uuid"
 	"hypercdr-platform/platform/backend/internal/store"
 	"hypercdr-platform/platform/backend/pkg/platform"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -33,6 +34,9 @@ func (s *Service) organization(w http.ResponseWriter, r *http.Request, p platfor
 			internal(w)
 			return
 		}
+	}
+	if r.Method == http.MethodPatch {
+		s.audit(r, p, "organization.updated", p.TenantID, p.TenantID)
 	}
 	var name, description string
 	var created time.Time
@@ -67,63 +71,7 @@ func (s *Service) members(w http.ResponseWriter, r *http.Request, p platform.Pri
 	respond(w, 200, map[string]any{"items": items})
 }
 func (s *Service) updateMember(w http.ResponseWriter, r *http.Request, p platform.Principal) {
-	if !admin(w, p) {
-		return
-	}
-	var in struct {
-		Role   string `json:"role"`
-		Status string `json:"status"`
-	}
-	if !decode(r, &in) || (in.Role != "admin" && in.Role != "operator") || (in.Status != "active" && in.Status != "disabled") {
-		problem(w, 400, "invalid_member", "Select a valid role and status.")
-		return
-	}
-	tx, e := s.db.BeginTx(r.Context(), nil)
-	if e != nil {
-		internal(w)
-		return
-	}
-	defer tx.Rollback()
-	// Serialize changes per organization to protect the last active administrator.
-	var scope string
-	if e = tx.QueryRowContext(r.Context(), `select id from resource_scopes where id=$1 for update`, p.TenantID).Scan(&scope); e != nil {
-		internal(w)
-		return
-	}
-	var oldRole, oldStatus string
-	e = tx.QueryRowContext(r.Context(), `select role,status from users where id=$1 and tenant_id=$2 and not is_system_admin for update`, r.PathValue("id"), p.TenantID).Scan(&oldRole, &oldStatus)
-	if e == sql.ErrNoRows {
-		problem(w, 404, "member_not_found", "Member not found.")
-		return
-	}
-	if e != nil {
-		internal(w)
-		return
-	}
-	if oldRole == "admin" && oldStatus == "active" && (in.Role != "admin" || in.Status != "active") {
-		var count int
-		e = tx.QueryRowContext(r.Context(), `select count(*) from users where tenant_id=$1 and role='admin' and status='active' and not is_system_admin`, p.TenantID).Scan(&count)
-		if e != nil {
-			internal(w)
-			return
-		}
-		if count <= 1 {
-			problem(w, 409, "last_administrator", "Keep at least one active organization administrator.")
-			return
-		}
-	}
-	_, e = tx.ExecContext(r.Context(), `update users set role=$1,status=$2,updated_at=now() where id=$3 and tenant_id=$4`, in.Role, in.Status, r.PathValue("id"), p.TenantID)
-	if e == nil {
-		_, e = tx.ExecContext(r.Context(), `delete from platform_sessions where user_id=$1`, r.PathValue("id"))
-	}
-	if e == nil {
-		e = tx.Commit()
-	}
-	if e != nil {
-		internal(w)
-		return
-	}
-	respond(w, 200, map[string]bool{"updated": true})
+	s.mutateMember(w, r, p)
 }
 func (s *Service) invite(w http.ResponseWriter, r *http.Request, p platform.Principal) {
 	if !admin(w, p) {
@@ -162,8 +110,17 @@ func (s *Service) invite(w http.ResponseWriter, r *http.Request, p platform.Prin
 		internal(w)
 		return
 	}
+	var administratorCount int
+	if e = tx.QueryRowContext(r.Context(), `select count(*) from users where tenant_id=$1 and role='admin' and status='active' and not is_system_admin`, p.TenantID).Scan(&administratorCount); e != nil {
+		internal(w)
+		return
+	}
+	if administratorCount == 0 && in.RoleID != "admin" {
+		problem(w, 409, "administrator_required", "Invite an organization administrator before adding members.")
+		return
+	}
 	var exists bool
-	e = tx.QueryRowContext(r.Context(), `select exists(select 1 from users where lower(email)=$1)`, email).Scan(&exists)
+	e = tx.QueryRowContext(r.Context(), `select exists(select 1 from users where (lower(email)=$1 or lower(username)=$1))`, email).Scan(&exists)
 	if e != nil {
 		internal(w)
 		return
@@ -189,6 +146,7 @@ func (s *Service) invite(w http.ResponseWriter, r *http.Request, p platform.Prin
 		problem(w, 503, "email_delivery_failed", "Invitation delivery failed. Send a new invitation.")
 		return
 	}
+	s.audit(r, p, "member.invited", p.TenantID, email)
 	respond(w, 201, map[string]string{"message": "Invitation sent."})
 }
 func (s *Service) listInvitations(w http.ResponseWriter, r *http.Request, p platform.Principal) {
@@ -231,10 +189,19 @@ func (s *Service) revokeInvitation(w http.ResponseWriter, r *http.Request, p pla
 		problem(w, 404, "invitation_not_found", "Invitation not found.")
 		return
 	}
+	s.audit(r, p, "invitation.revoked", p.TenantID, r.PathValue("id"))
 	respond(w, 200, map[string]bool{"revoked": true})
 }
 func (s *Service) audit(r *http.Request, p platform.Principal, action, tenant, target string) {
 	if ci, ok := s.identity.(communityIdentity); ok {
-		_, _ = ci.repo.CreateAuditLog(store.AuditLogInput{ActorID: p.ID, Actor: p.Email, Action: action, ResourceType: "identity", ResourceID: target, Result: "Success"})
+		actorOrganization := p.TenantID
+		_ = s.db.QueryRowContext(r.Context(), `select tenant_id from users where id=$1`, p.ID).Scan(&actorOrganization)
+		resourceID := ""
+		if id, err := uuid.Parse(target); err == nil {
+			resourceID = id.String()
+		}
+		if _, err := ci.repo.CreateAuditLog(store.AuditLogInput{ActorID: p.ID, Actor: p.Email, Action: action, ResourceType: "identity", ResourceID: resourceID, ResourceName: target, Result: "Success", Payload: map[string]any{"targetOrganizationId": tenant, "actorOrganizationId": actorOrganization, "target": target}}); err != nil {
+			slog.Error("identity audit recording failed", "action", action, "error", err)
+		}
 	}
 }

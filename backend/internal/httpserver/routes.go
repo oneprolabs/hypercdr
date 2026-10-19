@@ -22,7 +22,6 @@ func (r *Router) routes() {
 		r.handleRoute("GET /api/v1/users", r.listCommunityUsers)
 		r.handleRoute("PATCH /api/v1/users/{id}", r.updateCommunityAdmin)
 		r.handleRoute("POST /api/v1/users/{id}/password", r.resetCommunityAdminPassword)
-		r.handleRoute("PATCH /api/v1/users/{id}/recovery-email", r.updateCommunityAdminRecoveryEmail)
 	}
 	r.handleRoute("GET /api/v1/platform/access", r.accessSettings)
 	r.handleRoute("PATCH /api/v1/platform/access", r.accessSettings)

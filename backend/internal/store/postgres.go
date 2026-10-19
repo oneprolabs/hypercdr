@@ -263,7 +263,7 @@ func (s *PostgresStore) ListTenantAuditLogs(tenantID string, limit, offset int) 
 	if offset < 0 {
 		offset = 0
 	}
-	rows, err := s.db.Query(`select a.id,a.tenant_id,coalesce(a.actor_id::text,''),coalesce(u.email,''),a.action,a.resource_type,coalesce(a.resource_id::text,''),a.payload,a.created_at from audit_logs a left join users u on u.id=a.actor_id where a.actor_id is not null and a.action not in ('Create Cluster Registration Token','Start Cluster Registration') and ($3 = '' or a.tenant_id::text = $3) order by a.created_at desc,a.id desc limit $1 offset $2`, limit, offset, tenantID)
+	rows, err := s.db.Query(`select a.id,a.tenant_id,coalesce(a.actor_id::text,''),coalesce(u.email,u.username,''),a.action,a.resource_type,coalesce(a.resource_id::text,''),a.payload,a.created_at from audit_logs a left join users u on u.id=a.actor_id where a.actor_id is not null and a.action not in ('Create Cluster Registration Token','Start Cluster Registration') and ($3 = '' or a.tenant_id::text = $3) order by a.created_at desc,a.id desc limit $1 offset $2`, limit, offset, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -308,9 +308,10 @@ func (s *PostgresStore) ensureDefaultAdmin(ctx context.Context) error {
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `
-		insert into users (id, tenant_id, email, password_hash, role, status, is_system_admin, must_change_password, created_at, updated_at)
-		values ($1, $2, $3, $4, 'admin', 'active', true, true, $5, $5)
-		on conflict (tenant_id, email) do nothing
+		insert into users (id, tenant_id, username, password_hash, role, status, is_system_admin, must_change_password, created_at, updated_at)
+		select $1, $2, $3, $4, 'admin', 'active', true, true, $5, $5
+        where not exists(select 1 from users where lower(username)=lower($3))
+		on conflict (tenant_id, username) do nothing
 	`, newID(), DefaultTenantID, DefaultAdminEmail, string(passwordHash), time.Now().UTC())
 	return err
 }

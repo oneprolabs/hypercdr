@@ -10,6 +10,11 @@ import (
 func (r *Router) withPlatformAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		path := req.URL.Path
+		if strings.HasPrefix(path, "/api/v1/") {
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Add("Vary", "Authorization")
+			w.Header().Add("Vary", "X-HyperCDR-Organization")
+		}
 		publicAuth := publicAPIPath(path)
 		// Edition-scoped metadata must pass through session authentication.
 		if path == "/api/v1/product-info" && r.scopedLicenseProvider != nil && strings.HasPrefix(strings.TrimSpace(req.Header.Get("Authorization")), "Bearer ") {
@@ -76,7 +81,7 @@ func (r *Router) withPlatformAuth(next http.Handler) http.Handler {
 		if r.editionAuthorizer != nil {
 			decision := r.editionAuthorizer(req.Context(), EditionAuthorizationRequest{
 				Method: req.Method, Path: req.URL.Path,
-				Principal: EditionPrincipal{ID: user.ID, TenantID: user.TenantID, Email: user.Email, Role: user.Role, SystemAdmin: user.SystemAdmin},
+				Principal: EditionPrincipal{Username: user.Username, ID: user.ID, TenantID: user.TenantID, Email: user.Email, Role: user.Role, SystemAdmin: user.SystemAdmin},
 			})
 			if !decision.Allowed {
 				code := strings.TrimSpace(decision.Code)
@@ -91,7 +96,12 @@ func (r *Router) withPlatformAuth(next http.Handler) http.Handler {
 				return
 			}
 		}
-		next.ServeHTTP(w, req.WithContext(context.WithValue(req.Context(), requestUserContextKey{}, user)))
+		req = req.WithContext(context.WithValue(req.Context(), requestUserContextKey{}, user))
+		scopedRequest, allowed := r.applyOrganizationScope(w, req, user)
+		if !allowed {
+			return
+		}
+		next.ServeHTTP(w, scopedRequest)
 	})
 }
 

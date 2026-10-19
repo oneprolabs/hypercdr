@@ -36,7 +36,7 @@ func (r *Router) diagnosticLogFilter(req *http.Request) (store.DiagnosticLogFilt
 	if value := q.Get("to"); value != "" {
 		filter.To, _ = time.Parse(time.RFC3339, value)
 	}
-	if ok && !user.SystemAdmin {
+	if ok && (!user.SystemAdmin || filter.Source != "platform" || filter.Scope != "system" || filter.ClusterID != "") {
 		filter.TenantID = user.TenantID
 		filter.Scope = "tenant"
 	}
@@ -50,7 +50,7 @@ func (r *Router) diagnosticLogFilter(req *http.Request) (store.DiagnosticLogFilt
 		}
 		found := false
 		for _, cluster := range clusters {
-			if cluster.ID == filter.ClusterID && (user.SystemAdmin || cluster.TenantID == user.TenantID) && (filter.TenantID == "" || cluster.TenantID == filter.TenantID) {
+			if cluster.ID == filter.ClusterID && (cluster.TenantID == user.TenantID) && (filter.TenantID == "" || cluster.TenantID == filter.TenantID) {
 				found = true
 				break
 			}
@@ -149,7 +149,7 @@ func (r *Router) diagnosticLogSources(w http.ResponseWriter, req *http.Request) 
 	}
 	items := []diagnosticSource{}
 	for _, cluster := range clusters {
-		if user.SystemAdmin || cluster.TenantID == user.TenantID {
+		if cluster.TenantID == user.TenantID {
 			items = append(items, diagnosticSource{ID: cluster.ID, TenantID: cluster.TenantID, Name: cluster.Name, ConnectionStatus: cluster.ConnectionStatus})
 		}
 	}

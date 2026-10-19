@@ -120,3 +120,30 @@ html[data-theme] #root .hc-platform-access button:disabled { opacity:.5 !importa
 .hc-access-summary ~ .hc-access-form { margin-top:20px; padding-top:20px; border-top:1px solid var(--hc-border); }
 .hc-access-edit-actions { display:flex; gap:8px; }
 @media(max-width:640px) { .hc-access-summary { flex-wrap:wrap; } }
+
+.hc-directory { display:grid; gap:20px; }
+.hc-directory-row-actions, .hc-directory-filters, .hc-directory-context { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.hc-directory-toolbar { flex-wrap:wrap; gap:12px; }
+.hc-directory-filters select, .hc-directory-search { min-height:34px; border:1px solid var(--hc-border); border-radius:5px; background:var(--hc-surface); color:var(--hc-text); font:inherit; font-size:13px; }
+.hc-directory-filters select { padding:0 10px; max-width:240px; }
+.hc-directory-filters select option { background:var(--hc-surface); color:var(--hc-text); }
+.hc-directory-search { display:flex; align-items:center; gap:8px; padding:0 10px; }
+.hc-directory-search input { min-width:120px; width:210px; border:0; background:transparent; color:var(--hc-text); font:inherit; outline:none; }
+.hc-directory-search:focus-within { outline:2px solid var(--hc-accent); outline-offset:2px; }
+.hc-directory-system { display:block; color:var(--hc-text-2); font-size:11.5px; font-weight:400; }
+.hc-directory-context { color:var(--hc-text-2); font-size:13px; }
+.hc-settings-nav-group { padding:16px 14px 5px; color:var(--hc-text-2); font-size:11px; font-weight:500; letter-spacing:.04em; text-transform:uppercase; }
+.hc-directory .hbdr-dr-table-card { min-width:0; }
+@media(max-width:640px) { .hc-directory-filters { width:100%; } .hc-directory-search { flex:1; } .hc-directory-search input { width:100%; } }
+
+/* Keep identity-management actions compact despite legacy settings form rules. */
+#root .premium-app.hbdr-workspace .ee-organization-access .hbdr-dr-toolbar { display:flex; flex-direction:row; align-items:center; justify-content:space-between; flex-wrap:wrap; }
+#root .premium-app.hbdr-workspace .ee-organization-access .hbdr-dr-toolbar > button { width:auto; flex:0 0 auto; }
+#root .premium-app.hbdr-workspace .ee-organization-access .hc-directory-row-actions { display:flex; flex-direction:row; align-items:center; flex-wrap:nowrap; gap:8px; }
+#root .premium-app.hbdr-workspace .ee-organization-access .hc-directory-row-actions > button { width:auto; flex:0 0 auto; }
+
+.ee-bound-email-inline { display:flex; align-items:center; flex-wrap:wrap; gap:8px 12px; }
+.ee-bound-email-inline .hbdr-dr-action-secondary { min-height:28px; padding:4px 9px; font-size:12px; }
+.ee-bound-email-inline > p { flex-basis:100%; margin:0; }
+
+.ee-bound-email-unbound { color:var(--hc-crit); }

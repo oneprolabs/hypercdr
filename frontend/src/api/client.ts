@@ -1,3 +1,4 @@
+import { requestSessionToken, assertRequestSession } from '../auth/session.ts';
 import { AUTH_EXPIRED_EVENT, readStoredAuthSession } from '../auth/session.ts';
 
 export class ApiRequestError extends Error {
@@ -27,6 +28,7 @@ async function readApiError(response: Response): Promise<Error> {
 }
 
 export async function ensureApiResponse(response: Response, path: string, requestToken = ''): Promise<Response> {
+  assertRequestSession(requestToken);
   if (response.ok) return response;
   const publicAuthRequest = path === '/api/v1/auth/login' || path === '/api/v1/auth/captcha' || path === '/api/v1/auth/forgot-password' || path === '/api/v1/auth/reset-password';
   const currentToken = readStoredAuthSession()?.session.token || '';
@@ -36,7 +38,7 @@ export async function ensureApiResponse(response: Response, path: string, reques
   throw await readApiError(response);
 }
 
-export function apiHeaders(json = false, token = readStoredAuthSession()?.session.token || ''): Record<string, string> {
+export function apiHeaders(json = false, token = requestSessionToken()): Record<string, string> {
   const headers: Record<string, string> = {};
   if (json) headers['Content-Type'] = 'application/json';
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -46,7 +48,7 @@ export function apiHeaders(json = false, token = readStoredAuthSession()?.sessio
 const getRequests = new Map<string, Promise<unknown>>();
 
 export async function apiGet<T>(path: string): Promise<T> {
-  const token = readStoredAuthSession()?.session.token || '';
+  const token = requestSessionToken();
   const key = `${token}\n${path}`;
   const existing = getRequests.get(key);
   if (existing) return existing as Promise<T>;
@@ -59,7 +61,7 @@ export async function apiGet<T>(path: string): Promise<T> {
 }
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const token = readStoredAuthSession()?.session.token || '';
+  const token = requestSessionToken();
   const response = await ensureApiResponse(await fetch(path, {
     method: 'POST',
     headers: apiHeaders(true, token),
@@ -69,13 +71,13 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
 }
 
 export async function apiPut<T>(path: string, body: unknown): Promise<T> {
-  const token = readStoredAuthSession()?.session.token || '';
+  const token = requestSessionToken();
   const response = await ensureApiResponse(await fetch(path, { method: 'PUT', headers: apiHeaders(true, token), body: JSON.stringify(body) }), path, token);
   return response.json() as Promise<T>;
 }
 
 export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
-  const token = readStoredAuthSession()?.session.token || '';
+  const token = requestSessionToken();
   const response = await ensureApiResponse(await fetch(path, {
     method: 'PATCH',
     headers: apiHeaders(true, token),
@@ -85,7 +87,7 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
 }
 
 export async function apiDelete<T>(path: string): Promise<T> {
-  const token = readStoredAuthSession()?.session.token || '';
+  const token = requestSessionToken();
   const response = await ensureApiResponse(await fetch(path, { method: 'DELETE', headers: apiHeaders(false, token) }), path, token);
   if (response.status === 204 || response.headers.get('content-length') === '0') return undefined as T;
   return response.json() as Promise<T>;
@@ -94,13 +96,13 @@ export async function apiDelete<T>(path: string): Promise<T> {
 // Multipart requests and binary downloads share session expiry/error handling
 // with JSON requests. Let the browser set the multipart boundary.
 export async function apiUpload<T>(path: string, body: FormData): Promise<T> {
-  const token = readStoredAuthSession()?.session.token || '';
+  const token = requestSessionToken();
   const response = await ensureApiResponse(await fetch(path, { method: 'POST', headers: apiHeaders(false, token), body }), path, token);
   return response.json() as Promise<T>;
 }
 
 export async function apiDownload(path: string): Promise<Blob> {
-  const token = readStoredAuthSession()?.session.token || '';
+  const token = requestSessionToken();
   const response = await ensureApiResponse(await fetch(path, { headers: apiHeaders(false, token) }), path, token);
   return response.blob();
 }

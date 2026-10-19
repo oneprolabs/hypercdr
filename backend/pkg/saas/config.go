@@ -97,6 +97,12 @@ func (s *Service) Routes() []platform.Route {
 		routes = append(routes, platform.Route{Pattern: pattern, Handler: func(w http.ResponseWriter, r *http.Request, p platform.Principal) {
 			w.Header().Set("Cache-Control", "no-store")
 			r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+			// Read-only administration routes do not generate public links or
+			// validate origins. Avoid an unrelated platform-settings query.
+			if r.Method == http.MethodGet {
+				h(s, w, r, p)
+				return
+			}
 			s.withCurrentOrigin(w, r, func(current *Service) {
 				if r.Method != "GET" && r.Header.Get("Origin") != current.cfg.Origin {
 					originProblem(w, current.cfg.Origin)
@@ -107,6 +113,9 @@ func (s *Service) Routes() []platform.Route {
 		}})
 	}
 	public("GET "+auth+"/config", (*Service).configuration)
+	public("POST "+auth+"/email/verify", (*Service).verifyBoundEmail)
+	private("GET /api/v1/saas/account/email", (*Service).boundEmail)
+	private("POST /api/v1/saas/account/email", (*Service).requestBoundEmail)
 	public("POST "+auth+"/signup/request", (*Service).requestSignup)
 	public("POST "+auth+"/signup/verification", (*Service).verificationInfo)
 	public("POST "+auth+"/complete", (*Service).complete)
@@ -115,6 +124,18 @@ func (s *Service) Routes() []platform.Route {
 	public("GET "+auth+"/google/callback", (*Service).googleCallback)
 	public("POST "+auth+"/google/session", (*Service).googleSession)
 	public("POST "+auth+"/google/profile", (*Service).googleProfile)
+	private("GET /api/v1/saas/admin/organizations", (*Service).administrationOrganizations)
+	private("POST /api/v1/saas/admin/organizations", (*Service).administrationOrganizations)
+	private("GET /api/v1/saas/admin/organizations/{organization}", (*Service).administrationOrganization)
+	private("PATCH /api/v1/saas/admin/organizations/{organization}", (*Service).administrationOrganization)
+	private("GET /api/v1/saas/admin/users", (*Service).administrationUsers)
+	private("GET /api/v1/saas/admin/organizations/{organization}/members", (*Service).administrationMembers)
+	private("PATCH /api/v1/saas/admin/organizations/{organization}/members/{id}", (*Service).administrationMember)
+	private("DELETE /api/v1/saas/admin/organizations/{organization}/members/{id}", (*Service).administrationMember)
+	private("GET /api/v1/saas/admin/organizations/{organization}/invitations", (*Service).administrationInvitation)
+	private("POST /api/v1/saas/admin/organizations/{organization}/invitations", (*Service).administrationInvitation)
+	private("POST /api/v1/saas/admin/organizations/{organization}/invitations/{id}/revoke", (*Service).administrationRevoke)
+	private("DELETE /api/v1/saas/members/{id}", (*Service).updateMember)
 	private("GET /api/v1/saas/organization", (*Service).organization)
 	private("PATCH /api/v1/saas/organization", (*Service).organization)
 	private("GET /api/v1/saas/members", (*Service).members)

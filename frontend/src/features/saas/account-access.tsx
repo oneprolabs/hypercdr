@@ -6,7 +6,8 @@ import { ModalFrame } from '../../components/modal-frame';
 import type { FrontendModuleContext } from '../../app/extensions';
 import { SettingsHeader } from './organization-settings';
 import './saas-auth.css';
-export function AccountAccess({ toast }: FrontendModuleContext) {
+export function AccountAccess(context: FrontendModuleContext) {
+  const { toast } = context;
   const [state, setState] = useState<{ linked: boolean; enabled: boolean; passwordConfigured: boolean } | null>(null);
   const [show, setShow] = useState(false);
   const [password, setPassword] = useState('');

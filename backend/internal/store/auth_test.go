@@ -62,23 +62,6 @@ func TestPasswordChangeRequirementCanBeClearedOrRestored(t *testing.T) {
 	}
 }
 
-func TestCommunityAdminRecoveryEmailCreatesResetToken(t *testing.T) {
-	repo := newTestStore(t)
-	users, err := repo.ListUsers()
-	if err != nil || len(users) != 1 || !users[0].SystemAdmin {
-		t.Fatalf("admin users = %#v, %v", users, err)
-	}
-	if _, found, err := repo.SetAdminRecoveryEmail(users[0].ID, " Owner@Example.com "); err != nil || !found {
-		t.Fatalf("set recovery email: found=%v err=%v", found, err)
-	}
-	if email, found, err := repo.GetAdminRecoveryEmail(users[0].ID); err != nil || !found || email != "owner@example.com" {
-		t.Fatalf("recovery email=%q found=%v err=%v", email, found, err)
-	}
-	if token, found, err := repo.CreatePasswordResetToken("owner@example.com", time.Minute); err != nil || !found || token == "" {
-		t.Fatalf("admin reset token=%q found=%v err=%v", token, found, err)
-	}
-}
-
 func TestPostgresStoreGoogleUserLinksExistingEmail(t *testing.T) {
 	repo := newTestStore(t)
 	created, err := repo.CreateUser(DefaultTenantID, "user@example.com", "password")
@@ -145,7 +128,7 @@ func TestTenantAndSystemAdminMetadataStayConsistent(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("update admin: %#v, %v, %v", updated, found, err)
 	}
-	if updated.DisplayName != "Platform Administrator" || updated.TenantID != DefaultTenantID || updated.Email != DefaultAdminEmail || updated.Role != "admin" || updated.Status != "active" {
+	if updated.DisplayName != "Platform Administrator" || updated.TenantID != DefaultTenantID || updated.Username != DefaultAdminEmail || updated.Email != "" || updated.Role != "admin" || updated.Status != "active" {
 		t.Fatalf("protected admin fields changed unexpectedly: %#v", updated)
 	}
 }
@@ -158,5 +141,48 @@ func TestTenantDescriptionPersistsAndIsLimited(t *testing.T) {
 	}
 	if _, err := repo.CreateTenant(TenantInput{Name: "Too long", Description: strings.Repeat("x", 501)}); err == nil {
 		t.Fatal("expected tenant description length validation")
+	}
+}
+
+func TestBoundEmailUniquenessLoginAliasesAndPasswordRecovery(t *testing.T) {
+	repo := newTestStore(t)
+	admin := testAdmin(t, repo)
+	if admin.Username != "admin" || admin.Email != "" || admin.EmailVerifiedAt != nil {
+		t.Fatalf("fresh admin: %#v", admin)
+	}
+	if _, found, err := repo.CreatePasswordResetToken("admin", time.Minute); err != nil || found {
+		t.Fatal("unbound admin must not receive reset tokens")
+	}
+	user, err := repo.CreateUser(DefaultTenantID, "original@example.test", "Password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = repo.db.Exec(`update users set email='changed@example.test',email_verified_at=now() where id=$1`, user.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = repo.db.Exec(`update users set email='CHANGED@example.test',email_verified_at=now() where id=$1`, admin.ID); err == nil {
+		t.Fatal("non-normalized conflicting address accepted")
+	}
+	if _, err = repo.db.Exec(`update users set email='changed@example.test',email_verified_at=now() where id=$1`, admin.ID); err == nil {
+		t.Fatal("duplicate bound email accepted")
+	}
+	if _, err = repo.CreateUser(DefaultTenantID, "changed@example.test", "Password123"); !errors.Is(err, ErrUserExists) {
+		t.Fatalf("bound email reused as account: %v", err)
+	}
+	for _, login := range []string{"original@example.test", "CHANGED@example.test"} {
+		got, ok, err := repo.AuthenticateUser(UserAuthInput{Email: login, Password: "Password123"})
+		if err != nil || !ok || got.ID != user.ID {
+			t.Fatalf("alias %s: %v", login, err)
+		}
+	}
+	if _, found, err := repo.CreatePasswordResetToken("original@example.test", time.Minute); err != nil || found {
+		t.Fatal("login username must not be treated as bound recovery address")
+	}
+	token, found, err := repo.CreatePasswordResetToken("changed@example.test", time.Minute)
+	if err != nil || !found {
+		t.Fatalf("bound email reset: %v", err)
+	}
+	if got, err := repo.ResetPassword(token, "NewPassword123"); err != nil || got.ID != user.ID {
+		t.Fatalf("wrong reset account: %#v %v", got, err)
 	}
 }

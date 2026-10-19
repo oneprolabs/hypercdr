@@ -41,7 +41,7 @@ func (s *Service) requestSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var exists bool
-	if e := s.db.QueryRowContext(r.Context(), `select exists(select 1 from users where lower(email)=$1)`, email).Scan(&exists); e != nil {
+	if e := s.db.QueryRowContext(r.Context(), `select exists(select 1 from users where (lower(email)=$1 or lower(username)=$1))`, email).Scan(&exists); e != nil {
 		internal(w)
 		return
 	}
@@ -183,7 +183,7 @@ func (s *Service) complete(w http.ResponseWriter, r *http.Request) {
 	if google {
 		provider = "google"
 	}
-	_, e = tx.ExecContext(r.Context(), `insert into users(id,tenant_id,email,display_name,password_hash,role,status,must_change_password,auth_provider) values($1,$2,$3,nullif($4,''),$5,$6,'active',false,$7)`, user, tenant, t.Email, strings.TrimSpace(in.DisplayName), hash, t.Role.String, provider)
+	_, e = tx.ExecContext(r.Context(), `insert into users(id,tenant_id,username,email,email_verified_at,display_name,password_hash,role,status,must_change_password,auth_provider) values($1,$2,$3,$3,now(),nullif($4,''),$5,$6,'active',false,$7)`, user, tenant, t.Email, strings.TrimSpace(in.DisplayName), hash, t.Role.String, provider)
 	if e == nil && google {
 		_, e = tx.ExecContext(r.Context(), `insert into saas_external_identities(provider,subject,user_id) values('google',$1,$2)`, t.Subject, user)
 	}

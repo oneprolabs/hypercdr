@@ -27,7 +27,6 @@ type themeRequest struct {
 type passwordChangeRequest struct {
 	CurrentPassword string `json:"currentPassword"`
 	NewPassword     string `json:"newPassword"`
-	RecoveryEmail   string `json:"recoveryEmail"`
 }
 type forgotPasswordRequest struct {
 	Email string `json:"email"`

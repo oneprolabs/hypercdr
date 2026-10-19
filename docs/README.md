@@ -32,3 +32,5 @@
 - [离线集群清理](agent-offline-uninstall.md)、[日志设计](operations/logging-design.md)、[恢复缓存](operations/velero-restore-cache.zh.md)
 
 专项适配范围应结合文档中的限制及实际验证，不等同于所有版本、驱动或环境均已通过认证。
+
+- [用户、组织与平台权限](user-guide/users-and-organizations.zh.md)：设置菜单、组织归属、平台管理范围与会话一致性。

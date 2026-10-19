@@ -95,20 +95,17 @@ export function RequiredPasswordChange({
   onSignOut: () => void;
 }) {
   const [currentPassword, setCurrentPassword] = useState('');
-  const [recoveryEmail, setRecoveryEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const recoveryEmailRequired = session.user.systemAdmin;
-  const recoveryEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recoveryEmail.trim());
-  const valid = currentPassword.length > 0 && (!recoveryEmailRequired || recoveryEmailValid) && newPassword.length >= 8 && newPassword !== currentPassword && newPassword === confirmPassword;
+  const valid = currentPassword.length > 0 && newPassword.length >= 8 && newPassword !== currentPassword && newPassword === confirmPassword;
   const submit = async () => {
     if (!valid || busy) return;
     setBusy(true);
     setError('');
     try {
-      await apiPost<ApiPlatformUser>('/api/v1/auth/change-password', { currentPassword, newPassword, recoveryEmail: recoveryEmail.trim() });
+      await apiPost<ApiPlatformUser>('/api/v1/auth/change-password', { currentPassword, newPassword });
       onChanged();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Password update failed');
@@ -124,15 +121,10 @@ export function RequiredPasswordChange({
             <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-600"><KeyRound size={20} /></div>
             <h1 className="text-xl font-black tracking-tight text-slate-900">Change your temporary password</h1>
             <p className="mt-2 text-sm leading-6 text-slate-500">For account security, set a new password before entering HyperCDR.</p>
-            <p className="mt-3 text-xs font-semibold text-slate-400">Signed in as <span className="text-slate-600">{session.user.email}</span></p>
+            <p className="mt-3 text-xs font-semibold text-slate-400">Signed in as <span className="text-slate-600">{session.user.username || session.user.email}</span></p>
           </div>
           <div className="space-y-4 px-7 py-6">
             <EditField label="Current Password" type="password" value={currentPassword} onChange={setCurrentPassword} />
-            {recoveryEmailRequired && <div>
-              <EditField label="Recovery Email" type="email" value={recoveryEmail} onChange={setRecoveryEmail} />
-              <p className="mt-1.5 text-xs leading-5 text-slate-500">Password reset instructions for the built-in administrator will be sent to this address.</p>
-              {recoveryEmail && !recoveryEmailValid && <p className="mt-1 text-xs font-semibold text-rose-600">Enter a valid email address.</p>}
-            </div>}
             <EditField label="New Password" type="password" value={newPassword} onChange={setNewPassword} />
             <EditField label="Confirm New Password" type="password" value={confirmPassword} onChange={setConfirmPassword} />
             <PasswordValidation password={newPassword} confirmation={confirmPassword} />
@@ -238,7 +230,7 @@ export function PasswordRecoveryPage({
               {instructionsSent
                 ? 'If the email address is registered, password reset instructions have been sent.'
                 : flow === 'forgot'
-                  ? 'Enter your registered email address. We will send you a secure reset link valid for 15 minutes.'
+                  ? 'Enter your verified bound email address. We will send you a secure reset link valid for 15 minutes.'
                   : 'Choose a new password for your HyperCDR account.'}
             </p>
           </div>

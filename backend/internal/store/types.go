@@ -107,8 +107,6 @@ type IdentityRepository interface {
 	SetUserTheme(id, theme string) (User, bool, error)
 	DeleteUser(id string) (bool, error)
 	SetUserPassword(id string, password string, mustChangePassword bool) (User, bool, error)
-	GetAdminRecoveryEmail(userID string) (string, bool, error)
-	SetAdminRecoveryEmail(userID, email string) (string, bool, error)
 	CreatePlatformSession(userID string, ttl time.Duration) (PlatformSession, error)
 	AuthenticatePlatformSession(token string) (User, bool, error)
 	DeletePlatformSession(token string) error
@@ -448,19 +446,20 @@ type UserAuthInput struct {
 }
 
 type User struct {
-	ID                 string `json:"id"`
-	TenantID           string `json:"tenantId"`
-	TenantName         string `json:"tenantName"`
-	Email              string `json:"email"`
-	DisplayName        string `json:"displayName,omitempty"`
-	Role               string `json:"role"`
-	Status             string `json:"status"`
-	AuthProvider       string `json:"authProvider"`
-	TimeZone           string `json:"timeZone,omitempty"`
-	Theme              string `json:"theme,omitempty"`
-	SystemAdmin        bool   `json:"systemAdmin,omitempty"`
-	MustChangePassword bool   `json:"mustChangePassword"`
-	RecoveryEmail      string `json:"recoveryEmail,omitempty"`
+	ID                 string     `json:"id"`
+	TenantID           string     `json:"tenantId"`
+	TenantName         string     `json:"tenantName"`
+	Username           string     `json:"username"`
+	EmailVerifiedAt    *time.Time `json:"emailVerifiedAt,omitempty"`
+	Email              string     `json:"email"`
+	DisplayName        string     `json:"displayName,omitempty"`
+	Role               string     `json:"role"`
+	Status             string     `json:"status"`
+	AuthProvider       string     `json:"authProvider"`
+	TimeZone           string     `json:"timeZone,omitempty"`
+	Theme              string     `json:"theme,omitempty"`
+	SystemAdmin        bool       `json:"systemAdmin,omitempty"`
+	MustChangePassword bool       `json:"mustChangePassword"`
 }
 
 type UserUpdateInput struct {

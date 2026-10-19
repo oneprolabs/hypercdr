@@ -81,7 +81,8 @@ func (r *Router) withAuditLog(next http.Handler) http.Handler {
 		if sink == nil {
 			sink = storeAuditSink{store: r.store}
 		}
-		err := sink.RecordAudit(req.Context(), EditionAuditEvent{TenantID: user.TenantID, ActorID: user.ID, Actor: user.Email, Action: action, ResourceType: resourceType, ResourceID: validAuditUUID(resourceID), ResourceName: resourceName, Result: result, Message: message, HTTPStatus: status})
+		targetOrganization := user.TenantID
+		err := sink.RecordAudit(req.Context(), EditionAuditEvent{TenantID: targetOrganization, ActorID: user.ID, Actor: user.Email, Action: action, ResourceType: resourceType, ResourceID: validAuditUUID(resourceID), ResourceName: resourceName, Result: result, Message: message, HTTPStatus: status})
 		if err != nil {
 			r.logger.Error("write audit log failed", "error", err, "action", action, "actor", user.Email)
 		}

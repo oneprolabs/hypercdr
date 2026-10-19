@@ -12,16 +12,16 @@ type storeIdentityProvider struct{ store store.IdentityRepository }
 type storeAuditSink struct{ store store.AuditRepository }
 
 func (s storeAuditSink) RecordAudit(_ context.Context, event EditionAuditEvent) error {
-	_, err := s.store.CreateAuditLog(store.AuditLogInput{ActorID: event.ActorID, Actor: event.Actor, Action: event.Action, ResourceType: event.ResourceType, ResourceID: event.ResourceID, ResourceName: event.ResourceName, Result: event.Result, Message: event.Message, Payload: map[string]any{"httpStatus": event.HTTPStatus}})
+	_, err := s.store.CreateAuditLog(store.AuditLogInput{ActorID: event.ActorID, Actor: event.Actor, Action: event.Action, ResourceType: event.ResourceType, ResourceID: event.ResourceID, ResourceName: event.ResourceName, Result: event.Result, Message: event.Message, Payload: map[string]any{"httpStatus": event.HTTPStatus, "targetOrganizationId": event.TenantID}})
 	return err
 }
 
 func identityFromStore(user store.User) EditionIdentity {
-	return EditionIdentity{ID: user.ID, TenantID: user.TenantID, TenantName: user.TenantName, Email: user.Email, DisplayName: user.DisplayName, Role: user.Role, Status: user.Status, AuthProvider: user.AuthProvider, TimeZone: user.TimeZone, Theme: user.Theme, SystemAdmin: user.SystemAdmin, MustChangePassword: user.MustChangePassword}
+	return EditionIdentity{ID: user.ID, TenantID: user.TenantID, TenantName: user.TenantName, Username: user.Username, EmailVerifiedAt: user.EmailVerifiedAt, Email: user.Email, DisplayName: user.DisplayName, Role: user.Role, Status: user.Status, AuthProvider: user.AuthProvider, TimeZone: user.TimeZone, Theme: user.Theme, SystemAdmin: user.SystemAdmin, MustChangePassword: user.MustChangePassword}
 }
 
 func storeUserFromIdentity(user EditionIdentity) store.User {
-	return store.User{ID: user.ID, TenantID: user.TenantID, TenantName: user.TenantName, Email: user.Email, DisplayName: user.DisplayName, Role: user.Role, Status: user.Status, AuthProvider: user.AuthProvider, TimeZone: user.TimeZone, Theme: user.Theme, SystemAdmin: user.SystemAdmin, MustChangePassword: user.MustChangePassword}
+	return store.User{ID: user.ID, TenantID: user.TenantID, TenantName: user.TenantName, Username: user.Username, EmailVerifiedAt: user.EmailVerifiedAt, Email: user.Email, DisplayName: user.DisplayName, Role: user.Role, Status: user.Status, AuthProvider: user.AuthProvider, TimeZone: user.TimeZone, Theme: user.Theme, SystemAdmin: user.SystemAdmin, MustChangePassword: user.MustChangePassword}
 }
 
 func (p storeIdentityProvider) Authenticate(_ context.Context, email, password string) (EditionIdentity, bool, error) {

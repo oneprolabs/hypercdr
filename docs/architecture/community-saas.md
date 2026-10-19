@@ -6,7 +6,7 @@
 
 ## 身份与组织
 
-- `users.email` 全局唯一，`users.tenant_id` 非空，指向
+- `users.username` 是固定登录账号；`users.email` 是可空、全局唯一的已验证绑定邮箱，验证时间为 `email_verified_at`。登录账号和其他用户的绑定邮箱不能交叉重复。`users.tenant_id` 非空，指向
   `resource_scopes`；不建立多组织成员关系表。
 - 邮箱注册必须通过有效的验证链接；创建组织、创建管理员账号、消费
   验证令牌在一个 PostgreSQL 事务中完成。注册完成后创建登录会话。
@@ -46,3 +46,9 @@ Google 按钮仅在 Client ID 和 Secret 均已配置时显示。
 PostgreSQL 验证注册、令牌重放、邀请、最后管理员保护和资源隔离。
 Google 测试使用签名 JWT 与本地 OAuth/JWKS 服务；真实 Google 授权需
 配置有效凭据及符合 Google 要求的回调域名后另行联调。
+
+## 绑定邮箱
+
+个人信息中的 Email 支持绑定和修改。内置 `admin` 初始邮箱为空；邮件注册与 Google 注册使用已验证邮箱初始化绑定。绑定请求验证当前密码，并发送30分钟有效、单次使用的确认链接；确认前保留原绑定。确认后撤销该账号旧的密码重置令牌，保持固定登录账号、Google provider subject 和组织归属不变。密码恢复只匹配当前已验证绑定邮箱，不通过登录账号或其他恢复表推断地址。
+
+数据模型由 `000044_user_bound_email.sql` 定义；待验证地址存储于 `user_email_verifications`，旧的 `admin_recovery_email` 已移除。对开发阶段已有数据库，应备份后迁移或重新部署；不能让旧镜像直接使用新结构。

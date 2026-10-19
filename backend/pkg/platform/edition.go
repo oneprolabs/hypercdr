@@ -48,6 +48,7 @@ type ProductInfo struct {
 // Principal is the authenticated identity presented to an edition authorizer.
 // It intentionally contains no storage or HTTP server implementation types.
 type Principal struct {
+	Username    string
 	ID          string
 	TenantID    string
 	Email       string
@@ -59,18 +60,20 @@ type Principal struct {
 // supplies its own implementation so multi-user credentials and sessions do
 // not depend on Community-owned identity tables.
 type Identity struct {
-	ID                 string `json:"id"`
-	TenantID           string `json:"tenantId"`
-	TenantName         string `json:"tenantName"`
-	Email              string `json:"email"`
-	DisplayName        string `json:"displayName,omitempty"`
-	Role               string `json:"role"`
-	Status             string `json:"status"`
-	AuthProvider       string `json:"authProvider"`
-	TimeZone           string `json:"timeZone,omitempty"`
-	Theme              string `json:"theme,omitempty"`
-	SystemAdmin        bool   `json:"systemAdmin,omitempty"`
-	MustChangePassword bool   `json:"mustChangePassword"`
+	ID                 string     `json:"id"`
+	TenantID           string     `json:"tenantId"`
+	TenantName         string     `json:"tenantName"`
+	Username           string     `json:"username"`
+	EmailVerifiedAt    *time.Time `json:"emailVerifiedAt,omitempty"`
+	Email              string     `json:"email"`
+	DisplayName        string     `json:"displayName,omitempty"`
+	Role               string     `json:"role"`
+	Status             string     `json:"status"`
+	AuthProvider       string     `json:"authProvider"`
+	TimeZone           string     `json:"timeZone,omitempty"`
+	Theme              string     `json:"theme,omitempty"`
+	SystemAdmin        bool       `json:"systemAdmin,omitempty"`
+	MustChangePassword bool       `json:"mustChangePassword"`
 }
 
 // IdentityThemeProvider persists appearance in the edition-owned identity store.

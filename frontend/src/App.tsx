@@ -78,7 +78,7 @@ import {
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { apiGet, apiPatch, apiPost } from './api/client';
-import { AUTH_EXPIRED_EVENT, clearStoredAuthSession, readStoredAuthSession, writeStoredAuthSession } from './auth/session';
+import { AUTH_EXPIRED_EVENT, AUTH_SESSION_KEY, AUTH_CHANGED_EVENT, bindRequestSession, clearStoredAuthSession, readStoredAuthSession, writeStoredAuthSession } from './auth/session';
 import type { ApiLoginResponse, AuthSession } from './auth/types';
 import { setUserTimeZone as setSharedUserTimeZone } from './lib/date-time';
 import { hasUnreadReleaseNotes, markReleaseNotesViewed } from './lib/release-notes';
@@ -300,7 +300,7 @@ const locales: Record<LocaleCode, {
       tags: ['Tag Management', 'Create and maintain reusable application tags'],
       users: ['User Management', 'Create and maintain platform users'],
       tenants: ['Tenant Management', 'Create and maintain isolated tenants'],
-      email_settings: ['Email Settings', 'Configure password recovery email delivery'],
+      email_settings: ['Email Service', 'Configure SMTP and test email delivery'],
       upgrades: ['Platform Upgrade', 'Check releases and perform a manual blue-green upgrade'],
       profile: ['Basic Information', 'View and update your account'],
       login: ['', ''],
@@ -782,11 +782,19 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
     [extensionModules],
   );
   const [authSession, setAuthSession] = useState<AuthSession | null>(() => readStoredAuthSession());
+  bindRequestSession(authSession?.session.token || '');
+  useEffect(() => {
+    const synchronize = () => { window.location.reload(); };
+    const storage = (event: StorageEvent) => { if ((event.key === AUTH_SESSION_KEY || event.key === null) && (readStoredAuthSession()?.session.token || '') !== (authSession?.session.token || '')) synchronize(); };
+    window.addEventListener('storage', storage);
+    window.addEventListener(AUTH_CHANGED_EVENT, synchronize);
+    return () => { window.removeEventListener('storage', storage); window.removeEventListener(AUTH_CHANGED_EVENT, synchronize); };
+  }, [authSession?.session.token]);
   const [productInfo, setProductInfo] = useState<ApiProductInfo | null>(null);
   const [productCapabilities, setProductCapabilities] = useState<Record<string, { enabled?: boolean }>>({});
   const clusterRegistrationAllowed = !hasEnterpriseAuditModule || productInfo?.license?.status === 'active';
   const [passwordChangeCompleted, setPasswordChangeCompleted] = useState(false);
-  const [view, setView] = useState<View>(() => readStoredAuthSession() ? (readStoredView() || 'dashboard') : 'login');
+  const [view, setView] = useState<View>(() => { const restored=readStoredView(); const session=readStoredAuthSession(); return session ? (restored==='users'&&modules.some(m=>m.id==='platform-users') ? (session.user.systemAdmin?'extension:platform-users':'extension:members') : restored||'dashboard') : 'login'; });
   const [timeZonePreference, setTimeZonePreference] = useState(() => authSession?.user.timeZone || '');
   const [timeZoneDrawerOpen, setTimeZoneDrawerOpen] = useState(false);
   const [draftTimeZone, setDraftTimeZone] = useState(() => authSession?.user.timeZone || '');
@@ -1508,7 +1516,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
 
 
   const secondaryNav = useMemo(() => {
-    if (view === 'profile') return null;
+    if (view === 'profile' && !modules.some(module => module.id === 'platform-users')) return null;
     if (activeModule === 'overview') return null;
     if (activeModule === 'dr') {
       return {
@@ -1548,15 +1556,16 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
       items: productCapabilities.advancedIdentity?.enabled
         ? [
             ...visibleExtensionModules.filter(module => module.navigation.group === 'settings').map(module => ({ label: module.navigation.label, desc: module.navigation.description, view: module.view as View, icon: module.navigation.icon })),
-            ...(authSession?.user.systemAdmin ? [{ label: 'Platform Upgrade', desc: 'Check releases and perform a manual blue-green upgrade', view: 'upgrades' as View, icon: ArrowUpCircle }, { label: 'Email Settings', desc: 'Configure password recovery email delivery', view: 'email_settings' as View, icon: Mail }] : []),
+            ...(authSession?.user.systemAdmin ? [{ label: 'Platform Upgrade', desc: 'Check releases and perform a manual blue-green upgrade', view: 'upgrades' as View, icon: ArrowUpCircle }, { label: 'Email Service', desc: 'Configure SMTP and test email delivery', view: 'email_settings' as View, icon: Mail }] : []),
           ]
         : [
-            ...(authSession?.user.systemAdmin ? [{ label: 'User Management', desc: 'Manage the built-in Community administrator', view: 'users' as View, icon: User }] : []),
+            ...(authSession?.user.systemAdmin && !modules.some(m=>m.id==='platform-users') ? [{ label: 'User Management', desc: 'Manage the built-in Community administrator', view: 'users' as View, icon: User }] : []),
+            ...(modules.some(m=>m.id==='platform-users') ? [{label:'Personal Information',desc:'Your account details and organization',view:'profile' as View,icon:User}] : []),
             ...visibleExtensionModules.filter(module => module.navigation.group === 'settings').map(module => ({ label: module.navigation.label, desc: module.navigation.description, view: module.view as View, icon: module.navigation.icon })),
-            ...(authSession?.user.systemAdmin ? [{ label: 'Platform Upgrade', desc: 'Check releases and perform a manual blue-green upgrade', view: 'upgrades' as View, icon: ArrowUpCircle }, { label: 'Email Settings', desc: 'Configure password recovery email delivery', view: 'email_settings' as View, icon: Mail }] : []),
+            ...(authSession?.user.systemAdmin ? [{ label: 'Platform Upgrade', desc: 'Check releases and perform a manual blue-green upgrade', view: 'upgrades' as View, icon: ArrowUpCircle }, { label: 'Email Service', desc: 'Configure SMTP and test email delivery', view: 'email_settings' as View, icon: Mail }] : []),
           ],
     };
-  }, [activeModule, authSession?.user.systemAdmin, hasEnterpriseAuditModule, productCapabilities.advancedAudit?.enabled, productCapabilities.advancedIdentity?.enabled, visibleExtensionModules, view]);
+  }, [activeModule, authSession?.user.systemAdmin, hasEnterpriseAuditModule, productCapabilities.advancedAudit?.enabled, productCapabilities.advancedIdentity?.enabled, visibleExtensionModules, view, modules]);
 
   const openView = (nextView: View, options: { preserveSelectedCluster?: boolean; diagnosticTaskId?: string } = {}) => {
     if (!options.preserveSelectedCluster && (nextView === 'dashboard' || nextView === 'applications' || nextView === 'failback')) {
@@ -1691,12 +1700,12 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
                 <span>{authFlow === 'login' ? 'Welcome to HyperCDR' : authFlow === 'forgot' ? 'Forgot your password?' : 'Set a new password'}</span>
                 <LanguageIndicator locale={locale} compact />
               </h2>
-              {authFlow !== 'login' && <p className="hbdr-auth-description">{authFlow === 'forgot' ? 'Enter your registered email address and we will send a reset link.' : 'Choose a new password for your account.'}</p>}
+              {authFlow !== 'login' && <p className="hbdr-auth-description">{authFlow === 'forgot' ? 'Enter your verified bound email address and we will send a reset link.' : 'Choose a new password for your account.'}</p>}
               <div className="hbdr-login-form grid gap-4">
                 <label className="hbdr-login-field">
                   <User size={15} />
                   <input
-                    placeholder="Email Address"
+                    placeholder={authFlow === 'login' ? 'Email or login account' : 'Bound email address'}
                     value={loginEmail}
                     onChange={event => setLoginEmail(event.target.value)}
                     autoComplete="username"
@@ -1879,7 +1888,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
                   <span><User size={18} /></span>
                   <div>
                     <strong>{authSession?.user.email || 'admin'}</strong>
-                    <small>{authSession?.user.role || 'User'}</small>
+                    <small>{authSession?.user.systemAdmin?'Platform administrator':authSession?.user.role==='admin'?'Organization administrator':'Member'}</small>
                   </div>
                 </div>
                 <button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); openView('profile'); }}>
@@ -1929,13 +1938,15 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
               </button>
             </div>
             <div className="hbdr-secondary-menu">
-              {secondaryNav.items.map(item => {
+              {secondaryNav.items.map((item, index) => {
+                const sectionFor=(v:string)=>v==='profile'||v==='extension:signin-security'?'Personal settings':v==='extension:organization'||v==='extension:members'?'Organization management':'Platform management';
+                const section=sectionFor(item.view);
+                const showSection=activeModule==='settings'&&modules.some(m=>m.id==='platform-users')&&(index===0||sectionFor(secondaryNav.items[index-1].view)!==section);
                 const availableBeforeClusterRegistration = onboarding === 'register' && (item.view === 'storage' || item.view === 'policies');
                 const blocked = navBlockedViews.has(item.view) && onboarding !== 'ready' && item.view !== 'clusters' && !availableBeforeClusterRegistration;
                 const disabled = blocked;
                 return (
-                  <button
-                    key={item.view}
+                  <React.Fragment key={item.view}>{showSection&&<div className="hc-settings-nav-group">{section}</div>}<button
                     data-view={item.view}
                     onClick={() => { if (disabled) { setToast(onboardingMessage); openView('clusters'); return; } openView(item.view); }}
                     disabled={disabled}
@@ -1947,7 +1958,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
                       <strong>{item.label}</strong>
                       <small>{item.desc}</small>
                     </span>
-                  </button>
+                  </button></React.Fragment>
                 );
               })}
             </div>
@@ -1955,11 +1966,11 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
         )}
 
         <section className="premium-content flex-1 overflow-y-auto">
-          <AnimatePresence mode="wait">
+          <AnimatePresence mode={activeModule === 'settings' ? 'sync' : 'wait'}>
             {view === 'dashboard' && (
               <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                 <React.Suspense fallback={<PageLoadFallback />}><LazyOverviewPage
-                  organizationScoped={!authSession?.user.systemAdmin}
+                  organizationScoped={true}
                   cluster={dashboardCluster}
                   clusters={clusters}
                   storage={storage}
@@ -2163,7 +2174,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
             {view === 'users' && authSession?.user.systemAdmin && !productCapabilities.advancedIdentity?.enabled && <React.Suspense fallback={<PageLoadFallback />}><LazyCommunityUserManagementPage currentUser={authSession.user} toast={setToast} /></React.Suspense>}
             {view === 'profile' && authSession && ProfileComponent && <ProfileComponent currentUser={authSession.user} clusters={liveApiClusters} toast={setToast} onCurrentUserChange={user => { sessionMutationScope(resourceSessionOwnerRef, authSession.session.token)(() => { const next = { ...authSession, user }; setAuthSession(next); writeStoredAuthSession(next); }); }} />}
             {view === 'profile' && authSession && !ProfileComponent && <React.Suspense fallback={<PageLoadFallback />}><LazyProfilePage session={authSession} setSession={next => { sessionMutationScope(resourceSessionOwnerRef, next.session.token)(() => { setAuthSession(next); writeStoredAuthSession(next); }); }} toast={message => { sessionMutationScope(resourceSessionOwnerRef, authSession.session.token)(() => setToast(message)); }} /></React.Suspense>}
-            {authSession && visibleExtensionModules.map(module => view === module.view ? <React.Suspense key={module.id} fallback={<PageLoadFallback />}><module.component currentUser={authSession.user} clusters={liveApiClusters} toast={setToast} onCurrentUserChange={user => { sessionMutationScope(resourceSessionOwnerRef, authSession.session.token)(() => { const next = { ...authSession, user }; setAuthSession(next); writeStoredAuthSession(next); }); }} /></React.Suspense> : null)}
+            {authSession && visibleExtensionModules.map(module => view === module.view ? <React.Suspense key={module.id} fallback={<PageLoadFallback />}><module.component key={authSession.session.token} currentUser={authSession.user} clusters={liveApiClusters} toast={setToast} onCurrentUserChange={user => { sessionMutationScope(resourceSessionOwnerRef, authSession.session.token)(() => { const next = { ...authSession, user }; setAuthSession(next); writeStoredAuthSession(next); }); }} /></React.Suspense> : null)}
           </AnimatePresence>
         </section>
       </main>

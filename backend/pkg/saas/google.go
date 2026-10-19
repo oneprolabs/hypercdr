@@ -135,7 +135,7 @@ func (s *Service) googleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var emailExists bool
-	e = s.db.QueryRowContext(r.Context(), `select exists(select 1 from users where lower(email)=$1)`, claims.Email).Scan(&emailExists)
+	e = s.db.QueryRowContext(r.Context(), `select exists(select 1 from users where (lower(email)=$1 or lower(username)=$1))`, claims.Email).Scan(&emailExists)
 	if e != nil {
 		s.googleError(w, r, "identity_unavailable")
 		return
@@ -203,7 +203,7 @@ func (s *Service) linkGoogle(w http.ResponseWriter, r *http.Request, p platform.
 		problem(w, 400, "reauthentication_required", "Verify your current password before linking Google.")
 		return
 	}
-	identity, ok, e := s.identity.Authenticate(r.Context(), p.Email, in.Password)
+	identity, ok, e := s.identity.Authenticate(r.Context(), p.Username, in.Password)
 	if e != nil || !ok || identity.ID != p.ID {
 		problem(w, 403, "reauthentication_required", "Your current password could not be verified.")
 		return

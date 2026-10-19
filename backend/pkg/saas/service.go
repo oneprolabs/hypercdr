@@ -27,7 +27,7 @@ func Open(ctx context.Context, databaseURL string, cfg Config) (*Service, func()
 type communityIdentity struct{ repo *store.PostgresStore }
 
 func identity(u store.User) platform.Identity {
-	return platform.Identity{ID: u.ID, TenantID: u.TenantID, TenantName: u.TenantName, Email: u.Email, DisplayName: u.DisplayName, Role: u.Role, Status: u.Status, AuthProvider: u.AuthProvider, TimeZone: u.TimeZone, Theme: u.Theme, SystemAdmin: u.SystemAdmin, MustChangePassword: u.MustChangePassword}
+	return platform.Identity{ID: u.ID, TenantID: u.TenantID, TenantName: u.TenantName, Username: u.Username, EmailVerifiedAt: u.EmailVerifiedAt, Email: u.Email, DisplayName: u.DisplayName, Role: u.Role, Status: u.Status, AuthProvider: u.AuthProvider, TimeZone: u.TimeZone, Theme: u.Theme, SystemAdmin: u.SystemAdmin, MustChangePassword: u.MustChangePassword}
 }
 func (p communityIdentity) Authenticate(_ context.Context, email, password string) (platform.Identity, bool, error) {
 	u, ok, e := p.repo.AuthenticateUser(store.UserAuthInput{Email: email, Password: password})

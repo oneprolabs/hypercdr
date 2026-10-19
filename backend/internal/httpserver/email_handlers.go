@@ -389,7 +389,7 @@ func (r *Router) forgotPassword(w http.ResponseWriter, req *http.Request) {
 	token, found, err := r.identityProvider.CreatePasswordResetToken(req.Context(), body.Email, 15*time.Minute)
 	if err != nil {
 		r.logger.Error("failed to create reset token", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "reset_request_failed"})
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "reset_request_failed", "message": "Password reset could not be requested. Please try again or contact the administrator."})
 		return
 	}
 	if found && mailConfigured {

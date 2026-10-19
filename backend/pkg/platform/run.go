@@ -214,7 +214,7 @@ func editionRoutes(items []Route) []httpserver.ExtensionRoute {
 			Pattern: item.Pattern,
 			Public:  item.Public,
 			Handler: func(w http.ResponseWriter, req *http.Request, principal httpserver.EditionPrincipal) {
-				handler(w, req, Principal{ID: principal.ID, TenantID: principal.TenantID, Email: principal.Email, Role: principal.Role, SystemAdmin: principal.SystemAdmin})
+				handler(w, req, Principal{Username: principal.Username, ID: principal.ID, TenantID: principal.TenantID, Email: principal.Email, Role: principal.Role, SystemAdmin: principal.SystemAdmin})
 			},
 		})
 	}
@@ -321,7 +321,7 @@ func (a identityProviderAdapter) ResetPassword(ctx context.Context, token, passw
 	return a.provider.ResetPassword(ctx, token, password)
 }
 func editionIdentity(identity Identity) httpserver.EditionIdentity {
-	return httpserver.EditionIdentity{ID: identity.ID, TenantID: identity.TenantID, TenantName: identity.TenantName, Email: identity.Email, DisplayName: identity.DisplayName, Role: identity.Role, Status: identity.Status, AuthProvider: identity.AuthProvider, TimeZone: identity.TimeZone, Theme: identity.Theme, SystemAdmin: identity.SystemAdmin, MustChangePassword: identity.MustChangePassword}
+	return httpserver.EditionIdentity{ID: identity.ID, TenantID: identity.TenantID, TenantName: identity.TenantName, Username: identity.Username, EmailVerifiedAt: identity.EmailVerifiedAt, Email: identity.Email, DisplayName: identity.DisplayName, Role: identity.Role, Status: identity.Status, AuthProvider: identity.AuthProvider, TimeZone: identity.TimeZone, Theme: identity.Theme, SystemAdmin: identity.SystemAdmin, MustChangePassword: identity.MustChangePassword}
 }
 
 func utcLogTime(_ []string, attr slog.Attr) slog.Attr {
@@ -345,6 +345,6 @@ func scopedLicenseStatusProvider(provider func(context.Context, Principal) (Lice
 		return nil
 	}
 	return func(ctx context.Context, p httpserver.EditionPrincipal) (any, error) {
-		return provider(ctx, Principal{ID: p.ID, TenantID: p.TenantID, Email: p.Email, Role: p.Role, SystemAdmin: p.SystemAdmin})
+		return provider(ctx, Principal{Username: p.Username, ID: p.ID, TenantID: p.TenantID, Email: p.Email, Role: p.Role, SystemAdmin: p.SystemAdmin})
 	}
 }

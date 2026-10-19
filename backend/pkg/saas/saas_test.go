@@ -94,7 +94,7 @@ func signup(t *testing.T, s *Service, m *captureMail, email, org string) platfor
 	return out.User
 }
 func principal(u platform.Identity) platform.Principal {
-	return platform.Principal{ID: u.ID, TenantID: u.TenantID, Email: u.Email, Role: u.Role, SystemAdmin: u.SystemAdmin}
+	return platform.Principal{Username: u.Username, ID: u.ID, TenantID: u.TenantID, Email: u.Email, Role: u.Role, SystemAdmin: u.SystemAdmin}
 }
 func TestSignupOrganizationAndInvitationIsolation(t *testing.T) {
 	s, m := newTestService(t)

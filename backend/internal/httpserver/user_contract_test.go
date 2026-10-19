@@ -29,7 +29,7 @@ func TestUserContractsCoverMountedCommunityRoutes(t *testing.T) {
 			t.Fatal("placeholder response remains")
 		}
 	}
-	if count != 4 {
+	if count != 3 {
 		t.Fatalf("coverage %d", count)
 	}
 }
@@ -86,7 +86,6 @@ func TestUserContractsActualResponsesAndRoleOwnerIsolation(t *testing.T) {
 	run("GET /api/v1/users", "/api/v1/users", "", "", 401)
 	for _, item := range []struct{ pattern, suffix, body string }{
 		{"PATCH /api/v1/users/{id}", "", `{"displayName":"Contract administrator"}`},
-		{"PATCH /api/v1/users/{id}/recovery-email", "/recovery-email", `{"email":"recovery@example.com"}`},
 		{"POST /api/v1/users/{id}/password", "/password", `{"password":"new-contract-password"}`},
 	} {
 		run(item.pattern, "/api/v1/users/"+other.ID+item.suffix, item.body, session.Token, 404)

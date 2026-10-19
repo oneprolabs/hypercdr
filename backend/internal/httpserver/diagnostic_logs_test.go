@@ -58,7 +58,7 @@ func TestAccessLogKeepsFailureReason(t *testing.T) {
 	}
 }
 
-func TestSystemAdminCanSelectAllTenants(t *testing.T) {
+func TestSystemAdminDiagnosticsDefaultToOwnOrganization(t *testing.T) {
 	r := &Router{store: newTestStore(t)}
 	req := httptest.NewRequest("GET", "/api/v1/diagnostic-logs", nil)
 	user := store.User{ID: "admin", TenantID: store.DefaultTenantID, SystemAdmin: true}
@@ -67,8 +67,13 @@ func TestSystemAdminCanSelectAllTenants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if filter.TenantID != "" || filter.Scope != "" {
-		t.Fatalf("system admin all-tenant filter changed: %#v", filter)
+	if filter.TenantID != user.TenantID || filter.Scope != "tenant" {
+		t.Fatalf("system admin diagnostics escaped own organization: %#v", filter)
+	}
+	req = httptest.NewRequest("GET", "/api/v1/diagnostic-logs?source=platform&scope=system", nil).WithContext(req.Context())
+	filter, err = r.diagnosticLogFilter(req)
+	if err != nil || filter.Source != "platform" || filter.Scope != "system" {
+		t.Fatalf("platform administrator lost system diagnostics: %#v %v", filter, err)
 	}
 }
 

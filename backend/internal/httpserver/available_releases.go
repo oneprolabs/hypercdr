@@ -93,7 +93,9 @@ func (r *Router) listAvailableReleases(w http.ResponseWriter, req *http.Request)
 		for _, asset := range item.Assets {
 			assets = append(assets, githubAsset{Name: asset.Name, URL: asset.URL})
 		}
-		if item.AssetsURL != "" {
+		// GitHub already embeds assets in the release response. Only request
+		// the separate assets endpoint when the embedded list is absent.
+		if len(assets) == 0 && item.AssetsURL != "" {
 			assetsReq, _ := http.NewRequestWithContext(req.Context(), http.MethodGet, item.AssetsURL, nil)
 			assetsReq.Header.Set("Accept", "application/vnd.github+json")
 			assetsReq.Header.Set("User-Agent", "hypercdr-platform")

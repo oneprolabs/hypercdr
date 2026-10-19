@@ -73,8 +73,8 @@ type ProductInfo struct {
 }
 
 type EditionPrincipal struct {
-	ID, TenantID, Email, Role string
-	SystemAdmin               bool
+	Username, ID, TenantID, Email, Role string
+	SystemAdmin                         bool
 }
 
 type EditionAuthorizationRequest struct {
@@ -134,18 +134,20 @@ type ExtensionRoute struct {
 }
 
 type EditionIdentity struct {
-	ID                 string `json:"id"`
-	TenantID           string `json:"tenantId"`
-	TenantName         string `json:"tenantName"`
-	Email              string `json:"email"`
-	DisplayName        string `json:"displayName,omitempty"`
-	Role               string `json:"role"`
-	Status             string `json:"status"`
-	AuthProvider       string `json:"authProvider"`
-	TimeZone           string `json:"timeZone,omitempty"`
-	Theme              string `json:"theme,omitempty"`
-	SystemAdmin        bool   `json:"systemAdmin,omitempty"`
-	MustChangePassword bool   `json:"mustChangePassword"`
+	ID                 string     `json:"id"`
+	TenantID           string     `json:"tenantId"`
+	TenantName         string     `json:"tenantName"`
+	Username           string     `json:"username"`
+	EmailVerifiedAt    *time.Time `json:"emailVerifiedAt,omitempty"`
+	Email              string     `json:"email"`
+	DisplayName        string     `json:"displayName,omitempty"`
+	Role               string     `json:"role"`
+	Status             string     `json:"status"`
+	AuthProvider       string     `json:"authProvider"`
+	TimeZone           string     `json:"timeZone,omitempty"`
+	Theme              string     `json:"theme,omitempty"`
+	SystemAdmin        bool       `json:"systemAdmin,omitempty"`
+	MustChangePassword bool       `json:"mustChangePassword"`
 }
 
 type EditionIdentitySession struct {
@@ -421,7 +423,7 @@ func (r *Router) clusterVisible(req *http.Request, clusterID string) bool {
 
 func (r *Router) tenantGuard(kind string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
-		user, ok := requestUser(req)
+		_, ok := requestUser(req)
 		if !ok {
 			next(w, req)
 			return
@@ -432,18 +434,18 @@ func (r *Router) tenantGuard(kind string, next http.HandlerFunc) http.HandlerFun
 		case "cluster", "cluster-log":
 			items, _ := r.store.ListClusters()
 			for _, item := range items {
-				if item.ID == id && (item.TenantID == user.TenantID || kind == "cluster-log" && user.SystemAdmin) {
+				if item.ID == id && tenantVisible(req, item.TenantID) {
 					allowed = true
 					break
 				}
 			}
 		case "storage":
 			item, found, _ := r.store.GetStorageRepository(id)
-			allowed = found && item.TenantID == user.TenantID
+			allowed = found && tenantVisible(req, item.TenantID)
 		case "policy":
 			items, _ := r.store.ListPolicies()
 			for _, item := range items {
-				if item.ID == id && item.TenantID == user.TenantID {
+				if item.ID == id && tenantVisible(req, item.TenantID) {
 					allowed = true
 					break
 				}
@@ -451,20 +453,20 @@ func (r *Router) tenantGuard(kind string, next http.HandlerFunc) http.HandlerFun
 		case "tag":
 			items, _ := r.store.ListTags()
 			for _, item := range items {
-				if item.ID == id && item.TenantID == user.TenantID {
+				if item.ID == id && tenantVisible(req, item.TenantID) {
 					allowed = true
 					break
 				}
 			}
 		case "plan":
 			item, found, _ := r.store.GetProtectionPlan(id)
-			allowed = found && item.TenantID == user.TenantID
+			allowed = found && tenantVisible(req, item.TenantID)
 		case "application":
 			app, found, _ := r.store.GetApplication(id)
 			if found {
 				clusters, _ := r.store.ListClusters()
 				for _, cluster := range clusters {
-					if cluster.ID == app.ClusterID && cluster.TenantID == user.TenantID {
+					if cluster.ID == app.ClusterID && tenantVisible(req, cluster.TenantID) {
 						allowed = true
 						break
 					}
@@ -473,7 +475,7 @@ func (r *Router) tenantGuard(kind string, next http.HandlerFunc) http.HandlerFun
 		case "task":
 			items, _ := r.store.ListTasks("")
 			for _, item := range items {
-				if item.ID == id && item.TenantID == user.TenantID {
+				if item.ID == id && tenantVisible(req, item.TenantID) {
 					allowed = true
 					break
 				}
@@ -485,25 +487,6 @@ func (r *Router) tenantGuard(kind string, next http.HandlerFunc) http.HandlerFun
 		}
 		next(w, req)
 	}
-}
-
-func (r *Router) updateCommunityAdminRecoveryEmail(w http.ResponseWriter, req *http.Request) {
-	actor, ok := requestUser(req)
-	if !ok || !actor.SystemAdmin || actor.ID != req.PathValue("id") {
-		writeJSON(w, 404, map[string]any{"error": "user_not_found"})
-		return
-	}
-	var body communityAdminRecoveryRequest
-	if decodeJSON(req, &body) != nil || !validUserEmail(body.Email) {
-		writeJSON(w, 400, map[string]any{"error": "email_invalid"})
-		return
-	}
-	email, found, err := r.store.SetAdminRecoveryEmail(actor.ID, body.Email)
-	if err != nil || !found {
-		writeJSON(w, 500, map[string]any{"error": "recovery_email_update_failed"})
-		return
-	}
-	writeJSON(w, 200, communityAdminRecoveryResponse{RecoveryEmail: email, Verified: true})
 }
 
 func (r *Router) updateCommunityAdmin(w http.ResponseWriter, req *http.Request) {

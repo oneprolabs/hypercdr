@@ -64,3 +64,15 @@ test('simultaneous GETs share work only within the same session', async t => {
  assert.deepEqual(await first, await duplicate);
  assert.equal((await next).token, 'Bearer session-2');
 });
+
+test('rendered identity cannot borrow another tab credentials or accept its responses', async t => {
+ const { signIn, events } = setup(t);
+ const { bindRequestSession } = await import('../auth/session.ts');
+ bindRequestSession('session-1');
+ t.after(()=>bindRequestSession(undefined));
+ signIn('session-2');
+ await assert.rejects(apiGet('/api/v1/saas/members'), /signed-in account changed/);
+ assert.equal(globalThis.fetch.mock.callCount(), 0);
+ assert.ok(events.includes('hypercdr:auth-changed'));
+ await assert.rejects(ensureApiResponse(new Response('{}'), '/api/v1/clusters', 'session-1'), /previous account/);
+});
