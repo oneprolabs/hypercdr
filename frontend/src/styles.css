@@ -27995,7 +27995,8 @@ html[data-theme='dark'] #root .premium-app .hbdr-protect-wizard-inline [role="ra
   overflow-x:auto;
   color:#dbeafe;
   font:400 11px/1.55 'IBM Plex Mono',ui-monospace,monospace;
-  white-space:pre;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
 }
 #root .premium-app.hbdr-workspace .hbdr-kubeconfig-command pre::selection,
 #root .premium-app.hbdr-workspace .hbdr-register-command-compact pre::selection,

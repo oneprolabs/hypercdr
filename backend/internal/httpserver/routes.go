@@ -95,6 +95,7 @@ func (r *Router) routes() {
 	r.handleRoute("POST /api/v1/agent-tokens/validate", r.validateAgentToken)
 	r.handleRoute("GET /prepare-node.sh", r.prepareNodeScript)
 	r.handleRoute("GET /install.sh", r.installScript)
+	r.handleRoute("GET /check-cluster.sh", r.clusterAccessScript)
 	r.handleRoute("GET /uninstall-agent.sh", r.agentUninstallScript)
 	r.handleRoute("GET /disaster-handover.sh", r.disasterHandoverScript)
 	r.handleRoute("POST /api/v1/disaster-handovers/validate", r.validateDisasterHandoverToken)

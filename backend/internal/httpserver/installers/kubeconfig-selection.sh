@@ -1,87 +1,83 @@
-# Shared kubeconfig selection for the three command-based cluster installers.
-# Platform-direct registration supplies its temporary file and context through
-# internal arguments, so it bypasses the interactive menu.
-HCDR_COMMAND_KUBECONFIG_DIR="/etc/hypercdr/kubeconfigs"
-
+# Shared by the read-only access checker and all three installers. Keep the
+# caller's identity and merged KUBECONFIG intact; never switch to a root shell.
 select_registration_kubeconfig() {
-  local candidate mode choice index context server contexts_output
-  local -a candidates=() contexts=()
-
-  if [[ -z "$KUBECONFIG_PATH" ]]; then
-    [[ "$INTERACTIVE" == "true" ]] || fail "Command registration needs an interactive terminal to select a kubeconfig from ${HCDR_COMMAND_KUBECONFIG_DIR}."
-    (( EUID == 0 )) || fail "Run the registration command from a root shell so it can read ${HCDR_COMMAND_KUBECONFIG_DIR}."
-    [[ -d "$HCDR_COMMAND_KUBECONFIG_DIR" ]] || fail "Kubeconfig directory ${HCDR_COMMAND_KUBECONFIG_DIR} does not exist. Create it and place a cluster-admin kubeconfig there."
-    mode="$(stat -c '%a' "$HCDR_COMMAND_KUBECONFIG_DIR" 2>/dev/null || true)"
-    [[ "$mode" =~ ^[0-7]+$ ]] && (( (8#$mode & 077) == 0 )) || fail "Protect ${HCDR_COMMAND_KUBECONFIG_DIR} with chmod 700."
-    if ! { exec 3<>/dev/tty; } 2>/dev/null; then
-      fail "Open a terminal and rerun the registration command to choose a kubeconfig from ${HCDR_COMMAND_KUBECONFIG_DIR}."
-    fi
-    shopt -s nullglob
-    for candidate in "$HCDR_COMMAND_KUBECONFIG_DIR"/*.yaml "$HCDR_COMMAND_KUBECONFIG_DIR"/*.yml "$HCDR_COMMAND_KUBECONFIG_DIR"/*.json; do
-      [[ -f "$candidate" && ! -L "$candidate" && -r "$candidate" ]] || continue
-      mode="$(stat -c '%a' "$candidate" 2>/dev/null || true)"
-      [[ "$mode" =~ ^[0-7]+$ ]] || continue
-      if (( (8#$mode & 077) != 0 )); then
-        printf 'Skipping %s: use chmod 600 to protect cluster credentials.\n' "$candidate" >&3
-        continue
-      fi
-      contexts_output="$(command "$KUBECTL_BIN" --kubeconfig "$candidate" config get-contexts -o name 2>/dev/null || true)"
-      [[ -n "$contexts_output" ]] || continue
-      candidates+=("$candidate")
-    done
-    shopt -u nullglob
-    if (( ${#candidates[@]} == 0 )); then
-      exec 3>&-
-      fail "No valid, private .yaml, .yml, or .json kubeconfig was found in ${HCDR_COMMAND_KUBECONFIG_DIR}."
-    fi
-    printf 'Kubeconfig files in %s:\n' "$HCDR_COMMAND_KUBECONFIG_DIR" >&3
-    for index in "${!candidates[@]}"; do
-      candidate="${candidates[$index]}"
-      context="$(command "$KUBECTL_BIN" --kubeconfig "$candidate" config current-context 2>/dev/null || true)"
-      server="$(command "$KUBECTL_BIN" --kubeconfig "$candidate" config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || true)"
-      printf '%d) %s  [%s · %s]\n' "$((index+1))" "${candidate##*/}" "${context:-no current context}" "${server:-API unknown}" >&3
-    done
-    while true; do
-      printf 'Select a kubeconfig [1-%d], or 0 to cancel: ' "${#candidates[@]}" >&3
-      IFS= read -r choice <&3 || { exec 3>&-; fail "Kubeconfig selection was canceled."; }
-      [[ "$choice" == "0" ]] && { exec 3>&-; fail "Kubeconfig selection was canceled."; }
-      if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#candidates[@]} )); then break; fi
-      printf 'Enter a number from 1 to %d.\n' "${#candidates[@]}" >&3
-    done
-    KUBECONFIG_PATH="${candidates[$((choice-1))]}"
-    exec 3>&-
+  local contexts_output context server identity answer candidate
+  local -a contexts=() files=()
+  local supplied="${KUBECONFIG_PATH:-}"
+  if [[ -n "$supplied" ]]; then
+    [[ -r "$supplied" && -f "$supplied" ]] || fail "Kubeconfig is not readable: ${supplied}"
+    export KUBECONFIG="$supplied"
   fi
-
-  [[ -r "$KUBECONFIG_PATH" ]] || fail "Kubeconfig is not readable: ${KUBECONFIG_PATH}"
-  export KUBECONFIG="$KUBECONFIG_PATH"
-  contexts_output="$(command "$KUBECTL_BIN" --kubeconfig "$KUBECONFIG_PATH" config get-contexts -o name 2>/dev/null || true)"
-  [[ -n "$contexts_output" ]] || fail "The selected kubeconfig has no valid contexts: ${KUBECONFIG_PATH}"
+  contexts_output="$(command "$KUBECTL_BIN" config get-contexts -o name 2>/dev/null || true)"
+  if [[ -z "$contexts_output" ]]; then
+    [[ "$INTERACTIVE" == "true" ]] || fail "No cluster configuration found. Configure KUBECONFIG or supply --kubeconfig before retrying."
+    if ! { exec 3<>/dev/tty; } 2>/dev/null; then fail "Open an interactive terminal to provide your kubeconfig path."; fi
+    printf 'No cluster configuration found.\nEnter the full path to your kubeconfig (empty to cancel): ' >&3
+    IFS= read -r candidate <&3 || candidate=""
+    exec 3>&-
+    [[ -n "$candidate" ]] || fail "Cluster access check canceled; no changes were made."
+    [[ "$candidate" == '~/'* ]] && candidate="$HOME/${candidate:2}"
+    [[ -f "$candidate" && -r "$candidate" ]] || fail "Kubeconfig is not readable: ${candidate}. Upload the downloaded file to this Linux host and retry."
+    export KUBECONFIG="$candidate"
+    contexts_output="$(command "$KUBECTL_BIN" config get-contexts -o name 2>/dev/null || true)"
+  fi
+  [[ -n "$contexts_output" ]] || fail "No valid contexts found. Check your kubeconfig, KUBECONFIG environment variable, or complete oc login for OpenShift."
+  # Do not silently change permissions on users' existing credential files.
+  IFS=: read -r -a files <<< "${KUBECONFIG:-$HOME/.kube/config}"
+  for candidate in "${files[@]}"; do
+    [[ -n "$candidate" ]] || continue
+    [[ ! -e "$candidate" || -r "$candidate" ]] || fail "Kubeconfig is not readable: ${candidate}"
+  done
   mapfile -t contexts <<< "$contexts_output"
   if [[ -z "$KUBECTL_CONTEXT" ]]; then
-    if (( ${#contexts[@]} == 1 )); then
-      KUBECTL_CONTEXT="${contexts[0]}"
-    elif (( ${#contexts[@]} > 1 )); then
-      [[ "$INTERACTIVE" == "true" ]] || fail "The selected kubeconfig contains multiple contexts; choose one interactively."
-      if ! { exec 3<>/dev/tty; } 2>/dev/null; then fail "Open a terminal to choose a context from ${KUBECONFIG_PATH}."; fi
-      printf 'Contexts in %s:\n' "${KUBECONFIG_PATH##*/}" >&3
-      for index in "${!contexts[@]}"; do
-        context="${contexts[$index]}"
-        server="$(command "$KUBECTL_BIN" --kubeconfig "$KUBECONFIG_PATH" --context "$context" config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || true)"
-        printf '%d) %s  [%s]\n' "$((index+1))" "$context" "${server:-API unknown}" >&3
-      done
-      while true; do
-        printf 'Select a context [1-%d], or 0 to cancel: ' "${#contexts[@]}" >&3
-        IFS= read -r choice <&3 || { exec 3>&-; fail "Context selection was canceled."; }
-        [[ "$choice" == "0" ]] && { exec 3>&-; fail "Context selection was canceled."; }
-        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#contexts[@]} )); then break; fi
-        printf 'Enter a number from 1 to %d.\n' "${#contexts[@]}" >&3
-      done
-      KUBECTL_CONTEXT="${contexts[$((choice-1))]}"
+    KUBECTL_CONTEXT="$(command "$KUBECTL_BIN" config current-context 2>/dev/null || true)"
+    if [[ -z "$KUBECTL_CONTEXT" && ${#contexts[@]} -eq 1 ]]; then KUBECTL_CONTEXT="${contexts[0]}"; fi
+    if [[ -z "$KUBECTL_CONTEXT" ]]; then
+      [[ "$INTERACTIVE" == "true" ]] || fail "No current context. Select a context before retrying."
+      if ! { exec 3<>/dev/tty; } 2>/dev/null; then fail "Open a terminal to select your cluster context."; fi
+      printf 'Available contexts:\n' >&3
+      printf '  %s\n' "${contexts[@]}" >&3
+      printf 'Enter the context name (empty to cancel): ' >&3
+      IFS= read -r KUBECTL_CONTEXT <&3 || KUBECTL_CONTEXT=""
+      exec 3>&-
     fi
   fi
-  if ! printf '%s\n' "${contexts[@]}" | grep -Fxq "$KUBECTL_CONTEXT"; then
-    fail "Context '${KUBECTL_CONTEXT}' was not found in ${KUBECONFIG_PATH}."
+  printf '%s\n' "${contexts[@]}" | grep -Fxq -- "$KUBECTL_CONTEXT" || fail "Context '${KUBECTL_CONTEXT}' was not found. Select the intended cluster context and retry."
+  # Every request, including the installer, uses the exact context shown here.
+  export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+  KUBECONFIG_PATH="$KUBECONFIG"
+  server="$(command "$KUBECTL_BIN" --context "$KUBECTL_CONTEXT" config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || true)"
+  identity="$(command "$KUBECTL_BIN" --context "$KUBECTL_CONTEXT" config view --minify -o jsonpath='{.contexts[0].context.user}' 2>/dev/null || true)"
+  [[ -n "$server" ]] || fail "The selected context has no API endpoint. Repair the kubeconfig and retry."
+  printf '\nCluster access check\nContext:          %s\nAPI endpoint:     %s\nCredential entry: %s\n\n' "$KUBECTL_CONTEXT" "$server" "${identity:-not named}"
+}
+
+verify_registration_access() {
+  local answer permissions access_output
+  # A direct, bounded request avoids discovery retries and does not download
+  # the full namespace inventory merely to prove access.
+  if ! access_output="$(command "$KUBECTL_BIN" --context "$KUBECTL_CONTEXT" --request-timeout=15s get --raw='/api/v1/namespaces?limit=1' 2>&1)"; then
+    case "$access_output" in
+      *Unauthorized*|*"must be logged in"*|*"provide credentials"*|*"token has expired"*) fail "Cluster credentials are invalid or expired. Refresh the kubeconfig; for OpenShift, complete oc login again. No cluster changes were made." ;;
+      *Forbidden*|*forbidden*) fail "The credentials cannot list namespaces. Use a cluster administrator account and retry. No cluster changes were made." ;;
+      *x509*|*certificate*) fail "Cluster API certificate verification failed. Use a valid kubeconfig with the correct cluster CA. No cluster changes were made." ;;
+      *) fail "Cannot access the cluster API. Check the API address, network, VPN, and kubeconfig. No cluster changes were made." ;;
+    esac
   fi
-  server="$(command "$KUBECTL_BIN" --kubeconfig "$KUBECONFIG_PATH" --context "$KUBECTL_CONTEXT" config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || true)"
-  printf 'Using %s · context %s · API %s\n' "${KUBECONFIG_PATH##*/}" "$KUBECTL_CONTEXT" "${server:-unknown}"
+  printf '✓ API connection and namespace access verified\n'
+  permissions="$(command "$KUBECTL_BIN" --context "$KUBECTL_CONTEXT" --request-timeout=15s auth can-i '*' '*' --all-namespaces 2>/dev/null || true)"
+  [[ "$permissions" == "yes" || "$permissions" == "no" ]] || fail "Could not verify administrator permissions. Check API availability and credential validity, then retry. No cluster changes were made."
+  [[ "$permissions" == "yes" ]] || fail "Cluster administrator permissions are required. Ask your cluster administrator to provide suitable credentials, then retry. No cluster changes were made."
+  printf '✓ Cluster administrator permissions verified\n'
+  if [[ "${CLUSTER_TYPE:-}" == "openshift" ]]; then
+    command "$KUBECTL_BIN" --context "$KUBECTL_CONTEXT" --request-timeout=15s get --raw=/apis/config.openshift.io/v1/clusterversions/version >/dev/null || fail "The selected context could not be verified as OpenShift. Check the target cluster and retry."
+    printf '✓ OpenShift API verified\n'
+  fi
+  if [[ "$INTERACTIVE" == "true" ]]; then
+    if ! { exec 3<>/dev/tty; } 2>/dev/null; then fail "Open an interactive terminal to confirm the target cluster."; fi
+    printf '\nIs this the cluster you want to register? [y/N]: ' >&3
+    IFS= read -r answer <&3 || answer=""
+    exec 3>&-
+    [[ "$answer" =~ ^([Yy]|[Yy][Ee][Ss])$ ]] || fail "Registration canceled; no cluster changes were made."
+  fi
 }

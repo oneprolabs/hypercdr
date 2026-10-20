@@ -103,7 +103,7 @@ export default function ClusterPage(props: {
   const [registerOpen, setRegisterOpen] = useState(false);
   const [licenseGuideOpen, setLicenseGuideOpen] = useState(false);
   const [registrationType, setRegistrationType] = useState<ClusterRegistrationType>('native-kubernetes');
-  const [cceRegistrationMode, setCCERegistrationMode] = useState<CCERegistrationMode>('platform-direct');
+  const [cceRegistrationMode, setCCERegistrationMode] = useState<CCERegistrationMode>('command');
   const [cceUpload, setCCEUpload] = useState<CCEKubeconfigUpload | null>(null);
   const [cceContext, setCCEContext] = useState('');
   const [cceUploadLoading, setCCEUploadLoading] = useState(false);
@@ -371,6 +371,7 @@ export default function ClusterPage(props: {
       return;
     }
     setRegisterStep(1);
+    setCCERegistrationMode('command');
     setCopied(false);
     setInstallError(null);
     setRegistrationBaseline(clusters.map(cluster => cluster.id));

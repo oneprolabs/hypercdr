@@ -58,7 +58,7 @@ export function ProtectApplicationsWizard(props: Props & { onResourcesChanged: (
   const installCommandRef = useRef<HTMLTextAreaElement>(null);
   const registryCACommandRef = useRef<HTMLTextAreaElement>(null);
   const [registrationBaseline, setRegistrationBaseline] = useState<string[]>([]);
-  const [registrationMode, setRegistrationMode] = useState<'command' | 'platform'>('platform');
+  const [registrationMode, setRegistrationMode] = useState<'command' | 'platform'>('command');
   const [registrationType, setRegistrationType] = useState<RegistrationType>('native-kubernetes');
   const [kubeconfigUpload, setKubeconfigUpload] = useState<KubeconfigUpload | null>(null);
   const [kubeconfigContext, setKubeconfigContext] = useState('');
@@ -145,7 +145,7 @@ export function ProtectApplicationsWizard(props: Props & { onResourcesChanged: (
     else props.setStep((props.step + 1) as ProtectWizardStep);
   };
   const openCreate = (kind: 'target' | 'storage' | 'policy') => {
-    setInlineCreate(kind); setCreationBusy(false); setCreationError(''); setNewName(''); if (kind === 'policy') setPolicyForm(defaultPolicyForm()); if (kind === 'storage') { setStorageDraft(createStorageDraft('S3-Compatible')); setStorageTestResult(null); } if (kind === 'target') { setRegistrationMode('platform'); setRegistrationType('native-kubernetes'); setInstallCommand(''); setPrepareNodeCommand(''); setCommandCopied(false); setRegistrationWatchStarted(false); setCaCommandCopied(false); setKubeconfigUpload(null); setKubeconfigContext(''); setClusterInspection(null); setRegistrationStorageClass(''); setRegistrationTask(null); }
+    setInlineCreate(kind); setCreationBusy(false); setCreationError(''); setNewName(''); if (kind === 'policy') setPolicyForm(defaultPolicyForm()); if (kind === 'storage') { setStorageDraft(createStorageDraft('S3-Compatible')); setStorageTestResult(null); } if (kind === 'target') { setRegistrationMode('command'); setRegistrationType('native-kubernetes'); setInstallCommand(''); setPrepareNodeCommand(''); setCommandCopied(false); setRegistrationWatchStarted(false); setCaCommandCopied(false); setKubeconfigUpload(null); setKubeconfigContext(''); setClusterInspection(null); setRegistrationStorageClass(''); setRegistrationTask(null); }
   };
   const testStorageDraft = async () => {
     if (!storageDraft) return;

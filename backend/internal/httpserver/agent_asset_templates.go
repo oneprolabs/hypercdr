@@ -430,6 +430,7 @@ if [[ ! -x "$KUBECTL_BIN" ]] && ! command -v "$KUBECTL_BIN" >/dev/null 2>&1; the
   fail "kubectl is required but was not found in PATH"
 fi
 provider_select_context
+verify_registration_access
 
 if [[ -z "$ENDPOINT" ]]; then
   if [[ -n "$ENDPOINT_PRIVATE" ]]; then
