@@ -230,7 +230,7 @@ func (r *Router) getProductInfo(w http.ResponseWriter, req *http.Request) {
 			writeJSON(w, http.StatusOK, current)
 			return
 		}
-		license, err := r.scopedLicenseProvider(req.Context(), EditionPrincipal{ID: actor.ID, TenantID: actor.TenantID, Email: actor.Email, Role: actor.Role, SystemAdmin: actor.SystemAdmin})
+		license, err := r.scopedLicenseProvider(req.Context(), EditionPrincipal{Username: actor.Username, ID: actor.ID, TenantID: actor.TenantID, Email: actor.Email, Role: actor.Role, SystemAdmin: actor.SystemAdmin})
 		if err != nil {
 			writeJSON(w, 503, map[string]any{"error": "license_status_unavailable"})
 			return
@@ -337,7 +337,7 @@ func (r *Router) mountExtensionRoutes() {
 				writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "authentication_required"})
 				return
 			}
-			route.Handler(w, req, EditionPrincipal{ID: user.ID, TenantID: user.TenantID, Email: user.Email, Role: user.Role, SystemAdmin: user.SystemAdmin})
+			route.Handler(w, req, EditionPrincipal{Username: user.Username, ID: user.ID, TenantID: user.TenantID, Email: user.Email, Role: user.Role, SystemAdmin: user.SystemAdmin})
 		})
 	}
 }
@@ -398,7 +398,13 @@ type backupTaskRequest struct {
 
 func requestActor(req *http.Request) string {
 	if user, ok := requestUser(req); ok {
-		return user.Email
+		if user.Username != "" {
+			return user.Username
+		}
+		if user.Email != "" {
+			return user.Email
+		}
+		return user.ID
 	}
 	return "System"
 }

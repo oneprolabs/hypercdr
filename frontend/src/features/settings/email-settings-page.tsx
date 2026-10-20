@@ -41,7 +41,7 @@ export default function EmailSettingsPage({ currentUser, toast }: { currentUser:
   const [draft, setDraft] = useState<EmailSettingsDraft | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ApiEmailSettings | null>(null);
   const [testTarget, setTestTarget] = useState<ApiEmailSettings | null>(null);
-  const [recipient, setRecipient] = useState(currentUser.email === 'admin' ? '' : currentUser.email);
+  const [recipient, setRecipient] = useState(currentUser.email || '');
   const [busy, setBusy] = useState('');
   const [query, setQuery] = useState('');
   const [queryField, setQueryField] = useState('name');

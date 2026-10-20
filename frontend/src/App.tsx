@@ -1879,7 +1879,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
               aria-expanded={accountMenuOpen}
             >
               <span className="hbdr-top-user-avatar"><User size={15} /></span>
-              <span>{authSession?.user.email || 'admin'}</span>
+              <span>{authSession?.user.username || 'Account'}</span>
               <ChevronDown size={13} />
             </button>
             {accountMenuOpen && (
@@ -1887,7 +1887,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
                 <div className="hbdr-account-summary">
                   <span><User size={18} /></span>
                   <div>
-                    <strong>{authSession?.user.email || 'admin'}</strong>
+                    <strong>{authSession?.user.username || 'Account'}</strong>
                     <small>{authSession?.user.systemAdmin?'Platform administrator':authSession?.user.role==='admin'?'Organization administrator':'Member'}</small>
                   </div>
                 </div>

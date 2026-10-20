@@ -121,7 +121,7 @@ export function RequiredPasswordChange({
             <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-600"><KeyRound size={20} /></div>
             <h1 className="text-xl font-black tracking-tight text-slate-900">Change your temporary password</h1>
             <p className="mt-2 text-sm leading-6 text-slate-500">For account security, set a new password before entering HyperCDR.</p>
-            <p className="mt-3 text-xs font-semibold text-slate-400">Signed in as <span className="text-slate-600">{session.user.username || session.user.email}</span></p>
+            <p className="mt-3 text-xs font-semibold text-slate-400">Signed in as <span className="text-slate-600">{session.user.username || 'Account'}</span></p>
           </div>
           <div className="space-y-4 px-7 py-6">
             <EditField label="Current Password" type="password" value={currentPassword} onChange={setCurrentPassword} />

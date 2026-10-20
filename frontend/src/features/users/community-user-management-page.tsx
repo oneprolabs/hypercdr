@@ -19,7 +19,7 @@ export default function CommunityUserManagementPage({ toast }: { currentUser:Api
     {id:'select',header:'',size:46,enableSorting:false,cell:()=> <input type="checkbox" aria-label="Select admin" checked={selected} onChange={()=>setSelected(v=>!v)}/>},
     {id:'user',header:'User',accessorFn:r=>r.username,size:220,cell:i=><div><span>{i.row.original.displayName||'Administrator'}</span><p className="text-[11px] font-normal text-slate-400">{i.row.original.username}</p></div>,meta:{kind:'primary'}},
     {id:'role',header:'Role',accessorFn:r=>r.role,size:200,cell:()=> <span>System Administrator</span>,meta:{kind:'secondary'}},
-    {id:'email',header:'Bound email',accessorFn:r=>r.email||'',size:240,cell:i=>i.row.original.email||'Not bound',meta:{kind:'secondary'}},
+    {id:'email',header:'Bound email',accessorFn:r=>r.email||'',size:240,cell:i=>i.row.original.email||<span className="ee-bound-email-unbound">Not bound</span>,meta:{kind:'secondary'}},
     {id:'status',header:'Status',accessorFn:r=>r.status,size:110,meta:{kind:'status'}},{id:'signIn',header:'Sign-in',accessorFn:r=>r.authProvider,size:110,meta:{kind:'secondary'}},
   ];
   const saveProfile=async()=>{if(!admin)return;setBusy(true);try{await apiPatch(`/api/v1/users/${admin.id}`,{displayName});setPanel(null);await load();toast('Administrator profile updated.')}finally{setBusy(false)}};

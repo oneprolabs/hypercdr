@@ -22,7 +22,6 @@ export default function ProfilePage({
   const [displayName, setDisplayName] = useState(
     session.user.displayName || "",
   );
-  const [email, setEmail] = useState(session.user.email);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
@@ -30,7 +29,6 @@ export default function ProfilePage({
   const [passwordEditorOpen, setPasswordEditorOpen] = useState(false);
   const save = async () => {
     const user = await apiPatch<ApiPlatformUser>("/api/v1/auth/me", {
-      email,
       displayName,
     });
     setSession({ ...session, user });
@@ -49,7 +47,7 @@ export default function ProfilePage({
     setPasswordEditorOpen(false);
     toast("Password updated");
   };
-  const initial = (session.user.displayName || session.user.email || "U")
+  const initial = (session.user.displayName || session.user.username || "U")
     .trim()
     .charAt(0)
     .toUpperCase();
@@ -88,18 +86,18 @@ export default function ProfilePage({
             </div>
             <div>
               <span className="text-xs font-semibold text-slate-400">
-                Email Address
+                Bound email
               </span>
               <p className="mt-1 text-sm font-bold text-slate-800">
-                {session.user.email}
+                {session.user.email || <span className="ee-bound-email-unbound">Not bound</span>}
               </p>
             </div>
             <div>
               <span className="text-xs font-semibold text-slate-400">
-                User ID
+                Login account
               </span>
               <p className="mt-1 break-all font-mono text-xs font-semibold text-slate-600">
-                {session.user.id}
+                {session.user.username || "Not available"}
               </p>
             </div>
             <div>
@@ -113,7 +111,6 @@ export default function ProfilePage({
             type="button"
             onClick={() => {
               setDisplayName(session.user.displayName || "");
-              setEmail(session.user.email);
               setProfileEditorOpen(true);
             }}
             className="hbdr-dr-action-primary shrink-0"
@@ -166,11 +163,8 @@ export default function ProfilePage({
             onClose={() => setProfileEditorOpen(false)}
           >
             <div className="space-y-4">
-              <EditField
-                label="Email Address"
-                value={email}
-                onChange={setEmail}
-              />
+              <label>Login account<input readOnly value={session.user.username || ''}/></label>
+              <label>Bound email<input readOnly value={session.user.email} placeholder="Not bound"/></label>
               <EditField
                 label="Display Name"
                 value={displayName}
@@ -181,7 +175,6 @@ export default function ProfilePage({
                   Cancel
                 </button>
                 <button
-                  disabled={!email.trim()}
                   className="hbdr-dr-action-primary"
                   onClick={() =>
                     void save().catch((e) =>

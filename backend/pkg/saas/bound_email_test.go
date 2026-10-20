@@ -39,6 +39,10 @@ func TestBoundEmailAdminAndRegisteredAccountsShareOneModel(t *testing.T) {
 func TestBoundEmailChangePreservesLoginAndInvalidatesOldRecovery(t *testing.T) {
 	s, m := newTestService(t)
 	u := signup(t, s, m, "original@example.test", "Owner")
+	u.Username = "owner-account"
+	if _, e := s.db.Exec(`update users set username=$1 where id=$2`, u.Username, u.ID); e != nil {
+		t.Fatal(e)
+	}
 	p := principal(u)
 	v := signup(t, s, m, "other@example.test", "Other")
 	expect(t, call(t, s, "POST", "/api/v1/saas/account/email", map[string]string{"email": v.Email, "password": "Password123"}, p), 409)
@@ -59,12 +63,16 @@ func TestBoundEmailChangePreservesLoginAndInvalidatesOldRecovery(t *testing.T) {
 		t.Fatal("old address remains a recovery destination")
 	}
 	// Profile edits cannot bypass verified binding.
-	expect(t, call(t, s, "POST", "/api/v1/saas/account/email", map[string]string{"email": u.Username, "password": "Password123"}, principal(v)), 409)
+	expect(t, call(t, s, "POST", "/api/v1/saas/account/email", map[string]string{"email": "final@example.test", "password": "Password123"}, principal(v)), 409)
 }
 
 func TestBoundEmailExpiryConflictAndDeliveryFailure(t *testing.T) {
 	s, m := newTestService(t)
 	u := signup(t, s, m, "bind-owner@example.test", "Owner")
+	u.Username = "bind-owner-account"
+	if _, e := s.db.Exec(`update users set username=$1 where id=$2`, u.Username, u.ID); e != nil {
+		t.Fatal(e)
+	}
 	p := principal(u)
 	request := func(email string) string {
 		expect(t, call(t, s, "POST", "/api/v1/saas/account/email", map[string]string{"email": email, "password": "Password123"}, p), 202)
@@ -84,4 +92,20 @@ func TestBoundEmailExpiryConflictAndDeliveryFailure(t *testing.T) {
 	if e := s.db.QueryRow(`select email from users where id=$1`, u.ID).Scan(&email); e != nil || email != u.Email {
 		t.Fatal("failed verification changed email")
 	}
+}
+
+func TestEmailLoginCannotChangeBoundEmail(t *testing.T) {
+	s, m := newTestService(t)
+	u := signup(t, s, m, "fixed@example.test", "Fixed email")
+	expect(t, call(t, s, "POST", "/api/v1/saas/account/email", map[string]string{"email": "new@example.test", "password": "Password123"}, principal(u)), 409)
+	var email string
+	if e := s.db.QueryRow(`select email from users where id=$1`, u.ID).Scan(&email); e != nil || email != u.Username {
+		t.Fatal("fixed account email changed")
+	}
+	// Previously issued links must not bypass the new policy.
+	_, e := s.db.Exec(`insert into user_email_verifications(token_hash,user_id,email,previous_email,expires_at) values($1,$2,'new@example.test',$3,now()+interval '10 minutes')`, digest("old-link"), u.ID, u.Email)
+	if e != nil {
+		t.Fatal(e)
+	}
+	expect(t, call(t, s, "POST", "/api/v1/saas/auth/email/verify", map[string]string{"token": "old-link"}, platform.Principal{}), 400)
 }

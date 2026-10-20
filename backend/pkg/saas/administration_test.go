@@ -175,3 +175,40 @@ func TestNewOrganizationInvitationCompletesInSelectedOrganization(t *testing.T) 
 	}
 	expect(t, call(t, s, "GET", path, nil, sys), 200)
 }
+
+func TestMembersExposeLoginAccountAndBoundEmailSeparately(t *testing.T) {
+	s, m := newTestService(t)
+	owner := signup(t, s, m, "member-owner@example.test", "Member identity")
+	outsider := signup(t, s, m, "member-outsider@example.test", "Other organization")
+	member := directoryMember(t, s, owner.TenantID, "operator")
+	if _, err := s.db.Exec(`update users set email=null,email_verified_at=null where id=$1`, member); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`update users set email='member-new-address@example.test' where id=$1`, owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []platform.Principal{principal(owner), {ID: member, TenantID: owner.TenantID, Role: "operator"}} {
+		w := call(t, s, "GET", "/api/v1/saas/members", nil, p)
+		expect(t, w, 200)
+		var out struct {
+			Items []struct{ ID, Username, Email string }
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		if len(out.Items) != 2 {
+			t.Fatalf("expected only own organization members: %s", w.Body.String())
+		}
+		for _, u := range out.Items {
+			if u.ID == outsider.ID {
+				t.Fatal("another organization's member exposed")
+			}
+			if u.ID == owner.ID && (u.Username != "member-owner@example.test" || u.Email != "member-new-address@example.test") {
+				t.Fatalf("login account confused with bound email: %+v", u)
+			}
+			if u.ID == member && (u.Username != member+"@example.test" || u.Email != "") {
+				t.Fatalf("unbound member identity incorrect: %+v", u)
+			}
+		}
+	}
+}

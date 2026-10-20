@@ -49,7 +49,7 @@ func (s *Service) organization(w http.ResponseWriter, r *http.Request, p platfor
 	respond(w, 200, map[string]any{"name": name, "description": description, "createdAt": created, "memberCount": count, "role": p.Role, "roles": []map[string]string{{"name": p.Role, "roleType": "organization"}}, "canEdit": p.Role == "admin" || p.SystemAdmin})
 }
 func (s *Service) members(w http.ResponseWriter, r *http.Request, p platform.Principal) {
-	rows, e := s.db.QueryContext(r.Context(), `select id,email,coalesce(display_name,''),role,status from users where tenant_id=$1 and not is_system_admin order by created_at,id`, p.TenantID)
+	rows, e := s.db.QueryContext(r.Context(), `select id,username,coalesce(email,''),coalesce(display_name,''),role,status from users where tenant_id=$1 and not is_system_admin order by created_at,id`, p.TenantID)
 	if e != nil {
 		internal(w)
 		return
@@ -57,12 +57,12 @@ func (s *Service) members(w http.ResponseWriter, r *http.Request, p platform.Pri
 	defer rows.Close()
 	items := []map[string]string{}
 	for rows.Next() {
-		var id, email, name, role, status string
-		if rows.Scan(&id, &email, &name, &role, &status) != nil {
+		var id, username, email, name, role, status string
+		if rows.Scan(&id, &username, &email, &name, &role, &status) != nil {
 			internal(w)
 			return
 		}
-		items = append(items, map[string]string{"id": id, "email": email, "displayName": name, "role": role, "status": status})
+		items = append(items, map[string]string{"id": id, "username": username, "email": email, "displayName": name, "role": role, "status": status})
 	}
 	if rows.Err() != nil {
 		internal(w)
@@ -200,8 +200,18 @@ func (s *Service) audit(r *http.Request, p platform.Principal, action, tenant, t
 		if id, err := uuid.Parse(target); err == nil {
 			resourceID = id.String()
 		}
-		if _, err := ci.repo.CreateAuditLog(store.AuditLogInput{ActorID: p.ID, Actor: p.Email, Action: action, ResourceType: "identity", ResourceID: resourceID, ResourceName: target, Result: "Success", Payload: map[string]any{"targetOrganizationId": tenant, "actorOrganizationId": actorOrganization, "target": target}}); err != nil {
+		if _, err := ci.repo.CreateAuditLog(store.AuditLogInput{ActorID: p.ID, Actor: actorLogin(p), Action: action, ResourceType: "identity", ResourceID: resourceID, ResourceName: target, Result: "Success", Payload: map[string]any{"targetOrganizationId": tenant, "actorOrganizationId": actorOrganization, "target": target}}); err != nil {
 			slog.Error("identity audit recording failed", "action", action, "error", err)
 		}
 	}
+}
+
+func actorLogin(p platform.Principal) string {
+	if p.Username != "" {
+		return p.Username
+	}
+	if p.Email != "" {
+		return p.Email
+	}
+	return p.ID
 }

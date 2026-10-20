@@ -38,6 +38,10 @@ func (s *Service) requestBoundEmail(w http.ResponseWriter, r *http.Request, p pl
 		internal(w)
 		return
 	}
+	if _, emailLogin := emailAddress(username); emailLogin {
+		problem(w, 409, "bound_email_fixed", "Your login email is also your bound email and cannot be changed.")
+		return
+	}
 	if strings.HasPrefix(hash, "!google") {
 		problem(w, 409, "password_required", "Set up a password using password recovery before changing your bound email.")
 		return
@@ -118,7 +122,7 @@ func (s *Service) verifyBoundEmail(w http.ResponseWriter, r *http.Request) {
 		invalidToken(w)
 		return
 	}
-	result, err := tx.ExecContext(r.Context(), `update users set email=$2,email_verified_at=now(),updated_at=now() where id=$1 and coalesce(email,'')=$3 and status='active'`, id, email, previous)
+	result, err := tx.ExecContext(r.Context(), `update users set email=$2,email_verified_at=now(),updated_at=now() where id=$1 and username not like '%@%' and coalesce(email,'')=$3 and status='active'`, id, email, previous)
 	if err != nil {
 		problem(w, 409, "email_in_use", "This email can no longer be bound. Request a new verification from your account settings.")
 		return
