@@ -212,3 +212,85 @@ func TestMembersExposeLoginAccountAndBoundEmailSeparately(t *testing.T) {
 		}
 	}
 }
+
+func TestSelfAccountProtectionWithAnotherAdministrator(t *testing.T) {
+	s, m := newTestService(t)
+	a := signup(t, s, m, "self-owner@example.test", "Self protection")
+	other := directoryMember(t, s, a.TenantID, "admin")
+	member := directoryMember(t, s, a.TenantID, "operator")
+	p := principal(a)
+	self := "/api/v1/saas/members/" + a.ID
+	for _, op := range []struct {
+		method string
+		body   any
+	}{{"DELETE", nil}, {"PATCH", map[string]string{"role": "operator", "status": "active"}}, {"PATCH", map[string]string{"role": "admin", "status": "disabled"}}} {
+		w := call(t, s, op.method, self, op.body, p)
+		expect(t, w, 409)
+		var out struct{ Error string }
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		if out.Error != "self_account_protected" {
+			t.Fatalf("unexpected self protection: %s", w.Body.String())
+		}
+	}
+	var role, status string
+	if err := s.db.QueryRow(`select role,status from users where id=$1`, a.ID).Scan(&role, &status); err != nil || role != "admin" || status != "active" {
+		t.Fatal("self operation changed account")
+	}
+	// Ordinary members cannot call management APIs, including their own.
+	expect(t, call(t, s, "DELETE", "/api/v1/saas/members/"+member, nil, platform.Principal{ID: member, TenantID: a.TenantID, Role: "operator"}), 403)
+	expect(t, call(t, s, "PATCH", "/api/v1/saas/members/"+member, map[string]string{"role": "operator", "status": "disabled"}, p), 200)
+	expect(t, call(t, s, "DELETE", "/api/v1/saas/members/"+other, nil, p), 200)
+	// The system administrator still cannot remove the last organization admin.
+	sys := systemPrincipal(t, s)
+	for _, op := range []struct {
+		method string
+		body   any
+	}{{"DELETE", nil}, {"PATCH", map[string]string{"role": "operator", "status": "active"}}, {"PATCH", map[string]string{"role": "admin", "status": "disabled"}}} {
+		expect(t, call(t, s, op.method, "/api/v1/saas/admin/organizations/"+a.TenantID+"/members/"+a.ID, op.body, sys), 409)
+	}
+}
+
+func TestOrganizationMemberCountsIncludePlatformAdministrator(t *testing.T) {
+	s, _ := newTestService(t)
+	p := systemPrincipal(t, s)
+	w := call(t, s, "GET", "/api/v1/saas/admin/organizations", nil, p)
+	expect(t, w, 200)
+	var organizations struct {
+		Items []struct {
+			ID          string
+			MemberCount int
+		}
+	}
+	if e := json.Unmarshal(w.Body.Bytes(), &organizations); e != nil {
+		t.Fatal(e)
+	}
+	found := false
+	for _, o := range organizations.Items {
+		if o.ID == p.TenantID {
+			found = true
+			if o.MemberCount != 1 {
+				t.Fatalf("system organization member count=%d", o.MemberCount)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing system organization")
+	}
+	w = call(t, s, "GET", "/api/v1/saas/admin/organizations/"+p.TenantID+"/members", nil, p)
+	expect(t, w, 200)
+	var members struct {
+		Items []struct {
+			ID, Username string
+			SystemAdmin  bool
+		}
+	}
+	if e := json.Unmarshal(w.Body.Bytes(), &members); e != nil {
+		t.Fatal(e)
+	}
+	if len(members.Items) != 1 || members.Items[0].ID != p.ID || members.Items[0].Username != "admin" || !members.Items[0].SystemAdmin {
+		t.Fatalf("members and count disagree: %s", w.Body.String())
+	}
+	expect(t, call(t, s, "DELETE", "/api/v1/saas/admin/organizations/"+p.TenantID+"/members/"+p.ID, nil, p), 409)
+}

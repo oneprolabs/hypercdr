@@ -73,7 +73,7 @@ func (s *Service) administrationOrganizations(w http.ResponseWriter, r *http.Req
 		respond(w, 201, map[string]string{"id": id})
 		return
 	}
-	rows, e := s.db.QueryContext(r.Context(), `select t.id,t.name,t.status,coalesce(t.description,''),t.created_at,(select count(*) from users u where u.tenant_id=t.id and not u.is_system_admin),(select count(*) from users u where u.tenant_id=t.id and u.is_system_admin),(select count(*) from clusters c where c.tenant_id=t.id),(select count(*) from protection_plans a where a.tenant_id=t.id) from resource_scopes t order by t.created_at,t.id`)
+	rows, e := s.db.QueryContext(r.Context(), `select t.id,t.name,t.status,coalesce(t.description,''),t.created_at,(select count(*) from users u where u.tenant_id=t.id),(select count(*) from users u where u.tenant_id=t.id and u.is_system_admin),(select count(*) from clusters c where c.tenant_id=t.id),(select count(*) from protection_plans a where a.tenant_id=t.id) from resource_scopes t order by t.created_at,t.id`)
 	if e != nil {
 		internal(w)
 		return
@@ -221,6 +221,10 @@ func (s *Service) mutateMember(w http.ResponseWriter, r *http.Request, p platfor
 	}
 	if sys {
 		problem(w, 409, "protected_platform_administrator", "The built-in platform administrator is protected. Use personal settings to update your account.")
+		return
+	}
+	if p.ID == r.PathValue("id") && (deleting || in.Role != role || in.Status != oldStatus) {
+		problem(w, 409, "self_account_protected", "You cannot delete or disable your own account or change your own role. Use Personal Information to update your profile.")
 		return
 	}
 	if role == "admin" && oldStatus == "active" && (deleting || in.Role != "admin" || in.Status != "active") {

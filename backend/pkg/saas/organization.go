@@ -41,7 +41,7 @@ func (s *Service) organization(w http.ResponseWriter, r *http.Request, p platfor
 	var name, description string
 	var created time.Time
 	var count int
-	e := s.db.QueryRowContext(r.Context(), `select name,coalesce(description,''),created_at,(select count(*) from users where tenant_id=$1 and not is_system_admin) from resource_scopes where id=$1`, p.TenantID).Scan(&name, &description, &created, &count)
+	e := s.db.QueryRowContext(r.Context(), `select name,coalesce(description,''),created_at,(select count(*) from users where tenant_id=$1) from resource_scopes where id=$1`, p.TenantID).Scan(&name, &description, &created, &count)
 	if e != nil {
 		internal(w)
 		return
@@ -49,20 +49,21 @@ func (s *Service) organization(w http.ResponseWriter, r *http.Request, p platfor
 	respond(w, 200, map[string]any{"name": name, "description": description, "createdAt": created, "memberCount": count, "role": p.Role, "roles": []map[string]string{{"name": p.Role, "roleType": "organization"}}, "canEdit": p.Role == "admin" || p.SystemAdmin})
 }
 func (s *Service) members(w http.ResponseWriter, r *http.Request, p platform.Principal) {
-	rows, e := s.db.QueryContext(r.Context(), `select id,username,coalesce(email,''),coalesce(display_name,''),role,status from users where tenant_id=$1 and not is_system_admin order by created_at,id`, p.TenantID)
+	rows, e := s.db.QueryContext(r.Context(), `select id,username,coalesce(email,''),coalesce(display_name,''),role,status,is_system_admin from users where tenant_id=$1 order by created_at,id`, p.TenantID)
 	if e != nil {
 		internal(w)
 		return
 	}
 	defer rows.Close()
-	items := []map[string]string{}
+	items := []map[string]any{}
 	for rows.Next() {
 		var id, username, email, name, role, status string
-		if rows.Scan(&id, &username, &email, &name, &role, &status) != nil {
+		var systemAdmin bool
+		if rows.Scan(&id, &username, &email, &name, &role, &status, &systemAdmin) != nil {
 			internal(w)
 			return
 		}
-		items = append(items, map[string]string{"id": id, "username": username, "email": email, "displayName": name, "role": role, "status": status})
+		items = append(items, map[string]any{"id": id, "username": username, "email": email, "displayName": name, "role": role, "status": status, "systemAdmin": systemAdmin})
 	}
 	if rows.Err() != nil {
 		internal(w)

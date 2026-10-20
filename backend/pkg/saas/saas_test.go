@@ -191,7 +191,11 @@ func TestDisabledSessionsAndLastAdminConcurrency(t *testing.T) {
 		wg.Add(1)
 		go func(u platform.Identity) {
 			defer wg.Done()
-			v := call(t, s, "PATCH", "/api/v1/saas/members/"+u.ID, map[string]string{"role": "operator", "status": "disabled"}, principal(u))
+			actor := a
+			if u.ID == a.ID {
+				actor = out.User
+			}
+			v := call(t, s, "PATCH", "/api/v1/saas/members/"+u.ID, map[string]string{"role": "operator", "status": "disabled"}, principal(actor))
 			codes <- v.Code
 		}(u)
 	}

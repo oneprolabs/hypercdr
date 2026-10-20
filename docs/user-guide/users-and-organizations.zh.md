@@ -4,17 +4,17 @@
 
 ## Settings 菜单
 
-- 个人设置：Personal Information（个人资料）、Sign-in & Security（登录与安全）。所有登录用户只能修改自己的资料和安全设置。所有用户均在个人信息的 Email 字段旁管理绑定邮箱，修改须验证新邮箱。内置管理员初始不绑定邮箱，登录账号仍为 admin。
+- 个人设置：Personal Information（个人资料）、Sign-in & Security（登录与安全）。所有登录用户只能修改自己的资料和安全设置。邮箱账号的 Bound email 只读；非邮箱账号可在个人信息中绑定或修改邮箱，须验证新邮箱。内置管理员初始不绑定邮箱，登录账号仍为 admin。
 - 组织管理：Organization、Members。组织成员可查看本组织；组织管理员可修改组织资料、邀请和管理成员。成员无法通过 URL、组织 ID 或请求头切换到其他组织。
-- 平台管理：Users、Organizations、Access & Sign-in、Email Delivery、Platform Upgrade、Upgrade to Enterprise。仅平台管理员可见。Users 显示所有用户的所属组织、平台身份、组织角色和状态；Organizations 显示全部组织及其成员和资源数量。
+- 平台管理：Users、Organizations、Access & Sign-in、Email Service、Platform Upgrade（Upgrade to Enterprise 暂时隐藏）。仅平台管理员可见。Users 显示所有用户的所属组织、平台身份、组织角色和状态；Organizations 显示全部组织及其成员和资源数量。
 
-平台管理员在 Organizations 中进入某个组织的 Members，页面明确显示所查看组织及真实操作者。此操作不会登录为该组织成员，也不会改变平台管理员自身组织。
+组织的成员数量和 Members 列表均包含所属平台管理员，Role 标示 Platform administrator，并保留保护限制。平台管理员在 Organizations 中进入某个组织的 Members，页面明确显示所查看组织及真实操作者。此操作不会登录为该组织成员，也不会改变平台管理员自身组织。
 
 ## 创建、邀请与删除
 
-平台管理员先创建组织，再向该组织邀请第一位组织管理员。后续可邀请普通成员。账号在邮件验证完成后创建；未完成的邀请在该组织的 Invitations 中显示，可撤销。发送邀请和密码重置邮件前，需要配置 Email Delivery。
+平台管理员先创建组织，再向该组织邀请第一位组织管理员。后续可邀请普通成员。账号在邮件验证完成后创建；未完成的邀请在该组织的 Invitations 中显示，可撤销。发送邀请和密码重置邮件前，需要配置 Email Service。
 
-一个邮箱不能加入多个组织。Users 中可以编辑姓名、组织角色、启用或禁用账号，但不能直接改变账号邮箱或组织归属。删除普通用户会撤销会话和关联登录身份，不会删除组织的集群、存储、策略或保护配置。
+一个邮箱不能加入多个组织。Users 中可以编辑姓名、组织角色、启用或禁用账号，但不能直接改变账号邮箱或组织归属。删除账号统一称为 Delete account，会立即撤销会话和关联登录身份，不会删除组织的集群、存储、策略或保护配置。临时停止访问优先使用 Disable。Members 和 Users 中自己的操作区显示 Your account，不提供管理按钮；后端禁止自删、自禁用和修改自己的角色，即使组织存在其他管理员也不允许。
 
 内置平台管理员受保护，不允许通过组织成员接口修改、禁用或删除。每个已有有效管理员的组织必须保留至少一位有效组织管理员；并发操作也受数据库事务锁保护。组织停用会撤销其普通用户会话，重新启用不会恢复被撤销的会话。系统默认组织不可停用。
 
