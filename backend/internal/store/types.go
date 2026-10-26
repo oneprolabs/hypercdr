@@ -40,6 +40,7 @@ func (e *ApplicationAlreadyProtectedError) Error() string {
 // Store composes domain capabilities for the platform router. Consumers that
 // need only one domain should accept the narrower repository interface.
 type Store interface {
+	RestorePointLifecycleRepository
 	ChallengeRepository
 	SchedulerRepository
 	TenantRepository
@@ -189,6 +190,7 @@ type PolicyRepository interface {
 // ProtectionRepository defines the persisted protection operations.
 type ProtectionRepository interface {
 	CreateProtectionPlan(input ProtectionPlanInput) (ProtectionPlan, error)
+	UpdateProtectionPlan(id string, input ProtectionPlanInput) (ProtectionPlan, error)
 	ListProtectionPlans(clusterID string) ([]ProtectionPlan, error)
 	GetProtectionPlan(id string) (ProtectionPlan, bool, error)
 	UpdateProtectionPlanStatus(id string, status string) (ProtectionPlan, bool, error)
@@ -214,6 +216,7 @@ type RestorePointRepository interface {
 	ListRestorePoints(filter RestorePointFilter) ([]RestorePoint, error)
 	GetRestorePoint(id string) (RestorePoint, bool, error)
 	UpdateRestorePointState(input RestorePointStateInput) (RestorePoint, bool, error)
+	UpdateRestorePointSizeMetrics(id string, metrics map[string]any) error
 }
 
 // TaskRepository defines the persisted task operations.
@@ -832,39 +835,43 @@ type ClusterStorageBindingStatusInput struct {
 }
 
 type Policy struct {
-	ID             string    `json:"id"`
-	TenantID       string    `json:"tenantId"`
-	Name           string    `json:"name"`
-	Composition    string    `json:"composition"`
-	ScheduleType   string    `json:"scheduleType"`
-	IntervalValue  int       `json:"intervalValue,omitempty"`
-	IntervalUnit   string    `json:"intervalUnit,omitempty"`
-	Hour           int       `json:"hour,omitempty"`
-	Minute         int       `json:"minute,omitempty"`
-	WeekDay        int       `json:"weekDay,omitempty"`
-	MonthDay       int       `json:"monthDay,omitempty"`
-	RetentionCount int       `json:"retentionCount,omitempty"`
-	RetentionDays  int       `json:"retentionDays,omitempty"`
-	Status         string    `json:"status"`
-	BoundCount     int       `json:"boundCount"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	RetentionRules    []RetentionRule `json:"retentionRules"`
+	RetentionTimezone string          `json:"retentionTimezone"`
+	ID                string          `json:"id"`
+	TenantID          string          `json:"tenantId"`
+	Name              string          `json:"name"`
+	Composition       string          `json:"composition"`
+	ScheduleType      string          `json:"scheduleType"`
+	IntervalValue     int             `json:"intervalValue,omitempty"`
+	IntervalUnit      string          `json:"intervalUnit,omitempty"`
+	Hour              int             `json:"hour,omitempty"`
+	Minute            int             `json:"minute,omitempty"`
+	WeekDay           int             `json:"weekDay,omitempty"`
+	MonthDay          int             `json:"monthDay,omitempty"`
+	RetentionCount    int             `json:"retentionCount,omitempty"`
+	RetentionDays     int             `json:"retentionDays,omitempty"`
+	Status            string          `json:"status"`
+	BoundCount        int             `json:"boundCount"`
+	CreatedAt         time.Time       `json:"createdAt"`
+	UpdatedAt         time.Time       `json:"updatedAt"`
 }
 
 type PolicyInput struct {
-	TenantID       string `json:"-"`
-	Name           string `json:"name"`
-	Composition    string `json:"composition"`
-	ScheduleType   string `json:"scheduleType"`
-	IntervalValue  int    `json:"intervalValue"`
-	IntervalUnit   string `json:"intervalUnit"`
-	Hour           int    `json:"hour"`
-	Minute         int    `json:"minute"`
-	WeekDay        int    `json:"weekDay"`
-	MonthDay       int    `json:"monthDay"`
-	RetentionCount int    `json:"retentionCount"`
-	RetentionDays  int    `json:"retentionDays"`
-	Status         string `json:"status"`
+	RetentionRules    []RetentionRule `json:"retentionRules"`
+	RetentionTimezone string          `json:"retentionTimezone"`
+	TenantID          string          `json:"-"`
+	Name              string          `json:"name"`
+	Composition       string          `json:"composition"`
+	ScheduleType      string          `json:"scheduleType"`
+	IntervalValue     int             `json:"intervalValue"`
+	IntervalUnit      string          `json:"intervalUnit"`
+	Hour              int             `json:"hour"`
+	Minute            int             `json:"minute"`
+	WeekDay           int             `json:"weekDay"`
+	MonthDay          int             `json:"monthDay"`
+	RetentionCount    int             `json:"retentionCount"`
+	RetentionDays     int             `json:"retentionDays"`
+	Status            string          `json:"status"`
 }
 
 type ProtectionPlan struct {

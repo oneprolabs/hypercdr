@@ -116,7 +116,9 @@ func (r *Router) ingestVeleroBackupsFromInventory(clusterID string, backups []ma
 			SourceNamespace:   sourceNamespace,
 			BackupTaskID:      task.ID,
 			BackupStorageName: storageName,
+			SizeMetricsV2:     mapFromAnyJSON(task.Payload["sizeMetricsV2"]),
 			Metadata: map[string]any{
+				"sizeMetricsV2":    task.Payload["sizeMetricsV2"],
 				"scheduled":        true,
 				"phase":            phase,
 				"velero":           backup,
@@ -129,6 +131,7 @@ func (r *Router) ingestVeleroBackupsFromInventory(clusterID string, backups []ma
 		})
 		if err != nil {
 			r.logger.Error("failed to create restore point from scheduled backup", "backup", name, "error", err)
+			r.deferRestorePointReplacement(task.ID, err)
 			continue
 		}
 		r.scheduleRestorePointContentIndex(point)
@@ -242,6 +245,9 @@ func (r *Router) handleVeleroBackupEvent(clusterID string, event protocol.Velero
 		}
 		completedPoint, err = r.createRestorePointFromVeleroEvent(clusterID, plan, task, event)
 		if err != nil {
+			if r.deferRestorePointReplacement(task.ID, err) {
+				return task, nil
+			}
 			r.logger.Error("failed to create restore point from velero event", "backup", event.BackupName, "error", err)
 			return task, err
 		}
@@ -495,6 +501,11 @@ func backupTaskPayloadPatch(velero map[string]any) map[string]any {
 		return nil
 	}
 	patch := map[string]any{}
+	if _, observed := velero["readinessStage"]; observed {
+		for _, key := range []string{"readiness", "readinessStage", "readinessStartedAt", "readinessObservedAt", "readinessDeadline", "readinessObservationError"} {
+			patch[key] = velero[key]
+		}
+	}
 	if name := stringFromMap(velero, "name"); name != "" {
 		patch["veleroBackupName"] = name
 	}
@@ -583,6 +594,9 @@ func taskCompletedPayloadPatch(payload protocol.TaskCompletedPayload) map[string
 	patch := backupTaskPayloadPatch(payload.Velero)
 	if patch == nil {
 		patch = map[string]any{}
+	}
+	if deleted, found := payload.Velero["deleted"]; found {
+		patch["deletedRestorePointIds"] = deleted
 	}
 	restorePointSize := mapFromAny(payload.Velero["restorePointSize"])
 	if len(restorePointSize) == 0 {
@@ -857,7 +871,9 @@ func (r *Router) createRestorePointFromVeleroEvent(clusterID string, plan store.
 		SourceNamespace:   sourceNamespace,
 		BackupTaskID:      task.ID,
 		BackupStorageName: event.StorageLocation,
+		SizeMetricsV2:     mapFromAnyJSON(task.Payload["sizeMetricsV2"]),
 		Metadata: map[string]any{
+			"sizeMetricsV2":      task.Payload["sizeMetricsV2"],
 			"scheduled":          scheduled,
 			"phase":              event.Phase,
 			"velero":             event.Velero,
@@ -1043,6 +1059,10 @@ func (r *Router) reconcileRetention(planID string, triggerTaskID string) {
 	if len(available) <= policy.RetentionCount {
 		return
 	}
+	retained, selectionErr := store.RetentionSelections(points, policy.RetentionRules, policy.RetentionTimezone, time.Now().UTC())
+	if selectionErr != nil {
+		return
+	}
 	sort.SliceStable(available, func(i, j int) bool {
 		left := available[i].CompletedAt
 		if left.IsZero() {
@@ -1055,7 +1075,22 @@ func (r *Router) reconcileRetention(planID string, triggerTaskID string) {
 		return left.After(right)
 	})
 	candidates := available[policy.RetentionCount:]
+	eligible := candidates[:0]
+	for _, point := range candidates {
+		if point.Metadata["manualRetained"] == true || point.Metadata["drillRetained"] == true || point.Metadata["replacementTaskId"] != nil || len(retained[point.ID]) > 0 {
+			continue
+		}
+		eligible = append(eligible, point)
+	}
+	candidates = eligible
 	if len(candidates) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(candidates))
+	for _, point := range candidates {
+		ids = append(ids, point.ID)
+	}
+	if err := r.store.ClaimRestorePointDeletion(ids); err != nil {
 		return
 	}
 	restorePoints := make([]map[string]any, 0, len(candidates))
@@ -1167,6 +1202,13 @@ func (r *Router) createRestorePointDeleteTask(clusterID string, points []store.R
 	if err != nil {
 		return store.Task{}, "", err
 	}
+	if len(points) == 1 {
+		if owner, ok := points[0].Metadata["replacementTaskId"].(string); ok && owner != "" {
+			if err := r.store.BeginRestorePointReplacement(owner, task.ID); err != nil {
+				return store.Task{}, "", err
+			}
+		}
+	}
 	for _, point := range points {
 		_, _, _ = r.store.UpdateRestorePointState(store.RestorePointStateInput{
 			ID:     point.ID,
@@ -1244,6 +1286,28 @@ func (r *Router) createProtectionCleanupTask(plan store.ProtectionPlan) (store.T
 		ProtectionPlanID: plan.ID,
 	})
 	if err != nil {
+		return store.Task{}, "", err
+	}
+	policy, found, err := r.findPolicy(plan.PolicyID)
+	if err != nil {
+		return store.Task{}, "", err
+	}
+	if found {
+		retained, err := store.RetentionSelections(points, policy.RetentionRules, policy.RetentionTimezone, time.Now().UTC())
+		if err != nil {
+			return store.Task{}, "", err
+		}
+		if len(retained) > 0 {
+			return store.Task{}, "", store.ErrRestorePointLocked
+		}
+	}
+	var deletionIDs []string
+	for _, point := range points {
+		if point.Status != "deleted" {
+			deletionIDs = append(deletionIDs, point.ID)
+		}
+	}
+	if err := r.store.ClaimRestorePointDeletion(deletionIDs); err != nil {
 		return store.Task{}, "", err
 	}
 	restorePoints := make([]map[string]any, 0, len(points))

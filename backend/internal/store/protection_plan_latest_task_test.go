@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -80,7 +81,7 @@ func TestConcurrentTaskCreationPublishesOneCompleteTask(t *testing.T) {
 	}
 	const count = 24
 	created := make(chan Task, count)
-	errors := make(chan error, count)
+	failures := make(chan error, count)
 	var wait sync.WaitGroup
 	for index := 0; index < count; index++ {
 		wait.Add(1)
@@ -88,7 +89,7 @@ func TestConcurrentTaskCreationPublishesOneCompleteTask(t *testing.T) {
 			defer wait.Done()
 			task, createErr := repo.CreateTask(TaskInput{ProtectionPlanID: plan.ID, Type: "backup", Status: "queued", Payload: map[string]any{"request": index}})
 			if createErr != nil {
-				errors <- createErr
+				failures <- createErr
 				return
 			}
 			created <- task
@@ -96,16 +97,20 @@ func TestConcurrentTaskCreationPublishesOneCompleteTask(t *testing.T) {
 	}
 	wait.Wait()
 	close(created)
-	close(errors)
-	for createErr := range errors {
-		t.Fatal(createErr)
+	close(failures)
+	rejected := 0
+	for createErr := range failures {
+		if !errors.Is(createErr, ErrProtectionPlanBusy) {
+			t.Fatal(createErr)
+		}
+		rejected++
 	}
 	byID := map[string]Task{}
 	for task := range created {
 		byID[task.ID] = task
 	}
-	if len(byID) != count {
-		t.Fatalf("created %d unique tasks, want %d", len(byID), count)
+	if len(byID) != 1 || rejected != count-1 {
+		t.Fatalf("created %d unique tasks, rejected %d; want one task and %d rejections", len(byID), rejected, count-1)
 	}
 	current, ok, err := repo.GetProtectionPlan(plan.ID)
 	if err != nil || !ok {

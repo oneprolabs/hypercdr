@@ -236,3 +236,48 @@ func TestTenantScopePrecedesApplicationPagesAndTaskLimitsForSystemAdmin(t *testi
 		}
 	}
 }
+
+func TestNamespaceTasksFilterPlanBeforeLimitAndPreserveTenantScope(t *testing.T) {
+	repo := newTestStore(t)
+	plan := testTenantPlan(t, repo, store.DefaultTenantID)
+	otherPlan := testTenantPlan(t, repo, store.DefaultTenantID)
+	foreign, err := repo.CreateTenant(store.TenantInput{Name: "foreign-task-plan", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignPlan := testTenantPlan(t, repo, foreign.ID)
+	var ownTask store.Task
+	for _, p := range []store.ProtectionPlan{plan, otherPlan, foreignPlan} {
+		task, err := repo.CreateTask(store.TaskInput{TenantID: p.TenantID, ClusterID: p.SourceClusterID, AppID: p.AppID, ProtectionPlanID: p.ID, Type: "backup", Status: "succeeded"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.ID == plan.ID {
+			ownTask = task
+		}
+	}
+	r := &Router{store: repo, logger: slog.Default()}
+	for _, systemAdmin := range []bool{false, true} {
+		actor := store.User{ID: "actor", TenantID: store.DefaultTenantID, Role: "admin", Status: "active", SystemAdmin: systemAdmin}
+		for _, tc := range []struct {
+			planID    string
+			wantCount int
+		}{{plan.ID, 1}, {foreignPlan.ID, 0}} {
+			req := tenantRequest(httptest.NewRequest("GET", "/api/v1/tasks?view=summary&limit=1&protectionPlanId="+tc.planID, nil), actor)
+			w := httptest.NewRecorder()
+			r.listTasks(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+			var body struct {
+				Items []store.Task `json:"items"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if len(body.Items) != tc.wantCount || (tc.wantCount == 1 && body.Items[0].ID != ownTask.ID) {
+				t.Fatalf("systemAdmin=%v plan=%s tasks=%v", systemAdmin, tc.planID, body.Items)
+			}
+		}
+	}
+}

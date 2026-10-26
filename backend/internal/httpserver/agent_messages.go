@@ -296,13 +296,25 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 				r.logger.Error("failed to update task progress", "task_id", progress.Payload.TaskID, "error", err)
 				return
 			}
-			_ = r.addTaskEventIfChanged(store.TaskEventInput{
-				TaskID:  progress.Payload.TaskID,
-				Level:   "info",
-				Reason:  "progress",
-				Message: progress.Payload.Message,
-				Payload: map[string]any{"velero": progress.Payload.Velero},
-			})
+			reason := "progress"
+			if progress.Payload.Velero["readinessChanged"] == true {
+				reason = "workload_readiness_changed"
+			}
+			if progress.Payload.Velero["readinessChanged"] != false {
+				level := readinessEventLevel(progress.Payload.Velero)
+				input := store.TaskEventInput{
+					TaskID:  progress.Payload.TaskID,
+					Level:   level,
+					Reason:  reason,
+					Message: progress.Payload.Message,
+					Payload: map[string]any{"velero": progress.Payload.Velero},
+				}
+				if reason == "workload_readiness_changed" {
+					_ = r.store.AddTaskEvent(input)
+				} else {
+					_ = r.addTaskEventIfChanged(input)
+				}
+			}
 		case protocol.MessageAgentVeleroEvent:
 			var event protocol.Message[protocol.VeleroEventPayload]
 			if err := json.Unmarshal(data, &event); err != nil {
@@ -437,6 +449,12 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 					taskForPoint.Payload[key] = value
 				}
 				if point, err := r.createRestorePointFromBackup(taskForPoint, completed.Payload.Velero); err != nil {
+					if r.deferRestorePointReplacement(existingTask.ID, err) {
+						if completed.Payload.AckRequired {
+							_ = r.writeEventAck(conn, clusterID, completed.AgentID, completed.MessageID, completed.Type, completed.Payload.TaskID, completed.Payload.CommandID)
+						}
+						continue
+					}
 					r.logger.Error("failed to create restore point", "task_id", existingTask.ID, "error", err)
 					_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{
 						TaskID:       completed.Payload.TaskID,

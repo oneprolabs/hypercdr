@@ -53,6 +53,7 @@ func (r *Router) runSchedulerTickLocked(now time.Time) {
 		return
 	}
 	r.reconcileProtectionCleanupPlans(now)
+	r.reconcileRestorePointReplacements()
 	if jobs, err := r.store.ListPlatformUpgradeJobs(); err == nil {
 		for _, job := range jobs {
 			if !isTerminalPlatformUpgradeStatus(job.Status) {

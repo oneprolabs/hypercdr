@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func (r *Router) listRestorePoints(w http.ResponseWriter, req *http.Request) {
@@ -40,6 +41,45 @@ func (r *Router) listRestorePoints(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 	items = visible
+	selections := map[string]map[string][]store.RetentionReason{}
+	inUse := map[string]bool{}
+	for index := range items {
+		point := &items[index]
+		if point.Metadata == nil {
+			point.Metadata = map[string]any{}
+		}
+		if point.ProtectionPlanID == "" {
+			continue
+		}
+		selected, loaded := selections[point.ProtectionPlanID]
+		if !loaded {
+			tasks, taskErr := r.store.ListTasksFiltered(store.TaskFilter{TenantID: point.TenantID, ProtectionPlanID: point.ProtectionPlanID, Types: []string{"drill", "restore", "takeover"}})
+			if taskErr == nil {
+				for _, task := range tasks {
+					if task.CompletedAt.IsZero() && isActiveTaskStatus(task.Status) {
+						id := task.RestorePointID
+						if id == "" {
+							id = stringPayload(task.Payload, "restorePointId")
+						}
+						inUse[id] = true
+					}
+				}
+			}
+			plan, found, loadErr := r.store.GetProtectionPlan(point.ProtectionPlanID)
+			if loadErr == nil && found {
+				policy, found, loadErr := r.findPolicy(plan.PolicyID)
+				if loadErr == nil && found {
+					points, loadErr := r.store.ListRestorePoints(store.RestorePointFilter{TenantID: point.TenantID, ProtectionPlanID: plan.ID, IncludeDeleted: true})
+					if loadErr == nil {
+						selected, _ = store.RetentionSelections(points, policy.RetentionRules, policy.RetentionTimezone, time.Now().UTC())
+					}
+				}
+			}
+			selections[point.ProtectionPlanID] = selected
+		}
+		point.Metadata["retentionReasons"] = selected[point.ID]
+		point.Metadata["inUse"] = inUse[point.ID]
+	}
 	items = enrichRestorePointStorageIncrements(items)
 	writeJSON(w, http.StatusOK, map[string]any{"items": nonNilSlice(items)})
 }
@@ -88,12 +128,18 @@ func (r *Router) deleteRestorePoints(w http.ResponseWriter, req *http.Request) {
 			writeJSON(w, http.StatusConflict, map[string]any{"error": "restore_point_delete_in_progress", "restorePointId": id})
 			return
 		}
-		pointsByCluster[point.SourceClusterID] = append(pointsByCluster[point.SourceClusterID], point)
+		key := point.SourceClusterID + "::" + point.ProtectionPlanID
+		pointsByCluster[key] = append(pointsByCluster[key], point)
 	}
 
 	tasks := make([]store.Task, 0, len(pointsByCluster))
+	if err := r.store.ClaimRestorePointDeletion(ids); err != nil {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "restore_point_protected", "message": err.Error()})
+		return
+	}
 	warnings := []string{}
-	for clusterID, points := range pointsByCluster {
+	for _, points := range pointsByCluster {
+		clusterID := points[0].SourceClusterID
 		task, warning, err := r.createRestorePointDeleteTask(clusterID, points)
 		if err != nil {
 			r.logger.Error("failed to create restore point delete task", "cluster_id", clusterID, "error", err)
@@ -115,6 +161,36 @@ func (r *Router) deleteRestorePoints(w http.ResponseWriter, req *http.Request) {
 		response.Warning = strings.Join(warnings, "; ")
 	}
 	writeJSON(w, statusCode, response)
+}
+
+type restorePointRetentionRequest struct {
+	Retained *bool `json:"retained"`
+}
+
+func (r *Router) setRestorePointRetention(w http.ResponseWriter, req *http.Request) {
+	var body restorePointRetentionRequest
+	if err := decodeJSON(req, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
+		return
+	}
+	if body.Retained == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "retained_required"})
+		return
+	}
+	point, found, err := r.store.GetRestorePoint(req.PathValue("id"))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "get_restore_point_failed"})
+		return
+	}
+	if !found || !tenantVisible(req, point.TenantID) {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "restore_point_not_found"})
+		return
+	}
+	if err := r.store.SetRestorePointRetention(point.ID, point.TenantID, *body.Retained); err != nil {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "restore_point_locked", "message": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"retained": *body.Retained})
 }
 
 func uniqueNonEmptyStrings(values []string) []string {

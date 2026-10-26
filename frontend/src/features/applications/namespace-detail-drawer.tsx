@@ -1,4 +1,8 @@
 import type { useNamespaceDetail } from './use-namespace-detail';
+import { useEffect, useState } from 'react';
+import { apiPatch, apiPost } from '../../api/client';
+import { ModalFrame } from '../../components/modal-frame';
+import { restorePointMutationLocked, restorePointRetentionLabels } from '../recovery/restore-point-retention';
 import type { AppItem, Cluster, ResourceCategoryKey } from '../clusters/types';
 import type { ApiProtectionPlan, ApiRestorePointView, ApiTask, ApiTaskEvent, PolicyItem, StorageRepo } from '../recovery/types';
 import type { ApplicationStage } from '../recovery/task-ui';
@@ -38,16 +42,43 @@ interface NamespaceDetailDrawerProps {
 // protection, recovery and inventory workflows. Data remains owned by the
 // shared detail hook and the persisted platform catalog.
 export default function NamespaceDetailDrawer({detail, catalog, presentation, onRestorePointAction: openRestorePointAction}: NamespaceDetailDrawerProps) {
+  const [pointAction, setPointAction] = useState<{ point: ApiRestorePointView; mode: 'retain' | 'release' | 'delete' } | null>(null);
+  const [pointActionBusy, setPointActionBusy] = useState(false);
+  const [pointActionError, setPointActionError] = useState('');
+  const [pointDetails, setPointDetails] = useState<ApiRestorePointView | null>(null);
   const {selectedDetailApp, setSelectedDetailApp, namespaceDetailTab, setNamespaceDetailTab,
     namespaceDetailTaskId, setNamespaceDetailTaskId, namespaceRestorePointPage, setNamespaceRestorePointPage,
     restorePointMenuId, setRestorePointMenuId, namespaceTaskPage, setNamespaceTaskPage,
     namespaceDetailRestorePoints, namespaceDetailTasks, namespaceDetailLoading, namespaceDetailLoadError,
-    openNamespaceDetail} = detail;
+    openNamespaceDetail, refreshNamespaceRestorePoints} = detail;
   const {policies, liveRestorePoints, platformTasks, storage, currentCluster, drTaskEvents} = catalog;
   const {drSupportMetaForApp, drSupportFailureForApp, drSupportFailureDetailsForApp, stageOf,
     protectionPlanForApp, drStatusMetaForApp, unitNamespaces, resourceSummaryTotal,
     planStorageSizeForApp, nextSyncLabelForApp} = presentation;
+  useEffect(() => {
+    if (!restorePointMenuId) return;
+    const dismiss = (event: MouseEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest('.hbdr-namespace-rp-meta')) setRestorePointMenuId('');
+    };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setRestorePointMenuId(''); };
+    document.addEventListener('click', dismiss);
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('click', dismiss); document.removeEventListener('keydown', escape); };
+  }, [restorePointMenuId, setRestorePointMenuId]);
   if (!selectedDetailApp) return null;
+  const performPointAction = async () => {
+    if (!pointAction || pointActionBusy) return;
+    setPointActionBusy(true);
+    setPointActionError('');
+    try {
+      if (pointAction.mode === 'delete') await apiPost('/api/v1/restore-points/delete', { restorePointIds: [pointAction.point.id] });
+      else await apiPatch(`/api/v1/restore-points/${encodeURIComponent(pointAction.point.id)}/retention`, { retained: pointAction.mode === 'retain' });
+      setPointAction(null);
+      openNamespaceDetail(selectedDetailApp, 'restorePoints');
+    } catch (error) {
+      setPointActionError(error instanceof Error ? error.message : 'Restore point operation failed.');
+    } finally { setPointActionBusy(false); }
+  };
 
   const detailStorage = selectedDetailApp.storage || 'No backup repository';
   const detailPolicy = selectedDetailApp.policy || 'No policy bound';
@@ -96,7 +127,7 @@ export default function NamespaceDetailDrawer({detail, catalog, presentation, on
         ['Storage Request', formatBytes(capacityBytes)],
       ];
   const detailRestorePoints = (namespaceDetailRestorePoints || [])
-    .filter(point => Boolean(detailPlanId && point.protectionPlanId === detailPlanId))
+    .filter(point => point.status !== 'deleted' && Boolean(detailPlanId ? point.protectionPlanId === detailPlanId : selectedDetailApp.apiId && point.appId === selectedDetailApp.apiId && point.sourceClusterId === selectedDetailApp.clusterId))
     .sort((a, b) => (b.taskCreatedAt || b.createdAt || b.time || '').localeCompare(a.taskCreatedAt || a.createdAt || a.time || ''));
   const detailTasks = (namespaceDetailTasks || [])
     .filter(task => Boolean(detailPlanId && task.protectionPlanId === detailPlanId))
@@ -127,14 +158,14 @@ export default function NamespaceDetailDrawer({detail, catalog, presentation, on
   const activeTaskPage = Math.min(namespaceTaskPage, taskPageCount);
   const pagedDetailRestorePoints = detailRestorePoints.slice((activeRestorePointPage - 1) * namespaceDetailPageSize, activeRestorePointPage * namespaceDetailPageSize);
   const pagedDetailTasks = detailTasks.slice((activeTaskPage - 1) * namespaceDetailPageSize, activeTaskPage * namespaceDetailPageSize);
-  const detailTabs = detailStage === 'run'
-    ? [
+  const detailTabs = [
       { id: 'overview' as const, label: 'Overview' },
       { id: 'restorePoints' as const, label: 'Restore Points', count: namespaceDetailRestorePoints === null ? restorePointSummaryCount : detailRestorePoints.length },
+      ...(detailStage === 'run' ? [
       { id: 'tasks' as const, label: 'Tasks', count: namespaceDetailTasks === null ? taskSummaryCount : detailTasks.length },
       { id: 'storage' as const, label: 'Storage' },
-    ]
-    : [{ id: 'overview' as const, label: 'Overview' }];
+      ] : []),
+    ];
   return (
     <div className="fixed inset-0 z-[230] flex justify-end">
       <motion.div
@@ -317,10 +348,13 @@ export default function NamespaceDetailDrawer({detail, catalog, presentation, on
             <div className="hbdr-namespace-detail-panel">
               <div className="hbdr-namespace-detail-section-head">
                 <div><strong>Restore Points</strong><span>Recovery points stored for this namespace or DR plan.</span></div>
-                <em>{detailRestorePoints.length}</em>
+                <div className="hbdr-rp-toolbar">
+                  <em>{detailRestorePoints.length}{detailPlan?.policyId && policies.find(policy => policy.id === detailPlan.policyId)?.retention ? ` / ${policies.find(policy => policy.id === detailPlan.policyId)?.retention}` : ''}</em>
+                  <button type="button" className="hbdr-rp-refresh" aria-label="Refresh restore points" title="Refresh restore points" disabled={namespaceDetailLoading} onClick={refreshNamespaceRestorePoints}><RefreshCw size={14} className={namespaceDetailLoading ? 'animate-spin' : ''} /></button>
+                </div>
               </div>
               {namespaceDetailLoading ? (
-                <div className="hbdr-namespace-detail-empty" role="status"><RefreshCw className="animate-spin" size={22} /><strong>Loading restore points...</strong><span>Recovery-point details are loaded only when this tab is opened.</span></div>
+                <div className="hbdr-namespace-detail-empty" role="status"><RefreshCw className="animate-spin" size={22} /><strong>Loading restore points...</strong><span>Loading recovery points for this protection configuration.</span></div>
               ) : namespaceDetailLoadError ? (
                 <div className="hbdr-namespace-detail-empty" role="alert"><AlertCircle size={22} /><strong>Unable to load restore points</strong><span>{namespaceDetailLoadError}</span></div>
               ) : detailRestorePoints.length > 0 ? (
@@ -347,13 +381,14 @@ export default function NamespaceDetailDrawer({detail, catalog, presentation, on
 								? Math.max(0, Math.min(1, 1 - newDataBytes / logicalBytes))
 								: null;
 							const reuseRatio = overallReuseRatio ?? Number(reuse.ratio || 0);
-							const reuseLabel = `${Number((reuseRatio * 100).toFixed(2))}%`;
+							const reuseLabel = `${Math.min(99.99, reuseRatio * 100).toFixed(2)}%`;
 							return (
                     <section key={point.id} className="hbdr-namespace-rp-row">
                       <div className="hbdr-namespace-rp-icon" title="Stored recovery point"><DatabaseBackup size={17} /></div>
                       <div className="min-w-0">
                         <strong title={restorePointDisplayLabel(point)}>{restorePointDisplayLabel(point)}</strong>
                         <span>{formatLocalDateTime(point.taskCreatedAt || point.createdAt) || '-'} · {point.pointType === 'local' ? 'Local Snapshot' : 'Remote Snapshot'}</span>
+                        {restorePointRetentionLabels(point.metadata).length > 0 && <span className="hbdr-rp-retention-badge is-retained" title={[...restorePointRetentionLabels(point.metadata), ...(Array.isArray(point.metadata?.retentionReasons) ? point.metadata.retentionReasons.map((reason: { period: string; until: string }) => `${reason.period}: until ${formatLocalDateTime(reason.until)}`) : [])].join('\n')}>{restorePointRetentionLabels(point.metadata).join(' · ')}</span>}
                       </div>
                       <div className="hbdr-namespace-rp-metrics">
 								<div title="Complete data represented by this recovery point"><small>Logical size</small><strong>{logicalKnown ? formatBytes(Number(logical.totalBytes || point.sizeBytes || 0)) : (point.sizeBytes ? formatBytes(point.sizeBytes) : '—')}</strong></div>
@@ -363,9 +398,11 @@ export default function NamespaceDetailDrawer({detail, catalog, presentation, on
 							  <div className="hbdr-namespace-rp-meta">
 								<button type="button" className="hbdr-namespace-rp-menu-button" aria-label="Recovery point actions" onClick={event => { event.stopPropagation(); setRestorePointMenuId(current => current === point.id ? '' : point.id); }}><MoreVertical size={15} /></button>
 								{restorePointMenuId === point.id && <div className="hbdr-namespace-rp-menu">
-								  <button type="button" onClick={() => { setRestorePointMenuId(''); openNamespaceDetail(selectedDetailApp, 'restorePoints'); }}>View details</button>
-								  <button type="button" onClick={() => { setRestorePointMenuId(''); openRestorePointAction('drill', selectedDetailApp, point.id); }}>Drill</button>
-								  <button type="button" onClick={() => { setRestorePointMenuId(''); openRestorePointAction('takeover', selectedDetailApp, point.id); }}>Takeover</button>
+								  <button type="button" onClick={() => { setRestorePointMenuId(''); setPointDetails(point); }}>Details</button>
+                                  <button type="button" disabled={restorePointMutationLocked(point.metadata)} onClick={() => { setRestorePointMenuId(''); openRestorePointAction('drill', selectedDetailApp, point.id); }}>Drill</button>
+                                  <button type="button" disabled={restorePointMutationLocked(point.metadata)} onClick={() => { setRestorePointMenuId(''); openRestorePointAction('takeover', selectedDetailApp, point.id); }}>Takeover</button>
+                                  <button type="button" disabled={restorePointMutationLocked(point.metadata)} onClick={() => { setRestorePointMenuId(''); setPointActionError(''); setPointAction({ point, mode: point.metadata?.manualRetained ? 'release' : 'retain' }); }}>{point.metadata?.manualRetained ? 'Release retention' : 'Retain'}</button>
+                                  <button type="button" className="is-danger" disabled={restorePointMutationLocked(point.metadata) || point.metadata?.manualRetained === true || point.metadata?.drillRetained === true} title="Retained or in-use points cannot be deleted. Release manual retention first." onClick={() => { setRestorePointMenuId(''); setPointActionError(''); setPointAction({ point, mode: 'delete' }); }}>Delete</button>
 								</div>}
                       </div>
                     </section>
@@ -388,7 +425,7 @@ export default function NamespaceDetailDrawer({detail, catalog, presentation, on
           {namespaceDetailTab === 'tasks' && (
             <div className="hbdr-namespace-detail-panel">
               {namespaceDetailLoading ? (
-                <div className="hbdr-namespace-detail-empty" role="status"><RefreshCw className="animate-spin" size={22} /><strong>Loading tasks...</strong><span>Task details are loaded only when this tab is opened.</span></div>
+                <div className="hbdr-namespace-detail-empty" role="status"><RefreshCw className="animate-spin" size={22} /><strong>Loading tasks...</strong><span>Loading tasks for this protection configuration.</span></div>
               ) : namespaceDetailLoadError ? (
                 <div className="hbdr-namespace-detail-empty" role="alert"><AlertCircle size={22} /><strong>Unable to load tasks</strong><span>{namespaceDetailLoadError}</span></div>
               ) : selectedNamespaceTask ? (
@@ -523,6 +560,24 @@ export default function NamespaceDetailDrawer({detail, catalog, presentation, on
           <button onClick={() => setSelectedDetailApp(null)}>Close</button>
         </div>
       </motion.div>
+      {(pointDetails || pointAction) && <div className="hbdr-rp-overlay">
+      {pointDetails && <ModalFrame title="Restore Point Details" onClose={() => setPointDetails(null)}>
+        <dl className="hbdr-rp-details">
+          <dt>Restore point</dt><dd>{restorePointDisplayLabel(pointDetails)}</dd>
+          <dt>Retention</dt><dd>{restorePointRetentionLabels(pointDetails.metadata).join(' · ') || 'Not retained'}</dd>
+          <dt>Status</dt><dd>{pointDetails.status}</dd>
+          <dt>Created</dt><dd>{formatLocalDateTime(pointDetails.taskCreatedAt || pointDetails.createdAt)}</dd>
+          <dt>Backup</dt><dd>{pointDetails.veleroBackupName || pointDetails.title}</dd>
+          <dt>ID</dt><dd>{pointDetails.id}</dd>
+        </dl>
+      </ModalFrame>}
+      {pointAction && <ModalFrame title={pointAction.mode === 'delete' ? 'Delete Restore Point' : pointAction.mode === 'release' ? 'Release Manual Retention' : 'Retain Restore Point'} onClose={() => { if (!pointActionBusy) setPointAction(null); }}>
+        <p>{restorePointDisplayLabel(pointAction.point)}</p>
+        <p className="mt-3 text-sm text-slate-500">{pointAction.mode === 'delete' ? 'This permanently deletes the backup data, including any automatic policy retention. Historical drill records remain available.' : pointAction.mode === 'release' ? 'Only manual retention will be removed. Other retention reasons remain effective.' : 'This point will be retained until you release it. It counts toward the restore point quota.'}</p>
+        {pointActionError && <p role="alert" className="mt-3 text-red-600">{pointActionError}</p>}
+        <div className="mt-5 flex justify-end gap-3"><button type="button" disabled={pointActionBusy} onClick={() => setPointAction(null)}>Cancel</button><button type="button" disabled={pointActionBusy} onClick={() => void performPointAction()}>{pointActionBusy ? 'Applying...' : 'Confirm'}</button></div>
+      </ModalFrame>}
+      </div>}
     </div>
   );
 

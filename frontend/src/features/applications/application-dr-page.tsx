@@ -1,7 +1,7 @@
 import { useDrTaskEvents } from './use-dr-task-events';
 import { getRestorePointContents } from '../../api/restore-points';
 import { getTask, listTasks, createBackupTask, createRecoveryTask, cancelTask, cleanupDrillTask } from '../../api/tasks';
-import { listProtectionPlans, createProtectionPlan, activateProtectionPlan, reconfigureProtectionPlanStorage, deleteProtectionPlan } from '../../api/protection-plans';
+import { listProtectionPlans, createProtectionPlan, updateProtectionPlan, activateProtectionPlan, reconfigureProtectionPlanStorage, deleteProtectionPlan } from '../../api/protection-plans';
 import { listApplications, updateApplicationProtection } from '../../api/applications';
 import { requestClusterInventory, getInventoryRequestStatus } from '../../api/inventory';
 import NamespaceDetailDrawer from './namespace-detail-drawer';
@@ -216,7 +216,7 @@ export default function ApplicationDrPage(props: {
   const [drSupportErrorDetail, setDrSupportErrorDetail] = useState<AppItem | null>(null);
   const [operationConfirm, setOperationConfirm] = useState<'cancel-sync' | 'cleanup-drill' | 'remove-config' | null>(null);
   const namespaceDetail = useNamespaceDetail(protectionPlans);
-  const { selectedDetailApp, setSelectedDetailApp, namespaceDetailTab, setNamespaceDetailTab, namespaceDetailTaskId, setNamespaceDetailTaskId, namespaceRestorePointPage, setNamespaceRestorePointPage, restorePointMenuId, setRestorePointMenuId, namespaceTaskPage, setNamespaceTaskPage, namespaceDetailRestorePoints, setNamespaceDetailRestorePoints, namespaceDetailTasks, setNamespaceDetailTasks, namespaceDetailLoading, setNamespaceDetailLoading, namespaceDetailLoadError, setNamespaceDetailLoadError, openNamespaceDetail, selectedDetailPlanId } = namespaceDetail;
+  const { selectedDetailApp, setSelectedDetailApp, namespaceDetailTab, setNamespaceDetailTab, namespaceDetailTaskId, setNamespaceDetailTaskId, namespaceRestorePointPage, setNamespaceRestorePointPage, restorePointMenuId, setRestorePointMenuId, namespaceTaskPage, setNamespaceTaskPage, namespaceDetailRestorePoints, setNamespaceDetailRestorePoints, namespaceDetailTasks, setNamespaceDetailTasks, namespaceDetailLoading, namespaceDetailLoadError, openNamespaceDetail, selectedDetailPlanId } = namespaceDetail;
   const currentClusterIdRef = useRef(currentClusterId);
   useEffect(() => {
     if (currentClusterIdRef.current === currentClusterId) return;
@@ -1692,6 +1692,7 @@ export default function ApplicationDrPage(props: {
 			return;
 		}
 		setRestoreAction({ mode, app, config: buildRecoveryDraft(mode, app, pointId) });
+		setSelectedDetailApp(null);
 	};
   const confirmRestoreAction = async () => {
     if (!restoreAction) return;
@@ -1902,8 +1903,10 @@ export default function ApplicationDrPage(props: {
 
     if (isCompletedTaskStatus(task.status)) {
       const restorePointId = taskRestorePointId(task);
-      const restorePoint = restorePointsForApp(app).find(point => point.id === restorePointId);
-      const restorePointLabel = restorePointDisplayLabel(restorePoint) || 'restore point';
+      const restorePoint = liveRestorePoints.find(point => point.id === restorePointId);
+      const restorePointLabel = restorePointDisplayLabel(restorePoint)
+        || restorePointDisplayLabel({ taskCreatedAt: String(task.payload?.restorePointTaskCreatedAt || '') })
+        || String(task.payload?.restorePointName || '') || `RP-${restorePointId.slice(0, 8) || 'unknown'}`;
       const completedTitle = recoveryCompletedTargetTitle(restorePointLabel, task.completedAt, targetClusterName, targetNamespace, actionText.complete);
       const targetLabel = recoveryCompletedTargetLabel(targetClusterName, targetNamespace);
       return (
@@ -2182,11 +2185,19 @@ export default function ApplicationDrPage(props: {
       toast('Select one protected application to modify protection');
       return;
     }
-    const selectedApp = apps.find(item => item.name === selectedRunApps[0]);
+    const selectedApp = selectedRunRows[0];
     const plan = selectedApp ? protectionPlanForApp(selectedApp) : undefined;
+    if (!plan || !selectedApp) {
+      toast('The existing DR configuration could not be found. Refresh and try again.');
+      return;
+    }
     if (plan) {
       setProtectConfig(prev => ({
         ...prev,
+        storageId: plan.storageRepoId || '',
+        policy: plan.policyId || 'manual',
+        targetCluster: clusters.find(cluster => cluster.id === (plan.targetClusterId || plan.sourceClusterId))?.name || '',
+        mergeNamespaces: unitMembers(selectedApp).length > 1,
         resourceSelection: {
           mode: plan.resourceSelection?.mode || 'all',
           namespaceScoped: [...(plan.resourceSelection?.namespaceScoped || [])],
@@ -2203,7 +2214,7 @@ export default function ApplicationDrPage(props: {
     setProtectWizardMode('modify');
     setProtectWizardStep(1);
     setProtectWizardOpen(true);
-    warmWizardResourceCatalog(apps.find(item => item.name === selectedRunApps[0]));
+    warmWizardResourceCatalog(selectedApp);
   };
   const deleteDrConfiguration = async () => {
 	if (cleanupSubmittingRef.current) return;
@@ -2436,7 +2447,10 @@ export default function ApplicationDrPage(props: {
 	setConfiguringAppNames(prev => Array.from(new Set([...prev, ...targetApps])));
     try {
       for (const group of planGroups) {
-        const createdPlan = await createProtectionPlan({
+        const existingPlanId = protectWizardMode === 'modify' ? selectedRunRows[0]?.protectionPlanId : undefined;
+        if (protectWizardMode === 'modify' && !existingPlanId) throw new Error('The existing DR configuration could not be found. Refresh and try again.');
+        const savePlan = existingPlanId ? (input: Record<string, unknown>) => updateProtectionPlan(existingPlanId, input) : createProtectionPlan;
+        const createdPlan = await savePlan({
           sourceClusterId: currentClusterId,
           appIds: group.map(meta => meta.apiId),
           scopeType,
@@ -2448,8 +2462,8 @@ export default function ApplicationDrPage(props: {
           storageRepoId: protectConfig.storageId,
           policyId,
           targetClusterId: targetCluster?.id || currentClusterId,
-          preHooks: protectConfig.preScripts.map(scriptPayload),
-          postHooks: protectConfig.postScripts.map(scriptPayload),
+          preHooks: existingPlanId ? protectionPlans.find(plan => plan.id === existingPlanId)?.preHooks || [] : protectConfig.preScripts.map(scriptPayload),
+          postHooks: existingPlanId ? protectionPlans.find(plan => plan.id === existingPlanId)?.postHooks || [] : protectConfig.postScripts.map(scriptPayload),
         });
         createdPlans.push(createdPlan);
         group.forEach(meta => {
@@ -2526,7 +2540,7 @@ export default function ApplicationDrPage(props: {
     } catch (error) {
 	  setConfiguringAppNames(prev => prev.filter(name => !targetApps.includes(name)));
 	  setConfiguringPlanIds(prev => prev.filter(id => !createdPlans.some(plan => plan.id === id)));
-      toast('Failed to create protection plan: ' + (error instanceof Error ? error.message : 'unknown error'));
+      toast('Failed to save DR configuration: ' + (error instanceof Error ? error.message : 'unknown error'));
       protectSubmittingRef.current = false;
       setProtectSubmitting(false);
       return;

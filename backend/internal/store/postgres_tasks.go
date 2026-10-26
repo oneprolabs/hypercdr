@@ -50,6 +50,53 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 	if err := validateTaskReferences(tx, input, tenantID); err != nil {
 		return Task{}, err
 	}
+	if input.Type == "backup" && input.ProtectionPlanID != "" && !input.SuppressLatestPointer {
+		var busy bool
+		if err := tx.QueryRow(`select exists(select 1 from tasks where protection_plan_id=$1 and type='backup' and status not in ('succeeded','failed','canceled','cancelled')) or exists(select 1 from restore_point_reservations where protection_plan_id=$1 and state in ('data_ready','deleting'))`, input.ProtectionPlanID).Scan(&busy); err != nil {
+			return Task{}, err
+		}
+		if busy {
+			return Task{}, ErrProtectionPlanBusy
+		}
+	}
+	if input.Type == "backup-cancel" {
+		target, _ := input.Payload["targetTaskId"].(string)
+		var irreversible bool
+		if err := tx.QueryRow(`select exists(select 1 from restore_point_reservations where task_id=nullif($1,'')::uuid and state in ('data_ready','deleting','published'))`, target).Scan(&irreversible); err != nil {
+			return Task{}, err
+		}
+		if irreversible {
+			return Task{}, ErrRestorePointLocked
+		}
+	}
+	pointID := input.RestorePointID
+	if pointID == "" {
+		pointID, _ = input.Payload["restorePointId"].(string)
+	}
+	if pointID != "" && (input.Type == "drill" || input.Type == "restore" || input.Type == "takeover") {
+		var pointPlan, state string
+		var timestamp time.Time
+		if err := tx.QueryRow(`select coalesce(protection_plan_id::text,''),coalesce(metadata->>'retentionState',''),coalesce(task_created_at,created_at) from restore_points where id=$1 and tenant_id=$2 and status='available'`, pointID, tenantID).Scan(&pointPlan, &state, &timestamp); err != nil {
+			return Task{}, err
+		}
+		if pointPlan != input.ProtectionPlanID {
+			if err := quotaPlanLock(tx, pointPlan); err != nil {
+				return Task{}, err
+			}
+		}
+		busy, err := pointBusy(tx, pointID)
+		if err != nil {
+			return Task{}, err
+		}
+		if busy || state == "deleting" || state == "pending_delete" {
+			return Task{}, ErrRestorePointLocked
+		}
+		input.Payload["restorePointTaskCreatedAt"] = timestamp.UTC().Format(time.RFC3339Nano)
+		payloadRaw, err = json.Marshal(input.Payload)
+		if err != nil {
+			return Task{}, err
+		}
+	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	task := Task{
 		ID:               newID(),
@@ -80,6 +127,18 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 		return Task{}, err
 	}
 	if task.ProtectionPlanID != "" && !input.SuppressLatestPointer {
+		if err := reserveBackupQuota(tx, task); err != nil {
+			if !errors.Is(err, ErrRestorePointQuota) {
+				return Task{}, err
+			}
+			task.Status = "failed"
+			task.ErrorCode = "RESTORE_POINT_QUOTA_EXHAUSTED"
+			task.ErrorMessage = err.Error()
+			task.CompletedAt = now
+			if _, err := tx.Exec(`update tasks set status='failed',error_code=$2,error_message=$3,completed_at=$4 where id=$1`, task.ID, task.ErrorCode, task.ErrorMessage, now); err != nil {
+				return Task{}, err
+			}
+		}
 		column := ""
 		switch task.Type {
 		case "backup":
@@ -98,6 +157,9 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 				return Task{}, fmt.Errorf("protection plan %s not found while creating %s task", task.ProtectionPlanID, task.Type)
 			}
 		}
+	}
+	if err := prepareRestorePointDeletion(tx, task); err != nil {
+		return Task{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return Task{}, err
@@ -265,6 +327,26 @@ func (s *PostgresStore) UpdateTaskStatus(input TaskStatusInput) (Task, bool, err
 		return Task{}, false, err
 	}
 	defer tx.Rollback()
+	var planID string
+	if err := tx.QueryRow(`select coalesce(protection_plan_id::text,'') from tasks where id=$1`, input.TaskID).Scan(&planID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Task{}, false, nil
+		}
+		return Task{}, false, err
+	}
+	if err := quotaPlanLock(tx, planID); err != nil {
+		return Task{}, false, err
+	}
+	if input.MarkDone && input.Status != "succeeded" {
+		var publishing bool
+		if err := tx.QueryRow(`select exists(select 1 from restore_point_reservations rr join tasks t on t.id=rr.task_id where rr.task_id=$1 and rr.state in ('data_ready','deleting','published') and t.completed_at is null)`, input.TaskID).Scan(&publishing); err != nil {
+			return Task{}, false, err
+		}
+		if publishing {
+			input.Status = "finalizing"
+			input.MarkDone = false
+		}
+	}
 	if input.RestorePointID != "" {
 		var tenantID string
 		var completedAt sql.NullTime
@@ -322,6 +404,17 @@ func (s *PostgresStore) UpdateTaskStatus(input TaskStatusInput) (Task, bool, err
 	affected, err := result.RowsAffected()
 	if err != nil {
 		return Task{}, false, err
+	}
+	if input.MarkDone || input.Status == "failed" || input.Status == "canceled" || input.Status == "cancelled" {
+		if _, err := tx.Exec(`update restore_points set metadata=metadata-'replacementTaskId' where id in (select replacement_point_id from restore_point_reservations rr join tasks t on t.id=rr.task_id where rr.task_id=$1 and rr.state='reserved' and t.status in ('failed','canceled','cancelled'))`, input.TaskID); err != nil {
+			return Task{}, false, err
+		}
+		if _, err := tx.Exec(`update restore_point_reservations set state='released',updated_at=now() where task_id=$1 and state='reserved' and exists(select 1 from tasks where id=$1 and status in ('failed','canceled','cancelled'))`, input.TaskID); err != nil {
+			return Task{}, false, err
+		}
+		if _, err := tx.Exec(`update restore_points set metadata=metadata || jsonb_build_object('drillRetained', id=(select coalesce(restore_point_id,nullif(payload->>'restorePointId','')::uuid) from tasks where id=$1)) where protection_plan_id::text=$2 and exists(select 1 from tasks where id=$1 and type='drill' and status='succeeded' and completed_at=$3)`, input.TaskID, planID, now); err != nil {
+			return Task{}, false, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return Task{}, false, err

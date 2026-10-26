@@ -4,6 +4,7 @@ import { formatLocalDateTime, parseUTCInstant } from '../../lib/date-time';
 import type { AppItem, ResourceCategoryKey, ResourceKindSummary, ResourceRef } from '../clusters/types';
 import type { ApiRestorePoint, ApiTask, ApiTaskEvent, VolumeProgressInfo } from './types';
 import { isActiveTaskStatus, isFailedStatus, taskHasWarning } from './task-status';
+import { workloadReadinessEvents, workloadReadinessSnapshot, type WorkloadTimelineEvent } from './workload-readiness';
 import { groupTaskEventsByStage, keyTaskEvents, latestVisibleTaskEvent, reachedTaskStages } from './task-stage-model';
 export { groupTaskEventsByStage, keyTaskEvents, latestVisibleTaskEvent, reachedTaskStages } from './task-stage-model';
 
@@ -692,6 +693,7 @@ export function TaskProcessTimeline({ task, events }: { task: ApiTask; events: A
   const reachedStages = reachedTaskStages(stageGroups);
   const transferProgress = taskProgressInfo(task, events) || latestVolumeProgress(events);
   const transferStage = ['drill', 'restore', 'takeover'].includes(task.type) ? 'restoring_data' : 'backing_up_data';
+  const workloadEvents = workloadReadinessEvents(task, events);
   return (
     <div className="hbdr-task-detail-section">
       <div className="hbdr-task-stage-groups" aria-label="Task stages" aria-live="polite">
@@ -708,7 +710,11 @@ export function TaskProcessTimeline({ task, events }: { task: ApiTask; events: A
                 <span>{formatPercent(transferProgress.percent)}% · {formatBytes(transferProgress.bytesDone)} / {formatBytes(transferProgress.totalBytes)}{transferProgress.speedBytesPerSecond > 0 ? ` · ${formatBytesPerSecond(transferProgress.speedBytesPerSecond)}` : ''}</span>
               </div>
             )}
-            {stage.events.length > 0 && (
+            {stage.id === 'waiting_for_workloads' && workloadEvents.length > 0 && <div className="hbdr-task-detail-events" aria-label="Workload readiness events">
+              {workloadEvents.map(event => <WorkloadReadinessEvent key={event.id} event={event} />)}
+              {stage.status === 'failed' && <WorkloadReadinessEvent event={{ id: 'readiness-failed', at: task.completedAt || stage.events.at(-1)?.createdAt || '', status: 'failed', summary: /TIMEOUT/.test(task.errorCode || '') ? 'Timed out waiting for workloads to become ready.' : 'Workload readiness check failed.', detail: task.errorMessage || stage.events.find(event => event.level === 'error')?.message || 'See the final task result for diagnostic details.' }} />}
+            </div>}
+            {stage.events.length > 0 && !(stage.id === 'waiting_for_workloads' && workloadEvents.length > 0) && (
               <div className="hbdr-task-detail-events" aria-label={`${stage.name} events`}>
                 {stage.events.map(event => (
                   <TaskStageEvent key={event.id} event={event} current={!terminal && event.id === stage.currentEventId} />
@@ -723,7 +729,29 @@ export function TaskProcessTimeline({ task, events }: { task: ApiTask; events: A
   );
 }
 
-type TimelineStatus = 'completed' | 'in_progress' | 'failed' | 'warning' | 'not_started';
+type TimelineStatus = 'completed' | 'in_progress' | 'failed' | 'warning' | 'not_started' | 'waiting';
+
+function WorkloadReadinessEvent({ event }: { event: WorkloadTimelineEvent }) {
+  const [copyState, setCopyState] = React.useState('Copy');
+  React.useEffect(() => {
+    if (copyState === 'Copy') return;
+    const timer = window.setTimeout(() => setCopyState('Copy'), 2500);
+    return () => window.clearTimeout(timer);
+  }, [copyState]);
+  const copyImage = async () => {
+    try {
+      await navigator.clipboard.writeText(event.image || '');
+      setCopyState('Copied');
+    } catch {
+      setCopyState('Copy failed; select address');
+    }
+  };
+  const imageAddress = event.image && <div className="hbdr-task-image-address"><code>{event.image}</code><button type="button" onClick={copyImage} aria-label={`Copy image ${event.image}`}>{copyState}</button></div>;
+  return <TimelineItem status={event.status} title={<><time>[{formatLocalDateTime(event.at) || '-'}]</time><span>{event.summary}{event.count && event.count > 1 ? ` (${event.count} occurrences)` : ''}</span></>} className="hbdr-task-log-entry">
+    {!event.imageInDetails && imageAddress}
+    {event.detail && <details className="hbdr-task-log-detail"><summary>View details</summary>{event.imageInDetails && imageAddress}<p>{event.detail}</p>{event.count && event.count > 1 && event.lastAt && <p>Last observed: {formatLocalDateTime(event.lastAt)}</p>}</details>}
+  </TimelineItem>;
+}
 
 function TimelineMarker({ status }: { status: TimelineStatus }) {
   const label = status === 'in_progress' ? 'In progress' : status.replace('_', ' ');
@@ -792,6 +820,9 @@ export type TaskStatusDisplay = {
 
 /** Stable two-line status model: stage title on line one, event/data on line two. */
 export function taskStatusDisplay(task: ApiTask, events: ApiTaskEvent[]): TaskStatusDisplay {
+  if (task.type === 'backup' && task.status === 'finalizing' && ['data_ready', 'deleting_old_point'].includes(String(task.payload?.quotaStage || ''))) {
+    return { stage: 'Creating Restore Point', detail: task.errorMessage || 'Backup data is ready. Replacing an old restore point to release quota.', dataTransfer: false };
+  }
   if (task.payload?.submissionPending) {
     return { stage: 'Preparing Backup', detail: 'Submitting sync request…', dataTransfer: false };
   }
@@ -803,7 +834,7 @@ export function taskStatusDisplay(task: ApiTask, events: ApiTaskEvent[]): TaskSt
   const current = groups.find(group => group.status === 'failed') || groups.find(group => group.currentEventId && group.status === 'in_progress') || [...groups].reverse().find(group => group.status === 'in_progress') || groups.find(group => group.currentEventId);
   const latest = latestVisibleTaskEvent(visible);
   const fallback = current?.id === 'waiting_for_workloads'
-    ? 'Waiting for restored workloads and pods to become ready.'
+    ? workloadReadinessSnapshot(task, events)?.summary || 'Waiting for restored workloads and pods to become ready.'
     : latest ? taskEventPresentation(latest).summary : 'Waiting for task events...';
   const recovery = ['drill', 'restore', 'takeover'].includes(String(task.type || '').toLowerCase());
   const dataStage = recovery ? 'restoring_data' : 'backing_up_data';
@@ -830,7 +861,7 @@ export function taskProcessEventMessage(event: ApiTaskEvent): string {
     storage_preflight_skipped: message || 'Storage is already configured; readiness check skipped.',
     dispatched: 'Task was dispatched to the cluster agent.',
     accepted: 'Cluster agent accepted the task and started processing.',
-    progress: 'Persistent volume data transfer is in progress.',
+    progress: message || 'Task is in progress.',
     backup_progress: 'Persistent volume data backup is in progress.',
     restore_progress: 'Persistent volume data restoration is in progress.',
     finalizing: 'Data transfer completed; final task records are being prepared.',

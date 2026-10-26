@@ -116,6 +116,10 @@ func (c *gcReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 		return ctrl.Result{}, errors.Wrapf(err, "error getting backup %s", req.String())
 	}
 	log.Debugf("backup: %s", backup.Name)
+	if backup.Labels["hypercdr.io/managed-by"] == "hypercdr" && backup.Labels["hypercdr.io/plan-id"] != "" {
+		log.Debug("Backup retention is managed by the HyperCDR protection plan, skipping TTL garbage collection")
+		return ctrl.Result{}, nil
+	}
 
 	log = c.logger.WithFields(
 		logrus.Fields{

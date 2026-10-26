@@ -14,6 +14,63 @@ import (
 	"hypercdr-platform/platform/backend/internal/store"
 )
 
+func TestRestorePointListDoesNotPromoteLaterPointAfterFirstDeleted(t *testing.T) {
+	repo := newTestStore(t)
+	actor := testAdmin(t, repo)
+	cluster := testTenantCluster(t, repo, actor.TenantID, "retention-history")
+	first := seedContractRestorePoint(t, repo, cluster, "first-of-day")
+	plan, _, err := repo.GetProtectionPlan(first.ProtectionPlanID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := repo.UpdateRestorePointState(store.RestorePointStateInput{ID: first.ID, Status: "deleted"}); err != nil {
+		t.Fatal(err)
+	}
+	backup, err := repo.CreateTask(store.TaskInput{ClusterID: cluster.ID, ProtectionPlanID: plan.ID, Type: "backup", Status: "succeeded"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := repo.CreateRestorePoint(store.RestorePointInput{SourceClusterID: cluster.ID, ProtectionPlanID: plan.ID, BackupTaskID: backup.ID, VeleroBackupName: "second-of-day", TaskCreatedAt: first.TaskCreatedAt.Add(time.Microsecond)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := repo.CreatePolicy(store.PolicyInput{TenantID: actor.TenantID, Name: "daily-first", Composition: "retention", RetentionCount: 1, RetentionTimezone: "UTC", RetentionRules: []store.RetentionRule{{Period: "daily", Ordinal: 1, Keep: 3}}, Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpdateProtectionPlan(plan.ID, store.ProtectionPlanInput{TenantID: actor.TenantID, SourceClusterID: cluster.ID, AppID: plan.AppID, PolicyID: policy.ID, Status: "active"}); err != nil {
+		t.Fatal(err)
+	}
+	next, err := repo.CreateTask(store.TaskInput{ClusterID: cluster.ID, ProtectionPlanID: plan.ID, Type: "backup", Status: "running"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked, _, _ := repo.GetRestorePoint(second.ID)
+	if locked.Metadata["replacementTaskId"] != next.ID {
+		t.Fatalf("expected second point locked: %v", locked.Metadata)
+	}
+	router := &Router{store: repo, logger: slog.Default()}
+	request := tenantRequest(httptest.NewRequest("GET", "/api/v1/restore-points?protectionPlanId="+plan.ID, nil), actor)
+	response := httptest.NewRecorder()
+	router.listRestorePoints(response, request)
+	var body struct {
+		Items []store.RestorePoint `json:"items"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != 200 || len(body.Items) != 1 {
+		t.Fatalf("unexpected response: %s", response.Body.String())
+	}
+	raw, _ := json.Marshal(body.Items[0].Metadata["retentionReasons"])
+	if string(raw) != "null" && string(raw) != "[]" {
+		t.Fatalf("later point incorrectly promoted to first: %s", raw)
+	}
+	if body.Items[0].Metadata["replacementTaskId"] != next.ID {
+		t.Fatal("replacement marker missing")
+	}
+}
+
 func TestRestorePointContractsCoverMountedRoutes(t *testing.T) {
 	r := &Router{mux: http.NewServeMux(), productInfo: ProductInfo{Edition: "community"}}
 	r.routes()
@@ -39,7 +96,7 @@ func TestRestorePointContractsCoverMountedRoutes(t *testing.T) {
 			}
 		}
 	}
-	if count != 3 {
+	if count != 4 {
 		t.Fatalf("route coverage %d", count)
 	}
 }
@@ -144,6 +201,28 @@ func TestRestorePointReadAndDeleteActualResponsesAndTenantBatchIsolation(t *test
 		t.Fatal("deletion metadata missing")
 	}
 	run("POST /api/v1/restore-points/delete", "/api/v1/restore-points/delete", `{"restorePointId":"`+own.ID+`"}`, "", r.deleteRestorePoints, 409)
+}
+
+func TestRestorePointManualRetentionTenantAndDeletionGuard(t *testing.T) {
+	repo := newTestStore(t)
+	actor := testAdmin(t, repo)
+	cluster := testTenantCluster(t, repo, actor.TenantID, "manual-retention")
+	point := seedContractRestorePoint(t, repo, cluster, "retained-backup")
+	router := &Router{store: repo, hub: newSessionHub(), logger: slog.Default()}
+	path := "/api/v1/restore-points/" + point.ID + "/retention"
+	result := restorePointContractRun(t, router, actor, "PATCH /api/v1/restore-points/{id}/retention", path, `{"retained":true}`, point.ID, router.setRestorePointRetention, 200)
+	if result["retained"] != true {
+		t.Fatalf("unexpected retention response %v", result)
+	}
+	restorePointContractRun(t, router, actor, "POST /api/v1/restore-points/delete", "/api/v1/restore-points/delete", `{"restorePointId":"`+point.ID+`"}`, "", router.deleteRestorePoints, 409)
+	foreign, err := repo.CreateTenant(store.TenantInput{Name: "retention-foreign", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignCluster := testTenantCluster(t, repo, foreign.ID, "foreign-retention")
+	foreignPoint := seedContractRestorePoint(t, repo, foreignCluster, "foreign-point")
+	restorePointContractRun(t, router, actor, "PATCH /api/v1/restore-points/{id}/retention", path, `{"retained":false}`, foreignPoint.ID, router.setRestorePointRetention, 404)
+	restorePointContractRun(t, router, actor, "PATCH /api/v1/restore-points/{id}/retention", path, `{"retained":false}`, point.ID, router.setRestorePointRetention, 200)
 }
 
 func TestRestorePointMultiClusterDeleteResponseMatchesContract(t *testing.T) {

@@ -3,6 +3,7 @@ package kube
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -242,6 +243,8 @@ type ReadinessExpectations struct {
 }
 
 type NamespaceReadiness struct {
+	ImageEvents     []ReadinessImageEvent
+	Objects         []ReadinessObject
 	Namespace       string
 	NamespacePhase  string
 	Ready           bool
@@ -257,6 +260,91 @@ type NamespaceReadiness struct {
 	UnreadyWorkload []string
 	FailureCode     string
 	FailureMessage  string
+}
+
+type ReadinessObject struct {
+	DisplayName  string
+	Images       map[string]string
+	EventReason  string
+	EventMessage string
+	EventAt      time.Time
+	EventCount   int64
+	Since        time.Time
+	UID          string
+	Kind         string
+	Name         string
+	State        string
+	Reason       string
+	Message      string
+	Node         string
+	Container    string
+	Restarts     int64
+	Ready        int64
+	Desired      int64
+}
+
+func podReadinessObject(pod unstructured.Unstructured) ReadinessObject {
+	result := ReadinessObject{UID: string(pod.GetUID()), Kind: "Pod", Name: pod.GetName(), State: "Starting"}
+	result.DisplayName = pod.GetLabels()["app.kubernetes.io/name"]
+	if result.DisplayName == "" {
+		result.DisplayName = pod.GetLabels()["app"]
+	}
+	if result.DisplayName == "" {
+		result.DisplayName = pod.GetName()
+	}
+	result.Images = map[string]string{}
+	for _, field := range []string{"containers", "initContainers"} {
+		containers, _, _ := unstructured.NestedSlice(pod.Object, "spec", field)
+		for _, raw := range containers {
+			container, _ := raw.(map[string]any)
+			result.Images[stringField(container, "name")] = stringField(container, "image")
+		}
+	}
+	result.Node, _, _ = unstructured.NestedString(pod.Object, "spec", "nodeName")
+	if isPodReady(pod.Object) {
+		result.State = "Ready"
+		return result
+	}
+	conditions, _, _ := unstructured.NestedSlice(pod.Object, "status", "conditions")
+	for _, raw := range conditions {
+		condition, _ := raw.(map[string]any)
+		if stringField(condition, "type") == "PodScheduled" && stringField(condition, "status") == "False" {
+			result.State, result.Reason, result.Message = "Scheduling", stringField(condition, "reason"), stringField(condition, "message")
+			return result
+		}
+	}
+	for _, field := range []string{"initContainerStatuses", "containerStatuses"} {
+		statuses, _, _ := unstructured.NestedSlice(pod.Object, "status", field)
+		for _, raw := range statuses {
+			status, _ := raw.(map[string]any)
+			result.Restarts += int64FieldPath(status, "restartCount")
+			if field == "initContainerStatuses" {
+				if _, running, _ := unstructured.NestedMap(status, "state", "running"); running {
+					result.State, result.Container = "Initializing", stringField(status, "name")
+					return result
+				}
+			}
+			for _, state := range []string{"waiting", "terminated"} {
+				detail, found, _ := unstructured.NestedMap(status, "state", state)
+				if !found || stringField(detail, "reason") == "Completed" {
+					continue
+				}
+				result.State = "Starting"
+				if field == "initContainerStatuses" {
+					result.State = "Initializing"
+				}
+				result.Container, result.Reason, result.Message = stringField(status, "name"), stringField(detail, "reason"), stringField(detail, "message")
+				return result
+			}
+		}
+	}
+	for _, raw := range conditions {
+		condition, _ := raw.(map[string]any)
+		if stringField(condition, "type") == "Ready" && stringField(condition, "status") != "True" {
+			result.State, result.Reason, result.Message = "Waiting for readiness", stringField(condition, "reason"), stringField(condition, "message")
+		}
+	}
+	return result
 }
 
 func (a *DynamicManifestApplier) GetManifestStatus(ctx context.Context, object AppliedObject) (ManifestStatus, error) {
@@ -591,12 +679,14 @@ func (a *DynamicManifestApplier) GetNamespaceReadiness(ctx context.Context, name
 		pvc, err := a.client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumeclaims"}).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
 			result.UnreadyWorkload = append(result.UnreadyWorkload, "PersistentVolumeClaim/"+name+" (not restored)")
+			result.Objects = append(result.Objects, ReadinessObject{Kind: "PersistentVolumeClaim", Name: name, State: "Missing"})
 			continue
 		}
 		if err != nil {
 			return result, err
 		}
 		phase, _, _ := unstructured.NestedString(pvc.Object, "status", "phase")
+		result.Objects = append(result.Objects, ReadinessObject{UID: string(pvc.GetUID()), Kind: "PersistentVolumeClaim", Name: name, State: phase})
 		if phase == "Bound" {
 			result.ReadyPVCCount++
 		} else {
@@ -611,6 +701,47 @@ func (a *DynamicManifestApplier) GetNamespaceReadiness(ctx context.Context, name
 		return result, err
 	}
 	result.ServiceCount = len(services.Items)
+	if events, eventErr := a.client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "events"}).Namespace(namespace).List(ctx, metav1.ListOptions{}); eventErr == nil {
+		result.ImageEvents = readinessImageEvents(result.Objects, events.Items)
+		for index := range result.Objects {
+			object := &result.Objects[index]
+			if object.State == "Ready" || object.State == "Bound" || object.UID == "" {
+				continue
+			}
+			for _, event := range events.Items {
+				ownerUID, _, _ := unstructured.NestedString(event.Object, "involvedObject", "uid")
+				eventType, _, _ := unstructured.NestedString(event.Object, "type")
+				if ownerUID != object.UID || eventType != "Warning" {
+					continue
+				}
+				eventAt, found := nestedTime(event.Object, "lastTimestamp")
+				if !found {
+					eventAt, found = nestedTime(event.Object, "eventTime")
+				}
+				if !found {
+					eventAt = event.GetCreationTimestamp().Time
+				}
+				if observedAt, ok := nestedTime(event.Object, "series", "lastObservedTime"); ok && observedAt.After(eventAt) {
+					eventAt = observedAt
+				}
+				if !object.EventAt.IsZero() && !eventAt.After(object.EventAt) {
+					continue
+				}
+				object.EventAt = eventAt
+				object.EventCount = int64FieldPath(event.Object, "count")
+				if count := int64FieldPath(event.Object, "series", "count"); count > object.EventCount {
+					object.EventCount = count
+				}
+				object.EventReason, _, _ = unstructured.NestedString(event.Object, "reason")
+				object.EventMessage, _, _ = unstructured.NestedString(event.Object, "message")
+			}
+		}
+	}
+	sort.Slice(result.Objects, func(left, right int) bool {
+		return result.Objects[left].Kind+"/"+result.Objects[left].Name < result.Objects[right].Kind+"/"+result.Objects[right].Name
+	})
+	sort.Strings(result.UnreadyPods)
+	sort.Strings(result.UnreadyWorkload)
 
 	switch {
 	case expectations.Known && !expectations.RuntimeWorkloadsExpected && len(result.UnreadyWorkload) == 0:
@@ -641,6 +772,7 @@ func (a *DynamicManifestApplier) readPodReadiness(ctx context.Context, namespace
 		}
 		name := pod.GetName()
 		result.PodCount++
+		result.Objects = append(result.Objects, podReadinessObject(pod))
 		imageDetail := a.podImagePullFailureEvent(ctx, namespace, name)
 		if code, message := podTerminalReadinessFailure(pod.Object); code != "" {
 			if code == "RESTORE_WORKLOAD_IMAGE_PULL_FAILED" {
@@ -840,6 +972,15 @@ func (a *DynamicManifestApplier) readWorkloadReadiness(ctx context.Context, name
 				continue
 			}
 			result.WorkloadCount++
+			ready := int64FieldPath(item.Object, "status", "readyReplicas")
+			if workload.kind == "daemonset" {
+				ready = int64FieldPath(item.Object, "status", "numberReady")
+			}
+			state := "Waiting for replicas"
+			if isWorkloadReady(workload.kind, item.Object, desired) {
+				state = "Ready"
+			}
+			result.Objects = append(result.Objects, ReadinessObject{UID: string(item.GetUID()), Kind: workload.kind, Name: item.GetName(), State: state, Ready: ready, Desired: desired})
 			if isWorkloadReady(workload.kind, item.Object, desired) {
 				result.ReadyWorkloads++
 				continue

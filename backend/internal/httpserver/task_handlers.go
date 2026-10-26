@@ -13,7 +13,7 @@ import (
 
 func (r *Router) listTasks(w http.ResponseWriter, req *http.Request) {
 	query := req.URL.Query()
-	filter := store.TaskFilter{ClusterID: query.Get("clusterId")}
+	filter := store.TaskFilter{ClusterID: query.Get("clusterId"), ProtectionPlanID: query.Get("protectionPlanId")}
 	filter.Summary = query.Get("view") == "summary"
 	if user, ok := requestUser(req); ok {
 		filter.TenantID = user.TenantID
@@ -273,6 +273,10 @@ func (r *Router) cancelTask(w http.ResponseWriter, req *http.Request) {
 	}
 	if task.Type != "backup" {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "task_cancel_unsupported", "message": "Only running sync tasks can be force stopped."})
+		return
+	}
+	if task.Payload["quotaStage"] == "data_ready" || task.Payload["quotaStage"] == "deleting_old_point" {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "restore_point_replacement_in_progress", "message": "Backup data is already complete. Restore point replacement must finish before this task can be closed."})
 		return
 	}
 	if !isActiveTaskStatus(task.Status) || !task.CompletedAt.IsZero() {

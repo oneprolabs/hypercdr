@@ -10,18 +10,19 @@ import { getUserTimeZone, userTimeZoneLabel } from '../../lib/date-time';
 import { scheduleUTCToDisplay } from '../../lib/policy-schedule';
 import { listItems, type ApiList } from '../recovery/types';
 import { PolicyFormFields } from './policy-form-fields';
+import { retentionRuleSummary, type RetentionRule } from './retention-model';
 import { ResourceCreateDrawer } from '../../components/resource-create-drawer';
 import { buildPolicyInput, createPolicy, defaultPolicyForm, type PolicyComposition, type PolicyScheduleType } from './policy-form-model';
 
-type PolicyItem={id:string;name:string;composition:PolicyComposition;type:PolicyScheduleType;intervalValue:number;intervalUnit:'minutes'|'hours';hour:number;minute:number;weekDay:number;monthDay:number;retention?:number;status:'Active'|'Disabled';bound:number};
-type ApiPolicy={id:string;name:string;composition:string;scheduleType:string;intervalValue?:number;intervalUnit?:string;hour?:number;minute?:number;weekDay?:number;monthDay?:number;retentionCount?:number;status:string;boundCount:number};
+type PolicyItem={id:string;name:string;composition:PolicyComposition;type:PolicyScheduleType;intervalValue:number;intervalUnit:'minutes'|'hours';hour:number;minute:number;weekDay:number;monthDay:number;retention?:number;status:'Active'|'Disabled';bound:number;retentionRules?:RetentionRule[];retentionTimezone?:string};
+type ApiPolicy={id:string;name:string;composition:string;scheduleType:string;intervalValue?:number;intervalUnit?:string;hour?:number;minute?:number;weekDay?:number;monthDay?:number;retentionCount?:number;status:string;boundCount:number;retentionRules?:RetentionRule[];retentionTimezone?:string};
 const weekdays=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const formatTime=(hour:number,minute:number)=>`${String(hour).padStart(2,'0')}:${String(minute).padStart(2,'0')}`;
 const formatPolicyComposition=(value:PolicyComposition)=>value==='manual'?'Manual':value==='schedule'?'Schedule Only':value==='retention'?'Retention Only':'Schedule + Retention';
 const formatPolicyType=(value:PolicyScheduleType)=>value==='interval'?'Interval':value==='daily'?'Daily Backup':value==='weekly'?'Weekly Backup':'Monthly Backup';
-const formatPolicyRetention=(policy:Pick<PolicyItem,'composition'|'retention'>)=>policy.composition==='manual'?'Not defined':policy.composition==='schedule'?'Platform default':`${policy.retention??0} copies`;
+const formatPolicyRetention=(policy:Pick<PolicyItem,'composition'|'retention'|'retentionRules'>)=>policy.composition==='manual'?'Not defined':policy.composition==='schedule'?'Platform default':`${policy.retention??0} points${policy.retentionRules?.length ? ` · ${policy.retentionRules.length} retention rule${policy.retentionRules.length === 1 ? '' : 's'}` : ''}`;
 const formatPolicySchedule=(policy:Pick<PolicyItem,'composition'|'type'|'intervalValue'|'intervalUnit'|'hour'|'minute'|'weekDay'|'monthDay'>)=>policy.composition==='manual'?'Manual trigger':policy.composition==='retention'?'Not scheduled':policy.type==='interval'?`Every ${policy.intervalValue} ${policy.intervalUnit==='minutes'?(policy.intervalValue===1?'minute':'minutes'):(policy.intervalValue===1?'hour':'hours')}`:policy.type==='daily'?`Every day at ${formatTime(policy.hour,policy.minute)}`:policy.type==='weekly'?`Every ${weekdays[policy.weekDay]} at ${formatTime(policy.hour,policy.minute)}`:`Every month on day ${policy.monthDay} at ${formatTime(policy.hour,policy.minute)}`;
-const mapPolicy=(policy:ApiPolicy):PolicyItem=>{const display=scheduleUTCToDisplay(policy);return{id:policy.id,name:policy.name,composition:['manual','combined','schedule','retention'].includes(policy.composition)?policy.composition as PolicyComposition:'combined',type:['daily','weekly','monthly'].includes(policy.scheduleType)?policy.scheduleType as PolicyScheduleType:'interval',intervalValue:policy.intervalValue||1,intervalUnit:policy.intervalUnit==='minute'||policy.intervalUnit==='minutes'?'minutes':'hours',...display,retention:policy.retentionCount||0,status:policy.status==='disabled'?'Disabled':'Active',bound:policy.boundCount||0}};
+const mapPolicy=(policy:ApiPolicy):PolicyItem=>{const display=scheduleUTCToDisplay(policy);return{id:policy.id,name:policy.name,composition:['manual','combined','schedule','retention'].includes(policy.composition)?policy.composition as PolicyComposition:'combined',type:['daily','weekly','monthly'].includes(policy.scheduleType)?policy.scheduleType as PolicyScheduleType:'interval',intervalValue:policy.intervalValue||1,intervalUnit:policy.intervalUnit==='minute'||policy.intervalUnit==='minutes'?'minutes':'hours',...display,retention:policy.retentionCount||0,status:policy.status==='disabled'?'Disabled':'Active',bound:policy.boundCount||0,retentionRules:policy.retentionRules || [],retentionTimezone:policy.retentionTimezone}};
 function Info({label,value}:{label:string;value:string}){return <div className="rounded bg-slate-50 p-3"><p className="text-[10px] font-black uppercase tracking-wider text-slate-400">{label}</p><p className="mt-1 truncate text-xs font-bold text-slate-700">{value}</p></div>}
 
 export default function PolicyPage({ policies, setPolicies }: { policies: PolicyItem[]; setPolicies: React.Dispatch<React.SetStateAction<PolicyItem[]>> }) {
@@ -79,7 +80,7 @@ export default function PolicyPage({ policies, setPolicies }: { policies: Policy
   const policyColumns = [
     { value: 'composition', label: 'Schedule Type' },
     { value: 'schedule', label: 'Execution Plan' },
-    { value: 'retention', label: 'Retained Copies' },
+    { value: 'retention', label: 'Restore Point Quota' },
     { value: 'bound', label: 'Bound Apps' },
     { value: 'status', label: 'Status' },
   ];
@@ -175,12 +176,12 @@ export default function PolicyPage({ policies, setPolicies }: { policies: Policy
     });
     addColumn({
       id: 'retention',
-      header: 'Retained Copies',
+      header: 'Restore Point Quota',
       accessorFn: policy => policy.retention,
       size: 150,
       minSize: 130,
       cell: info => formatPolicyRetention(info.row.original),
-      meta: { kind: 'number', title: policy => formatPolicyRetention(policy) },
+      meta: { kind: 'number', title: policy => [formatPolicyRetention(policy), ...(policy.retentionRules || []).map(retentionRuleSummary)].join('\n') },
     });
     addColumn({
       id: 'bound',
@@ -222,6 +223,8 @@ export default function PolicyPage({ policies, setPolicies }: { policies: Policy
       weekDay: policy.weekDay,
       monthDay: policy.monthDay,
       retention: policy.retention,
+      retentionRules: policy.retentionRules || [],
+      retentionTimezone: policy.retentionTimezone,
     });
     setPolicyModalOpen(true);
     setMenuId(null);
@@ -435,7 +438,7 @@ export default function PolicyPage({ policies, setPolicies }: { policies: Policy
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <Info label="Policy Name" value={deletePolicy.name} />
                 <Info label="Schedule" value={formatPolicySchedule(deletePolicy)} />
-                <Info label="Retained Copies" value={formatPolicyRetention(deletePolicy)} />
+                <Info label="Restore Point Quota" value={formatPolicyRetention(deletePolicy)} />
                 <Info label="Bound Apps" value={`${deletePolicy.bound}`} />
               </div>
               <div className="flex justify-end gap-3">

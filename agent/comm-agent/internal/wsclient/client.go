@@ -2453,21 +2453,45 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, o
 	}
 	startPayload := cloneVeleroPayload(basePayload)
 	startPayload["readinessStage"] = "started"
+	startedAt := time.Now().UTC()
+	startPayload["readinessStartedAt"] = startedAt
+	lastReadiness := ""
+	lastReportedAt := time.Time{}
+	var lastObserved *kube.NamespaceReadiness
+	var lastObservedAt time.Time
+	previousObjects := map[string]kube.ReadinessObject{}
 	if err := c.sendTaskProgress(task, startPayload, 0, "Resource and volume data restoration completed; restored application readiness validation started."); err != nil {
 		c.logger.Warn("failed to send restore readiness start event; continuing readiness checks", "task_id", task.TaskID, "error", err)
 	}
 	for {
-		readiness, err := c.readiness.GetNamespaceReadiness(context.Background(), namespace, kube.ReadinessExpectations{
+		readContext, cancelRead := context.WithTimeout(context.Background(), 20*time.Second)
+		readiness, err := c.readiness.GetNamespaceReadiness(readContext, namespace, kube.ReadinessExpectations{
 			Known:                    task.Restore.ReadinessExpectationsKnown,
 			RuntimeWorkloadsExpected: task.Restore.RuntimeWorkloadsExpected,
 			PVCNames:                 task.Restore.ExpectedPVCs,
 		})
+		cancelRead()
 		payload := cloneVeleroPayload(basePayload)
+		payload["readinessStartedAt"] = startedAt
+		payload["readinessDeadline"] = deadline
 		// Keep the phase monotonic on every readiness poll. Without this marker,
 		// subsequent samples rebuild recoveryStages from the pre-readiness base
 		// payload and regress Waiting for Workloads from running to pending.
 		payload["readinessStage"] = "started"
 		if err == nil {
+			for index := range readiness.Objects {
+				object := &readiness.Objects[index]
+				key := object.Kind + "/" + object.Name + "/" + object.UID
+				previous, exists := previousObjects[key]
+				object.Since = time.Now().UTC()
+				if exists && previous.State == object.State && previous.Reason == object.Reason && previous.Container == object.Container {
+					object.Since = previous.Since
+				}
+				previousObjects[key] = *object
+			}
+			lastObserved = &readiness
+			lastObservedAt = time.Now().UTC()
+			payload["readinessObservedAt"] = lastObservedAt
 			payload["readiness"] = readiness
 			if readiness.FailureCode != "" {
 				c.failRestoreTask(task, object, readiness.FailureCode, readiness.FailureMessage, map[string]any{"velero": payload})
@@ -2490,23 +2514,62 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, o
 				return
 			}
 			if time.Now().UTC().After(deadline) {
-				c.failRestoreTask(task, object, "RESTORE_READINESS_TIMEOUT", "timed out waiting for restored application readiness", map[string]any{"velero": payload})
+				c.failRestoreTask(task, object, "RESTORE_READINESS_TIMEOUT", "timed out waiting for restored application readiness: "+readiness.Message, map[string]any{"velero": payload})
 				return
 			}
-			if err := c.sendTaskProgress(task, payload, 0, restoreReadinessProgressMessage(readiness)); err != nil {
-				c.logger.Warn("failed to send restore readiness progress; continuing readiness checks", "task_id", task.TaskID, "error", err)
+			snapshot := readinessSnapshotKey(readiness)
+			changed := snapshot != lastReadiness
+			payload["readinessChanged"] = changed
+			if changed || time.Since(lastReportedAt) >= 30*time.Second {
+				if err := c.sendTaskProgress(task, payload, 0, restoreReadinessProgressMessage(readiness)); err != nil {
+					c.logger.Warn("failed to send restore readiness progress; continuing readiness checks", "task_id", task.TaskID, "error", err)
+				} else {
+					lastReadiness, lastReportedAt = snapshot, time.Now()
+				}
 			}
 		} else {
+			payload["readinessObservationError"] = "Unable to read Kubernetes readiness; retrying."
+			if apierrors.IsNotFound(err) {
+				payload["readinessObservationError"] = "A readiness resource was not found; retrying Kubernetes checks."
+			}
+			if apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err) {
+				payload["readinessObservationError"] = "Kubernetes readiness access was denied; check agent permissions."
+			}
+			if lastObserved != nil {
+				payload["readiness"] = lastObserved
+				payload["readinessObservedAt"] = lastObservedAt
+			}
 			if time.Now().UTC().After(deadline) {
 				c.failRestoreTask(task, object, "RESTORE_READINESS_READ_FAILED", err.Error(), map[string]any{"velero": payload})
 				return
 			}
-			if err := c.sendTaskProgress(task, payload, 0, "waiting for restored namespace to be created"); err != nil {
-				c.logger.Warn("failed to send restore readiness progress; continuing readiness checks", "task_id", task.TaskID, "error", err)
+			observationKey := fmt.Sprint(payload["readinessObservationError"])
+			payload["readinessChanged"] = lastReadiness != observationKey
+			if lastReadiness != observationKey || time.Since(lastReportedAt) >= 30*time.Second {
+				if err := c.sendTaskProgress(task, payload, 0, observationKey); err != nil {
+					c.logger.Warn("failed to send restore readiness progress; continuing readiness checks", "task_id", task.TaskID, "error", err)
+				} else {
+					lastReadiness, lastReportedAt = observationKey, time.Now()
+				}
 			}
 		}
 		time.Sleep(5 * time.Second)
 	}
+}
+
+func readinessSnapshotKey(readiness kube.NamespaceReadiness) string {
+	readiness.ImageEvents = append([]kube.ReadinessImageEvent(nil), readiness.ImageEvents...)
+	for index := range readiness.ImageEvents {
+		readiness.ImageEvents[index].LastAt = time.Time{}
+		readiness.ImageEvents[index].Count = 0
+	}
+	readiness.Objects = append([]kube.ReadinessObject(nil), readiness.Objects...)
+	for index := range readiness.Objects {
+		readiness.Objects[index].EventAt = time.Time{}
+		readiness.Objects[index].EventCount = 0
+	}
+	encoded, _ := json.Marshal(readiness)
+	return string(encoded)
 }
 
 func restoreReadinessProgressMessage(readiness kube.NamespaceReadiness) string {
@@ -2521,6 +2584,14 @@ func restoreReadinessProgressMessage(readiness kube.NamespaceReadiness) string {
 	)
 	if strings.TrimSpace(readiness.Message) != "" {
 		message += "; " + strings.TrimSuffix(strings.TrimSpace(readiness.Message), ".")
+	}
+	for _, object := range readiness.Objects {
+		if object.Kind == "Pod" && object.State != "Ready" {
+			message += "; " + object.Name + ": " + object.State
+			if object.Reason != "" {
+				message += " (" + object.Reason + ")"
+			}
+		}
 	}
 	return message + "."
 }

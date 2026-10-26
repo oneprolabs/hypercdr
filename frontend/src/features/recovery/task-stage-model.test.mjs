@@ -11,6 +11,31 @@ const recoveryStages = [
   ['finalizing_drill', 'Finalizing Drill'],
 ];
 
+test('resource startup progress retains its authoritative resource stage', () => {
+  const event = { id: 'resources', reason: 'progress', message: 'Waiting for the restore operation to start.', createdAt: '2026-10-23T09:00:00Z', payload: { velero: { recoveryStages: recoveryStages.map(([id, name], index) => ({ id, name, status: index === 1 ? 'running' : 'pending' })) } } };
+  const groups = groupTaskEventsByStage(task(), [event]);
+  assert.ok(groups.find(group => group.id === 'restoring_resources').events.some(item => item.id === 'resources'));
+});
+
+test('readiness success remains in the workload stage and task completion stays final', () => {
+  const events = [
+    { id: 'ready', reason: 'progress', message: 'Readiness completed.', payload: { velero: { readinessStage: 'succeeded' } } },
+    { id: 'done', reason: 'completed', payload: { velero: { readinessStage: 'succeeded' } } },
+  ];
+  const groups = groupTaskEventsByStage(task('succeeded'), events);
+  assert.ok(groups.find(group => group.id === 'waiting_for_workloads').events.some(item => item.id === 'ready'));
+  assert.ok(groups.find(group => group.id === 'finalizing_drill').events.some(item => item.id === 'done'));
+});
+
+test('readiness transitions retain history in the workload stage', () => {
+  const events = [
+    { id: 'ready-1', taskId: 'task-current', reason: 'workload_readiness_changed', level: 'info', message: 'nextcloud: ImagePullBackOff', createdAt: '2026-10-23T08:00:00Z' },
+    { id: 'ready-2', taskId: 'task-current', reason: 'workload_readiness_changed', level: 'info', message: 'nextcloud: Waiting for readiness', createdAt: '2026-10-23T08:01:00Z' },
+  ];
+  const groups = groupTaskEventsByStage(task('running', { payload: { recoveryStages: recoveryStages.map(([id, name], index) => ({ id, name, status: index < 3 ? 'succeeded' : index === 3 ? 'running' : 'pending' })) } }), keyTaskEvents(events));
+  assert.equal(groups.find(group => group.id === 'waiting_for_workloads').events.length, 2);
+});
+
 function task(status = 'running', overrides = {}) {
   return {
     id: 'task-current', type: 'drill', status, progress: 10, clusterId: 'target',

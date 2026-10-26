@@ -47,6 +47,63 @@ func (s *PostgresStore) CreateRestorePoint(input RestorePointInput) (RestorePoin
 		return RestorePoint{}, err
 	}
 	defer tx.Rollback()
+	if err := quotaPlanLock(tx, input.ProtectionPlanID); err != nil {
+		return RestorePoint{}, err
+	}
+	if input.BackupTaskID != "" && len(input.SizeMetricsV2) == 0 {
+		var taskMetrics []byte
+		if err := tx.QueryRow(`select coalesce(payload->'sizeMetricsV2','null'::jsonb) from tasks where id=$1 and protection_plan_id=nullif($2,'')::uuid`, input.BackupTaskID, input.ProtectionPlanID).Scan(&taskMetrics); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return RestorePoint{}, err
+		}
+		if len(taskMetrics) > 0 {
+			if err := json.Unmarshal(taskMetrics, &input.SizeMetricsV2); err != nil {
+				return RestorePoint{}, err
+			}
+			if len(input.SizeMetricsV2) > 0 {
+				sizeMetricsRaw = taskMetrics
+				metadata["sizeMetricsV2"] = input.SizeMetricsV2
+				metadataRaw, err = json.Marshal(metadata)
+				if err != nil {
+					return RestorePoint{}, err
+				}
+			}
+		}
+	}
+	if input.BackupTaskID != "" {
+		var state, replacement string
+		err := tx.QueryRow(`select state,coalesce(replacement_point_id::text,'') from restore_point_reservations where task_id=$1 for update`, input.BackupTaskID).Scan(&state, &replacement)
+		if errors.Is(err, sql.ErrNoRows) && input.ProtectionPlanID != "" {
+			if reserveErr := reserveBackupQuota(tx, Task{ID: input.BackupTaskID, ProtectionPlanID: input.ProtectionPlanID, Type: "backup"}); reserveErr != nil {
+				return RestorePoint{}, reserveErr
+			}
+			err = tx.QueryRow(`select state,coalesce(replacement_point_id::text,'') from restore_point_reservations where task_id=$1 for update`, input.BackupTaskID).Scan(&state, &replacement)
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return RestorePoint{}, err
+		}
+		if state == "released" {
+			return RestorePoint{}, ErrRestorePointQuota
+		}
+		if replacement != "" && state != "published" {
+			var oldStatus string
+			if err := tx.QueryRow(`select status from restore_points where id=$1`, replacement).Scan(&oldStatus); err != nil {
+				return RestorePoint{}, err
+			}
+			if oldStatus != "deleted" {
+				raw, err := json.Marshal(input)
+				if err != nil {
+					return RestorePoint{}, err
+				}
+				if _, err := tx.Exec(`update restore_point_reservations set state=case when state='reserved' then 'data_ready' else state end,pending_point=$2,updated_at=now() where task_id=$1`, input.BackupTaskID, raw); err != nil {
+					return RestorePoint{}, err
+				}
+				if err := tx.Commit(); err != nil {
+					return RestorePoint{}, err
+				}
+				return RestorePoint{}, ErrRestorePointReplacementPending
+			}
+		}
+	}
 	var tenantID string
 	if err := tx.QueryRow(`select tenant_id from clusters where id=$1 for share`, input.SourceClusterID).Scan(&tenantID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -106,12 +163,21 @@ func (s *PostgresStore) CreateRestorePoint(input RestorePointInput) (RestorePoin
 		       metadata = coalesce(restore_points.metadata, '{}'::jsonb)
 		           || (coalesce(excluded.metadata, '{}'::jsonb)
 		               - array['velero', 'size', 'restorePointSize', 'planStorageSize', 'sizeStatus', 'sizeWarnings']),
-		       size_metrics_v2 = case when excluded.size_metrics_v2 = '{}'::jsonb then restore_points.size_metrics_v2 else excluded.size_metrics_v2 end
+		       size_metrics_v2 = case when excluded.size_metrics_v2 in ('{}'::jsonb, 'null'::jsonb) then restore_points.size_metrics_v2 else excluded.size_metrics_v2 end
 	`, point.ID, point.TenantID, point.ProtectionPlanID, point.SourceClusterID, point.AppID,
 		point.StorageRepoID, point.DisplayName, point.VeleroBackupName, point.PointType, point.Status, point.SizeBytes,
 		point.StartedAt, point.CompletedAt, point.ExpiresAt, metadataRaw, now, point.TaskCreatedAt, sizeMetricsRaw, point.BackupTaskID)
 	if err != nil {
 		return RestorePoint{}, err
+	}
+	if input.BackupTaskID != "" {
+		pendingRaw, err := json.Marshal(input)
+		if err != nil {
+			return RestorePoint{}, err
+		}
+		if _, err := tx.Exec(`update restore_point_reservations set state='published',pending_point=$2,updated_at=now() where task_id=$1 and state in ('reserved','data_ready','deleting')`, input.BackupTaskID, pendingRaw); err != nil {
+			return RestorePoint{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return RestorePoint{}, err
@@ -136,6 +202,7 @@ func (s *PostgresStore) ListRestorePoints(filter RestorePointFilter) ([]RestoreP
 			'backupTaskId',metadata->'backupTaskId','backupStorageName',metadata->'backupStorageName',
 			'includedNamespaces',metadata->'includedNamespaces','scheduled',metadata->'scheduled',
 			'retentionState',metadata->'retentionState','retentionWarning',metadata->'retentionWarning',
+            'manualRetained',metadata->'manualRetained','drillRetained',metadata->'drillRetained','replacementTaskId',metadata->'replacementTaskId',
 			'protectionCleanupState',metadata->'protectionCleanupState'))`
 	}
 	query := `
@@ -251,6 +318,9 @@ func (s *PostgresStore) UpdateRestorePointState(input RestorePointStateInput) (R
 		return RestorePoint{}, false, nil
 	}
 	status := input.Status
+	if input.Metadata == nil {
+		input.Metadata = map[string]any{}
+	}
 	if status == "" {
 		status = "available"
 	}
@@ -260,9 +330,24 @@ func (s *PostgresStore) UpdateRestorePointState(input RestorePointStateInput) (R
 	}
 	var item RestorePoint
 	var metadataRawOut []byte
-	err = s.db.QueryRow(`
+	tx, err := s.db.Begin()
+	if err != nil {
+		return RestorePoint{}, false, err
+	}
+	defer tx.Rollback()
+	var planID string
+	if err := tx.QueryRow(`select coalesce(protection_plan_id::text,'') from restore_points where id=$1`, input.ID).Scan(&planID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return RestorePoint{}, false, nil
+		}
+		return RestorePoint{}, false, err
+	}
+	if err := quotaPlanLock(tx, planID); err != nil {
+		return RestorePoint{}, false, err
+	}
+	err = tx.QueryRow(`
 		update restore_points
-		   set status = $2,
+		   set status = case when status='deleted' then status else $2 end,
 		       metadata = coalesce(metadata, '{}'::jsonb) || $3::jsonb
 		 where id = $1
 		returning id, tenant_id, coalesce(protection_plan_id::text, ''), source_cluster_id,
@@ -284,6 +369,21 @@ func (s *PostgresStore) UpdateRestorePointState(input RestorePointStateInput) (R
 		return RestorePoint{}, false, err
 	}
 	_ = json.Unmarshal(metadataRawOut, &item.Metadata)
+	if err := tx.Commit(); err != nil {
+		return RestorePoint{}, false, err
+	}
 	hydrateRestorePointMetadata(&item)
 	return item, true, nil
+}
+
+func (s *PostgresStore) UpdateRestorePointSizeMetrics(id string, metrics map[string]any) error {
+	if id == "" || len(metrics) == 0 {
+		return nil
+	}
+	raw, err := json.Marshal(metrics)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`update restore_points set size_metrics_v2=$2::jsonb, metadata=coalesce(metadata,'{}'::jsonb)||jsonb_build_object('sizeMetricsV2',$2::jsonb) where id=$1 and (size_metrics_v2 is null or size_metrics_v2 in ('{}'::jsonb,'null'::jsonb))`, id, raw)
+	return err
 }

@@ -29,9 +29,10 @@ type restorePointContentsResponse struct {
 
 func restorePointPayloadContract(pattern string) (payloadContract, int, bool) {
 	contracts := map[string]payloadContract{
-		"GET /api/v1/restore-points":               {Response: reflect.TypeFor[listResponse[store.RestorePoint]]()},
-		"GET /api/v1/restore-points/{id}/contents": {Response: reflect.TypeFor[restorePointContentsResponse]()},
-		"POST /api/v1/restore-points/delete":       {Request: reflect.TypeFor[restorePointDeleteRequest](), Response: reflect.TypeFor[restorePointDeleteResponse]()},
+		"PATCH /api/v1/restore-points/{id}/retention": {Request: reflect.TypeFor[restorePointRetentionRequest](), Response: reflect.TypeFor[map[string]bool](), Required: []string{"retained"}},
+		"GET /api/v1/restore-points":                  {Response: reflect.TypeFor[listResponse[store.RestorePoint]]()},
+		"GET /api/v1/restore-points/{id}/contents":    {Response: reflect.TypeFor[restorePointContentsResponse]()},
+		"POST /api/v1/restore-points/delete":          {Request: reflect.TypeFor[restorePointDeleteRequest](), Response: reflect.TypeFor[restorePointDeleteResponse]()},
 	}
 	c, ok := contracts[pattern]
 	status := 200

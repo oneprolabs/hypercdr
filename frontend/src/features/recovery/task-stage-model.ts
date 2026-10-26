@@ -89,6 +89,8 @@ function taskEventStageId(event: ApiTaskEvent, recovery: boolean, storageSync = 
     if (['progress', 'backup_progress'].includes(reason) || reason.includes('volume') || reason.includes('backup')) return 'backing_up_data';
     return 'preparing_backup';
   }
+  if (['finalizing', 'completed'].includes(reason)) return 'finalizing_drill';
+  if (event.payload?.velero?.readinessStage || reason === 'workload_readiness_changed' || reason === 'application_readiness_check_started') return 'waiting_for_workloads';
   // Recovery progress events all share a generic `progress` reason. Prefer
   // the authoritative stage snapshot carried by that exact event, otherwise
   // readiness polls are incorrectly grouped back under persistent data.
@@ -98,7 +100,6 @@ function taskEventStageId(event: ApiTaskEvent, recovery: boolean, storageSync = 
   if (snapshotStage?.id) return String(snapshotStage.id);
   if (reason === 'application_ready' || reason.includes('validation')) return 'application_validation';
   if (reason === 'application_readiness_check_started' || reason.includes('readiness') || reason.includes('workload') || code.includes('WORKLOAD')) return 'waiting_for_workloads';
-  if (['finalizing', 'completed'].includes(reason)) return 'finalizing_drill';
   if (['restore_progress', 'progress'].includes(reason) || reason.includes('volume') || reason.includes('data_transfer') || reason.includes('data_path') || reason === 'restore_velero_stalled' || code.includes('VOLUME') || code.includes('DATA_PATH')) return 'restoring_data';
   if (reason === 'restore_completed' || reason.includes('restore_resource') || reason.includes('restore_submit') || code.includes('RESTORE_SUBMIT')) return 'restoring_resources';
   return 'preparing_restore';

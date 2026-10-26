@@ -83,6 +83,8 @@ export type ApiPolicy = {
 };
 
 export type ApiProtectionPlan = {
+  preHooks?: Record<string, unknown>[];
+  postHooks?: Record<string, unknown>[];
   id: string;
   appId: string;
   appIds?: string[];

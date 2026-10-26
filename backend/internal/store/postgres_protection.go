@@ -7,7 +7,18 @@ import (
 	"time"
 )
 
+var ErrProtectionPlanBusy = errors.New("protection plan has active work")
+var ErrProtectionPlanIdentity = errors.New("source cluster and application membership cannot be changed")
+
 func (s *PostgresStore) CreateProtectionPlan(input ProtectionPlanInput) (ProtectionPlan, error) {
+	return s.saveProtectionPlan("", input)
+}
+
+func (s *PostgresStore) UpdateProtectionPlan(id string, input ProtectionPlanInput) (ProtectionPlan, error) {
+	return s.saveProtectionPlan(id, input)
+}
+
+func (s *PostgresStore) saveProtectionPlan(id string, input ProtectionPlanInput) (ProtectionPlan, error) {
 	if input.TenantID == "" {
 		input.TenantID = DefaultTenantID
 	}
@@ -82,6 +93,33 @@ func (s *PostgresStore) CreateProtectionPlan(input ProtectionPlanInput) (Protect
 	}
 	defer tx.Rollback()
 
+	if id != "" {
+		var tenantID, sourceID, status string
+		if err := tx.QueryRow(`select tenant_id, source_cluster_id, status, created_at from protection_plans where id=$1 for update`, id).Scan(&tenantID, &sourceID, &status, &plan.CreatedAt); err != nil {
+			return ProtectionPlan{}, err
+		}
+		if tenantID != input.TenantID {
+			return ProtectionPlan{}, ErrTenantResourceMismatch
+		}
+		if sourceID != input.SourceClusterID {
+			return ProtectionPlan{}, ErrProtectionPlanIdentity
+		}
+		var sameApps bool
+		if err := tx.QueryRow(`select count(*) = cardinality($2::uuid[]) and coalesce(bool_and(app_id = any($2::uuid[])),false) from protection_plan_apps where plan_id=$1`, id, planIDsSlice(appIDs)).Scan(&sameApps); err != nil {
+			return ProtectionPlan{}, err
+		}
+		if !sameApps {
+			return ProtectionPlan{}, ErrProtectionPlanIdentity
+		}
+		var busy bool
+		if err := tx.QueryRow(`select exists(select 1 from tasks where protection_plan_id=$1 and status in ('queued','pending','running','dispatched','accepted','syncing','finalizing','canceling','cancelling'))`, id).Scan(&busy); err != nil {
+			return ProtectionPlan{}, err
+		}
+		if busy || status == "cleanup_running" || status == "activating_storage" || status == "activating_schedule" {
+			return ProtectionPlan{}, ErrProtectionPlanBusy
+		}
+		plan.ID = id
+	}
 	// Validate relationships in the same transaction as insertion. Handlers are
 	// not the only caller: schedules and edition integrations also create plans.
 	var referencesValid bool
@@ -130,15 +168,30 @@ func (s *PostgresStore) CreateProtectionPlan(input ProtectionPlanInput) (Protect
 			from protection_plans p
 			join protection_plan_apps ppa on ppa.plan_id = p.id
 			where p.tenant_id = $1 and p.source_cluster_id = $2
-			  and ppa.app_id = any($3::uuid[])
+			  and ppa.app_id = any($3::uuid[]) and p.id::text <> $4
 			limit 1
-		`, plan.TenantID, plan.SourceClusterID, planIDsSlice(appIDs)).Scan(&existingPlanID, &existingAppID)
+		`, plan.TenantID, plan.SourceClusterID, planIDsSlice(appIDs), id).Scan(&existingPlanID, &existingAppID)
 		if err == nil {
 			return ProtectionPlan{}, &ApplicationAlreadyProtectedError{ProtectionPlanID: existingPlanID, ApplicationID: existingAppID}
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return ProtectionPlan{}, err
 		}
+	}
+	if id != "" {
+		_, err = tx.Exec(`update protection_plans set scope_type=$2, included_resources=$3, resource_selection=$4, label_selector=$5, include_cluster_scoped=$6, storage_repo_id=nullif($7,'')::uuid, policy_id=nullif($8,'')::uuid, target_cluster_id=nullif($9,'')::uuid, excluded_resources=$10, pre_hooks=$11, post_hooks=$12, status=$13, updated_at=$14 where id=$1`, id, plan.ScopeType, includedResources, resourceSelection, labelSelector, plan.IncludeClusterScoped, plan.StorageRepoID, plan.PolicyID, plan.TargetClusterID, excludedResources, preHooks, postHooks, plan.Status, now)
+		if err != nil {
+			return ProtectionPlan{}, err
+		}
+		// Pause the previous schedule atomically; activation enables the new
+		// schedule only after storage is ready. Manual policies stay disabled.
+		if _, err := tx.Exec(`update protection_plan_schedules set enabled=false, next_fire_at=null, updated_at=$2 where protection_plan_id=$1`, id, now); err != nil {
+			return ProtectionPlan{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return ProtectionPlan{}, err
+		}
+		return plan, nil
 	}
 	_, err = tx.Exec(`
 		insert into protection_plans (

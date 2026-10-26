@@ -1,13 +1,16 @@
 import React from 'react';
-import { Calendar, Layers, Sun, Zap } from 'lucide-react';
+import { Calendar, Layers, Plus, Sun, Trash2, Zap } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { userTimeZoneLabel } from '../../lib/date-time';
+import { getUserTimeZone, userTimeZoneLabel } from '../../lib/date-time';
+import { retentionUnits, type RetentionPeriod } from './retention-model';
 import type { PolicyComposition, PolicyForm, PolicyScheduleType } from './policy-form-model';
 const weekdays=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 function TimeSelector({hour,minute,onChange}:{hour:number;minute:number;onChange:(hour:number,minute:number)=>void}){return <div className="flex items-center gap-2"><select value={hour} onChange={event=>onChange(Number(event.target.value),minute)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold outline-none">{Array.from({length:24}).map((_,index)=><option key={index} value={index}>{String(index).padStart(2,'0')}</option>)}</select><span className="font-bold text-slate-500">:</span><select value={minute} onChange={event=>onChange(hour,Number(event.target.value))} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold outline-none">{Array.from({length:60}).map((_,index)=><option key={index} value={index}>{String(index).padStart(2,'0')}</option>)}</select></div>}
 export function PolicyFormFields({policyForm,setPolicyForm}:{policyForm:PolicyForm;setPolicyForm:React.Dispatch<React.SetStateAction<PolicyForm>>}){
  const showScheduleConfig=policyForm.composition!=='retention';
  const showRetentionConfig=policyForm.composition!=='schedule';
+ const retentionTimeZone=policyForm.retentionTimezone || getUserTimeZone();
+ const separateRetentionTimeZone=showScheduleConfig && showRetentionConfig && (policyForm.retentionRules || []).length > 0 && retentionTimeZone!==getUserTimeZone();
  return <div className="hbdr-policy-form-fields">
               <div className="hbdr-filter-drawer-body hbdr-policy-drawer-body">
                 <section className="hbdr-advanced-filter-section">
@@ -18,7 +21,10 @@ export function PolicyFormFields({policyForm,setPolicyForm}:{policyForm:PolicyFo
                 </section>
 
                 <section className="hbdr-advanced-filter-section">
-                  <h4>Policy Composition</h4>
+                  <div className="hbdr-policy-composition-heading">
+                    <h4>Policy Composition</h4>
+                    <span className="hbdr-policy-timezone-note">{userTimeZoneLabel(showScheduleConfig ? getUserTimeZone() : retentionTimeZone)}{separateRetentionTimeZone ? ` · Retention: ${retentionTimeZone}` : ''}</span>
+                  </div>
                   <div className="hbdr-advanced-filter-box hbdr-policy-form-box">
                   <div className="grid gap-2 md:grid-cols-3">
                     {[
@@ -45,11 +51,10 @@ export function PolicyFormFields({policyForm,setPolicyForm}:{policyForm:PolicyFo
                 </section>
 
                 {showScheduleConfig && (
-                <section className="hbdr-advanced-filter-section">
+                <section className="hbdr-advanced-filter-section hbdr-policy-schedule-section">
                   <h4>Schedule Type</h4>
-                  <p className="hbdr-policy-timezone-note">Schedule times use {userTimeZoneLabel()}.</p>
                   <div className="hbdr-advanced-filter-box hbdr-policy-form-box">
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="hbdr-policy-schedule-options grid grid-cols-2 gap-2">
                     {[
                       { id: 'interval' as PolicyScheduleType, label: 'Interval', icon: Zap },
                       { id: 'daily' as PolicyScheduleType, label: 'Daily Backup', icon: Sun },
@@ -112,15 +117,25 @@ export function PolicyFormFields({policyForm,setPolicyForm}:{policyForm:PolicyFo
 
                 {showRetentionConfig && (
                 <section className="hbdr-advanced-filter-section">
-                  <h4>Retention Policy</h4>
-                  <div className="hbdr-advanced-filter-box hbdr-policy-form-box">
-                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-                    <div className="flex max-w-[260px] items-center gap-3">
-                      <input type="number" min={1} value={policyForm.retention} onChange={event => setPolicyForm({ ...policyForm, retention: Number(event.target.value) })} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold outline-none focus:border-indigo-500" />
-                      <span className="text-xs font-bold uppercase text-slate-400">valid copies</span>
+                  <div className="hbdr-policy-quota-header">
+                    <h4><label htmlFor="policy-restore-point-quota">Restore Point Quota</label></h4>
+                    <input id="policy-restore-point-quota" type="number" min={1} value={policyForm.retention} onChange={event => setPolicyForm({ ...policyForm, retention: Number(event.target.value) })} className="w-20 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500" />
+                    <span className="text-xs text-slate-500">restore points</span>
+                  </div>
+                  <p className="hbdr-policy-timezone-note">All retained points count toward the quota.</p>
+                  <div className="hbdr-retention-heading"><h4>Automatic Retention <span>Optional</span></h4><button type="button" disabled={(policyForm.retentionRules || []).length >= 32} onClick={() => setPolicyForm({ ...policyForm, retentionRules: [...(policyForm.retentionRules || []), { period: 'daily', ordinal: 1, keep: 3 }], retentionTimezone: policyForm.retentionTimezone || getUserTimeZone() })}><Plus size={14} />Add Rule</button></div>
+                  {(policyForm.retentionRules || []).length > 0 ? <>
+                    <div className="hbdr-retention-rules">
+                      <div className="hbdr-retention-rule-header"><span>Period</span><span>Successful point</span><span>Keep for</span><span /></div>
+                      {(policyForm.retentionRules || []).map((rule, index) => <div className="hbdr-retention-rule" key={index}>
+                        <select aria-label={`Rule ${index + 1} period`} value={rule.period} onChange={event => setPolicyForm({ ...policyForm, retentionRules: policyForm.retentionRules?.map((item, position) => position === index ? { ...item, period: event.target.value as RetentionPeriod } : item) })}>{Object.entries({ daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', yearly: 'Yearly' }).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+                        <label>#{' '}<input aria-label={`Rule ${index + 1} point number`} type="number" min={1} max={100000} value={rule.ordinal} onChange={event => setPolicyForm({ ...policyForm, retentionRules: policyForm.retentionRules?.map((item, position) => position === index ? { ...item, ordinal: Number(event.target.value) } : item) })} /></label>
+                        <label><input aria-label={`Rule ${index + 1} duration`} type="number" min={1} max={1000} value={rule.keep} onChange={event => setPolicyForm({ ...policyForm, retentionRules: policyForm.retentionRules?.map((item, position) => position === index ? { ...item, keep: Number(event.target.value) } : item) })} />{retentionUnits[rule.period]}</label>
+                        <button type="button" aria-label={`Remove rule ${index + 1}`} onClick={() => setPolicyForm({ ...policyForm, retentionRules: policyForm.retentionRules?.filter((_, position) => position !== index) })}><Trash2 size={14} /></button>
+                      </div>)}
                     </div>
-                  </div>
-                  </div>
+                    <p className="hbdr-policy-timezone-note">Includes the current period.{policyForm.retentionRules?.some(rule => rule.period === 'weekly') ? ' Weeks start Monday.' : ''}</p>
+                  </> : <p className="hbdr-policy-timezone-note">No rules: replace oldest eligible points when full.</p>}
                 </section>
                 )}
               </div>

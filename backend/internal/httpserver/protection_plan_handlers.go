@@ -169,8 +169,18 @@ func (r *Router) createProtectionPlan(w http.ResponseWriter, req *http.Request) 
 		input.AppID = input.AppIDs[0]
 	}
 	input.Status = "activating_storage"
-	item, err := r.store.CreateProtectionPlan(input)
+	var item store.ProtectionPlan
+	var err error
+	if id := req.PathValue("id"); id != "" {
+		item, err = r.store.UpdateProtectionPlan(id, input)
+	} else {
+		item, err = r.store.CreateProtectionPlan(input)
+	}
 	if err != nil {
+		if errors.Is(err, store.ErrProtectionPlanBusy) || errors.Is(err, store.ErrProtectionPlanIdentity) {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "protection_plan_update_conflict", "message": err.Error()})
+			return
+		}
 		var conflict *store.ApplicationAlreadyProtectedError
 		if errors.As(err, &conflict) {
 			writeJSON(w, http.StatusConflict, map[string]any{
@@ -187,7 +197,11 @@ func (r *Router) createProtectionPlan(w http.ResponseWriter, req *http.Request) 
 	// plan immediately. Storage and schedule activation must not mutate it to
 	// Ready inside the Save request, otherwise the UI can never present a
 	// truthful, monotonic Configuring -> Ready/Failed state transition.
-	writeJSON(w, http.StatusCreated, protectionPlanActivationResponse(item, nil, ""))
+	statusCode := http.StatusCreated
+	if req.PathValue("id") != "" {
+		statusCode = http.StatusOK
+	}
+	writeJSON(w, statusCode, protectionPlanActivationResponse(item, nil, ""))
 	r.startWorker(func() { r.activateNewProtectionPlan(item) })
 }
 

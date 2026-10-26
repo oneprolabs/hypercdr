@@ -28,7 +28,6 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 	}
 	body.RequestedBy = requestActor(req)
 
-	// When a protection plan is provided, expand to one task per app on the plan.
 	type planApp struct {
 		appID                   string
 		ns                      string
@@ -68,7 +67,7 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 		if hasRepo {
 			storageName = storageDomainBSLName(repo, plan.SourceClusterID)
 		}
-		if body.AppID == "" && body.SourceNamespace == "" {
+		if body.AppID == "" {
 			sourceNamespaces := []string{}
 			appIDs := plan.AppIDs
 			if len(appIDs) == 0 && plan.AppID != "" {
@@ -113,6 +112,10 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 			}
 			task, err := r.createPendingBackupTask(body, "")
 			if err != nil {
+				if errors.Is(err, store.ErrProtectionPlanBusy) {
+					writeJSON(w, http.StatusConflict, map[string]any{"error": "sync_already_running", "message": "Wait for the current sync and restore point replacement to finish."})
+					return
+				}
 				r.logger.Error("failed to create plan backup task", "error", err)
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "create_task_failed"})
 				return
@@ -125,6 +128,9 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 		}
 		for _, appID := range plan.AppIDs {
 			if appID == "" {
+				continue
+			}
+			if body.AppID != "" && appID != body.AppID {
 				continue
 			}
 			if _, dup := seen[appID]; dup {
@@ -239,6 +245,10 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 		}
 		task, err := r.createPendingBackupTask(body, tgt.appID)
 		if err != nil {
+			if errors.Is(err, store.ErrProtectionPlanBusy) {
+				writeJSON(w, http.StatusConflict, map[string]any{"error": "sync_already_running", "message": "Wait for the current sync and restore point replacement to finish."})
+				return
+			}
 			r.logger.Error("failed to create backup task", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "create_task_failed"})
 			return
@@ -428,6 +438,9 @@ func (r *Router) createPendingBackupTask(body backupTaskRequest, appID string) (
 }
 
 func (r *Router) dispatchBackupTaskAfterStorageSync(task store.Task, storageName string, storageRepoID string, sourceClusterID string) {
+	if !task.CompletedAt.IsZero() {
+		return
+	}
 	if r.backgroundContext().Err() != nil {
 		return
 	}
@@ -485,6 +498,9 @@ func (r *Router) dispatchBackupTaskAfterStorageSync(task store.Task, storageName
 }
 
 func (r *Router) dispatchBackupTask(task store.Task) {
+	if !task.CompletedAt.IsZero() {
+		return
+	}
 	if r.backgroundContext().Err() != nil {
 		return
 	}

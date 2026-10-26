@@ -197,8 +197,8 @@ func TestTaskCreationActualResponsesMatchContracts(t *testing.T) {
 				created := taskContractRun(t, r, actor, "POST /api/v1/tasks/backup", body, "", r.createBackupTask, 201)
 				reused := taskContractRun(t, r, actor, "POST /api/v1/tasks/backup", body, "", r.createBackupTask, 200)
 				if kind == "backup-multiple" {
-					if len(created["tasks"].([]any)) != 2 || reused["reused"] != float64(2) {
-						t.Fatalf("multi-task shape %#v %#v", created, reused)
+					if created["task"] == nil || reused["reused"] != true {
+						t.Fatalf("multi-namespace sync must use one task: %#v %#v", created, reused)
 					}
 				} else if reused["reused"] != true {
 					t.Fatal("single reuse not boolean")

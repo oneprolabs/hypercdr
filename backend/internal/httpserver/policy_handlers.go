@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"errors"
 	"hypercdr-platform/platform/backend/internal/store"
 	"net/http"
 	"strings"
@@ -36,6 +37,17 @@ func (r *Router) createPolicy(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "name_required"})
 		return
 	}
+	if input.RetentionTimezone == "" {
+		input.RetentionTimezone = "UTC"
+	}
+	if (input.Composition == "combined" || input.Composition == "retention") && input.RetentionCount < 1 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_restore_point_quota", "message": "Restore point quota must be a positive integer."})
+		return
+	}
+	if err := store.ValidateRetentionRules(input.RetentionRules, input.RetentionTimezone); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_retention_rules", "message": err.Error()})
+		return
+	}
 	item, err := r.store.CreatePolicy(input)
 	if err != nil {
 		r.logger.Error("failed to create policy", "error", err)
@@ -55,8 +67,23 @@ func (r *Router) updatePolicy(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "name_required", "message": "Policy name is required."})
 		return
 	}
+	if input.RetentionTimezone == "" {
+		input.RetentionTimezone = "UTC"
+	}
+	if (input.Composition == "combined" || input.Composition == "retention") && input.RetentionCount < 1 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_restore_point_quota", "message": "Restore point quota must be a positive integer."})
+		return
+	}
+	if err := store.ValidateRetentionRules(input.RetentionRules, input.RetentionTimezone); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_retention_rules", "message": err.Error()})
+		return
+	}
 	item, ok, err := r.store.UpdatePolicy(req.PathValue("id"), input)
 	if err != nil {
+		if errors.Is(err, store.ErrRestorePointQuota) {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "restore_point_quota_below_usage", "message": "Quota cannot be lower than occupied and reserved restore point slots."})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "update_policy_failed"})
 		return
 	}
