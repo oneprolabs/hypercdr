@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"hypercdr-platform/agent/comm-agent/pkg/protocol"
 )
 
 type eventOutbox struct {
@@ -311,6 +313,38 @@ func (o *eventOutbox) remove(messageID string) error {
 	defer o.mu.Unlock()
 	delete(o.items, messageID)
 	return o.flushLocked()
+}
+
+func (o *eventOutbox) acknowledge(ack protocol.EventAckPayload) (string, bool, error) {
+	if o == nil || !ack.Persisted || ack.AckMessageID == "" {
+		return "", false, nil
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	raw, found := o.items[ack.AckMessageID]
+	if !found {
+		return "", false, nil
+	}
+	var event struct {
+		Type    string `json:"type"`
+		Payload struct {
+			TaskID    string `json:"taskId"`
+			CommandID string `json:"commandId"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(raw, &event); err != nil {
+		return "", false, err
+	}
+	terminal := event.Type == protocol.MessageAgentTaskCompleted || event.Type == protocol.MessageAgentTaskFailed
+	if (ack.AckType != "" && ack.AckType != event.Type) || (terminal && ack.TaskID != event.Payload.TaskID) || (ack.TaskID != "" && ack.TaskID != event.Payload.TaskID) || (ack.CommandID != "" && ack.CommandID != event.Payload.CommandID) {
+		return "", false, nil
+	}
+	delete(o.items, ack.AckMessageID)
+	if err := o.flushLocked(); err != nil {
+		o.items[ack.AckMessageID] = raw
+		return "", false, err
+	}
+	return event.Payload.TaskID, terminal, nil
 }
 
 func (o *eventOutbox) list() []json.RawMessage {

@@ -22,22 +22,19 @@ func (r *Router) reconcileRestorePointReplacements() {
 			}
 		}
 		if item.PointID == "" || point.Status == "deleted" {
-			if task, found, taskErr := r.store.GetTask(item.TaskID); taskErr == nil && found {
-				if metrics := mapFromAnyJSON(task.Payload["sizeMetricsV2"]); len(metrics) > 0 {
-					item.Input.SizeMetricsV2 = metrics
-					if item.Input.Metadata == nil {
-						item.Input.Metadata = map[string]any{}
-					}
-					item.Input.Metadata["sizeMetricsV2"] = metrics
+			if task, found, taskErr := r.store.GetTask(item.TaskID); taskErr == nil && found && task.Payload["backupResult"] == nil {
+				item.Input.SizeMetricsV2 = mapFromAnyJSON(task.Payload["sizeMetricsV2"])
+				if item.Input.Metadata == nil {
+					item.Input.Metadata = map[string]any{}
 				}
+				item.Input.Metadata["sizeMetricsV2"] = item.Input.SizeMetricsV2
 			}
-			created, err := r.store.CreateRestorePoint(item.Input)
+			created, err := r.store.PublishBackupResult(item.Input)
 			if err != nil {
 				r.logger.Error("restore point publication pending", "task_id", item.TaskID, "error", err)
 				continue
 			}
 			r.scheduleRestorePointContentIndex(created)
-			_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: item.TaskID, Status: "succeeded", Progress: 100, RestorePointID: created.ID, MarkDone: true, Payload: map[string]any{"quotaStage": "published"}})
 			_ = r.addTaskEventIfChanged(store.TaskEventInput{TaskID: item.TaskID, Level: "info", Reason: "restore_point_published", Message: "Old restore point deleted; new restore point published."})
 			continue
 		}

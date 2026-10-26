@@ -11,6 +11,14 @@ import (
 )
 
 func (s *PostgresStore) CreateRestorePoint(input RestorePointInput) (RestorePoint, error) {
+	return s.createRestorePoint(input, false)
+}
+
+func (s *PostgresStore) PublishBackupResult(input RestorePointInput) (RestorePoint, error) {
+	return s.createRestorePoint(input, true)
+}
+
+func (s *PostgresStore) createRestorePoint(input RestorePointInput, finalizeBackup bool) (RestorePoint, error) {
 	now := time.Now().UTC()
 	if input.PointType == "" {
 		input.PointType = "backup"
@@ -49,6 +57,74 @@ func (s *PostgresStore) CreateRestorePoint(input RestorePointInput) (RestorePoin
 	defer tx.Rollback()
 	if err := quotaPlanLock(tx, input.ProtectionPlanID); err != nil {
 		return RestorePoint{}, err
+	}
+	var tenantID string
+	if err := tx.QueryRow(`select tenant_id from clusters where id=$1 for share`, input.SourceClusterID).Scan(&tenantID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return RestorePoint{}, ErrTenantResourceMismatch
+		}
+		return RestorePoint{}, err
+	}
+	if err := validateRestorePointReferences(tx, input, tenantID); err != nil {
+		return RestorePoint{}, err
+	}
+	if finalizeBackup {
+		input.Metadata = metadata
+		var conflictingPoint bool
+		if err := tx.QueryRow(`select exists(select 1 from restore_points where source_cluster_id=$1 and velero_backup_name=$2 and (tenant_id<>$3 or backup_task_id is distinct from nullif($4,'')::uuid))`, input.SourceClusterID, input.VeleroBackupName, tenantID, input.BackupTaskID).Scan(&conflictingPoint); err != nil {
+			return RestorePoint{}, err
+		}
+		if conflictingPoint {
+			return RestorePoint{}, ErrBackupResultConflict
+		}
+		var taskStatus, taskType, publishedPointID string
+		var accepted []byte
+		if err := tx.QueryRow(`select type,status,coalesce(payload->'backupResult','null'::jsonb),coalesce(restore_point_id::text,'') from tasks where id=nullif($1,'')::uuid and tenant_id=$2 and cluster_id=$3 and protection_plan_id=$4 for update`, input.BackupTaskID, tenantID, input.SourceClusterID, input.ProtectionPlanID).Scan(&taskType, &taskStatus, &accepted, &publishedPointID); err != nil {
+			return RestorePoint{}, err
+		}
+		if taskType != "backup" || taskStatus == "failed" || taskStatus == "canceling" || taskStatus == "canceled" || taskStatus == "cancelled" {
+			return RestorePoint{}, ErrBackupResultConflict
+		}
+		if string(accepted) != "null" {
+			var snapshot RestorePointInput
+			if err := json.Unmarshal(accepted, &snapshot); err != nil {
+				return RestorePoint{}, err
+			}
+			if snapshot.VeleroBackupName != input.VeleroBackupName || !backupMetricsEqual(snapshot.SizeMetricsV2, input.SizeMetricsV2) {
+				return RestorePoint{}, ErrBackupResultConflict
+			}
+			if taskStatus == "succeeded" && publishedPointID != "" {
+				if err := tx.Commit(); err != nil {
+					return RestorePoint{}, err
+				}
+				point, found, err := s.GetRestorePoint(publishedPointID)
+				if err == nil && !found {
+					return RestorePoint{}, ErrBackupResultConflict
+				}
+				return point, err
+			}
+			input = snapshot
+			metadata = snapshot.Metadata
+			metadataRaw, err = json.Marshal(metadata)
+			if err != nil {
+				return RestorePoint{}, err
+			}
+			sizeMetricsRaw, err = json.Marshal(input.SizeMetricsV2)
+			if err != nil {
+				return RestorePoint{}, err
+			}
+		} else {
+			if !CompleteBackupMetrics(input.SizeMetricsV2) {
+				return RestorePoint{}, ErrBackupResultIncomplete
+			}
+			snapshot, err := json.Marshal(input)
+			if err != nil {
+				return RestorePoint{}, err
+			}
+			if _, err := tx.Exec(`update tasks set status=case when completed_at is null then 'finalizing' else status end,payload=payload||jsonb_build_object('backupResult',$2::jsonb,'sizeMetricsV2',$3::jsonb,'veleroBackupName',$4::text,'backupResultStatus','accepted','sizeProgressV2',null,'volumeProgress',null) where id=$1`, input.BackupTaskID, snapshot, sizeMetricsRaw, input.VeleroBackupName); err != nil {
+				return RestorePoint{}, err
+			}
+		}
 	}
 	if input.BackupTaskID != "" && len(input.SizeMetricsV2) == 0 {
 		var taskMetrics []byte
@@ -103,16 +179,6 @@ func (s *PostgresStore) CreateRestorePoint(input RestorePointInput) (RestorePoin
 				return RestorePoint{}, ErrRestorePointReplacementPending
 			}
 		}
-	}
-	var tenantID string
-	if err := tx.QueryRow(`select tenant_id from clusters where id=$1 for share`, input.SourceClusterID).Scan(&tenantID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return RestorePoint{}, ErrTenantResourceMismatch
-		}
-		return RestorePoint{}, err
-	}
-	if err := validateRestorePointReferences(tx, input, tenantID); err != nil {
-		return RestorePoint{}, err
 	}
 	point := RestorePoint{
 		ID:                newID(),
@@ -176,6 +242,14 @@ func (s *PostgresStore) CreateRestorePoint(input RestorePointInput) (RestorePoin
 			return RestorePoint{}, err
 		}
 		if _, err := tx.Exec(`update restore_point_reservations set state='published',pending_point=$2,updated_at=now() where task_id=$1 and state in ('reserved','data_ready','deleting')`, input.BackupTaskID, pendingRaw); err != nil {
+			return RestorePoint{}, err
+		}
+	}
+	if finalizeBackup {
+		if _, err := tx.Exec(`update tasks set status='succeeded',progress=100,error_code=null,error_message=null,completed_at=coalesce(completed_at,$2),restore_point_id=(select id from restore_points where source_cluster_id=$3 and velero_backup_name=$4),payload=payload||jsonb_build_object('quotaStage','published','restorePointId',(select id::text from restore_points where source_cluster_id=$3 and velero_backup_name=$4)) where id=$1`, input.BackupTaskID, now, input.SourceClusterID, input.VeleroBackupName); err != nil {
+			return RestorePoint{}, err
+		}
+		if _, err := tx.Exec(`insert into task_events(id,task_id,level,reason,message,payload,created_at) values($1,$2,'info','completed','Backup result accepted and restore point published.','{"backupResultPublished":true}'::jsonb,$3)`, newID(), input.BackupTaskID, now); err != nil {
 			return RestorePoint{}, err
 		}
 	}

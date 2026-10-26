@@ -527,8 +527,16 @@ func (c *Client) readMessages() error {
 			if err := json.Unmarshal(data, &ack); err != nil {
 				return err
 			}
-			_ = c.outbox.remove(ack.Payload.AckMessageID)
-			_ = c.ledger.markTerminalAcked(ack.Payload.TaskID)
+			taskID, terminal, err := c.outbox.acknowledge(ack.Payload)
+			if err != nil {
+				c.logger.Error("failed to persist event acknowledgement", "message_id", ack.Payload.AckMessageID, "error", err)
+				continue
+			}
+			if terminal {
+				if err := c.ledger.markTerminalAcked(taskID); err != nil {
+					c.logger.Error("failed to persist terminal result acknowledgement", "task_id", taskID, "error", err)
+				}
+			}
 			c.logger.Info("platform acknowledged event", "ack_message_id", ack.Payload.AckMessageID, "ack_type", ack.Payload.AckType, "task_id", ack.Payload.TaskID)
 		case protocol.MessagePlatformEventError:
 			var eventError protocol.Message[protocol.EventErrorPayload]

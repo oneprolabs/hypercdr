@@ -213,6 +213,7 @@ type ApplicationLookupRepository interface {
 // RestorePointRepository defines the persisted restorepoint operations.
 type RestorePointRepository interface {
 	CreateRestorePoint(input RestorePointInput) (RestorePoint, error)
+	PublishBackupResult(input RestorePointInput) (RestorePoint, error)
 	ListRestorePoints(filter RestorePointFilter) ([]RestorePoint, error)
 	GetRestorePoint(id string) (RestorePoint, bool, error)
 	UpdateRestorePointState(input RestorePointStateInput) (RestorePoint, bool, error)

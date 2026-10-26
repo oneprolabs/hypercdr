@@ -13,146 +13,7 @@ import (
 )
 
 func (r *Router) ingestVeleroBackupsFromInventory(clusterID string, backups []map[string]any) {
-	if len(backups) == 0 {
-		return
-	}
-	existingPoints, err := r.store.ListRestorePoints(store.RestorePointFilter{ClusterID: clusterID, IncludeDeleted: true})
-	if err != nil {
-		r.logger.Error("failed to list restore points before velero ingest", "cluster_id", clusterID, "error", err)
-		return
-	}
-	seen := map[string]struct{}{}
-	for _, point := range existingPoints {
-		seen[point.VeleroBackupName] = struct{}{}
-	}
-	for _, backup := range backups {
-		name := stringFromMap(backup, "name")
-		if name == "" {
-			continue
-		}
-		if _, ok := seen[name]; ok {
-			continue
-		}
-		phase := stringFromMap(backup, "phase")
-		if phase != "Completed" {
-			continue
-		}
-		labels := mapPayload(backup, "labels")
-		planID := stringFromMap(labels, "hypercdr.io/plan-id")
-		if planID == "" {
-			continue
-		}
-		plan, ok, err := r.store.GetProtectionPlan(planID)
-		if err != nil {
-			r.logger.Error("failed to load protection plan for velero backup ingest", "plan_id", planID, "error", err)
-			continue
-		}
-		if !ok {
-			continue
-		}
-		if plan.SourceClusterID != clusterID {
-			continue
-		}
-		sourceNamespace := stringFromMap(labels, "hypercdr.io/source-namespace")
-		if sourceNamespace == "" {
-			sourceNamespace = firstStringFromAny(backup["includedNamespaces"])
-		}
-		storageName := stringFromMap(backup, "storageLocation")
-		completedAt := parseTimeFromAny(backup["completedAt"])
-		if completedAt.IsZero() {
-			completedAt = parseTimeFromAny(backup["createdAt"])
-		}
-		task, ok, err := r.findVeleroBackupTask(clusterID, name)
-		if err != nil {
-			r.logger.Error("failed to find scheduled backup task from inventory", "backup", name, "error", err)
-			continue
-		}
-		if !ok {
-			commandID := store.NewPublicID()
-			task, err = r.store.CreateTask(store.TaskInput{
-				ClusterID:        clusterID,
-				AppID:            plan.AppID,
-				ProtectionPlanID: plan.ID,
-				Type:             "backup",
-				Status:           "queued",
-				CommandID:        commandID,
-				Payload: map[string]any{
-					"scheduled":        true,
-					"sourceNamespace":  sourceNamespace,
-					"storageRepo":      storageName,
-					"veleroBackupName": name,
-					"phase":            phase,
-				},
-				SuppressLatestPointer: true,
-			})
-			if err != nil {
-				r.logger.Error("failed to create scheduled backup task from inventory", "backup", name, "error", err)
-				continue
-			}
-		} else if !task.CompletedAt.IsZero() {
-			// Inventory is eventually consistent and can report completion after a
-			// task has already reached a terminal state (notably after force stop).
-			// Terminal task state and restore-point outcome are immutable.
-			continue
-		}
-		task, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{
-			TaskID:      task.ID,
-			Status:      "finalizing",
-			Progress:    100,
-			Payload:     backupTaskPayloadPatch(backup),
-			MarkStarted: true,
-		})
-		point, err := r.store.CreateRestorePoint(store.RestorePointInput{
-			ProtectionPlanID:  plan.ID,
-			SourceClusterID:   clusterID,
-			AppID:             plan.AppID,
-			StorageRepoID:     plan.StorageRepoID,
-			TaskCreatedAt:     task.CreatedAt,
-			VeleroBackupName:  name,
-			PointType:         "backup",
-			Status:            "available",
-			SizeBytes:         veleroBackupSizeBytes(backup),
-			CompletedAt:       completedAt,
-			SourceNamespace:   sourceNamespace,
-			BackupTaskID:      task.ID,
-			BackupStorageName: storageName,
-			SizeMetricsV2:     mapFromAnyJSON(task.Payload["sizeMetricsV2"]),
-			Metadata: map[string]any{
-				"sizeMetricsV2":    task.Payload["sizeMetricsV2"],
-				"scheduled":        true,
-				"phase":            phase,
-				"velero":           backup,
-				"size":             firstNonEmptyMap(mapFromAny(backup["restorePointSize"]), mapFromAny(backup["size"])),
-				"sizeStatus":       backup["sizeStatus"],
-				"sizeWarnings":     sliceFromAny(backup["sizeWarnings"]),
-				"restorePointSize": firstNonEmptyMap(mapFromAny(backup["restorePointSize"]), mapFromAny(backup["size"])),
-				"planStorageSize":  mapFromAny(backup["planStorageSize"]),
-			},
-		})
-		if err != nil {
-			r.logger.Error("failed to create restore point from scheduled backup", "backup", name, "error", err)
-			r.deferRestorePointReplacement(task.ID, err)
-			continue
-		}
-		r.scheduleRestorePointContentIndex(point)
-		task, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{
-			TaskID:   task.ID,
-			Status:   "succeeded",
-			Progress: 100,
-			Payload:  backupTaskPayloadPatch(backup),
-			MarkDone: true,
-		})
-		_ = r.store.AddTaskEvent(store.TaskEventInput{
-			TaskID:  task.ID,
-			Level:   "info",
-			Reason:  "velero-schedule",
-			Message: "scheduled velero backup completed",
-			Payload: map[string]any{"velero": backup},
-		})
-		r.updateProtectionPlanStorageSizeFromVelero(plan.ID, backup)
-		seen[name] = struct{}{}
-		r.reconcileRetention(point.ProtectionPlanID, point.BackupTaskID)
-	}
+	r.observeInventoryBackups(clusterID, backups)
 }
 
 func (r *Router) handleVeleroBackupEvent(clusterID string, event protocol.VeleroEventPayload) (store.Task, error) {
@@ -200,90 +61,7 @@ func (r *Router) handleVeleroBackupEvent(clusterID string, event protocol.Velero
 		// create a restore point after its task reached any terminal outcome.
 		return task, nil
 	}
-	status := "running"
-	markDone := false
-	errorCode := ""
-	errorMessage := ""
-	switch event.EventType {
-	case "backup_completed":
-		status = "succeeded"
-		markDone = true
-	case "backup_failed":
-		status = "failed"
-		markDone = true
-		errorCode = "VELERO_BACKUP_FAILED"
-		errorMessage = detailedTaskFailureMessage(event.Message, event.Velero)
-	default:
-		status = "running"
-	}
-	if event.Phase == "Failed" || event.Phase == "FailedValidation" || event.Phase == "PartiallyFailed" || event.Phase == "Canceled" {
-		status = "failed"
-		markDone = true
-		errorCode = "VELERO_BACKUP_FAILED"
-		errorMessage = detailedTaskFailureMessage(event.Message, event.Velero)
-	}
-	if event.Phase == "Completed" {
-		status = "succeeded"
-		markDone = true
-	}
-	progress := event.Progress
-	if markDone && status == "succeeded" {
-		progress = 100
-	}
-	var completedPoint store.RestorePoint
-	if status == "succeeded" {
-		task, _, err = r.store.UpdateTaskStatus(store.TaskStatusInput{
-			TaskID:      task.ID,
-			Status:      "finalizing",
-			Progress:    100,
-			Payload:     backupTaskPayloadPatch(event.Velero),
-			MarkStarted: true,
-		})
-		if err != nil {
-			r.logger.Error("failed to mark velero backup task finalizing", "task_id", task.ID, "backup", event.BackupName, "error", err)
-			return task, err
-		}
-		completedPoint, err = r.createRestorePointFromVeleroEvent(clusterID, plan, task, event)
-		if err != nil {
-			if r.deferRestorePointReplacement(task.ID, err) {
-				return task, nil
-			}
-			r.logger.Error("failed to create restore point from velero event", "backup", event.BackupName, "error", err)
-			return task, err
-		}
-	}
-	task, _, err = r.store.UpdateTaskStatus(store.TaskStatusInput{
-		TaskID:       task.ID,
-		Status:       status,
-		Progress:     progress,
-		ErrorCode:    errorCode,
-		ErrorMessage: errorMessage,
-		Payload:      backupTaskPayloadPatch(event.Velero),
-		MarkStarted:  true,
-		MarkDone:     markDone,
-	})
-	if err != nil {
-		r.logger.Error("failed to update velero backup task", "task_id", task.ID, "backup", event.BackupName, "error", err)
-		return task, err
-	}
-	level := "info"
-	if status == "failed" {
-		level = "error"
-	}
-	_ = r.addTaskEventIfChanged(store.TaskEventInput{
-		TaskID:  task.ID,
-		Level:   level,
-		Reason:  event.EventType,
-		Message: detailedTaskFailureMessage(event.Message, event.Velero),
-		Payload: map[string]any{"velero": event.Velero},
-	})
-	if status == "succeeded" {
-		if completedPoint.ID != "" {
-			r.updateProtectionPlanStorageSizeFromVelero(plan.ID, event.Velero)
-			r.reconcileRetention(completedPoint.ProtectionPlanID, completedPoint.BackupTaskID)
-		}
-	}
-	return task, nil
+	return r.recordBackupObservation(task, event.Velero, event.Phase)
 }
 
 func (r *Router) addTaskEventIfChanged(input store.TaskEventInput) error {
@@ -850,48 +628,6 @@ func isForceStoppedBackupTask(task store.Task) bool {
 	return status == "canceling" || status == "canceled" || strings.EqualFold(task.ErrorCode, "SYNC_FORCE_STOPPED")
 }
 
-func (r *Router) createRestorePointFromVeleroEvent(clusterID string, plan store.ProtectionPlan, task store.Task, event protocol.VeleroEventPayload) (store.RestorePoint, error) {
-	completedAt := event.CompletedAt
-	if completedAt.IsZero() {
-		completedAt = time.Now().UTC()
-	}
-	sourceNamespace := firstNonEmptyString(event.Labels["hypercdr.io/source-namespace"], firstStringFromStrings(event.IncludedNamespaces), taskPayloadString(task.Payload, "sourceNamespace"))
-	scheduled := taskPayloadBool(task.Payload, "scheduled")
-	point, err := r.store.CreateRestorePoint(store.RestorePointInput{
-		ProtectionPlanID:  plan.ID,
-		SourceClusterID:   clusterID,
-		AppID:             plan.AppID,
-		StorageRepoID:     plan.StorageRepoID,
-		TaskCreatedAt:     task.CreatedAt,
-		VeleroBackupName:  event.BackupName,
-		PointType:         "backup",
-		Status:            "available",
-		SizeBytes:         veleroBackupSizeBytes(event.Velero),
-		CompletedAt:       completedAt,
-		SourceNamespace:   sourceNamespace,
-		BackupTaskID:      task.ID,
-		BackupStorageName: event.StorageLocation,
-		SizeMetricsV2:     mapFromAnyJSON(task.Payload["sizeMetricsV2"]),
-		Metadata: map[string]any{
-			"sizeMetricsV2":      task.Payload["sizeMetricsV2"],
-			"scheduled":          scheduled,
-			"phase":              event.Phase,
-			"velero":             event.Velero,
-			"size":               firstNonEmptyMap(mapFromAny(event.Velero["restorePointSize"]), mapFromAny(event.Velero["size"])),
-			"sizeStatus":         event.Velero["sizeStatus"],
-			"sizeWarnings":       sliceFromAny(event.Velero["sizeWarnings"]),
-			"restorePointSize":   firstNonEmptyMap(mapFromAny(event.Velero["restorePointSize"]), mapFromAny(event.Velero["size"])),
-			"planStorageSize":    mapFromAny(event.Velero["planStorageSize"]),
-			"includedNamespaces": event.IncludedNamespaces,
-			"sourceNamespaces":   event.IncludedNamespaces,
-		},
-	})
-	if err == nil {
-		r.scheduleRestorePointContentIndex(point)
-	}
-	return point, err
-}
-
 func (r *Router) createRestorePointFromBackup(task store.Task, veleroPayload map[string]any) (store.RestorePoint, error) {
 	if task.ProtectionPlanID == "" {
 		return store.RestorePoint{}, errors.New("backup restore point requires protection plan id")
@@ -933,7 +669,7 @@ func (r *Router) createRestorePointFromBackup(task store.Task, veleroPayload map
 		completedAt = time.Now().UTC()
 	}
 
-	point, err := r.store.CreateRestorePoint(store.RestorePointInput{
+	point, err := r.store.PublishBackupResult(store.RestorePointInput{
 		ProtectionPlanID:  task.ProtectionPlanID,
 		SourceClusterID:   task.ClusterID,
 		AppID:             task.AppID,
@@ -963,15 +699,6 @@ func (r *Router) createRestorePointFromBackup(task store.Task, veleroPayload map
 		return store.RestorePoint{}, err
 	}
 	r.scheduleRestorePointContentIndex(point)
-	if task.ID != "" && point.ID != "" {
-		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{
-			TaskID:         task.ID,
-			RestorePointID: point.ID,
-			Payload: map[string]any{
-				"restorePointId": point.ID,
-			},
-		})
-	}
 	r.updateProtectionPlanStorageSizeFromVelero(task.ProtectionPlanID, veleroPayload)
 	return point, nil
 }

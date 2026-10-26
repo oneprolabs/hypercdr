@@ -229,6 +229,10 @@ func (r *Router) pingAgentConnection(conn *websocket.Conn, clusterID string, don
 }
 
 func (r *Router) writeEventAck(conn *websocket.Conn, clusterID string, agentID string, ackMessageID string, ackType string, taskID string, commandID string) error {
+	if ackType != protocol.MessageAgentTaskCompleted && ackType != protocol.MessageAgentTaskFailed {
+		taskID = ""
+		commandID = ""
+	}
 	message := protocol.Message[protocol.EventAckPayload]{
 		Version:     protocol.Version,
 		MessageID:   store.NewPublicID(),

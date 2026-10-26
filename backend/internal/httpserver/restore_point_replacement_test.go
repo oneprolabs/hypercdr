@@ -55,7 +55,7 @@ func TestRestorePointReplacementWaitsForConfirmedDeletionAndRetriesPublication(t
 	if parent.Status != "finalizing" || !parent.CompletedAt.IsZero() {
 		t.Fatalf("failed deletion closed parent: %v", parent)
 	}
-	if _, _, err := repo.UpdateTaskStatus(store.TaskStatusInput{TaskID: backup.ID, Status: "finalizing", Payload: map[string]any{"sizeMetricsV2": map[string]any{"newData": map[string]any{"known": true, "totalBytes": float64(123)}}}}); err != nil {
+	if _, _, err := repo.UpdateTaskStatus(store.TaskStatusInput{TaskID: backup.ID, Status: "finalizing", Payload: map[string]any{"sizeMetricsV2": map[string]any{"schemaVersion": 2, "logical": map[string]any{"known": true, "totalBytes": 1024}, "newData": map[string]any{"known": true, "totalBytes": float64(123)}}}}); err != nil {
 		t.Fatal(err)
 	}
 	locked, _, _ := repo.GetRestorePoint(old.ID)

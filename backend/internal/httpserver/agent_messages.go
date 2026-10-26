@@ -3,6 +3,7 @@ package httpserver
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/gorilla/websocket"
 	"hypercdr-platform/platform/backend/internal/protocol"
@@ -16,6 +17,7 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 		var meta struct {
 			Type      string `json:"type"`
 			ClusterID string `json:"clusterId"`
+			Version   string `json:"version"`
 		}
 		_, data, err := conn.ReadMessage()
 		if err != nil {
@@ -25,6 +27,10 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 		if err := json.Unmarshal(data, &meta); err != nil {
 			r.logger.Warn("failed to decode agent message metadata", "cluster_id", clusterID, "error", err)
 			return
+		}
+		if (meta.ClusterID != "" && meta.ClusterID != clusterID) || (meta.Version != "" && meta.Version != protocol.Version) {
+			r.logger.Warn("rejected agent message envelope", "cluster_id", clusterID, "type", meta.Type)
+			continue
 		}
 
 		switch meta.Type {
@@ -249,6 +255,9 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 				r.logger.Warn("ignored task accepted with invalid task identity", "cluster_id", clusterID, "task_id", accepted.Payload.TaskID, "command_id", accepted.Payload.CommandID)
 				continue
 			}
+			if !existing.CompletedAt.IsZero() || existing.Payload["backupResult"] != nil {
+				continue
+			}
 			_, _, err := r.store.UpdateTaskStatus(store.TaskStatusInput{
 				TaskID:       accepted.Payload.TaskID,
 				Status:       "accepted",
@@ -277,6 +286,13 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 			}
 			if progress.Payload.CommandID != "" && existing.CommandID != "" && progress.Payload.CommandID != existing.CommandID {
 				r.logger.Warn("ignored progress with mismatched command", "task_id", existing.ID, "command_id", progress.Payload.CommandID)
+				continue
+			}
+			if !isActiveTaskStatus(progress.Payload.Status) {
+				r.logger.Warn("ignored terminal status in task progress", "task_id", existing.ID, "status", progress.Payload.Status)
+				continue
+			}
+			if existing.Type == "backup" && (existing.Status == "finalizing" || existing.Payload["backupResult"] != nil) {
 				continue
 			}
 			if incoming := progress.Payload.SizeProgressV2; incoming != nil {
@@ -419,6 +435,20 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 				continue
 			}
 			patch := taskCompletedPayloadPatch(completed.Payload)
+			if existingTask.Type == "backup" {
+				if err := r.acceptBackupCompletion(existingTask, completed.Payload); err != nil {
+					r.logger.Error("backup execution result rejected", "task_id", existingTask.ID, "error", err)
+					if completed.Payload.AckRequired {
+						retryable := !errors.Is(err, store.ErrBackupResultConflict)
+						_ = r.writeEventError(conn, clusterID, completed.AgentID, completed.MessageID, completed.Type, existingTask.ID, completed.Payload.CommandID, "BACKUP_RESULT_REJECTED", err.Error(), retryable)
+					}
+					continue
+				}
+				if completed.Payload.AckRequired {
+					_ = r.writeEventAck(conn, clusterID, completed.AgentID, completed.MessageID, completed.Type, existingTask.ID, completed.Payload.CommandID)
+				}
+				continue
+			}
 			existingTask, _, err = r.store.UpdateTaskStatus(store.TaskStatusInput{
 				TaskID:      completed.Payload.TaskID,
 				Status:      "finalizing",
@@ -440,38 +470,6 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 				Message: "finalizing restore point",
 				Payload: map[string]any{"velero": completed.Payload.Velero},
 			})
-			if existingTask.Type == "backup" {
-				taskForPoint := existingTask
-				if taskForPoint.Payload == nil {
-					taskForPoint.Payload = map[string]any{}
-				}
-				for key, value := range patch {
-					taskForPoint.Payload[key] = value
-				}
-				if point, err := r.createRestorePointFromBackup(taskForPoint, completed.Payload.Velero); err != nil {
-					if r.deferRestorePointReplacement(existingTask.ID, err) {
-						if completed.Payload.AckRequired {
-							_ = r.writeEventAck(conn, clusterID, completed.AgentID, completed.MessageID, completed.Type, completed.Payload.TaskID, completed.Payload.CommandID)
-						}
-						continue
-					}
-					r.logger.Error("failed to create restore point", "task_id", existingTask.ID, "error", err)
-					_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{
-						TaskID:       completed.Payload.TaskID,
-						Status:       "failed",
-						Progress:     100,
-						ErrorCode:    "RESTORE_POINT_CREATE_FAILED",
-						ErrorMessage: err.Error(),
-						MarkDone:     true,
-					})
-					if completed.Payload.AckRequired {
-						_ = r.writeEventError(conn, clusterID, completed.AgentID, completed.MessageID, completed.Type, completed.Payload.TaskID, completed.Payload.CommandID, "RESTORE_POINT_CREATE_FAILED", err.Error(), true)
-					}
-					continue
-				} else if point.ID != "" {
-					r.reconcileRetention(point.ProtectionPlanID, point.BackupTaskID)
-				}
-			}
 			if existingTask.Type == "unregister" {
 				if err := r.finishUnregisterTask(clusterID, existingTask); err != nil {
 					_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: existingTask.ID, Status: "failed", Progress: 95, ErrorCode: "PLATFORM_CLEANUP_FAILED", ErrorMessage: err.Error(), MarkDone: true})
@@ -547,6 +545,18 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 			errorMessage := detailedTaskFailureMessage(failed.Payload.Message, failed.Payload.Details)
 			payloadPatch := taskFailurePayloadPatch(failed.Payload.Details)
 			existingTask, _, lookupErr := r.findTaskByID(clusterID, failed.Payload.TaskID)
+			if lookupErr != nil || existingTask.ID == "" || (failed.Payload.CommandID != "" && failed.Payload.CommandID != existingTask.CommandID) {
+				if failed.Payload.AckRequired {
+					_ = r.writeEventError(conn, clusterID, failed.AgentID, failed.MessageID, failed.Type, failed.Payload.TaskID, failed.Payload.CommandID, "TASK_IDENTITY_MISMATCH", "Failure does not match a task on this cluster.", false)
+				}
+				continue
+			}
+			if existingTask.Type == "backup" && existingTask.Payload["backupResult"] != nil {
+				if failed.Payload.AckRequired {
+					_ = r.writeEventError(conn, clusterID, failed.AgentID, failed.MessageID, failed.Type, failed.Payload.TaskID, failed.Payload.CommandID, "BACKUP_RESULT_CONFLICT", "An accepted backup result cannot be replaced by a failure.", false)
+				}
+				continue
+			}
 			if lookupErr == nil && existingTask.Type == "backup" && isForceStoppedBackupTask(existingTask) {
 				_ = r.store.AddTaskEvent(store.TaskEventInput{
 					TaskID:  existingTask.ID,
