@@ -40,11 +40,13 @@ fmt:
 	cd agent/comm-agent && gofmt -w $$(find . -name '*.go' -type f)
 
 lint:
+	python3 -B scripts/sync-agent-protocol.py --check
 	cd backend && go vet ./...
 	cd agent/comm-agent && go vet ./...
 	test -z "$$(gofmt -l $$(find backend agent/comm-agent -name '*.go' -type f))"
 
 verify: lint test
+	python3 -B scripts/tests/protocol-sync.py
 	python3 -B scripts/tests/deployment-inputs.py
 	python3 -B scripts/tests/dev-provenance.py
 	python3 -B scripts/tests/repository-hygiene.py

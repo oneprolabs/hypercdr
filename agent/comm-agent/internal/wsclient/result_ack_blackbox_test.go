@@ -70,6 +70,16 @@ func TestResultACKBlackBoxDoesNotConfuseObservationAndResult(t *testing.T) {
 			t.Fatalf("barrier failed: %v %v", response, err)
 		}
 	}
+	for _, invalid := range []protocol.Message[protocol.EventAckPayload]{
+		{Version: "v2", Type: protocol.MessagePlatformEventAck},
+		{ClusterID: "other-cluster", Type: protocol.MessagePlatformEventAck},
+		{MessageKind: protocol.MessageKindRequest, Type: protocol.MessagePlatformEventAck},
+	} {
+		invalid.Payload = protocol.EventAckPayload{AckMessageID: "result", AckType: protocol.MessageAgentTaskCompleted, TaskID: "task", Persisted: true}
+		if err := peer.WriteJSON(invalid); err != nil {
+			t.Fatal(err)
+		}
+	}
 	acknowledge("observation", protocol.MessageAgentVeleroEvent, "")
 	if ledger.isTerminalAcked("task") {
 		t.Fatal("observation ACK confirmed final result")

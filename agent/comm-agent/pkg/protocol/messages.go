@@ -1,8 +1,6 @@
 package protocol
 
-import (
-	"time"
-)
+import "time"
 
 const Version = "v1"
 
@@ -39,26 +37,13 @@ const (
 type Message[T any] struct {
 	Version     string    `json:"version"`
 	MessageID   string    `json:"messageId"`
-	MessageKind string    `json:"messageKind"`
+	MessageKind string    `json:"messageKind,omitempty"`
 	Type        string    `json:"type"`
 	TenantID    string    `json:"tenantId,omitempty"`
 	ClusterID   string    `json:"clusterId,omitempty"`
 	AgentID     string    `json:"agentId,omitempty"`
 	Timestamp   time.Time `json:"timestamp"`
 	Payload     T         `json:"payload"`
-}
-
-func NewMessage[T any](messageKind string, messageType string, clusterID string, agentID string, payload T) Message[T] {
-	return Message[T]{
-		Version:     Version,
-		MessageID:   newMessageID(),
-		MessageKind: messageKind,
-		Type:        messageType,
-		ClusterID:   clusterID,
-		AgentID:     agentID,
-		Timestamp:   time.Now().UTC(),
-		Payload:     payload,
-	}
 }
 
 type RegisterPayload struct {
@@ -179,9 +164,6 @@ type NamespaceAPIInventory struct {
 	Count     int    `json:"count"`
 }
 
-// APIResourceInventory records one resource endpoint actually served by the
-// cluster. Readiness checks use this evidence instead of assuming that a CRD
-// name alone makes every stored API version restorable.
 type APIResourceInventory struct {
 	Group      string `json:"group,omitempty"`
 	Version    string `json:"version"`
@@ -420,8 +402,6 @@ type TaskDispatchPayload struct {
 	ControlPlaneHandover *ControlPlaneHandoverCommand `json:"controlPlaneHandover,omitempty"`
 }
 
-// ControlPlaneHandoverCommand changes only Agent control-plane ownership. It
-// never recreates the namespace, Velero, node-agent, Kopia, or persistent data.
 type ControlPlaneHandoverCommand struct {
 	Action             string    `json:"action"`
 	MigrationID        string    `json:"migrationId"`
@@ -491,6 +471,9 @@ type BackupCommand struct {
 	Hooks                   HookSet           `json:"hooks"`
 }
 
+// ResourceSelection uses Velero v1.18 Backup's scope-specific resource
+// fields. It is optional so older installed agents safely retain the legacy
+// generic include/exclude behavior during rolling upgrades.
 type ResourceSelection struct {
 	Mode            string   `json:"mode,omitempty"`
 	NamespaceScoped []string `json:"namespaceScoped,omitempty"`
@@ -682,19 +665,16 @@ type SizeProgressV2 struct {
 	Sequence         int64     `json:"sequence,omitempty"`
 	ObservedAt       time.Time `json:"observedAt"`
 }
-
 type SizeValueV2 struct {
 	TotalBytes    int64 `json:"totalBytes,omitempty"`
 	MetadataBytes int64 `json:"metadataBytes,omitempty"`
 	VolumeBytes   int64 `json:"volumeBytes,omitempty"`
 	Known         bool  `json:"known"`
 }
-
 type SizeReuseV2 struct {
 	Ratio  float64 `json:"ratio,omitempty"`
 	Status string  `json:"status"`
 }
-
 type SizeRepositoryV2 struct {
 	StoredBytes   int64     `json:"storedBytes,omitempty"`
 	MetadataBytes int64     `json:"metadataBytes,omitempty"`
@@ -702,7 +682,6 @@ type SizeRepositoryV2 struct {
 	Known         bool      `json:"known"`
 	MeasuredAt    time.Time `json:"measuredAt,omitempty"`
 }
-
 type SizeQualityV2 struct {
 	LogicalVolumeSource string `json:"logicalVolumeSource,omitempty"`
 	NewVolumeDataSource string `json:"newVolumeDataSource,omitempty"`
@@ -711,7 +690,6 @@ type SizeQualityV2 struct {
 	NewDataAccuracy     string `json:"newDataAccuracy,omitempty"`
 	RepositoryAccuracy  string `json:"repositoryAccuracy,omitempty"`
 }
-
 type VolumeSizeMetricV2 struct {
 	Namespace    string `json:"namespace,omitempty"`
 	PVCName      string `json:"pvcName,omitempty"`
@@ -724,7 +702,6 @@ type VolumeSizeMetricV2 struct {
 	Phase        string `json:"phase,omitempty"`
 	Source       string `json:"source,omitempty"`
 }
-
 type SizeMetricsV2 struct {
 	SchemaVersion     int                  `json:"schemaVersion"`
 	Operation         string               `json:"operation"`

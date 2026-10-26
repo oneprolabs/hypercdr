@@ -161,6 +161,16 @@ func TestBackupProtocolBlackBoxMessagePermutations(t *testing.T) {
 					}
 				}
 			}
+			for _, invalid := range []protocol.Message[protocol.TaskFailedPayload]{
+				{Version: "v2", Type: protocol.MessageAgentTaskFailed},
+				{ClusterID: "other-cluster", Type: protocol.MessageAgentTaskFailed},
+				{MessageKind: protocol.MessageKindRequest, Type: protocol.MessageAgentTaskFailed},
+			} {
+				invalid.Payload = protocol.TaskFailedPayload{TaskID: task.ID, CommandID: commandID, ErrorCode: "INVALID_ENVELOPE"}
+				if err := conn.WriteJSON(invalid); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if err := conn.WriteJSON(protocol.Message[protocol.TaskProgressPayload]{Version: protocol.Version, Type: protocol.MessageAgentTaskProgress, Payload: protocol.TaskProgressPayload{TaskID: task.ID, CommandID: commandID, Status: "succeeded", Progress: 100}}); err != nil {
 				t.Fatal(err)
 			}

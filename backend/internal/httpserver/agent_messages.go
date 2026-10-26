@@ -28,7 +28,7 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 			r.logger.Warn("failed to decode agent message metadata", "cluster_id", clusterID, "error", err)
 			return
 		}
-		if (meta.ClusterID != "" && meta.ClusterID != clusterID) || (meta.Version != "" && meta.Version != protocol.Version) {
+		if err := protocol.ValidateV1Message(data, protocol.AgentToPlatform, clusterID); err != nil {
 			r.logger.Warn("rejected agent message envelope", "cluster_id", clusterID, "type", meta.Type)
 			continue
 		}

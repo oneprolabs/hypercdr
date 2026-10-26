@@ -488,6 +488,12 @@ func (c *Client) readMessages() error {
 		if err := json.Unmarshal(data, &meta); err != nil {
 			return err
 		}
+		if err := protocol.ValidateV1Message(data, protocol.PlatformToAgent, c.cfg.ClusterID); err != nil {
+			if c.logger != nil {
+				c.logger.Warn("rejected platform message envelope", "type", meta.Type, "error", err)
+			}
+			continue
+		}
 		switch meta.Type {
 		case protocol.MessagePlatformTaskDispatch:
 			var dispatch protocol.Message[protocol.TaskDispatchPayload]

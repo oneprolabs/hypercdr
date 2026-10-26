@@ -335,7 +335,11 @@ func (o *eventOutbox) acknowledge(ack protocol.EventAckPayload) (string, bool, e
 	if err := json.Unmarshal(raw, &event); err != nil {
 		return "", false, err
 	}
-	terminal := event.Type == protocol.MessageAgentTaskCompleted || event.Type == protocol.MessageAgentTaskFailed
+	definition, known := protocol.LookupContract(event.Type)
+	if !known || definition.Direction != protocol.AgentToPlatform {
+		return "", false, nil
+	}
+	terminal := definition.TerminalResult
 	if (ack.AckType != "" && ack.AckType != event.Type) || (terminal && ack.TaskID != event.Payload.TaskID) || (ack.TaskID != "" && ack.TaskID != event.Payload.TaskID) || (ack.CommandID != "" && ack.CommandID != event.Payload.CommandID) {
 		return "", false, nil
 	}
