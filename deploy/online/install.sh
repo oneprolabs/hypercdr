@@ -72,11 +72,10 @@ command -v jq >/dev/null 2>&1 || fail "jq is required"
 command -v docker >/dev/null 2>&1 || fail "Docker is required; install Docker before running this installer"
 [[ "$(id -u)" -eq 0 ]] || fail "run this command as root, for example: curl ... | sudo bash -s -- ..."
 
-api_url="https://api.github.com/repos/${OWNER_REPO}/releases"
 info "Preparing the HyperCDR online installer."
 if [[ -z "$VERSION" ]]; then
   info "Resolving the latest GitHub Release."
-  VERSION="$(curl -fsSL "${api_url}/latest" | sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p' | head -1)"
+  VERSION="$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${OWNER_REPO}/releases/latest" | sed 's#.*/tag/##')"
 fi
 [[ -n "$VERSION" ]] || fail "could not resolve a GitHub Release version"
 case "$VERSION" in
@@ -86,14 +85,8 @@ case "$VERSION" in
 esac
 [[ "$VERSION" =~ ^ce-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ || "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ ]] || fail "invalid Community version"
 asset="hypercdr-installer-${VERSION}.tar.gz"
-info "Reading GitHub Release metadata for ${RELEASE_TAG}."
-release_json="$(curl -fsSL "${api_url}/tags/${RELEASE_TAG}")" || fail "could not read GitHub Release metadata"
-asset_api_url="$(printf '%s' "${release_json}" | jq -er --arg name "${asset}" '.assets[] | select(.name == $name) | .url' | head -1 || true)"
-if [[ -z "${asset_api_url}" ]]; then
-  assets_url="$(printf '%s' "${release_json}" | jq -er '.assets_url')" || fail "GitHub Release metadata has no assets endpoint"
-  asset_api_url="$(curl -fsSL -H 'Accept: application/vnd.github+json' "${assets_url}" | jq -er --arg name "${asset}" '.[] | select(.name == $name) | .url' | head -1 || true)"
-fi
-[[ -n "${asset_api_url}" ]] || fail "GitHub Release does not contain ${asset}"
+asset_url="https://github.com/${OWNER_REPO}/releases/download/${RELEASE_TAG}/${asset}"
+info "Using GitHub Release asset ${asset}."
 WORK_DIR="$(mktemp -d /tmp/hypercdr-online.XXXXXX)"
 trap 'rm -rf "${WORK_DIR}"' EXIT
 
@@ -105,7 +98,7 @@ if [[ "$ASSUME_YES" != "true" ]]; then
 fi
 
 info "Downloading the ${VERSION} installer package."
-curl -fL --retry 3 --progress-bar -H 'Accept: application/octet-stream' -o "${WORK_DIR}/${asset}" "$asset_api_url"
+curl -fL --retry 3 --progress-bar -o "${WORK_DIR}/${asset}" "$asset_url"
 info "Extracting the installer package."
 tar -xzf "${WORK_DIR}/${asset}" -C "$WORK_DIR"
 package_dir="${WORK_DIR}/hypercdr-installer-${VERSION}"
