@@ -90,7 +90,7 @@ func (r *Router) listCommunityUsers(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) createCaptcha(w http.ResponseWriter, req *http.Request) {
-	code, err := randomDigits(4)
+	code, err := randomCaptchaCode(4)
 	if err != nil {
 		r.logger.Error("failed to generate captcha", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "captcha_generation_failed"})

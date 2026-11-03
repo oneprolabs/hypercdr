@@ -582,14 +582,15 @@ func (r *Router) googleCallback(w http.ResponseWriter, req *http.Request) {
 	http.Redirect(w, req, "/#google_auth="+url.QueryEscape(base64.RawURLEncoding.EncodeToString(payload)), http.StatusFound)
 }
 
-func randomDigits(length int) (string, error) {
+func randomCaptchaCode(length int) (string, error) {
+	const alphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz"
 	var builder strings.Builder
 	for i := 0; i < length; i++ {
-		n, err := rand.Int(rand.Reader, big.NewInt(10))
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(alphabet))))
 		if err != nil {
 			return "", err
 		}
-		builder.WriteByte(byte('0' + n.Int64()))
+		builder.WriteByte(alphabet[n.Int64()])
 	}
 	return builder.String(), nil
 }
