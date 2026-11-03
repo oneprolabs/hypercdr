@@ -1750,7 +1750,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
                   <input
                     placeholder="Verification Code"
                     value={loginCaptchaCode}
-                    onChange={event => setLoginCaptchaCode(event.target.value.replace(/\D/g, '').slice(0, 4))}
+                    onChange={event => setLoginCaptchaCode(event.target.value.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4))}
                     onKeyDown={event => {
                       if (event.key === 'Enter') void submitLogin();
                     }}
