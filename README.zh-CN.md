@@ -11,7 +11,7 @@ HyperCDR 是 Kubernetes 容器容灾平台，提供集群管理、保护策略�
 Linux 主机需预装 Docker Engine/Compose v2、Bash、curl、tar、jq 和 OpenSSL。替换为浏览器及业务集群能访问的地址：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/oneprolabs/hypercdr/main/deploy/online/install.sh \
+curl -fL --progress-bar https://raw.githubusercontent.com/oneprolabs/hypercdr/main/deploy/online/install.sh \
   | sudo bash -s -- --base-url https://platform.example.com:12443 --install-dir /var/lib/hypercdr --yes
 ```
 

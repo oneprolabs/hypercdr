@@ -15,7 +15,7 @@ Install for me 还要求中控注册执行器能访问 kubeconfig 中的集群 A
 将示例域名替换为浏览器和集群都能访问的实际 IP 或域名；域名解析需自行配置。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/oneprolabs/hypercdr/main/deploy/online/install.sh \
+curl -fL --progress-bar https://raw.githubusercontent.com/oneprolabs/hypercdr/main/deploy/online/install.sh \
   | sudo bash -s -- \
     --base-url https://platform.example.com:12443 \
     --install-dir /var/lib/hypercdr \

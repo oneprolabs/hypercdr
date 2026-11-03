@@ -11,7 +11,7 @@ Community supports self-service email registration, Google sign-in and organizat
 Use a Linux host with Docker Engine/Compose v2, Bash, curl, tar, jq and OpenSSL. Replace the example address with one reachable by browsers and cluster agents.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/oneprolabs/hypercdr/main/deploy/online/install.sh \
+curl -fL --progress-bar https://raw.githubusercontent.com/oneprolabs/hypercdr/main/deploy/online/install.sh \
   | sudo bash -s -- --base-url https://platform.example.com:12443 --install-dir /var/lib/hypercdr --yes
 ```
 

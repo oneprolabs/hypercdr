@@ -5,7 +5,7 @@
 The supported first-install entry point is `deploy/online/install.sh`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/oneprolabs/hypercdr/main/deploy/online/install.sh \
+curl -fL --progress-bar https://raw.githubusercontent.com/oneprolabs/hypercdr/main/deploy/online/install.sh \
   | sudo bash -s -- \
     --base-url https://platform.example.com:12443 \
     --install-dir /var/lib/hypercdr \

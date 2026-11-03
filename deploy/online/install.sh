@@ -33,6 +33,7 @@ USAGE
 }
 
 fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+info() { printf '[HyperCDR] %s\n' "$*"; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -56,7 +57,9 @@ command -v docker >/dev/null 2>&1 || fail "Docker is required; install Docker be
 [[ "$(id -u)" -eq 0 ]] || fail "run this command as root, for example: curl ... | sudo bash -s -- ..."
 
 api_url="https://api.github.com/repos/${OWNER_REPO}/releases"
+info "Preparing the HyperCDR online installer."
 if [[ -z "$VERSION" ]]; then
+  info "Resolving the latest GitHub Release."
   VERSION="$(curl -fsSL "${api_url}/latest" | sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p' | head -1)"
 fi
 [[ -n "$VERSION" ]] || fail "could not resolve a GitHub Release version"
@@ -67,6 +70,7 @@ case "$VERSION" in
 esac
 [[ "$VERSION" =~ ^ce-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ || "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ ]] || fail "invalid Community version"
 asset="hypercdr-installer-${VERSION}.tar.gz"
+info "Reading GitHub Release metadata for ${RELEASE_TAG}."
 release_json="$(curl -fsSL "${api_url}/tags/${RELEASE_TAG}")" || fail "could not read GitHub Release metadata"
 asset_api_url="$(printf '%s' "${release_json}" | jq -er --arg name "${asset}" '.assets[] | select(.name == $name) | .url' | head -1 || true)"
 if [[ -z "${asset_api_url}" ]]; then
@@ -83,7 +87,9 @@ if [[ "$ASSUME_YES" != "true" ]]; then
   [[ "$answer" =~ ^[Yy]$ ]] || { echo 'Installation cancelled.'; exit 0; }
 fi
 
-curl -fL --retry 3 -H 'Accept: application/octet-stream' -o "${WORK_DIR}/${asset}" "$asset_api_url"
+info "Downloading the ${VERSION} installer package."
+curl -fL --retry 3 --progress-bar -H 'Accept: application/octet-stream' -o "${WORK_DIR}/${asset}" "$asset_api_url"
+info "Extracting the installer package."
 tar -xzf "${WORK_DIR}/${asset}" -C "$WORK_DIR"
 package_dir="${WORK_DIR}/hypercdr-installer-${VERSION}"
 [[ -x "${package_dir}/install-blue-green.sh" ]] || fail "downloaded package is missing install-blue-green.sh"
@@ -98,6 +104,8 @@ if [[ -r "${package_dir}/install-config.sh" ]]; then
   export HCDR_AUTH_CHALLENGE_MODE HCDR_TURNSTILE_SITE_KEY
   export HCDR_TURNSTILE_SECRET_KEY HCDR_TURNSTILE_VERIFY_URL
 fi
+
+info "Starting the HyperCDR control-plane installation."
 
 domain="${BASE_URL#https://}"
 domain="${domain%%/*}"
