@@ -179,3 +179,66 @@ sudo /var/lib/hypercdr/uninstall.sh --purge-data --remove-images --execute
 - **Agent 离线**：检查 Agent 到 `--base-url` 的 WSS 出站连通性、时间同步、Token 和集群网络策略。
 - **任务失败**：先查看任务详情和详细日志，再核对 Agent、Kubernetes 权限、Velero/OADP、CSI 和对象存储访问。
 
+## 9. 安装产物、服务与目录
+
+典型安装目录为 `/var/lib/hypercdr`，实际文件以发布包版本为准：
+
+| 路径/对象 | 作用 |
+|---|---|
+| `.env` | 地址、认证、数据库、密钥和镜像配置，必须保护权限 |
+| `docker-compose.yml` | 当前发布包的服务编排 |
+| PostgreSQL 数据卷 | 中控元数据和任务状态 |
+| `certs/` | TLS 证书材料 |
+| `release-manifest.json` | 活动版本和组件镜像身份 |
+| `restart-platform.sh`、`configure-public-url.sh` | 重启和访问地址辅助脚本 |
+
+平台通常由 Edge、蓝/绿 API、蓝/绿前端、PostgreSQL、注册执行器和升级执行器组成；可选产品门户独占 `12445`，不安装门户不影响中控 `12443`。
+
+## 10. 完整配置参考
+
+| 变量 | 说明 |
+|---|---|
+| `HCDR_BASE_URL` | 中控外部 HTTPS Origin，必须与 Agent WSS 地址一致 |
+| `HCDR_PUBLIC_BASE_URL` | 首次初始化平台地址，已有数据库设置后不覆盖 |
+| `HCDR_HTTPS_PORT` | Edge 端口，默认 `12443` |
+| `HCDR_WEBSITE_PORT` | 可选门户端口，默认 `12445` |
+| `HCDR_AUTH_CHALLENGE_MODE` | `captcha`/`image` 或 `turnstile` |
+| `HCDR_TURNSTILE_SITE_KEY`、`HCDR_TURNSTILE_SECRET_KEY` | Turnstile 前后端凭据，必须成对配置 |
+| `HCDR_DATABASE_URL` | PostgreSQL 连接地址 |
+| `HCDR_SECRET_KEY` | 保护秘密字段的密钥，迁移必须保留 |
+| `HCDR_IMAGE_REGISTRY` | 平台、Agent、Velero/OADP 镜像仓库 |
+| `HCDR_TLS_CERT_FILE`、`HCDR_TLS_KEY_FILE` | TLS 文件路径 |
+| `HCDR_RELEASE_MANIFEST_PATH` | 活动版本清单路径 |
+| `HCDR_RELEASE_TOKEN` | 升级执行器凭据 |
+| `HCDR_REGISTRATION_EXECUTOR_TOKEN` | 注册执行器内部凭据 |
+| `HCDR_DEPLOYMENT_MODE`、`HCDR_SAAS_SIGNUP_ENABLED` | 注册/私有部署模式 |
+| `HCDR_GOOGLE_CLIENT_ID`、`HCDR_GOOGLE_CLIENT_SECRET` | Google OAuth 凭据，必须同时配置 |
+
+交互安装器会询问访问地址/IP 是否已加入 Turnstile 允许清单；未登记、不确定或内网无法校验时选择图片验证码。`--yes` 非交互安装默认使用图片验证码；显式选择 Turnstile 但缺少完整凭据时应失败。需要邮箱验证、邀请和密码恢复时，在 **Settings → Email Service** 配置 SMTP 并发送测试邮件；Google 回调必须登记为实际 Origin 加 `/api/v1/saas/auth/google/callback`。
+
+## 11. 安装后逐项验收
+
+1. 访问 `https://<host>:12443`，确认登录页、验证码和认证模式一致。
+2. 使用初始管理员登录后立即改密，检查 **Settings → Access & Login** 的公开地址。
+3. 检查 Edge、API、前端、PostgreSQL、注册执行器、升级执行器和 `/readyz`。
+4. 注册测试集群，确认 Agent online、节点/Namespace 清单和 inventory 刷新。
+5. 创建对象存储并执行 **Test Storage Connection**。
+6. 创建最小测试策略，执行一次同步，检查恢复点和详细日志。
+7. 在隔离 Namespace 执行一次 Drill，并验证工作负载、PVC 和应用数据。
+
+## 12. 升级、回滚和卸载边界
+
+平台蓝绿升级不自动升级集群 Agent、Velero/OADP 或 Kubernetes 组件；集群页面提供的组件升级必须单独执行和验收。回滚平台镜像不能回滚数据库迁移或对象存储数据。卸载前备份数据库、`.env`、`HCDR_SECRET_KEY`、TLS 和版本清单；卸载中控不会自动删除集群 Agent、应用 Namespace 或外部对象存储备份。
+
+## 13. 安装故障定位
+
+| 现象 | 优先检查 |
+|---|---|
+| 下载或解析版本等待 | GitHub/Release、DNS、代理和 TLS；确认 `latest.json`/资产可访问 |
+| 登录页验证码异常 | `/api/v1/auth/config`、`.env` 模式以及前端/API 版本一致性 |
+| Turnstile 失败 | site/secret key、允许域名、浏览器和 API 出站网络 |
+| Agent offline | 集群到 `12443` 的 HTTPS/WSS、证书、Token 和网络策略 |
+| 存储测试失败 | endpoint、DNS/TLS、Bucket、区域、凭据权限和集群网络 |
+| 注册任务卡住 | kubeconfig context、RBAC、注册执行器日志和 clusterType |
+| 恢复失败 | 恢复点状态、目标权限、PVC/CSI、对象存储和任务首个失败事件 |
+

@@ -87,3 +87,56 @@ Drill 用于在隔离目标中验证恢复流程和恢复点可用性。演练�
 - 自动生成的 TLS 证书用于启动 HTTPS，不等同于浏览器信任的公开证书。
 - 不应将源码中存在的适配代码、构建资产或实验路径理解为所有发行版、驱动和拓扑均已认证。
 
+## 7. 中控平台功能地图
+
+当前社区版的中控按业务域提供 Dashboard、Clusters、Configuration、Disaster Recovery、Tasks 和 Settings 等入口。Dashboard 用于总览；Clusters 管理注册集群、Agent、清单、组件升级和日志；Configuration 管理 Storage、Policies 和 Tags；Disaster Recovery 管理保护配置、恢复点、Drill、Restore 和 Takeover；Tasks 展示任务状态、阶段、事件与详细日志；Settings 管理个人、组织、邮件、登录和平台升级。菜单会随版本和权限变化，页面不可见不代表绕过权限调用 API。
+
+所有业务资源按组织（tenant）隔离。平台管理员可以管理用户和组织，但不能通过 URL、组织 ID 或请求头切换到其他组织的集群、存储、策略、应用、任务或恢复点。
+
+## 8. 三类集群与执行组件
+
+当前注册接口明确支持 `native-kubernetes`、`huaweicloud-cce` 和 `openshift` 三类集群。
+
+### 8.1 Native Kubernetes
+
+面向标准 Kubernetes API 的集群。Agent 读取清单、接收平台任务并调用 Velero 执行备份与恢复。注册可由中控注册执行器使用 kubeconfig 完成，也可在能访问集群的主机执行平台生成的命令。上传的 kubeconfig 必须内嵌凭据，最大 1 MiB，不能依赖外部 exec 插件或凭据文件。
+
+### 8.2 Huawei Cloud CCE
+
+CCE 使用独立的 kubeconfig 检查和注册会话。平台先建立临时上传会话并检查 context，再创建注册任务；会话绑定组织和上传者，平台重启后需重新上传并检查。CCE 仍通过 Agent、Kubernetes API、Velero 和对象存储执行保护，不等同于直接调用云厂商备份 API。
+
+### 8.3 OpenShift
+
+OpenShift 采用 OADP 兼容路径。保护和恢复受 OADP、项目权限、SecurityContextConstraints、CSI 快照和对象存储配置约束；当前向导对 OpenShift 默认资源范围有明确限制，不能按 Native Kubernetes 的全部资源选择能力理解。
+
+三类集群共享中控任务模型，但注册检查、组件镜像、超时和后端适配不同。上线前应在目标发行版完成存储测试、同步和隔离恢复验证。
+
+## 9. Agent、Velero/OADP 与数据路径
+
+Agent 主动通过出站 WSS 连接中控，报告 Kubernetes 版本、节点、Namespace、资源和组件状态，并接收 inventory、storage-sync、backup、restore、drill、takeover、retention-cleanup、upgrade 和 unregister 等任务。中控不要求 Agent 提供入站端口，但集群必须能访问中控 HTTPS/WSS、镜像仓库和对象存储。
+
+Agent 负责通信、编排和结果回报；Velero/OADP 负责 Kubernetes 资源和持久化数据；对象存储保存备份数据；PostgreSQL 保存平台元数据和任务状态。注销脚本不会删除应用 Namespace、Longhorn、外部对象存储或其他命名空间的 Velero 资源。
+
+## 10. 备份、同步、恢复点与恢复
+
+- **保护配置**：将源集群、应用/Namespace、策略和存储仓库组合为可执行关系。
+- **同步/备份**：Agent 执行存储准备、备份或状态推进，平台接收事件并建立或更新恢复点。
+- **恢复点**：由源集群、保护配置、备份任务和 Velero 备份名关联确定，可查看状态、保留信息和内容清单。
+- **Restore**：向目标集群正式恢复资源和数据。
+- **Drill**：向隔离目标验证恢复链路，不等同于生产接管。
+- **Takeover**：按容灾切换流程执行接管，必须先通过校验和变更审批。
+
+恢复点处于创建中、来源不匹配、保护配置已删除或仓库不可访问时，不应启动恢复。任务成功后仍需检查目标工作负载、PVC、Service、应用健康和数据；删除平台恢复点记录也不应被理解为立即擦除对象存储全部数据。
+
+## 11. 配置边界与安全责任
+
+用户、组织、策略、任务、恢复点等中控元数据保存在 PostgreSQL；秘密字段由 `HCDR_SECRET_KEY` 保护。完整平台备份必须同时保留数据库、秘密密钥、TLS 文件、`.env`、版本清单和对象存储访问配置。只备份数据库而丢失密钥，可能无法解密存储凭据；只保留对象存储而没有中控元数据，也不能恢复完整管理面。
+
+登录挑战支持图片验证码和 Cloudflare Turnstile。图片验证码为四位数字/字母且字母不区分大小写；Turnstile 需要有效 key、浏览器访问 Cloudflare 控件和服务端出站校验。实际模式以安装目录 `.env` 为准。
+
+## 12. 149 实机截图
+
+以下截图来自 149 开发环境实际访问到的 HyperCDR 登录页。登录后的业务截图需要有效账号和测试数据，因此不使用伪造的集群或任务页面。
+
+![149 开发环境 HyperCDR 登录页](images/hypercdr-login-149.png)
+

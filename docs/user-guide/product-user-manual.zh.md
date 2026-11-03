@@ -152,3 +152,53 @@ sudo ./restart-platform.sh
 5. 打开任务详细日志，按第一个失败阶段定位，不要只看最后一条汇总错误。
 6. 必要时先用隔离 Namespace 重试；生产恢复前保留原现场和审计信息。
 
+## 12. 集群接入详细流程
+
+### 12.1 注册前检查
+
+准备 kubeconfig、集群 API 可达性、等效 RBAC、对象存储路径、镜像拉取凭据和中控 HTTPS 地址，并选择 `native-kubernetes`、`huaweicloud-cce` 或 `openshift`。kubeconfig 必须内嵌凭据，不能依赖外部 exec 插件或凭据文件，上传大小不超过 1 MiB。
+
+### 12.2 Install for me 与 Run command
+
+**Install for me** 由中控注册执行器访问 kubeconfig 中的集群并安装组件，适合中控能访问集群 API 的拓扑。**Run command** 生成一次性命令，由能访问集群的跳板机或管理员主机执行，适合中控无法直连集群的拓扑。两者最终都建立集群身份和 Agent 出站 WSS；命令中的 Token、kubeconfig 和地址不得公开。
+
+注册后在集群详情确认连接状态、Kubernetes 版本、节点、Namespace、资源清单、Agent 和 Velero/OADP 状态。集群记录存在但 Agent offline，只表示中控记录已创建，不表示安装成功。
+
+## 13. 对象存储、策略和应用范围
+
+在 **Configuration → Storage** 核对名称、类型、endpoint、Bucket、区域、路径前缀、访问密钥和秘密密钥，并分别从中控和 Agent 网络执行测试。保存配置不代表 Agent 能访问；使用明确的集群前缀隔离多个源集群。更换正在使用的仓库应使用 **Reconfigure DR Storage**，不要手工改数据库。
+
+策略应明确名称、调度/频率、保留数量或期限和执行选项。保护配置是策略与具体集群、应用、存储的绑定；编辑策略前检查引用关系。应用范围可按 Namespace、资源类型、标签和资源清单选择，并配置排除项、目标 Namespace、PVC 和存储类映射。应用标签用于分类检索，不改变备份范围。保护配置创建后还需激活或启动，存在配置不等于已经产生恢复点。
+
+## 14. 恢复点内容、保留和删除
+
+恢复点详情包含源集群、保护配置、Velero 备份名、Namespace、创建时间、状态和内容清单。核验 Deployment/StatefulSet、Service、ConfigMap/Secret、PVC、VolumeSnapshot 或数据上传对象。保留设置影响平台保留决策；对象存储生命周期、备份仓库和云端版本控制可能独立保留数据。删除前确认没有任务引用恢复点，并保留审计记录；删除平台记录不等于立即擦除对象存储全部数据。
+
+## 15. 任务状态、事件与重试
+
+任务详情由汇总状态、阶段进度、事件和详细日志组成。排障时记录任务 ID、类型、源/目标集群、保护配置、恢复点和时间；查看任务停在 storage sync、backup、restore、readiness、cleanup 还是组件升级；优先处理第一个失败事件，区分平台调度、Agent、Kubernetes/RBAC、Velero/OADP 和对象存储错误。修复后使用 **Retry**，不要重复创建同一业务任务；取消运行中任务前确认组件支持安全取消，并检查残留资源。
+
+主要任务类型包括 storage-sync、backup、restore、drill、takeover、retention-cleanup、组件升级和 unregister。列表成功只表示任务链路完成，仍要检查资源级结果。
+
+## 16. Drill、Restore 与 Takeover 边界
+
+| 操作 | 目的 | 验收重点 |
+|---|---|---|
+| Drill | 隔离验证恢复点和链路 | 隔离 Namespace、工作负载、PVC、Service、应用数据 |
+| Restore | 正式恢复业务 | 变更审批、覆盖/映射、容量、应用可用性和数据 |
+| Takeover | 按容灾流程切换控制权 | 前置校验、源端状态、网络/DNS、回切方案和审计 |
+
+Drill 使用隔离 Namespace 和资源前缀，完成后执行 cleanup。Drill 成功不能直接推断生产 Restore 一定成功。Takeover 属于高风险操作，只在前置校验通过并完成审批后执行。
+
+## 17. 组件升级、注销和平台运维
+
+集群详情提供 Comm Agent 和 Velero 组件升级入口。升级前确认没有备份、恢复、Drill 或注销任务，检查目标版本、镜像仓库、权限和回滚方案；平台升级与组件升级分别验收。注销前执行 unregister precheck，处理运行任务、保护配置和恢复点引用。注销清理中控集群身份，不删除应用 Namespace、Longhorn、外部对象存储或其他命名空间的 Velero 资源。
+
+平台管理员可在 **Users/Organizations** 管理身份和组织，在 **Access & Login** 修改公开 Origin，在 **Email Service** 配置 SMTP，在 **Platform Upgrade** 执行平台升级，并在 **Audit/Diagnostics** 查询真实操作者、目标组织、任务 ID 和时间范围。删除账号会撤销会话，但不删除业务资源；每个组织应保留有效组织管理员。
+
+## 18. 149 实机页面截图
+
+以下截图来自 149 开发环境实际访问到的登录页；集群、策略和任务页面需要有效业务账号及测试数据，因此不使用虚构业务截图。
+
+![149 开发环境 HyperCDR 登录页](../images/hypercdr-login-149.png)
+
