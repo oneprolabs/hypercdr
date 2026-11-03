@@ -104,3 +104,43 @@ func TestContractCopiesCannotMutateAuthority(t *testing.T) {
 		t.Fatal("caller mutated authoritative contract")
 	}
 }
+
+func TestDecodeMessageReportsStructuredProtocolErrors(t *testing.T) {
+	valid := `{"version":"v1","messageKind":"event","type":"agent.task.progress","clusterId":"cluster","payload":{"taskId":"task"}}`
+	message, err := DecodeMessage([]byte(valid), AgentToPlatform, "cluster")
+	if err != nil || message.Type != MessageAgentTaskProgress {
+		t.Fatalf("decode valid message: message=%+v error=%v", message, err)
+	}
+	for _, test := range []struct {
+		name  string
+		data  string
+		stage string
+	}{
+		{"unknown type", `{"type":"agent.unknown","payload":{}}`, "contract"},
+		{"wrong direction", `{"type":"platform.task.dispatch","payload":{}}`, "direction"},
+		{"wrong kind", `{"messageKind":"request","type":"agent.task.progress","payload":{}}`, "metadata"},
+		{"invalid payload", `{"type":"agent.task.progress","payload":[]}`, "payload"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := DecodeMessage([]byte(test.data), AgentToPlatform, "")
+			protocolErr, ok := err.(*DecodeError)
+			if !ok || protocolErr.Stage != test.stage {
+				t.Fatalf("error=%T %v, want stage %q", err, err, test.stage)
+			}
+		})
+	}
+}
+
+func TestEncodeMessageProducesValidatedEnvelope(t *testing.T) {
+	data, err := EncodeMessage(Message[TaskProgressPayload]{Version: Version, MessageKind: MessageKindEvent, Type: MessageAgentTaskProgress, ClusterID: "cluster", AgentID: "agent", Payload: TaskProgressPayload{TaskID: "task"}})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	message, err := DecodeMessage(data, AgentToPlatform, "cluster")
+	if err != nil {
+		t.Fatalf("decode encoded message: %v", err)
+	}
+	if message.Type != MessageAgentTaskProgress || message.MessageKind != MessageKindEvent {
+		t.Fatalf("unexpected envelope: %+v", message)
+	}
+}

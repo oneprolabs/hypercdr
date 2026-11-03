@@ -1,10 +1,6 @@
 package protocol
 
-import (
-	"encoding/json"
-	"fmt"
-	"reflect"
-)
+import "reflect"
 
 type Direction string
 
@@ -63,38 +59,10 @@ func LookupContract(messageType string) (Contract, bool) {
 }
 
 func ValidateV1Message(data []byte, direction Direction, authenticatedCluster string) error {
-	var envelope Message[json.RawMessage]
-	if err := json.Unmarshal(data, &envelope); err != nil {
-		return fmt.Errorf("invalid envelope: %w", err)
-	}
-	if envelope.Version != "" && envelope.Version != Version {
-		return fmt.Errorf("unsupported protocol version %q", envelope.Version)
-	}
-	if authenticatedCluster != "" && envelope.ClusterID != "" && envelope.ClusterID != authenticatedCluster {
-		return fmt.Errorf("cluster does not match authenticated connection")
-	}
-	definition, ok := LookupContract(envelope.Type)
-	if !ok {
-		return fmt.Errorf("unknown message type %q", envelope.Type)
-	}
-	if definition.Direction != direction {
-		return fmt.Errorf("invalid direction for %s", envelope.Type)
-	}
-	if envelope.MessageKind != "" {
-		allowed := false
-		for _, kind := range definition.AllowedKinds {
-			allowed = allowed || envelope.MessageKind == kind
-		}
-		if !allowed {
-			return fmt.Errorf("invalid message kind for %s", envelope.Type)
-		}
-	}
-	var object map[string]json.RawMessage
-	if err := json.Unmarshal(envelope.Payload, &object); err != nil || object == nil {
-		return fmt.Errorf("payload must be an object for %s", envelope.Type)
-	}
-	if err := json.Unmarshal(envelope.Payload, reflect.New(definition.payload).Interface()); err != nil {
-		return fmt.Errorf("invalid payload for %s: %w", envelope.Type, err)
-	}
-	return nil
+	_, err := DecodeMessage(data, direction, authenticatedCluster)
+	return err
+}
+
+func newPayload(definition Contract) any {
+	return reflect.New(definition.payload).Interface()
 }
