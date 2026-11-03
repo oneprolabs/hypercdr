@@ -98,7 +98,7 @@ func (r *Router) createCaptcha(w http.ResponseWriter, req *http.Request) {
 	}
 	id := store.NewPublicID()
 	now := time.Now().UTC()
-	if err := r.store.CreateAuthChallenge(req.Context(), "captcha", id, code, now.Add(2*time.Minute)); err != nil {
+	if err := r.store.CreateAuthChallenge(req.Context(), "captcha", id, strings.ToLower(code), now.Add(2*time.Minute)); err != nil {
 		r.logger.Error("failed to persist captcha", "error", err)
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "captcha_generation_failed"})
 		return

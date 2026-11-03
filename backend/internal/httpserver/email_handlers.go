@@ -287,7 +287,7 @@ func (r *Router) decryptSetting(value string) (string, error) {
 func (r *Router) consumeCaptcha(id, code string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	ok, err := r.store.ConsumeAuthChallenge(ctx, "captcha", id, strings.TrimSpace(code))
+	ok, err := r.store.ConsumeAuthChallenge(ctx, "captcha", id, strings.ToLower(strings.TrimSpace(code)))
 	if err != nil {
 		r.logger.Error("failed to consume captcha", "error", err)
 	}

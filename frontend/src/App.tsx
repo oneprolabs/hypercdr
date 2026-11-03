@@ -1754,7 +1754,11 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
                     onKeyDown={event => {
                       if (event.key === 'Enter') void submitLogin();
                     }}
-                    inputMode="numeric"
+                    inputMode="text"
+                    autoCapitalize="characters"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    maxLength={4}
                     autoComplete="off"
                   />
                 </label>
