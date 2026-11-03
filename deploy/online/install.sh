@@ -68,14 +68,14 @@ esac
 [[ -n "$BASE_URL" ]] || { usage; fail "--base-url is required"; }
 command -v curl >/dev/null 2>&1 || fail "curl is required"
 command -v tar >/dev/null 2>&1 || fail "tar is required"
-command -v jq >/dev/null 2>&1 || fail "jq is required"
 command -v docker >/dev/null 2>&1 || fail "Docker is required; install Docker before running this installer"
 [[ "$(id -u)" -eq 0 ]] || fail "run this command as root, for example: curl ... | sudo bash -s -- ..."
 
 info "Preparing the HyperCDR online installer."
 if [[ -z "$VERSION" ]]; then
   info "Resolving the latest GitHub Release."
-  VERSION="$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${OWNER_REPO}/releases/latest" | sed 's#.*/tag/##')"
+  latest_url="https://raw.githubusercontent.com/${OWNER_REPO}/main/deploy/online/latest.json"
+  VERSION="$(curl -fsSL "$latest_url" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
 fi
 [[ -n "$VERSION" ]] || fail "could not resolve a GitHub Release version"
 case "$VERSION" in
