@@ -9,6 +9,7 @@ PUBLIC_BASE_URL=""
 REGISTRY="registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr"
 INSTALL_DIR="/var/lib/hypercdr"
 ASSUME_YES="false"
+AUTH_CHALLENGE="auto"
 WORK_DIR=""
 
 usage() {
@@ -24,6 +25,7 @@ Options:
   --public-base-url URL      Optional public URL used in generated commands
   --registry REGISTRY        Optional image registry override
   --install-dir PATH         Installation directory, default: /var/lib/hypercdr
+  --auth-challenge MODE      Authentication mode: auto, turnstile, or image
   --yes                      Skip confirmation
   -h, --help                 Show this help
 
@@ -35,6 +37,14 @@ USAGE
 fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 info() { printf '[HyperCDR] %s\n' "$*"; }
 
+read_prompt() {
+  if [[ -r /dev/tty ]]; then
+    read -r "$@" </dev/tty
+  else
+    read -r "$@"
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --version) VERSION="${2:?missing value for --version}"; shift 2 ;;
@@ -43,11 +53,17 @@ while [[ $# -gt 0 ]]; do
     --install-website) INSTALL_WEBSITE=true; shift ;;
     --registry) REGISTRY="${2:?missing value for --registry}"; shift 2 ;;
     --install-dir) INSTALL_DIR="${2:?missing value for --install-dir}"; shift 2 ;;
+    --auth-challenge) AUTH_CHALLENGE="${2:?missing value for --auth-challenge}"; shift 2 ;;
     --yes) ASSUME_YES="true"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage; fail "unknown option: $1" ;;
   esac
 done
+
+case "$AUTH_CHALLENGE" in
+  auto|image|turnstile) ;;
+  *) usage; fail "--auth-challenge must be auto, image, or turnstile" ;;
+esac
 
 [[ -n "$BASE_URL" ]] || { usage; fail "--base-url is required"; }
 command -v curl >/dev/null 2>&1 || fail "curl is required"
@@ -83,7 +99,8 @@ trap 'rm -rf "${WORK_DIR}"' EXIT
 
 printf 'HyperCDR online installer\nVersion: %s\nBase URL: %s\nInstall directory: %s\n' "$VERSION" "$BASE_URL" "$INSTALL_DIR"
 if [[ "$ASSUME_YES" != "true" ]]; then
-  read -r -p 'Continue installation? [y/N] ' answer
+  printf 'Continue installation? [y/N] '
+  read_prompt answer
   [[ "$answer" =~ ^[Yy]$ ]] || { echo 'Installation cancelled.'; exit 0; }
 fi
 
@@ -104,6 +121,40 @@ if [[ -r "${package_dir}/install-config.sh" ]]; then
   export HCDR_AUTH_CHALLENGE_MODE HCDR_TURNSTILE_SITE_KEY
   export HCDR_TURNSTILE_SECRET_KEY HCDR_TURNSTILE_VERIFY_URL
 fi
+
+turnstile_configured=false
+if [[ -n "${HCDR_TURNSTILE_SITE_KEY:-}" && -n "${HCDR_TURNSTILE_SECRET_KEY:-}" ]]; then
+  turnstile_configured=true
+fi
+
+case "$AUTH_CHALLENGE" in
+  turnstile)
+    [[ "$turnstile_configured" == true ]] || fail "Turnstile was requested but the release package has no complete Turnstile credentials"
+    HCDR_AUTH_CHALLENGE_MODE=turnstile
+    ;;
+  image)
+    HCDR_AUTH_CHALLENGE_MODE=image
+    ;;
+  auto)
+    if [[ "$ASSUME_YES" == "true" ]]; then
+      HCDR_AUTH_CHALLENGE_MODE=image
+      info "Non-interactive installation selected image captcha by default."
+    elif [[ "$turnstile_configured" == true ]]; then
+      printf 'Have you added this installation host/IP to the Cloudflare Turnstile allowed hostnames list? [y/N] '
+      read_prompt turnstile_allowed
+      if [[ "$turnstile_allowed" =~ ^[Yy]$ ]]; then
+        HCDR_AUTH_CHALLENGE_MODE=turnstile
+      else
+        HCDR_AUTH_CHALLENGE_MODE=image
+      fi
+    else
+      HCDR_AUTH_CHALLENGE_MODE=image
+      info "Turnstile credentials are unavailable; using image captcha."
+    fi
+    ;;
+esac
+export HCDR_AUTH_CHALLENGE_MODE
+info "Authentication mode: ${HCDR_AUTH_CHALLENGE_MODE}."
 
 info "Starting the HyperCDR control-plane installation."
 

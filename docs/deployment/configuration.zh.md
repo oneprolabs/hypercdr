@@ -23,6 +23,8 @@ Compose 未指定验证码模式时默认 turnstile；源码 env.example 示例�
 
 Turnstile 同时要求浏览器访问 Cloudflare 控件、API 出站访问校验服务及有效的站点配置。captcha 不需要 Cloudflare 凭据。
 
+在线安装器默认会在交互安装时询问当前访问主机/IP 是否已加入 Turnstile 允许主机列表；选择“否”或不确定时使用图片验证码。`--yes` 非交互安装默认使用图片验证码，也可以显式指定 `--auth-challenge turnstile` 或 `--auth-challenge image`。显式选择 `turnstile` 但安装包缺少完整凭据时，安装会直接失败。
+
 修改配置后需按安装目录 Compose 配置重建受影响容器，单纯刷新页面或 restart 现有容器不会重新载入 Compose 环境变量。不要通过手工改镜像标签替代蓝绿升级。
 
 ## 社区版注册与组织
