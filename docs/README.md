@@ -4,12 +4,20 @@
 
 ## 安装与使用
 
-1. [安装部署](deployment/deployment-guide.zh.md)
-2. [首次使用：注册、保护、备份与恢复](user-guide/first-use.zh.md)
-3. [配置参考](deployment/configuration.zh.md)
-4. [平台运维、升级与卸载](operations/platform.zh.md)
-5. [故障排查](operations/troubleshooting.zh.md)
-6. [部署与适配范围](deployment/support-scope.zh.md)
+### 产品文档
+
+1. [产品概览](product-overview.zh.md)
+2. [产品安装](deployment/product-installation.zh.md)
+3. [产品使用手册](user-guide/product-user-manual.zh.md)
+
+### 运维参考
+
+- [安装部署](deployment/deployment-guide.zh.md)
+- [首次使用：注册、保护、备份与恢复](user-guide/first-use.zh.md)
+- [配置参考](deployment/configuration.zh.md)
+- [平台运维、升级与卸载](operations/platform.zh.md)
+- [故障排查](operations/troubleshooting.zh.md)
+- [部署与适配范围](deployment/support-scope.zh.md)
 
 ## 系统与开发
 
