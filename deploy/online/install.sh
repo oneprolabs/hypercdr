@@ -74,10 +74,11 @@ command -v docker >/dev/null 2>&1 || fail "Docker is required; install Docker be
 info "Preparing the HyperCDR online installer."
 if [[ -z "$VERSION" ]]; then
   info "Resolving the latest GitHub Release."
-  latest_url="https://raw.githubusercontent.com/${OWNER_REPO}/main/deploy/online/latest.json"
+  latest_url="https://github.com/${OWNER_REPO}/releases/latest/download/latest.json"
   VERSION="$(curl -fsSL "$latest_url" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
 fi
 [[ -n "$VERSION" ]] || fail "could not resolve a GitHub Release version"
+info "Selected release version: ${VERSION}."
 case "$VERSION" in
  ce-v*) RELEASE_TAG="$VERSION" ;;
  v*) RELEASE_TAG="$VERSION"; VERSION="${VERSION#v}" ;;

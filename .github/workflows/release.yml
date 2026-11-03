@@ -264,13 +264,15 @@ jobs:
           test -s "${RELEASE_DIR}/hypercdr-installer-${{ needs.prepare-release.outputs.image_version }}.tar.gz"
           test -s "${RELEASE_DIR}/hypercdr-installer-${{ needs.prepare-release.outputs.image_version }}.sha256"
           test -s "${RELEASE_DIR}/release-manifest.json"
+          printf '{"version":"%s"}\n' '${{ needs.prepare-release.outputs.image_version }}' > "${RELEASE_DIR}/latest.json"
           gh release view "${RELEASE_TAG}" >/dev/null 2>&1 || gh release create "${RELEASE_TAG}" --generate-notes --latest
           gh release upload "${RELEASE_TAG}" \
             "${RELEASE_DIR}/hypercdr-installer-${{ needs.prepare-release.outputs.image_version }}.tar.gz" \
             "${RELEASE_DIR}/hypercdr-installer-${{ needs.prepare-release.outputs.image_version }}.sha256" \
-            "${RELEASE_DIR}/release-manifest.json" --clobber
+            "${RELEASE_DIR}/release-manifest.json" \
+            "${RELEASE_DIR}/latest.json" --clobber
           asset_count="$(gh release view "${RELEASE_TAG}" --json assets --jq '.assets | length')"
-          test "${asset_count}" -eq 3 || { echo "expected 3 GitHub Release assets, got ${asset_count}" >&2; gh release view "${RELEASE_TAG}" --json assets; exit 1; }
+          test "${asset_count}" -eq 4 || { echo "expected 4 GitHub Release assets, got ${asset_count}" >&2; gh release view "${RELEASE_TAG}" --json assets; exit 1; }
 
   deploy:
     needs: publish
