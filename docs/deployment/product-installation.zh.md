@@ -260,3 +260,15 @@ sudo /var/lib/hypercdr/uninstall.sh --purge-data --remove-images --execute
 | 注册任务卡住 | kubeconfig context、RBAC、注册执行器日志和 clusterType |
 | 恢复失败 | 恢复点状态、目标权限、PVC/CSI、对象存储和任务首个失败事件 |
 
+## 14. 安装页面截图与发布验收
+
+本版已发布的实机图仅包含登录入口，位于 `docs/assets/images/overview/login-149.png`。安装向导、在线下载进度、固定版本选择、离线安装和安装后服务页面，必须在目标发行版上真实执行并脱敏后再加入 `docs/assets/images/installation/`；没有实机证据时不使用示意图代替。
+
+| 验收对象 | 当前证据 | 发布前动作 |
+|---|---|---|
+| 登录入口与验证码 | 149 实机截图 | 按目标版本复核认证模式和地址 |
+| 在线安装向导 | 尚无可发布截图 | 在干净 Linux 主机执行一次并脱敏 |
+| 固定版本安装 | 尚无可发布截图 | 使用指定 Release 版本执行并记录实际版本 |
+| 离线安装 | 尚无可发布截图 | 校验压缩包后在隔离主机执行 |
+| 安装后验收 | 命令和清单已提供 | 结合实际容器、`readyz` 和登录结果验收 |
+
