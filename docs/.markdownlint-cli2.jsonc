@@ -1,0 +1,12 @@
+{
+  "globs": [
+    "product-overview.zh.md",
+    "deployment/product-installation.zh.md",
+    "user-guide/product-user-manual.zh.md"
+  ],
+  "config": {
+    "default": true,
+    "MD013": false,
+    "MD024": { "siblings_only": true }
+  }
+}

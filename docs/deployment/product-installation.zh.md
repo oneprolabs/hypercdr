@@ -19,7 +19,7 @@ Linux 主机需要预先安装：
 ### 1.2 网络要求
 
 | 方向 | 用途 |
-|---|---|
+| --- | --- |
 | 安装主机 → GitHub | 获取入口脚本、Release 安装包和校验文件。 |
 | 安装主机 → 镜像仓库 | 拉取 API、前端、注册执行器及依赖镜像。 |
 | 浏览器 → 中控主机 `12443/tcp` | 访问登录页和 API。 |
@@ -65,7 +65,7 @@ https://platform.example.com:12443
 ### 字段与页面说明
 
 | 向导信息 | 用户需要核对的内容 |
-|---|---|
+| --- | --- |
 | Version | 本次实际安装的 Release 版本；不指定版本并不代表没有版本 |
 | Base URL | 浏览器与集群 Agent 均可访问的中控 HTTPS 地址 |
 | Install directory | 保存平台配置和部署辅助脚本的位置 |
@@ -126,7 +126,7 @@ curl -fL --progress-bar \
 ## 3. 安装参数
 
 | 参数 | 必需 | 说明 |
-|---|---:|---|
+| --- | ---: | --- |
 | `--base-url URL` | 是 | 中控对外 HTTPS Origin，默认入口端口为 `12443`。 |
 | `--version VERSION` | 否 | Release 版本，如 `ce-v0.0.13`；不填使用最新正式版。 |
 | `--install-dir PATH` | 否 | 安装目录，默认 `/var/lib/hypercdr`。 |
@@ -205,7 +205,20 @@ sudo ./install-blue-green.sh "$VERSION" \
 
 离线安装仍需要目标主机能够访问配置的镜像仓库，除非镜像已提前导入并改用可访问的本地仓库。离线包不包含 Docker Engine，也不自动准备 Kubernetes 集群或对象存储。
 
-## 7. 升级、回滚和卸载
+## 7. 平台维护：升级、回滚和卸载
+
+### 功能说明
+
+平台升级用于更新中控服务；回滚用于在保留可用上一版本时恢复平台流量；卸载用于停止或移除当前中控安装。这些操作不等同于集群注销，也不自动升级或卸载已注册集群的 Agent。
+
+### 前置条件
+
+- 已确认操作的是目标中控主机及实际安装目录，安排维护窗口并停止新任务提交。
+- 升级或回滚前记录当前版本、目标版本和集群组件版本，确认目标版本适用。
+- 已按保留要求备份数据，并验证备份文件不在将要删除的安装目录中。
+- 回滚要求上一版本的清单、镜像和部署状态仍可用；没有保留目标版本时不要将回滚命令视为恢复保障。
+
+### 操作步骤：升级与回滚
 
 升级前备份 PostgreSQL、`.env`、平台密钥、TLS 文件和版本清单。平台升级采用蓝绿部署，成功切换后检查活动版本、任务和 Agent 状态。回滚：
 
@@ -214,6 +227,26 @@ sudo /var/lib/hypercdr/deploy-blue-green.sh --rollback
 ```
 
 回滚不撤销数据库迁移，也不自动回滚集群 Agent。
+
+安装到自定义目录时，回滚脚本还需要使用相同的安装目录，例如：
+
+```bash
+sudo env HCDR_INSTALL_DIR=/srv/hypercdr /srv/hypercdr/deploy-blue-green.sh --rollback
+```
+
+不要把全新安装或删除数据库当作升级步骤。升级入口和版本选择参见第 12 节，升级完成后重新执行第 11 节验收。
+
+### 操作步骤：卸载
+
+1. 确认业务集群后续如何管理；如需移除集群端组件，先按使用手册评审集群注销，而不是假定中控卸载会代办。
+2. 在实际安装目录运行预览，不带 `--execute` 不会执行删除：
+
+   ```bash
+   sudo /var/lib/hypercdr/uninstall.sh
+   ```
+
+3. 核对输出中的安装目录、目标容器、Purge data 和 Remove images。
+4. 根据保留要求选择以下一种命令；不要两条都执行。
 
 默认卸载保留数据：
 
@@ -229,6 +262,29 @@ sudo /var/lib/hypercdr/uninstall.sh --purge-data --remove-images --execute
 
 这些命令不删除外部对象存储、业务集群、Harbor、MinIO 或其他无关服务。
 
+### 参数与页面说明
+
+| 选项 | 说明 |
+| --- | --- |
+| 不带 `--execute` | 仅打印卸载计划，用于核对范围 |
+| `--execute` | 应用卸载操作，默认保留数据 |
+| `--purge-data` | 配合执行参数删除此安装目录和平台数据，不能依靠目录内文件恢复 |
+| `--remove-images` | 配合执行参数移除卸载范围内的平台镜像，不是清空宿主机全部镜像 |
+
+卸载脚本按自身所在位置识别安装目录，不按当前终端目录识别。必须运行已安装目录内的脚本，不应从源码目录或解压包直接卸载线上平台。
+
+### 结果确认
+
+- 升级或回滚：入口可访问、服务就绪、实际活动版本符合预期，并确认已有集群和任务数据仍可查看。
+- 保留数据卸载：目标平台容器已停止或移除，数据保留符合计划。停止容器不代表备份已完成。
+- 彻底卸载：目标容器、平台数据和所选镜像按计划清除，无关服务未受影响。外部对象存储和业务集群的保留与清理由各自管理流程确认。
+
+### 注意事项与常见问题
+
+- 彻底删除不可逆；不要在没有备份或删除授权时添加 `--purge-data`。
+- 不使用 `docker system prune` 或删除宿主机整个 Docker 数据目录代替产品卸载。
+- 回滚平台版本不能撤销已经发生的集群资源恢复、接管、备份删除或数据库迁移。
+
 ## 8. 常见问题
 
 - **入口下载卡住**：检查到 `raw.githubusercontent.com` 的 DNS、IPv4/IPv6 和 HTTPS 出口；用 `--version` 可减少版本发现步骤，但仍需下载 Release 资产。
@@ -243,7 +299,7 @@ sudo /var/lib/hypercdr/uninstall.sh --purge-data --remove-images --execute
 典型安装目录为 `/var/lib/hypercdr`，实际文件以发布包版本为准：
 
 | 路径/对象 | 作用 |
-|---|---|
+| --- | --- |
 | `.env` | 地址、认证、数据库、密钥和镜像配置，必须保护权限 |
 | `docker-compose.yaml` | 当前发布包的服务编排，与验收命令中的文件名一致 |
 | PostgreSQL 数据卷 | 中控元数据和任务状态 |
@@ -256,7 +312,7 @@ sudo /var/lib/hypercdr/uninstall.sh --purge-data --remove-images --execute
 ## 10. 完整配置参考
 
 | 变量 | 说明 |
-|---|---|
+| --- | --- |
 | `HCDR_BASE_URL` | 中控外部 HTTPS Origin，必须与 Agent WSS 地址一致 |
 | `HCDR_PUBLIC_BASE_URL` | 首次初始化平台地址，已有数据库设置后不覆盖 |
 | `HCDR_HTTPS_PORT` | Edge 端口，默认 `12443` |
@@ -292,7 +348,7 @@ sudo /var/lib/hypercdr/uninstall.sh --purge-data --remove-images --execute
 ## 13. 安装故障定位
 
 | 现象 | 优先检查 |
-|---|---|
+| --- | --- |
 | 下载或解析版本等待 | GitHub/Release、DNS、代理和 TLS；确认 `latest.json`/资产可访问 |
 | 登录页验证码异常 | `/api/v1/auth/config`、`.env` 模式以及前端/API 版本一致性 |
 | Turnstile 失败 | site/secret key、允许域名、浏览器和 API 出站网络 |
@@ -306,10 +362,9 @@ sudo /var/lib/hypercdr/uninstall.sh --purge-data --remove-images --execute
 本版已发布的实机图仅包含登录入口，位于 `docs/assets/images/overview/login-149.png`。安装向导、在线下载进度、固定版本选择、离线安装和安装后服务页面，必须在目标发行版上真实执行并脱敏后再加入 `docs/assets/images/installation/`；没有实机证据时不使用示意图代替。
 
 | 验收对象 | 当前证据 | 发布前动作 |
-|---|---|---|
+| --- | --- | --- |
 | 登录入口与验证码 | 149 实机截图 | 按目标版本复核认证模式和地址 |
 | 在线安装向导 | 尚无可发布截图 | 在干净 Linux 主机执行一次并脱敏 |
 | 固定版本安装 | 尚无可发布截图 | 使用指定 Release 版本执行并记录实际版本 |
 | 离线安装 | 尚无可发布截图 | 校验压缩包后在隔离主机执行 |
 | 安装后验收 | 命令和清单已提供 | 结合实际容器、`readyz` 和登录结果验收 |
-
