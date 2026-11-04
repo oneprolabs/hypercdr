@@ -299,12 +299,27 @@ HyperCDR 中控平台通过 HTTPS 提供登录和业务管理页面。登录挑�
 
 ### 操作步骤
 
-1. 进入 **Disaster Recovery → Application DR**。
-2. 选择源集群和应用范围。
-3. 按 Namespace、资源类型、标签或资源清单选择对象。
-4. 配置排除项、PVC、目标集群、目标 Namespace 和存储类映射。
-5. 选择 Storage 和 Policy。
-6. 在摘要页核对范围，提交并激活保护配置。
+1. 进入 **DR → Application DR**，选择源集群。
+2. 在 **Select application** 中核对需要保护的业务 Namespace，选择后按页面提示进入下一阶段。
+3. 在 **Set up DR** 中完成保护向导：先检查资源范围及排除项，再选择默认目标集群。
+4. 选择存储方式、仓库和策略。Local CSI Snapshot 与 Remote Repository 的依赖不同，不要认为本地快照天然具备跨集群、跨存储恢复能力。
+5. 业务需要备份前后处理时配置 Hooks；不需要则保持未配置，不为完成向导而添加空脚本。
+6. 在 **Configuration Review** 核对 Scope、Target、Storage、Policy 和 Hooks，确认后提交。
+7. 返回 **Run DR** 检查配置状态。恢复时的目标 Namespace、存储类和镜像映射在恢复向导中另行核对，不应当成保护向导已经执行过的恢复操作。
+
+### 字段与页面说明
+
+| 配置项 | 含义和核对要点 |
+| --- | --- |
+| Scope | 需要保护的资源范围；排除规则可能使部分资源不进入备份 |
+| Default target | 默认恢复目标集群，不代表提交保护后立即在目标端创建业务资源 |
+| Remote Repository | 使用对象存储仓库，核对仓库及集群访问条件 |
+| Local CSI Snapshot | 依赖本地 CSI 快照能力，应核对驱动和恢复边界 |
+| Policy | 可复用调度和保留配置；手动触发策略不产生定时执行计划 |
+| Pre-backup Hook | 备份前执行，可用于应用静默、刷新或检查；需自行验证脚本正确性 |
+| Post-backup Hook | 备份后处理，可用于恢复应用状态、清理或通知 |
+| Entry script / Dependencies | Hook 入口与依赖文件；核对入口选择和依赖完整性 |
+| Configuration Review | 提交前汇总页面，不等于第一次备份已完成 |
 
 ### 结果确认
 
@@ -313,6 +328,8 @@ HyperCDR 中控平台通过 HTTPS 提供登录和业务管理页面。登录挑�
 ### 注意事项
 
 不要把平台组件、无关 Namespace 或凭据误加入应用范围。应用标签只用于分类，不会改变保护范围。
+
+Hook 脚本可能影响应用状态，只使用经过业务负责人审阅和验证的脚本。未配置 Hooks 不代表备份自动具备数据库应用一致性；应根据业务写入和恢复要求制定一致性方案。
 
 ## 8. 执行同步与查看恢复点
 

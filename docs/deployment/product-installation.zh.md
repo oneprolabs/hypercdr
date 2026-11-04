@@ -197,7 +197,22 @@ curl -kfsS -o /dev/null -w 'ready=%{http_code}\n' https://platform.example.com:1
 
 ## 6. 离线/本地安装
 
-在联网且已认证的发布环境下载对应 Release 资产及校验文件：
+### 功能说明
+
+本地包安装适用于安装主机不能方便下载 GitHub Release、但能够访问镜像仓库的环境：先在联网主机下载版本包，再复制到目标主机执行。当前安装包包含脚本、配置模板和部署资产，**不是包含全部容器镜像的完全离线镜像包**。
+
+### 前置条件
+
+- 目标主机满足第 1 节要求，已准备 Docker、Compose v2、tar 和 `sha256sum`。
+- 联网下载主机具备 GitHub CLI（`gh`），并能访问目标 Release；也可在 Release 页面下载同名资产。
+- 目标主机能访问所选镜像仓库；仓库要求认证时，先按仓库规范完成 `docker login`。
+- 确认版本、安装目录、访问地址和验证码方式。以下示例明确使用图片验证码，不依赖 Cloudflare 凭据或允许清单。
+
+### 操作步骤
+
+#### 步骤一：下载安装包
+
+在联网主机下载同一版本的安装包和校验文件。示例版本需替换为实际选择的 Release：
 
 ```bash
 VERSION=ce-v0.0.13
@@ -207,12 +222,37 @@ gh release download "$VERSION" -R oneprolabs/hypercdr \
 sha256sum -c "hypercdr-installer-${VERSION}.sha256"
 ```
 
-将校验通过的压缩包复制到目标主机，解压后执行包内安装器：
+#### 步骤二：校验与复制
+
+检查校验输出为 `OK`。失败时重新下载，不解压执行。
+
+将安装包和校验文件一并复制到目标主机，在目标端再次校验，再解压。重新设置 `VERSION`，不要假定下载主机上的变量会随文件复制过去。
 
 ```bash
+VERSION=ce-v0.0.13
+sha256sum -c "hypercdr-installer-${VERSION}.sha256"
 tar -xzf hypercdr-installer-${VERSION}.tar.gz
 cd hypercdr-installer-${VERSION}
-sudo ./install-blue-green.sh "$VERSION" \
+```
+
+#### 步骤三：预览参数
+
+在解压目录先执行预览，核对版本、仓库、安装目录和域名。此命令没有 `--execute`，不会部署：
+
+```bash
+sudo env HCDR_AUTH_CHALLENGE_MODE=image ./install-blue-green.sh "$VERSION" \
+  --base-url https://platform.example.com:12443 \
+  --domain platform.example.com \
+  --registry registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr \
+  --install-dir /var/lib/hypercdr
+```
+
+#### 步骤四：执行安装
+
+核对预览后，在同一目录执行安装：
+
+```bash
+sudo env HCDR_AUTH_CHALLENGE_MODE=image ./install-blue-green.sh "$VERSION" \
   --base-url https://platform.example.com:12443 \
   --domain platform.example.com \
   --registry registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr \
@@ -221,6 +261,26 @@ sudo ./install-blue-green.sh "$VERSION" \
 ```
 
 离线安装仍需要目标主机能够访问配置的镜像仓库，除非镜像已提前导入并改用可访问的本地仓库。离线包不包含 Docker Engine，也不自动准备 Kubernetes 集群或对象存储。
+
+### 参数与目录说明
+
+| 对象或参数 | 说明 |
+| --- | --- |
+| `hypercdr-installer-${VERSION}` | 解压目录，不是持久化安装目录 |
+| `--install-dir` | 平台持久化配置和部署辅助脚本目录，升级时保持一致 |
+| `--registry` | 容器镜像来源，目标主机必须可访问且具备所需权限 |
+| `HCDR_AUTH_CHALLENGE_MODE=image` | 本示例显式采用本地图片验证码 |
+| `--execute` | 执行实际部署；不带时仅输出参数预览，不完成依赖或业务验收 |
+
+### 结果确认
+
+按第 5 节和第 11 节检查容器、就绪接口、实际版本和浏览器登录。出现 `Dry run` 只表示参数预览结束，不表示安装成功。
+
+### 注意事项与常见问题
+
+- 包可能包含部署凭据，限制压缩包、解压目录和校验文件的访问范围，不将配置内容粘贴到公开工单。
+- 完全无外网时，还需单独准备所有版本匹配的镜像及仓库；不要只复制这个脚本包就宣称环境已具备完全离线部署条件。
+- 如确需 Turnstile，应准备有效的成对凭据、允许主机和网络条件，并按受控部署配置执行；不要直接省略示例中的图片验证码选择。
 
 ## 7. 平台维护：升级、回滚和卸载
 
