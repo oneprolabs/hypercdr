@@ -1,14 +1,18 @@
 # HyperCDR 文档
 
-以下入口以当前代码和流程为依据。公开版本及安装包见 [GitHub Releases](https://github.com/oneprolabs/hypercdr/releases)。
+从产品概览开始了解 HyperCDR，再按安装和使用手册完成部署、应用保护与恢复验证。公开版本及安装包见 [GitHub Releases](https://github.com/oneprolabs/hypercdr/releases)。
 
 ## 安装与使用
 
 ### 产品文档
 
-1. [产品概览](product-overview.zh.md)
-2. [产品安装](deployment/product-installation.zh.md)
-3. [产品使用手册](user-guide/product-user-manual.zh.md)
+| 文档 | 适合阅读的场景 |
+| --- | --- |
+| [产品概览](product-overview.zh.md) | 了解产品组成、使用场景、三类集群、保护与恢复概念、权限和能力边界 |
+| [产品安装](deployment/product-installation.zh.md) | 准备部署环境，选择在线或本地包安装，配置登录方式，验收与维护中控平台 |
+| [产品使用手册](user-guide/product-user-manual.zh.md) | 按实机图文步骤完成集群、存储、策略、应用保护、演练、接管和日常管理 |
+
+三份文档均为中文用户文档。图片统一放在 `assets/images/` 对应分类目录，正文通过相对路径引用；下载到本地阅读时，请同时保留图片目录。系统与开发章节用于实现和运维参考，不替代产品手册中的用户操作说明。
 
 ### 运维参考
 

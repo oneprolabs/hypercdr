@@ -352,19 +352,6 @@ Hook 脚本可能影响应用状态，只使用经过业务负责人审阅和验
 
 ![恢复点列表的时间、仓库和容量信息](../assets/images/user-guide/restore-points.png)
 
-### 恢复点页面说明
-
-| 列 | 使用说明 |
-| --- | --- |
-| Namespace | 恢复点所属应用命名空间，恢复前须与保护对象核对 |
-| Restore Point | 恢复点显示名称，时间按用户选择的时区展示 |
-| Repository | 备份所在的存储仓库，恢复时仍需保持可访问 |
-| Original Size | 页面已获取的原始数据大小，不应直接当作对象存储实际占用 |
-| Storage Size | 存储增量等信息不可获取时显示 Unknown；Unknown 不等于零，也不能单凭该值判断备份失败 |
-| Recovery Task | 关联恢复任务及其状态；没有恢复任务不等于恢复点不可用 |
-
-截图为列表局部，右侧未显示的列可通过表格横向滚动查看。选择恢复点前先核对源集群、Namespace、时间与仓库，不要只依靠最近一条记录判断可恢复性。
-
 ### 功能说明
 
 同步/备份任务把应用资源和数据写入对象存储，并由平台建立恢复点。
@@ -382,6 +369,19 @@ Hook 脚本可能影响应用状态，只使用经过业务负责人审阅和验
 3. 点击 **Start Sync** 提交任务。该按钮会直接发起备份请求，不应假定点击后还有独立确认窗口；不要为了查看详情而点击。
 4. 进入 **Backup & Recovery Tasks** 查看进度。
 5. 任务完成后进入 **Restore Points** 核对新增恢复点；需要检查资源范围和环境映射时，可在 Drill 恢复向导中查看相应信息，尚未批准演练时关闭向导，不提交任务。
+
+### 恢复点页面说明
+
+| 列 | 使用说明 |
+| --- | --- |
+| Namespace | 恢复点所属应用命名空间，恢复前须与保护对象核对 |
+| Restore Point | 恢复点显示名称，时间按用户选择的时区展示 |
+| Repository | 备份所在的存储仓库，恢复时仍需保持可访问 |
+| Original Size | 页面已获取的原始数据大小，不应直接当作对象存储实际占用 |
+| Storage Size | 存储增量等信息不可获取时显示 Unknown；Unknown 不等于零，也不能单凭该值判断备份失败 |
+| Recovery Task | 关联恢复任务及其状态；没有恢复任务不等于恢复点不可用 |
+
+截图为列表局部，右侧未显示的列可通过表格横向滚动查看。选择恢复点前先核对源集群、Namespace、时间与仓库，不要只依靠最近一条记录判断可恢复性。
 
 ### 结果确认
 
@@ -434,20 +434,6 @@ Hook 脚本可能影响应用状态，只使用经过业务负责人审阅和验
 
 ![Drill 向导中的目标集群与恢复模式](../assets/images/user-guide/drill-target.png)
 
-### 字段与页面说明
-
-向导按 **Restore Point → Target → Restore Options → Review** 四步组织操作。Restore Point 页面应确认状态为 Available，并核对源集群、Namespace 和备份时间；Target 页面选择目标集群及恢复模式。
-
-| 选项 | 说明与风险 |
-| --- | --- |
-| Target cluster | 实际执行恢复的目标集群；不能只检查源集群在线状态 |
-| Clone to new namespace | 恢复到新 Namespace；隔离演练优先采用此方式，并核对命名空间未被生产使用 |
-| Full restore to original namespace | 恢复到目标集群的原同名 Namespace；可能与现有资源冲突，不应当作隔离演练默认选择 |
-| Target namespace | 克隆模式下的目标命名空间；示例中的 `demo-nextcloud-drill` 只是当前表单值 |
-| Restore Options | 核对恢复范围和映射后再进入 Review；进入向导和点击 Next 不代表已经提交任务 |
-
-> **注意**：Drill 的名称本身不保证目标隔离。提交前必须核对恢复模式、目标集群和 Namespace，避免影响已有工作负载。
-
 ### 功能说明
 
 Drill 用于验证恢复点能否恢复为可运行的应用。只有正确选择隔离目标并控制网络访问，才能降低对生产应用的影响；选择原同名 Namespace 或与生产共享外部服务时仍有业务风险。
@@ -467,6 +453,20 @@ Drill 用于验证恢复点能否恢复为可运行的应用。只有正确选�
 5. 在任务详情查看资源恢复、工作负载就绪检查和最终结果；仅当页面实际出现清理阶段时，再检查清理结果。
 6. 到目标集群检查工作负载、PVC、Service 和应用数据。
 7. 验证结束后按演练清理计划处理演练资源。先确认清理对象属于本次演练，不要删除生产 Namespace 或共享存储；不要将任务完成理解为演练资源已自动删除。
+
+### 字段与页面说明
+
+向导按 **Restore Point → Target → Restore Options → Review** 四步组织操作。Restore Point 页面应确认状态为 Available，并核对源集群、Namespace 和备份时间；Target 页面选择目标集群及恢复模式。
+
+| 选项 | 说明与风险 |
+| --- | --- |
+| Target cluster | 实际执行恢复的目标集群；不能只检查源集群在线状态 |
+| Clone to new namespace | 恢复到新 Namespace；隔离演练优先采用此方式，并核对命名空间未被生产使用 |
+| Full restore to original namespace | 恢复到目标集群的原同名 Namespace；可能与现有资源冲突，不应当作隔离演练默认选择 |
+| Target namespace | 克隆模式下的目标命名空间；示例中的 `demo-nextcloud-drill` 只是当前表单值 |
+| Restore Options | 核对恢复范围和映射后再进入 Review；进入向导和点击 Next 不代表已经提交任务 |
+
+> **注意**：Drill 的名称本身不保证目标隔离。提交前必须核对恢复模式、目标集群和 Namespace，避免影响已有工作负载。
 
 ### 结果确认
 

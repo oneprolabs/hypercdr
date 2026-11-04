@@ -112,6 +112,10 @@ Drill 用于在隔离目标中验证恢复流程和恢复点可用性。演练�
 
 ## 7. 中控平台功能地图
 
+![中控 Dashboard 的组织资源和保护健康概览](assets/images/overview/dashboard-149.png)
+
+Dashboard 将组织资源与当前集群的保护状态分开展示。图中为测试环境局部：左侧为注册集群、保护配置和存储仓库，右侧为选定集群的配置覆盖与保护缺口。Configured 比例不是备份任务完成百分比；Backup overdue 等提示需要进一步检查策略、最新恢复点和任务，不应仅凭集群在线就判断保护健康。
+
 当前实机中控的一级入口包括 **Dashboard、DR、Configuration、Operations、Settings**。常用功能位置如下，页面可见范围还受账号权限影响。
 
 | 功能入口 | 主要用途 |
