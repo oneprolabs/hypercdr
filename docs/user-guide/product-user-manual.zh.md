@@ -154,10 +154,22 @@ HyperCDR 中控平台通过 HTTPS 提供登录和业务管理页面。登录挑�
 1. 进入 **Configuration → Clusters**，点击 **Register Cluster**。
 2. 选择集群类型：`Native Kubernetes`、`Huawei Cloud CCE` 或 `OpenShift`。
 3. 选择 **Install for me** 或 **Run command**。
-4. 使用 **Install for me** 时上传 kubeconfig，完成集群检查并提交安装任务。
+4. 使用 **Install for me** 时上传 kubeconfig，选择正确 context，执行集群检查；检查结果返回后核对集群与节点信息，选择用于安装的 StorageClass，再提交 **Register cluster**。
 5. 使用 **Run command** 时复制一次性命令，在能够访问集群的跳板机执行。
 6. 返回 **Clusters**，等待 Agent 建立出站连接。
-7. 打开集群详情，刷新 inventory。
+7. 检查集群卡片的节点、Namespace 和组件状态，需要时刷新资源信息。不要把注册任务创建成功当作 Agent 已就绪。
+
+![选择由平台安装并准备 kubeconfig](../assets/images/user-guide/cluster-direct-install.png)
+
+上图为 Native Kubernetes 的 **Install for me** 页面，尚未上传文件或创建安装任务。可在已经配置集群管理权限的主机上先确认当前 context，再按页面指引导出内嵌凭据的配置：
+
+```bash
+kubectl config current-context
+kubectl config view --raw --minify --flatten > hypercdr-native-kubeconfig.yaml
+chmod 600 hypercdr-native-kubeconfig.yaml
+```
+
+`--minify` 只导出当前 context 的相关配置，因此必须先确认当前连接的是目标集群。`--raw` 输出包含真实凭据，不要将命令结果打印到公开终端记录或粘贴到文档；导出文件按凭据管理要求保存，使用完后处理不再需要的副本。CCE 与 OpenShift 请按各自向导提供的获取说明准备文件。
 
 ### 页面说明
 
@@ -168,6 +180,10 @@ HyperCDR 中控平台通过 HTTPS 提供登录和业务管理页面。登录挑�
 | Run command | 由用户在可访问集群的主机执行生成命令 |
 | Agent status | 显示 online/offline 和最近心跳 |
 | Inventory | 节点、Namespace、资源和存储类清单 |
+| kubeconfig / Context | 上传的集群访问配置与实际操作上下文，文件含多个 context 时尤其需要核对 |
+| 集群检查结果 | 核对集群名称、Kubernetes 版本、节点数、存储类和未通过检查项 |
+| StorageClass | 供注册安装使用的目标存储类；默认项不代表一定符合现场容量和驱动要求 |
+| Registration in progress | 正在执行预检查、组件安装或就绪验证，不应重复提交注册 |
 
 ### 三类集群差异
 
@@ -188,6 +204,7 @@ HyperCDR 中控平台通过 HTTPS 提供登录和业务管理页面。登录挑�
 - 不要把注册命令、Token 或 kubeconfig 粘贴到公开工单。
 - Agent 采用出站 WSS，中控不需要访问 Agent 入站端口。
 - 注册执行器卡住时检查 kubeconfig context、RBAC、网络和执行器日志。
+- 临时上传会话失效、取消或平台重启后，按提示重新上传和检查，不要复用已经失效的检查结果。
 
 ## 5. 配置对象存储
 

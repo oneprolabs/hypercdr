@@ -1,6 +1,8 @@
 # HyperCDR 产品安装
 
-本文面向平台管理员，覆盖发行版在线安装、离线安装、参数、验收、升级和卸载。在线入口为 `deploy/online/install.sh`；Release 安装包内的 `scripts/release/install-blue-green.sh` 负责实际部署。
+本文面向负责部署和维护中控平台的管理员，介绍安装前准备、在线与本地包安装、登录配置、验收、升级、回滚和卸载。安装完成后，请继续阅读[用户使用手册](../user-guide/product-user-manual.zh.md)，注册集群并配置应用保护；安装中控不会自动保护业务应用。
+
+本文的中控部署方式是独立 Linux 主机上的 Docker Compose。示例使用 HTTPS 域名和默认安装目录；请替换为现场规划。需要先判断是否适用于目标集群与存储环境时，请阅读[产品概览](../product-overview.zh.md)和[适配范围](support-scope.zh.md)。本地安装包不等于完全离线镜像包，具体边界见第 6 节。
 
 ## 目录
 
@@ -402,8 +404,9 @@ sudo /var/lib/hypercdr/uninstall.sh --purge-data --remove-images --execute
 | `.env` | 地址、认证、数据库、密钥和镜像配置，必须保护权限 |
 | `docker-compose.yaml` | 当前发布包的服务编排，与验收命令中的文件名一致 |
 | PostgreSQL 数据卷 | 中控元数据和任务状态 |
-| `certs/` | TLS 证书材料 |
-| `release-manifest.json` | 活动版本和组件镜像身份 |
+| `tls.crt`、`tls.key` | 默认 Edge TLS 证书与私钥；如配置其他路径，以实际配置为准 |
+| `releases/<版本>/release-manifest.json` | 按版本保存的发行清单及组件镜像身份 |
+| `current-release.json` | 当前活动发行清单；升级切换后需核对实际版本 |
 | `restart-platform.sh`、`configure-public-url.sh` | 重启和访问地址辅助脚本 |
 
 平台通常由 Edge、蓝/绿 API、蓝/绿前端、PostgreSQL、注册执行器和升级执行器组成；可选产品门户独占 `12445`，不安装门户不影响中控 `12443`。
