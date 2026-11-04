@@ -320,6 +320,22 @@ HyperCDR 中控平台通过 HTTPS 提供登录和业务管理页面。登录挑�
 
 ## 9. 执行 Drill
 
+![Drill 向导中的目标集群与恢复模式](../assets/images/user-guide/drill-target.png)
+
+### 字段与页面说明
+
+向导按 **Restore Point → Target → Restore Options → Review** 四步组织操作。Restore Point 页面应确认状态为 Available，并核对源集群、Namespace 和备份时间；Target 页面选择目标集群及恢复模式。
+
+| 选项 | 说明与风险 |
+|---|---|
+| Target cluster | 实际执行恢复的目标集群；不能只检查源集群在线状态 |
+| Clone to new namespace | 恢复到新 Namespace；隔离演练优先采用此方式，并核对命名空间未被生产使用 |
+| Full restore to original namespace | 恢复到目标集群的原同名 Namespace；可能与现有资源冲突，不应当作隔离演练默认选择 |
+| Target namespace | 克隆模式下的目标命名空间；示例中的 `demo-nextcloud-drill` 只是当前表单值 |
+| Restore Options | 核对恢复范围和映射后再进入 Review；进入向导和点击 Next 不代表已经提交任务 |
+
+> **注意**：Drill 的名称本身不保证目标隔离。提交前必须核对恢复模式、目标集群和 Namespace，避免影响已有工作负载。
+
 ### 功能说明
 
 Drill 在隔离目标验证恢复点，不影响生产应用。
@@ -375,6 +391,12 @@ Restore 将恢复点正式恢复到目标集群，属于生产变更操作。
 不要重复点击创建相同恢复任务。发现目标冲突、权限错误或数据异常时，先停止后续变更并保留现场。
 
 ## 11. 查看任务进度和详细日志
+
+![已完成 Drill 任务的事件时间线](../assets/images/user-guide/drill-events.png)
+
+上图来自既有 Drill 任务，而非本次为截图重新执行。事件记录展示存储预检查、下发、Agent 接受、恢复等待、工作负载就绪检查和完成过程。`accepted` 只表示 Agent 已接受任务，不能作为恢复成功依据；`workload readiness changed` 表示应用就绪检查发生变化，应结合其中 Pod 和工作负载数量判断等待原因。
+
+截图中的 `completed` 明确报告资源恢复完成且应用就绪。它是该任务的实际结果，不表示其他恢复点或其他目标集群已通过验证；业务数据仍需应用负责人验收。
 
 ### 功能说明
 
