@@ -112,7 +112,7 @@ HyperCDR 中控平台通过 HTTPS 提供登录和业务管理页面。登录挑�
 
 ### 操作步骤
 
-1. 进入 **Clusters**，点击注册集群。
+1. 进入 **Configuration → Clusters**，点击 **Register Cluster**。
 2. 选择集群类型：`Native Kubernetes`、`Huawei Cloud CCE` 或 `OpenShift`。
 3. 选择 **Install for me** 或 **Run command**。
 4. 使用 **Install for me** 时上传 kubeconfig，完成集群检查并提交安装任务。
@@ -131,6 +131,10 @@ HyperCDR 中控平台通过 HTTPS 提供登录和业务管理页面。登录挑�
 | Inventory | 节点、Namespace、资源和存储类清单 |
 
 ### 三类集群差异
+
+下图为 149 实机注册向导中的集群类型选择区域。默认选中 Native Kubernetes；请选择实际发行版，不要仅按集群名称判断类型。
+
+![注册向导中的三类集群选择](../assets/images/user-guide/cluster-types.png)
 
 - **Native Kubernetes**：通过 Kubernetes API 和 Velero 执行标准集群保护与恢复。
 - **Huawei Cloud CCE**：通过 CCE kubeconfig 检查会话注册；仍由 Agent 和 Velero 执行任务。
@@ -162,10 +166,14 @@ HyperCDR 中控平台通过 HTTPS 提供登录和业务管理页面。登录挑�
 
 1. 进入 **Configuration → Storage**。
 2. 点击新建，填写仓库名称和存储类型。
-3. 填写 endpoint、Bucket、区域和可选路径前缀。
+3. 填写 Endpoint、Bucket 和区域，按存储服务要求选择 SSL/TLS 和 URL Style。
 4. 填写访问密钥和秘密密钥。
-5. 保存后执行 **Test Storage Connection**。
+5. 填写完成后执行 **Test Connection**，检查结果，再点击 **Save Storage**。不要将保存配置成功视为集群侧备份链路已验证。
 6. 在需要使用的保护配置中选择该仓库。
+
+![新建对象存储仓库配置窗口](../assets/images/user-guide/storage-new.png)
+
+上图为未填写凭据的新建窗口。不同存储类型显示的配置项不同；以下以 S3 Compatible 为例。
 
 ### 字段说明
 
@@ -176,7 +184,8 @@ HyperCDR 中控平台通过 HTTPS 提供登录和业务管理页面。登录挑�
 | Endpoint | 对象存储服务地址，含 TLS/路径形式要求 |
 | Bucket | 存放备份数据的 Bucket |
 | Region | 后端要求时填写的区域 |
-| Prefix | 用于集群或业务隔离的路径前缀 |
+| SSL/TLS | 是否使用加密连接；应与 Endpoint 协议和服务端证书配置一致 |
+| URL Style | Path 将 Bucket 放在请求路径中，Virtual-host 将 Bucket 放在主机名中；按存储服务要求选择 |
 | Access/Secret key | 具备读写和列举权限的凭据 |
 
 ### 结果确认
@@ -208,6 +217,23 @@ HyperCDR 中控平台通过 HTTPS 提供登录和业务管理页面。登录挑�
 4. 保存并确认策略状态可用。
 5. 在应用保护配置中引用策略。
 
+![新建保护策略窗口](../assets/images/user-guide/policy-new.png)
+
+### 字段与页面说明
+
+| 字段 | 说明 |
+|---|---|
+| Policy Name | 用于识别和选择策略，建议包含业务等级、频率或保留要求 |
+| Schedule + Retention | 同时配置定时执行和恢复点保留，页面推荐组合 |
+| Schedule Only | 仅定义执行计划；不要据此推断已设置保留规则 |
+| Retention Only | 仅定义恢复点生命周期；不会因此自动产生定时备份 |
+| Interval | 按分钟或小时设置执行间隔 |
+| Daily / Weekly / Monthly Backup | 按日、周或月设置执行计划；保存前核对页面显示的用户时区 |
+| Restore Point Quota | 保留恢复点数量配额；页面说明所有保留点均计入配额 |
+| Automatic Retention / Add Rule | 添加可选自动保留规则；未设置规则时，配额满后替换符合条件的最旧恢复点 |
+
+截图中的 5 分钟和 7 个恢复点是新建表单的当前显示值，并非所有业务的推荐配置。应按数据变化量、对象存储容量和恢复目标确定参数。
+
 ### 结果确认
 
 策略出现在可选择列表中，且保护配置引用的是预期策略。修改策略前检查其引用的应用范围。
@@ -217,6 +243,10 @@ HyperCDR 中控平台通过 HTTPS 提供登录和业务管理页面。登录挑�
 策略是可复用规则，保护配置才是规则与具体应用、集群和存储的绑定。策略存在不等于已经创建恢复点。
 
 ## 7. 创建应用保护
+
+![应用保护的三个操作阶段](../assets/images/user-guide/protection-stages.png)
+
+页面将操作分为 **Select application → Set up DR → Run DR** 三个阶段。第一阶段选择源集群中的 Namespace；第二阶段完成保护范围、目标集群、存储、策略和 Hooks 设置；第三阶段查看已保护应用并开展同步和恢复验证。阶段中的数量是当前集群的实际统计，不是任务进度。
 
 ### 功能说明
 
@@ -246,6 +276,21 @@ HyperCDR 中控平台通过 HTTPS 提供登录和业务管理页面。登录挑�
 不要把平台组件、无关 Namespace 或凭据误加入应用范围。应用标签只用于分类，不会改变保护范围。
 
 ## 8. 执行同步与查看恢复点
+
+![恢复点列表的时间、仓库和容量信息](../assets/images/user-guide/restore-points.png)
+
+### 恢复点页面说明
+
+| 列 | 使用说明 |
+|---|---|
+| Namespace | 恢复点所属应用命名空间，恢复前须与保护对象核对 |
+| Restore Point | 恢复点显示名称，时间按用户选择的时区展示 |
+| Repository | 备份所在的存储仓库，恢复时仍需保持可访问 |
+| Original Size | 页面已获取的原始数据大小，不应直接当作对象存储实际占用 |
+| Storage Size | 存储增量等信息不可获取时显示 Unknown；Unknown 不等于零，也不能单凭该值判断备份失败 |
+| Recovery Task | 关联恢复任务及其状态；没有恢复任务不等于恢复点不可用 |
+
+截图为列表局部，右侧未显示的列可通过表格横向滚动查看。选择恢复点前先核对源集群、Namespace、时间与仓库，不要只依靠最近一条记录判断可恢复性。
 
 ### 功能说明
 
@@ -389,7 +434,7 @@ Restore 将恢复点正式恢复到目标集群，属于生产变更操作。
 
 ## 15. 页面截图说明
 
-登录页截图已在 149 开发环境实际采集并随文档发布。集群注册、存储、策略、保护、恢复点、Drill、Restore 和任务详情属于登录后的业务页面；当前 149 会话没有可公开使用的测试账号和脱敏业务数据，因此本版不放置伪造截图。获得可用测试数据后，应按以下目录补充真实截图：
+登录页和集群类型选择截图已在 149 环境实际采集并随文档发布。149 登录已验证成功，业务数据可访问；存储、策略、保护、恢复点、Drill、Restore 和任务详情的完整截图仍待逐页采集、脱敏和审阅，不能把已有登录截图视为这些页面的验证证据。后续截图按以下目录归档：
 
 | 页面 | 图片目录 |
 |---|---|
