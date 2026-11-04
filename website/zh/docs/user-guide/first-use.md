@@ -45,7 +45,7 @@ description: 按阶段完成集群注册、存储与策略准备、应用保护�
 
 ## 3. 配置应用保护 {#configure-protection}
 
-进入 **Disaster Recovery → Application DR**。页面三阶段分别展示：可保护的源应用、保护配置、目标侧恢复状态。
+进入 **DR → Application DR**。页面三阶段分别展示：可保护的源应用、保护配置、目标侧恢复状态。
 
 选择源 namespace，启动保护向导，依次选择范围、目标、存储和策略。
 

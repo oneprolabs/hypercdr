@@ -15,11 +15,11 @@ description: 组织、集群、存储、策略、应用容灾、任务、恢复�
 | 集群 | 已注册的 Kubernetes / CCE / OpenShift 集群 | Configuration → Clusters |
 | 存储 | 对象存储地址、bucket 与凭据 | Configuration → Storage |
 | 策略 | 保护计划、保留规则等选项 | Configuration → Policies |
-| 应用容灾 | 源 namespace、目标端与存储的组合保护配置 | Disaster Recovery → Application DR |
+| 应用容灾 | 源 namespace、目标端与存储的组合保护配置 | DR → Application DR |
 | 任务 | 一次备份或恢复的执行记录 | Backup & Recovery Tasks |
 | 恢复点 | 某次成功备份产出的可恢复时间点 | Restore Points |
 | 演练 | 在隔离范围验证恢复是否可用 | Drill |
-| 恢复 | 把恢复点还原到目标集群 | Recovery |
+| 恢复 | 恢复任务的能力与任务记录类型；可用入口是 Drill 和 Takeover | Backup & Recovery Tasks |
 | 接管 | 按容灾切换流程把业务切到目标端，需先通过校验和变更审批 | Takeover |
 | 同步 / 备份 | 一次数据同步或备份执行，由 Agent 完成并产出恢复点 | Tasks |
 
@@ -55,7 +55,8 @@ description: 组织、集群、存储、策略、应用容灾、任务、恢复�
 - **保护配置**把源集群、应用/namespace、策略和存储仓库组合成一条可执行关系；
 - **同步/备份**由 Agent 执行存储准备、备份或状态推进，平台接收事件并建立或更新恢复点；
 - **恢复点**由源集群、保护配置、备份任务和 Velero 备份名共同确定，可查看状态、保留信息和内容清单；
-- **Restore** 向目标集群正式恢复资源和数据，**Drill** 只向隔离目标验证恢复链路，**Takeover** 才是有审批的容灾切换。
+- **Restore** 是恢复任务的能力与记录类型，当前已核验的恢复点操作入口是 **Drill** 和 **Takeover**，没有独立的 Restore 创建按钮。
+- **Drill** 只向隔离目标验证恢复链路，**Takeover** 才是有审批的容灾切换。
 
 恢复点处于创建中、来源不匹配、保护配置已删除或仓库不可访问时，不应启动恢复。任务成功后仍要检查目标工作负载、PVC、Service、应用健康和数据；删除平台里的恢复点记录，也不等于立即擦除对象存储中的全部数据。
 

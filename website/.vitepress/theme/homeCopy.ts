@@ -119,7 +119,7 @@ const RELEASES = 'https://github.com/oneprolabs/hypercdr/releases'
 const ISSUES = 'https://github.com/oneprolabs/hypercdr/issues'
 const LOGIN = 'https://app.hypercdr.com/login'
 const INSTALL_COMMAND = `# 安装最新版本与官网
-$ curl -fL --progress-bar https://raw.githubusercontent.com/oneprolabs/hypercdr/main/deploy/online/install.sh | sudo bash -s -- --base-url https://your-host:12443 --install-website --install-dir /var/lib/hypercdr --yes`
+$ curl -fL --progress-bar https://raw.githubusercontent.com/oneprolabs/hypercdr/main/deploy/online/install.sh | sudo bash -s -- --base-url https://your-host:12443 --install-dir /var/lib/hypercdr --yes`
 
 const zh: HomeCopy = {
   nav: [
@@ -247,10 +247,10 @@ const zh: HomeCopy = {
     kicker: '社区',
     title: '开源，一条清晰的生产路径。',
     description:
-      '用 Docker 在自己的 Linux 主机上运行 HyperCDR。在线安装器会下载已发布的版本，并可同时安装可选的官网。',
+      '用 Docker 在自己的 Linux 主机上运行 HyperCDR。在线安装器会下载并部署已发布的版本；文档站独立部署，不占中控端口。',
     actions: [
       { label: '在 GitHub 查看', href: GITHUB, external: true },
-      { label: '安装指南', href: '/docs/deployment/install' },
+      { label: '安装指南', href: '/docs/getting-started/install' },
       { label: '查看发布版本', href: RELEASES, external: true },
     ],
     install: {
@@ -259,7 +259,7 @@ const zh: HomeCopy = {
       copy: '复制命令',
       copied: '已复制',
       command: INSTALL_COMMAND,
-      footer: '已验证的发布版本 · 控制面 12443 · 官网 12445',
+      footer: '已验证的发布版本 · 控制面 12443 · 文档站独立部署',
     },
   },
   contact: {
@@ -305,7 +305,7 @@ const zh: HomeCopy = {
   },
   docs: {
     home: '/docs/',
-    install: '/docs/deployment/install',
+    install: '/docs/getting-started/install',
   },
 }
 
@@ -438,10 +438,10 @@ const en: HomeCopy = {
     kicker: 'Community',
     title: 'Open source. One clear path to production.',
     description:
-      'Run HyperCDR on your own Linux host with Docker. The online installer downloads a verified release and can install the optional public website alongside the control plane.',
+      'Run HyperCDR on your own Linux host with Docker. The online installer downloads and deploys a verified release; the documentation site is deployed independently.',
     actions: [
       { label: 'View on GitHub', href: GITHUB, external: true },
-      { label: 'Installation guide', href: '/en/docs/' },
+      { label: 'Installation guide', href: '/en/docs/getting-started/install' },
       { label: 'View releases', href: RELEASES, external: true },
     ],
     install: {
@@ -450,7 +450,7 @@ const en: HomeCopy = {
       copy: 'Copy command',
       copied: 'Copied',
       command: INSTALL_COMMAND,
-      footer: 'Verified release · Control plane on 12443 · Website on 12445',
+      footer: 'Verified release · Control plane on 12443 · Docs deployed separately',
     },
   },
   contact: {
@@ -496,7 +496,7 @@ const en: HomeCopy = {
   },
   docs: {
     home: '/en/docs/',
-    install: '/en/docs/',
+    install: '/en/docs/getting-started/install',
   },
 }
 

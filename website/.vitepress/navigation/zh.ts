@@ -1,22 +1,28 @@
 import type { DefaultTheme } from 'vitepress'
 
 /**
- * 文档总览：给文档站首页一个覆盖全部板块的侧边栏。
+ * 快速开始：文档站的入口页，替代原来的「文档总览」。
+ *
+ * 首页（/docs/）直接给最短可用路径，不再做板块目录；跨板块跳转交给顶部导航。
  *
  * sidebar 的 key 与 item.link 都是站点绝对路径（与 URL 一致，例如 /docs/product/）。
  * 中文内容源码放在 zh/ 下，由 config.mts 的 rewrites 提到根路径，因此 URL 不带 zh 前缀。
  */
-const docsOverview: DefaultTheme.SidebarItem[] = [
+const gettingStarted: DefaultTheme.SidebarItem[] = [
   {
-    text: '文档',
+    text: '快速开始',
     items: [
-      { text: '文档总览', link: '/docs/' },
-      { text: '产品概览', link: '/docs/product/' },
-      { text: '安装部署', link: '/docs/deployment/' },
-      { text: '用户指南', link: '/docs/user-guide/' },
-      { text: '使用手册', link: '/docs/manual/' },
-      { text: '运维', link: '/docs/operations/' },
-      { text: '参考', link: '/docs/reference/' },
+      { text: '快速开始', link: '/docs/' },
+      { text: '安装 HyperCDR', link: '/docs/getting-started/install' },
+      { text: '第一次恢复验证', link: '/docs/getting-started/first-recovery' },
+    ],
+  },
+  {
+    text: '装完之后',
+    items: [
+      { text: '安装详解', link: '/docs/deployment/install' },
+      { text: '配置参考', link: '/docs/deployment/configuration' },
+      { text: '故障排查', link: '/docs/operations/troubleshooting' },
     ],
   },
 ]
@@ -147,9 +153,9 @@ export const zhThemeConfig: DefaultTheme.Config = {
   i18nRouting: true,
   nav: [
     { text: '官网', link: '/' },
-    // 文档站首页（/docs/）在导航里必须有入口：各板块的侧边栏只列本板块的页面，
-    // 进到 /docs/xxx 之后就再也回不到总览了。命名与侧边栏首项、404 页保持一致。
-    { text: '文档总览', link: '/docs/', activeMatch: '^/docs/$' },
+    // 文档站入口（/docs/）就是快速开始：首页的「文档」和「安装指南」都指向这里，
+    // 不再提供文档总览页。各板块的侧边栏只列本板块的页面，跨板块走顶部导航。
+    { text: '快速开始', link: '/docs/', activeMatch: '^/docs/(getting-started/)?$' },
     { text: '产品概览', link: '/docs/product/', activeMatch: '^/docs/product/' },
     { text: '安装部署', link: '/docs/deployment/', activeMatch: '^/docs/deployment/' },
     { text: '用户指南', link: '/docs/user-guide/', activeMatch: '^/docs/user-guide/' },
@@ -164,7 +170,8 @@ export const zhThemeConfig: DefaultTheme.Config = {
     '/docs/manual/': manual,
     '/docs/operations/': operations,
     '/docs/reference/': reference,
-    '/docs/': docsOverview,
+    '/docs/getting-started/': gettingStarted,
+    '/docs/': gettingStarted,
   },
   outline: { label: '本页内容', level: [2, 3] },
   docFooter: { prev: '上一页', next: '下一页' },
@@ -177,8 +184,8 @@ export const zhThemeConfig: DefaultTheme.Config = {
   darkModeSwitchTitle: '切换为深色模式',
   notFound: {
     title: '页面不存在',
-    quote: '这个地址没有对应内容，可以回到文档总览重新查找。',
-    linkText: '返回文档总览',
+    quote: '这个地址没有对应内容，可以回到快速开始重新查找。',
+    linkText: '返回快速开始',
   },
   socialLinks: [{ icon: 'github', link: 'https://github.com/oneprolabs/hypercdr' }],
   footer: {

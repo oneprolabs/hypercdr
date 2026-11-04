@@ -8,18 +8,22 @@ import type { DefaultTheme } from 'vitepress'
  * 新增中文页时，记得在 en/docs/ 下放同路径的英文页（未翻译就先放待翻译占位）。
  */
 
-/** 文档总览 */
-const docsOverview: DefaultTheme.SidebarItem[] = [
+/** 快速开始：文档站入口，替代原来的文档总览 */
+const gettingStarted: DefaultTheme.SidebarItem[] = [
   {
-    text: 'Documentation',
+    text: 'Quick start',
     items: [
-      { text: 'Documentation overview', link: '/en/docs/' },
-      { text: 'Product overview', link: '/en/docs/product/' },
-      { text: 'Deployment', link: '/en/docs/deployment/' },
-      { text: 'User guide', link: '/en/docs/user-guide/' },
-      { text: 'Operation manual', link: '/en/docs/manual/' },
-      { text: 'Administration', link: '/en/docs/operations/' },
-      { text: 'Reference', link: '/en/docs/reference/' },
+      { text: 'Quick start', link: '/en/docs/' },
+      { text: 'Install HyperCDR', link: '/en/docs/getting-started/install' },
+      { text: 'First verified recovery', link: '/en/docs/getting-started/first-recovery' },
+    ],
+  },
+  {
+    text: 'After installation',
+    items: [
+      { text: 'Install in detail', link: '/en/docs/deployment/install' },
+      { text: 'Configuration reference', link: '/en/docs/deployment/configuration' },
+      { text: 'Troubleshooting', link: '/en/docs/operations/troubleshooting' },
     ],
   },
 ]
@@ -142,8 +146,8 @@ export const enThemeConfig: DefaultTheme.Config = {
   siteTitle: 'HyperCDR',
   nav: [
     { text: 'Home', link: '/en/' },
-    // 与 zh.ts 同构：文档站首页在导航里必须有入口，否则进了板块子页就回不去总览。
-    { text: 'Docs overview', link: '/en/docs/', activeMatch: '^/en/docs/$' },
+    // 与 zh.ts 同构：文档站入口就是快速开始，不再提供文档总览页。
+    { text: 'Quick start', link: '/en/docs/', activeMatch: '^/en/docs/(getting-started/)?$' },
     { text: 'Product', link: '/en/docs/product/', activeMatch: '^/en/docs/product/' },
     { text: 'Deployment', link: '/en/docs/deployment/', activeMatch: '^/en/docs/deployment/' },
     { text: 'User guide', link: '/en/docs/user-guide/', activeMatch: '^/en/docs/user-guide/' },
@@ -158,7 +162,8 @@ export const enThemeConfig: DefaultTheme.Config = {
     '/en/docs/manual/': manual,
     '/en/docs/operations/': operations,
     '/en/docs/reference/': reference,
-    '/en/docs/': docsOverview,
+    '/en/docs/getting-started/': gettingStarted,
+    '/en/docs/': gettingStarted,
   },
   outline: { label: 'On this page', level: [2, 3] },
   docFooter: { prev: 'Previous', next: 'Next' },

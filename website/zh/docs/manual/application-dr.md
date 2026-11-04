@@ -5,7 +5,7 @@ description: 通过三阶段向导把源应用、目标集群、存储和策略�
 
 # 应用容灾保护
 
-入口：**Disaster Recovery → Application DR**。
+入口：**DR → Application DR**。
 
 这是把前面几个基础资源组装起来的地方：**哪些应用受保护、备份写到哪里、恢复到哪个集群、按什么节奏执行**。
 

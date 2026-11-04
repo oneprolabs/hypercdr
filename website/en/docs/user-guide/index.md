@@ -13,4 +13,4 @@ The full text is currently available in Chinese: [用户指南](/docs/user-guide
 The English translation of this section is still in progress. In the meantime you can:
 
 - read the [Chinese original](/docs/user-guide/)
-- go back to the [documentation overview](/en/docs/)
+- go back to the [quick start](/en/docs/)

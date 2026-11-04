@@ -13,4 +13,4 @@ The full text is currently available in Chinese: [HyperCDR 是什么](/docs/prod
 The English translation of this section is still in progress. In the meantime you can:
 
 - read the [Chinese original](/docs/product/)
-- go back to the [documentation overview](/en/docs/)
+- go back to the [quick start](/en/docs/)

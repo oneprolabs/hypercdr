@@ -10,7 +10,7 @@ description: HyperCDR 社区版的部署路径、环境要求与安装后的下�
 ## 部署路径
 
 ```text
-准备 Linux 主机 → 安装 Docker/Compose 与基础工具 → 开放 12443（可选 12445）
+准备 Linux 主机 → 安装 Docker/Compose 与基础工具 → 开放 12443
 → 执行在线安装器 → 检查服务与健康状态 → 首次登录并修改密码 → 注册测试集群
 ```
 
@@ -34,7 +34,7 @@ Nginx Proxy Manager 和本地 Harbor 不是安装前提。`charts/` 里的 Kuber
 ## 本板块内容
 
 <div class="hcdr-grid">
-  <a class="hcdr-card" href="/docs/deployment/install"><b>安装社区版</b><span>前置条件、安装命令、参数说明和安装后的验收步骤。</span></a>
+  <a class="hcdr-card" href="/docs/deployment/install"><b>安装详解</b><span>前置条件、安装命令、参数说明和安装后的验收步骤。</span></a>
   <a class="hcdr-card" href="/docs/deployment/configuration"><b>配置参考</b><span>环境变量、验证码模式、注册配置和访问地址调整。</span></a>
   <a class="hcdr-card" href="/docs/reference/support-scope"><b>部署与适配范围</b><span>哪些入口和组合已经验证，哪些只是代码里存在。</span></a>
 </div>

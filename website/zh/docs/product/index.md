@@ -9,7 +9,7 @@ HyperCDR 是面向 Kubernetes 与 OpenShift 的**容器容灾平台**。它不�
 
 控制面自己不做备份传输：实际的数据搬运由运行在业务集群里的 Agent 完成，Agent 主动向外连接平台，协调 Velero（原生 Kubernetes、Huawei CCE）或 OADP（OpenShift）执行任务。
 
-平台的完整链路是「保护 → 验证 → 恢复」：管理员登记集群和存储，选择要保护的应用，按策略产出恢复点，再用 Drill 验证恢复结果，必要时执行 Restore。
+平台的完整链路是「保护 → 验证 → 恢复」：管理员登记集群和存储，选择要保护的应用，按策略产出恢复点，再用 Drill 验证恢复结果，需要正式接管时另行走 Takeover。
 
 HyperCDR 不是通用的虚拟机迁移产品。本文只介绍当前版本已提供的 Kubernetes 应用保护能力，不把物理机、VMware 无代理、公有云专用接口或跨平台迁移能力当作功能承诺。
 
@@ -35,7 +35,7 @@ HyperCDR 不是通用的虚拟机迁移产品。本文只介绍当前版本已�
 | --- | --- |
 | 日常保护 | 为应用建立保护配置，按策略执行同步/备份并检查最新恢复点 |
 | 恢复可用性验证 | 在与生产隔离的目标 namespace 执行 Drill，检查工作负载、PVC、Service 和业务数据 |
-| 生产恢复 | 评审恢复点、目标集群和资源映射后执行 Restore，并完成应用级验收 |
+| 正式接管 | 评审恢复点、目标集群和资源映射后走 Takeover 流程，并完成应用级验收 |
 | 多团队协作 | 用组织、成员和角色权限隔离业务资源，按职责分配平台管理与容灾操作 |
 
 实际支持范围取决于 Kubernetes 发行版、Agent 版本、Velero/OADP 路径、CSI/存储驱动和对象存储兼容性，部署前应结合[适配范围](/docs/reference/support-scope)与现场验证确认。
@@ -47,22 +47,21 @@ HyperCDR 不是通用的虚拟机迁移产品。本文只介绍当前版本已�
 - **同步与恢复点**：按策略执行同步或备份，平台接收事件并建立恢复点记录。
 - **应用容灾**：按源 namespace 组织保护范围，配置目标端与存储，跟踪目标侧恢复状态。
 - **Drill 容灾演练**：在隔离目标验证恢复链路，检查工作负载、PVC、Service 和应用数据。
-- **Restore 与 Takeover**：核对目标与资源映射后执行恢复；接管按容灾切换流程、校验和变更审批执行。
+- **Drill 与 Takeover**：Drill 在隔离目标验证恢复链路与恢复点可用性；Takeover 按容灾切换流程执行接管，需先通过校验和变更审批。
 - **身份与组织隔离**：社区版支持邮箱注册、Google 登录和组织邀请，业务资源按组织隔离。
 - **升级与回滚**：平台以蓝绿方式运行，升级切换流量并记录活动版本；回滚只恢复应用流量和版本清单。
 
 ## 平台长什么样
 
-社区版中控按业务域组织为六个入口，菜单会随版本和权限变化；页面不可见不代表可以绕过权限直接调用 API。
+社区版中控的一级入口包括 Dashboard、DR、Configuration、Operations 和 Settings，页面可见范围还受账号权限影响；页面不可见不代表可以绕过权限直接调用 API。
 
 | 入口 | 覆盖内容 |
 | --- | --- |
-| Dashboard | 集群、任务与恢复点的总览 |
-| Clusters | 注册集群、Agent 状态、资源清单、组件升级与日志 |
-| Configuration | Storage、Policies、Tags |
-| Disaster Recovery | 应用保护配置、恢复点、Drill、Restore、Takeover |
-| Tasks | 任务状态、阶段、事件与详细日志 |
-| Settings | 个人、组织、邮件、登录方式与平台升级 |
+| Dashboard | 组织资源、保护健康、同步与恢复活动以及当前告警 |
+| Configuration | Clusters、Storage、Policies、Tag Management |
+| DR | Application DR、Restore Points、Backup & Recovery Tasks |
+| Operations | 平台侧的运行、升级与维护入口 |
+| Settings | 个人、组织、平台设置与平台升级 |
 
 所有业务资源按组织（tenant）隔离。平台管理员可以管理用户和组织，但不能通过 URL、组织 ID 或请求头切换到其他组织的集群、存储、策略、应用、任务或恢复点。
 
@@ -93,4 +92,4 @@ HyperCDR 保留构建所需的 Velero 源码（`third_party/velero/`），并在
 
 - 想先理解系统组成：[中控架构](/docs/product/architecture)
 - 想弄清术语关系：[核心概念](/docs/product/concepts)
-- 想直接装起来：[安装社区版](/docs/deployment/install)
+- 想直接装起来：[安装详解](/docs/deployment/install)

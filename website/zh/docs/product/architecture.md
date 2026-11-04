@@ -29,7 +29,7 @@ description: HyperCDR 控制面的组件构成、请求路径、集群连接方�
 集群 Agent    → Kubernetes API → Velero / OADP → 对象存储
 ```
 
-可选官网独立运行在 12445，与中控前端不混用。
+产品文档站是独立部署的服务，与中控前端不混用。
 
 ## 集群如何接入
 

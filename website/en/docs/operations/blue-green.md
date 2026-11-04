@@ -13,4 +13,4 @@ The full text is currently available in Chinese: [蓝绿部署与回滚](/docs/o
 The English translation of this section is still in progress. In the meantime you can:
 
 - read the [Chinese original](/docs/operations/blue-green)
-- go back to the [documentation overview](/en/docs/)
+- go back to the [quick start](/en/docs/)

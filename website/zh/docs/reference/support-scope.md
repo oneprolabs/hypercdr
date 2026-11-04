@@ -10,7 +10,7 @@ description: 区分代码入口与经过环境验收的能力，避免把实现�
 | 项目 | 当前入口与限制 |
 | --- | --- |
 | 独立主机中控 | GitHub Release 在线安装器，Docker Compose 蓝绿 API/前端，共享 PostgreSQL |
-| 官网 | 可选独立网站容器，默认 12445；中控默认 12443 |
+| 产品文档站 | 独立部署的静态文档站，与中控安装和发布流程不共用容器；中控默认 12443 |
 | Kubernetes 中控 | 仓库有 Chart 资产；**不是**在线安装器或当前蓝绿生命周期的交付路径 |
 | Native Kubernetes | 平台注册页面及生成的安装脚本，使用社区 Velero 路径 |
 | Huawei CCE | 独立 provider 检查，见 [CCE 专项](/docs/reference/cce)；不能据此推断 CCE Autopilot 或所有节点架构可用 |

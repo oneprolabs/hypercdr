@@ -13,4 +13,4 @@ The full text is currently available in Chinese: [术语表](/docs/reference/glo
 The English translation of this section is still in progress. In the meantime you can:
 
 - read the [Chinese original](/docs/reference/glossary)
-- go back to the [documentation overview](/en/docs/)
+- go back to the [quick start](/en/docs/)

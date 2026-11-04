@@ -13,4 +13,4 @@ The full text is currently available in Chinese: [Huawei CCE](/docs/reference/cc
 The English translation of this section is still in progress. In the meantime you can:
 
 - read the [Chinese original](/docs/reference/cce)
-- go back to the [documentation overview](/en/docs/)
+- go back to the [quick start](/en/docs/)

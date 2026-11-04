@@ -14,7 +14,7 @@ description: HyperCDR 的环境变量、验证码模式、社区版注册配置�
 | `HCDR_BASE_URL` | 中控外部访问地址 |
 | `HCDR_PUBLIC_BASE_URL` | 安装初始公开地址；安装后以数据库中平台设置为准 |
 | `HCDR_HTTPS_PORT` | Edge 端口，默认 12443 |
-| `HCDR_WEBSITE_PORT` | 可选官网端口，默认 12445 |
+| `HCDR_WEBSITE_PORT` | 历史产品门户兼容配置，默认 12445；当前源码不再自动启动旧门户，也不通过此项配置独立文档站 |
 | `HCDR_AUTH_CHALLENGE_MODE` | `captcha`（安装参数里也写作 `image`）图片验证码，或 `turnstile` Cloudflare |
 | `HCDR_TURNSTILE_SITE_KEY` / `HCDR_TURNSTILE_SECRET_KEY` | Turnstile 浏览器与服务端凭据 |
 | `HCDR_TURNSTILE_VERIFY_URL` | 服务端校验地址，空值采用后端默认值 |

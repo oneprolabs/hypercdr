@@ -1,11 +1,17 @@
 ---
-title: 安装社区版
+title: 安装详解
 description: 在自有 Linux 主机上安装 HyperCDR 社区版，覆盖在线与离线安装、参数、验收、升级与卸载。
 ---
 
-# 安装社区版
+# 安装详解
 
 本文面向平台管理员，覆盖在线安装、离线安装、安装参数、验收、升级和卸载。在线入口是 `deploy/online/install.sh`，Release 安装包内的 `scripts/release/install-blue-green.sh` 负责实际部署。
+
+::: tip 只想先跑起来
+
+第一次安装按[快速开始](/docs/getting-started/install)走最短路径即可，那是从零到能登录的完整步骤。本页是它的完整版：全部参数、固定版本、非交互安装、离线包、升级回滚与卸载。
+
+:::
 
 ## 安装前准备 {#prepare}
 
@@ -33,7 +39,7 @@ description: 在自有 Linux 主机上安装 HyperCDR 社区版，覆盖在线�
 | Agent / 集群组件 → 对象存储 | 写入和读取备份数据 |
 | 注册执行器 → Kubernetes API | 使用 Install for me 注册集群 |
 
-数据库、API、前端和注册执行器不直接发布宿主机端口；安装可选产品门户时另用 `12445/tcp`。
+数据库、API、前端和注册执行器不直接发布宿主机端口。独立部署的产品文档站可使用 `12445/tcp`，该端口不是使用中控平台的前提。
 
 ### 地址与证书
 
@@ -102,11 +108,11 @@ curl -fL --progress-bar \
 | `--version VERSION` | 否 | Release 版本，如 `ce-v0.0.13`；不填使用最新正式版 |
 | `--install-dir PATH` | 否 | 安装目录，默认 `/var/lib/hypercdr` |
 | `--registry REGISTRY` | 否 | 覆盖默认镜像仓库 |
-| `--install-website` | 否 | 同时安装可选产品门户，使用 `12445` |
+| `--install-website` | 否 | 历史产品门户兼容参数，不建议用于新部署；产品文档站独立部署 |
 | `--auth-challenge MODE` | 否 | `auto`、`image` 或 `turnstile` |
 | `--yes` | 否 | 跳过安装确认 |
 
-`--install-website` 是**无参数开关**，不接受 `true`/`false`。门户通过 `https://HOST:12445/` 访问，中控通过 `https://HOST:12443/login` 访问。
+`--install-website` 是**无参数开关**，不接受 `true`/`false`。当前源码已停止自动部署旧门户，新部署不要依赖它；历史安装包的行为以该版本说明为准。中控始终通过 `https://HOST:12443/login` 访问，产品文档站独立部署。
 
 ::: warning `--public-base-url` 当前不生效
 
@@ -223,7 +229,7 @@ sudo /var/lib/hypercdr/uninstall.sh --purge-data --remove-images --execute
 | `release-manifest.json` | 活动版本和组件镜像身份 |
 | `restart-platform.sh`、`configure-public-url.sh` | 重启和访问地址辅助脚本 |
 
-平台通常由 Edge、蓝/绿 API、蓝/绿前端、PostgreSQL、注册执行器和升级执行器组成；可选产品门户独占 `12445`，不安装门户不影响中控 `12443`。
+平台通常由 Edge、蓝/绿 API、蓝/绿前端、PostgreSQL、注册执行器和升级执行器组成。中控使用 `12443`；产品文档站独立部署，不安装文档站不影响中控使用。历史安装包可能包含使用 `12445` 的旧门户，升级前应核对所选版本说明及端口占用。
 
 ## 常见问题与故障定位
 
