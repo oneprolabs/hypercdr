@@ -60,7 +60,7 @@ Linux 主机需要预先安装：
 | Agent/集群组件 → 对象存储 | 写入和读取备份数据。 |
 | 注册执行器 → Kubernetes API | 使用 Install for me 注册集群。 |
 
-数据库、API、前端和注册执行器不直接发布宿主机端口。安装产品门户时另使用 `12445/tcp`。
+数据库、API、前端和注册执行器不直接发布宿主机端口。独立部署的产品文档站可使用 `12445/tcp`，该端口不是使用中控平台的前提。
 
 ### 1.3 地址和证书
 
@@ -87,7 +87,7 @@ https://platform.example.com:12443
 
 ### 操作步骤与向导说明
 
-1. 执行下面的安装命令，替换示例域名，不需要安装产品门户时不要添加 `--install-website`。
+1. 执行下面的安装命令，替换示例域名。安装中控平台无需添加 `--install-website`。
 2. 等待入口脚本下载。脚本启动后输出准备信息；没有指定版本时先解析最新 Release，再显示 **Selected release version**。记录该版本，后续问题定位应使用实际版本而不是“最新版”。
 3. 在摘要中核对 **Version**、**Base URL**、**Install directory**。出现 `Continue installation? [y/N]` 时，输入 `y` 并回车才继续；回车或输入其他内容会取消安装，不代表部署成功。
 4. 等待版本安装包下载与解压。下载过程显示进度，网络等待与容器镜像拉取是不同阶段；不要因为短暂无输出而重复启动安装器。
@@ -168,7 +168,7 @@ curl -fL --progress-bar \
 | `--version VERSION` | 否 | Release 版本，如 `ce-v0.0.13`；不填使用最新正式版。 |
 | `--install-dir PATH` | 否 | 安装目录，默认 `/var/lib/hypercdr`。 |
 | `--registry REGISTRY` | 否 | 覆盖默认镜像仓库。 |
-| `--install-website` | 否 | 同时安装可选产品门户，使用 `12445`。 |
+| `--install-website` | 否 | 历史产品门户兼容参数，不建议用于新部署。当前源码已停止自动部署旧门户；指定历史版本时，行为以该版本安装包为准。产品文档站独立部署。 |
 | `--public-base-url URL` | 否 | 兼容参数；当前安装流程以 `--base-url` 为主要地址，不应依赖此参数改变平台设置。 |
 | `--auth-challenge MODE` | 否 | `auto`、`image` 或 `turnstile`。 |
 | `--yes` | 否 | 跳过安装确认。 |
@@ -456,7 +456,7 @@ sudo /var/lib/hypercdr/uninstall.sh --purge-data --remove-images --execute
 | `current-release.json` | 当前活动发行清单；升级切换后需核对实际版本 |
 | `restart-platform.sh`、`configure-public-url.sh` | 重启和访问地址辅助脚本 |
 
-平台通常由 Edge、蓝/绿 API、蓝/绿前端、PostgreSQL、注册执行器和升级执行器组成；可选产品门户独占 `12445`，不安装门户不影响中控 `12443`。
+平台通常由 Edge、蓝/绿 API、蓝/绿前端、PostgreSQL、注册执行器和升级执行器组成。中控使用 `12443`；产品文档站独立部署，不安装文档站不影响中控使用。历史安装包可能包含使用 `12445` 的旧门户，升级前应核对所选版本说明及端口占用。
 
 ## 10. 常用部署配置
 
@@ -467,7 +467,7 @@ sudo /var/lib/hypercdr/uninstall.sh --purge-data --remove-images --execute
 | `HCDR_BASE_URL` | 中控外部 HTTPS Origin，必须与 Agent WSS 地址一致 |
 | `HCDR_PUBLIC_BASE_URL` | 首次初始化平台地址，已有数据库设置后不覆盖 |
 | `HCDR_HTTPS_PORT` | Edge 端口，默认 `12443` |
-| `HCDR_WEBSITE_PORT` | 可选门户端口，默认 `12445` |
+| `HCDR_WEBSITE_PORT` | 历史产品门户兼容配置，默认 `12445`；当前源码不再自动启动旧门户，也不通过此项配置独立文档站 |
 | `HCDR_AUTH_CHALLENGE_MODE` | `captcha`/`image` 或 `turnstile` |
 | `HCDR_TURNSTILE_SITE_KEY`、`HCDR_TURNSTILE_SECRET_KEY` | Turnstile 前后端凭据，必须成对配置 |
 | `HCDR_DATABASE_URL` | PostgreSQL 连接地址 |
