@@ -351,7 +351,7 @@ sudo /var/lib/hypercdr/uninstall.sh --purge-data --remove-images --execute
 ## 11. 安装后逐项验收
 
 1. 访问 `https://<host>:12443`，确认登录页、验证码和认证模式一致。
-2. 使用初始管理员登录后立即改密，检查 **Settings → Access & Login** 的公开地址。
+2. 使用初始管理员登录后立即改密，检查 **Settings → Access & Sign-in** 的公开地址。
 3. 检查 Edge、API、前端、PostgreSQL、注册执行器、升级执行器和 `/readyz`。
 4. 注册测试集群，确认 Agent online、节点/Namespace 清单和 inventory 刷新。
 5. 创建对象存储并执行 **Test Storage Connection**。
