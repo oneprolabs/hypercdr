@@ -13,7 +13,7 @@
 Markdown 文档使用相对路径引用图片，例如：
 
 ```markdown
-![集群注册页面](../assets/images/user-guide/cluster-registration.png)
+![登录页面](overview/login-149.png)
 ```
 
 提交前应遮盖密码、Token、邮箱、内网地址和其他敏感信息。149 环境临时截图如果不作为仓库资产发布，应保存在本地核验证据目录，不要放入本目录。
