@@ -1,0 +1,596 @@
+/**
+ * 文档站版式：导航栏、侧边栏、正文（含表格/代码/提示块）、目录、页脚。
+ * 设计 token 见 custom.css。
+ */
+
+
+/* ---------- 导航栏 ---------- */
+
+.VPNavBar {
+  background: color-mix(in srgb, var(--vp-c-bg) 88%, transparent) !important;
+  backdrop-filter: saturate(180%) blur(16px);
+  border-bottom: 1px solid var(--vp-c-divider);
+}
+
+.VPNavBar.has-sidebar .curtain {
+  background: var(--vp-c-bg);
+}
+
+.VPNavBar .title {
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.VPNavBarMenuLink {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.VPNavBarMenuLink.active {
+  font-weight: 600;
+}
+
+/**
+ * 导航的宽度预算。
+ *
+ * 中文导航是 8 个词条（官网/文档总览/产品概览/安装部署/用户指南/使用手册/
+ * 运维/参考），每项约 74–80px。实测 1280 以下开始和搜索框、右侧图标抢空间，
+ * 1024 以下会把外观开关和 GitHub 图标挤出视口，所以按断点收一档。
+ *
+ * 注意选择器必须写成两段祖先（0,3,0）：主题里的 .VPNavBarMenuLink 是带
+ * data-v 属性的选择器（0,2,0），单个类名压不过去，媒体查询会静默失效。
+ */
+@media (max-width: 1280px) {
+  .VPNavBarMenu .VPNavBarMenuLink {
+    padding: 0 9px;
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 1080px) {
+  .VPNavBarMenu .VPNavBarMenuLink {
+    padding: 0 7px;
+  }
+}
+
+/**
+ * 1024 以下把导航整体收进抽屉。
+ *
+ * 收紧之后菜单是 450px，配上站点名和搜索框在 1024 刚好放下；再窄就会溢出
+ * （实测 960 溢出 32px、768 溢出 66px，并带出整页横向滚动）。主题默认要到
+ * 768 才收，这里提前到 1024——此时侧边栏本来也已经在抽屉里了，导航跟着进
+ * 抽屉是一致的行为，比裁切掉几个词条更好。
+ */
+@media (max-width: 1023px) {
+  .VPNav .VPNavBar .VPNavBarMenu {
+    display: none;
+  }
+
+  .VPNav .VPNavBar .VPNavBarHamburger {
+    display: flex;
+  }
+}
+
+/* 搜索框：与导航项对齐的轻量胶囊 */
+.DocSearch-Button,
+.VPNavBarSearch .DocSearch-Button {
+  border-radius: 9px !important;
+  border: 1px solid var(--vp-c-divider) !important;
+  background: var(--vp-c-bg-alt) !important;
+  height: 36px;
+}
+
+.DocSearch-Button:hover {
+  border-color: var(--vp-c-brand-1) !important;
+}
+
+/* ---------- 侧边栏 ---------- */
+
+.VPSidebar {
+  padding-top: 32px;
+}
+
+.VPSidebarItem.level-0 > .item .text {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--vp-c-text-1);
+}
+
+.VPSidebarItem.level-0 {
+  padding-bottom: 4px;
+}
+
+.VPSidebarItem.level-0 + .VPSidebarItem.level-0 {
+  padding-top: 18px;
+}
+
+.VPSidebarItem.level-1 .text {
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.VPSidebarItem.level-1.is-active > .item .link .text,
+.VPSidebarItem.level-1.is-active > .item .text {
+  color: var(--vp-c-brand-1);
+  font-weight: 600;
+}
+
+.VPSidebarItem.level-1 > .item .link:hover .text {
+  color: var(--vp-c-brand-1);
+}
+
+/* 当前项改用「浅色圆角底 + 文字色」标识，不再用左侧竖线。
+ * 原来 border-left 配 padding-left: 0，竖线紧贴文字；加上主题默认的
+ * 分组引导线，每一项左侧都挂着线，又挤又乱。 */
+.VPSidebarItem.level-1 > .item {
+  margin-left: 0;
+  padding: 0 8px 0 12px;
+  border-left: 0;
+  border-radius: 8px;
+  transition: background-color 0.2s ease;
+}
+
+.VPSidebarItem.level-1 > .item:hover {
+  background-color: var(--vp-c-bg-alt);
+}
+
+.VPSidebarItem.level-1.is-active > .item,
+.VPSidebarItem.level-1.is-active > .item:hover {
+  background-color: var(--vp-c-brand-soft);
+}
+
+/* VitePress 默认给每个分组的子项列表加的 1px 贯穿竖线，一并去掉；
+ * 层级缩进改由上面 12px 的左内边距体现，文字不再贴线。 */
+.VPSidebar .VPSidebarItem.level-1 .items,
+.VPSidebar .VPSidebarItem.level-2 .items,
+.VPSidebar .VPSidebarItem.level-3 .items {
+  border-left: 0;
+  padding-left: 0;
+}
+
+/* 每一项里那个绝对定位的 indicator 竖线也隐藏，避免残留竖线 */
+.VPSidebar .VPSidebarItem > .item > .indicator {
+  display: none;
+}
+
+/* ---------- 文档正文 ---------- */
+
+.vp-doc {
+  font-size: 15.5px;
+  line-height: 1.78;
+  color: var(--vp-c-text-1);
+}
+
+.vp-doc h1 {
+  font-size: 34px;
+  line-height: 1.24;
+  letter-spacing: -0.035em;
+  font-weight: 700;
+  margin-bottom: 14px;
+}
+
+.vp-doc h2 {
+  font-size: 23px;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+  font-weight: 650;
+  margin-top: 52px;
+  padding-top: 26px;
+  border-top: 1px solid var(--vp-c-divider);
+}
+
+.vp-doc h3 {
+  font-size: 17.5px;
+  letter-spacing: -0.01em;
+  font-weight: 650;
+  margin-top: 34px;
+}
+
+.vp-doc h4 {
+  font-size: 15.5px;
+  font-weight: 650;
+  margin-top: 26px;
+}
+
+.vp-doc p,
+.vp-doc li {
+  color: var(--vp-c-text-1);
+}
+
+.vp-doc a {
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2.5px;
+  font-weight: 500;
+}
+
+.vp-doc strong {
+  font-weight: 650;
+  color: var(--vp-c-text-1);
+}
+
+.vp-doc ul,
+.vp-doc ol {
+  padding-left: 1.35em;
+}
+
+.vp-doc li + li {
+  margin-top: 6px;
+}
+
+.vp-doc blockquote {
+  border-left: 3px solid var(--vp-c-brand-1);
+  background: var(--vp-c-bg-alt);
+  border-radius: 0 8px 8px 0;
+  padding: 12px 18px;
+}
+
+.vp-doc blockquote > p {
+  color: var(--vp-c-text-2);
+  font-size: 14.5px;
+}
+
+/* 行内代码 */
+.vp-doc :not(pre) > code {
+  background: var(--vp-c-bg-soft);
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 5px;
+  padding: 2px 5px;
+  font-size: 0.875em;
+  font-weight: 500;
+  color: var(--vp-c-text-1);
+}
+
+.vp-doc a > code {
+  color: var(--vp-c-brand-1);
+}
+
+/* 代码块 */
+.vp-doc div[class*="language-"] {
+  border-radius: var(--hcdr-radius);
+  border: 1px solid var(--vp-c-divider);
+  box-shadow: none;
+}
+
+.vp-doc div[class*="language-"] > span.lang {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--vp-c-text-3);
+}
+
+.vp-doc .line-numbers-wrapper {
+  border-right: 1px solid var(--vp-c-divider);
+}
+
+/* 表格 */
+.vp-doc table {
+  display: table;
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: var(--hcdr-radius);
+  overflow: hidden;
+  margin: 22px 0;
+  font-size: 14.5px;
+}
+
+.vp-doc tr {
+  border-top: none;
+  background: var(--vp-c-bg);
+}
+
+.vp-doc tr:nth-child(2n) {
+  background: var(--vp-c-bg-alt);
+}
+
+.vp-doc th {
+  background: var(--vp-c-bg-soft);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: var(--vp-c-text-2);
+  text-align: left;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--vp-c-divider);
+}
+
+.vp-doc td {
+  padding: 11px 16px;
+  border-top: 1px solid var(--vp-c-divider);
+  vertical-align: top;
+}
+
+/* 首列多为标签或配置名，断行会很难读 */
+.vp-doc th:first-child,
+.vp-doc td:first-child {
+  white-space: nowrap;
+}
+
+/* 窄屏下改为可横向滚动，避免宽表格撑破正文 */
+@media (max-width: 767px) {
+  .vp-doc table {
+    display: block;
+    overflow-x: auto;
+  }
+
+  .vp-doc th:first-child,
+  .vp-doc td:first-child {
+    white-space: normal;
+  }
+}
+
+.vp-doc tr:first-child td {
+  border-top: none;
+}
+
+/* 提示块 */
+.vp-doc .custom-block {
+  border-radius: var(--hcdr-radius);
+  border: 1px solid var(--vp-c-divider);
+  border-left-width: 3px;
+  padding: 14px 18px;
+  font-size: 14.5px;
+  line-height: 1.7;
+}
+
+.vp-doc .custom-block .custom-block-title {
+  font-weight: 650;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  margin-bottom: 4px;
+}
+
+.vp-doc .custom-block.tip {
+  border-color: var(--vp-c-brand-soft);
+  border-left-color: var(--vp-c-brand-1);
+  background: var(--vp-c-brand-soft);
+}
+
+.vp-doc .custom-block.info {
+  border-left-color: var(--hcdr-muted);
+  background: var(--vp-c-bg-alt);
+}
+
+.vp-doc .custom-block.warning {
+  border-left-color: #d97706;
+  background: rgba(217, 119, 6, 0.08);
+}
+
+.vp-doc .custom-block.danger {
+  border-left-color: #dc2626;
+  background: rgba(220, 38, 38, 0.07);
+}
+
+.vp-doc .custom-block a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* 锚点标题的链接标记在中文标题下容易挤字，稍微收一点 */
+.vp-doc .header-anchor {
+  font-weight: 400;
+}
+
+/* 页脚导航 */
+.VPDocFooter .pager-link {
+  border-radius: var(--hcdr-radius);
+  border: 1px solid var(--vp-c-divider);
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.VPDocFooter .pager-link:hover {
+  border-color: var(--vp-c-brand-1);
+  background: var(--vp-c-bg-alt);
+}
+
+.VPDocFooter .pager-link .desc {
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.VPDocFooter .pager-link .title {
+  font-size: 14.5px;
+  font-weight: 600;
+}
+
+/* 目录 */
+.VPDocAsideOutline .outline-title {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--vp-c-text-3);
+}
+
+.VPDocAsideOutline .outline-link {
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.VPDocAsideOutline .outline-link.active {
+  color: var(--vp-c-brand-1);
+  font-weight: 600;
+}
+
+/* 入口卡片网格 */
+.hcdr-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+/* 六张卡片时固定三列，避免 auto-fit 排成 4+2 */
+.hcdr-grid.hcdr-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 980px) {
+  .hcdr-grid.hcdr-grid-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .hcdr-grid.hcdr-grid-3 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.hcdr-card {
+  display: block;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: var(--hcdr-radius);
+  padding: 20px 22px;
+  background: var(--vp-c-bg);
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.hcdr-card:hover {
+  border-color: var(--vp-c-brand-1);
+  transform: translateY(-2px);
+  box-shadow: var(--hcdr-shadow);
+}
+
+.hcdr-card b {
+  display: block;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--vp-c-text-1);
+  margin-bottom: 6px;
+}
+
+.hcdr-card span {
+  display: block;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--vp-c-text-2);
+}
+
+/* ---------- 文档页头部 ---------- */
+
+.VPDoc .content-container {
+  max-width: 780px;
+}
+
+.VPDoc h1 + .vp-doc > p:first-of-type {
+  color: var(--vp-c-text-2);
+}
+
+/* ---------- 响应式 ---------- */
+
+@media (max-width: 640px) {
+  .vp-doc {
+    font-size: 15px;
+  }
+
+  .vp-doc h1 {
+    font-size: 27px;
+  }
+
+  .vp-doc h2 {
+    font-size: 20px;
+    margin-top: 40px;
+  }
+
+  .vp-doc table {
+    font-size: 13.5px;
+  }
+
+  .vp-doc th,
+  .vp-doc td {
+    padding: 9px 12px;
+  }
+}
+
+
+
+/* ── 导航栏语言下拉 ────────────────────────────────────────────────────────
+ * 主题默认的 VPFlyout 触发按钮高度 = --vp-nav-height（64px），在 40×22 的
+ * 外观开关和 36×36 的 GitHub 图标旁边显得又高又空，看着突兀。
+ * 这里把它收敛成 32px 的图标按钮，并把卡片菜单对齐站点的圆角风格；
+ * 首页头部（.lang-menu）用同一套尺寸与配色，两处观感一致。
+ * 仍然是 VitePress 内置组件，键盘交互与移动端列表不受影响。 */
+.VPNavBarTranslations {
+  margin-left: 4px;
+}
+
+.VPNavBarTranslations .button {
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 9px;
+  color: var(--vp-c-text-2);
+  transition: color 0.2s, background-color 0.2s;
+}
+
+.VPNavBarTranslations .button:hover,
+.VPNavBarTranslations .button[aria-expanded='true'] {
+  color: var(--vp-c-text-1);
+  background: var(--vp-c-default-soft);
+}
+
+.VPNavBarTranslations .text {
+  gap: 2px;
+  line-height: 1;
+  font-size: 13px;
+  color: inherit;
+}
+
+.VPNavBarTranslations .option-icon {
+  font-size: 16px;
+}
+
+.VPNavBarTranslations .text-icon {
+  font-size: 11px;
+  opacity: 0.65;
+  transition: transform 0.2s;
+}
+
+.VPNavBarTranslations .button[aria-expanded='true'] .text-icon {
+  transform: rotate(180deg);
+}
+
+.VPNavBarTranslations .menu {
+  top: calc(var(--vp-nav-height) / 2 + 16px);
+}
+
+.VPNavBarTranslations .VPMenu {
+  min-width: 172px;
+  padding: 6px;
+  border-radius: 12px;
+}
+
+.VPNavBarTranslations .items {
+  padding: 0;
+}
+
+.VPNavBarTranslations .title {
+  padding: 6px 10px 4px;
+  line-height: 1.4;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--vp-c-text-3);
+}
+
+.VPNavBarTranslations .VPMenuLink .link {
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+/**
+ * 图标换成地球，与首页那个下拉同款。
+ *
+ * 主题自带的 vpi-languages 是「文A」翻译图标，语义上偏「翻译这一篇」；
+ * 这里语言数量会持续增加，地球更贴合「切换站点语言」，也让首页和文档站
+ * 的两个下拉看起来是同一个控件。只覆盖图标变量，不动主题组件本身。
+ */
+.VPNavBarTranslations .vpi-languages {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23000' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.7' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M3 12h18'/%3E%3Cpath d='M12 3c2.4 2.6 3.6 5.6 3.6 9s-1.2 6.4-3.6 9c-2.4-2.6-3.6-5.6-3.6-9S9.6 5.6 12 3Z'/%3E%3C/svg%3E");
+  width: 17px;
+  height: 17px;
+}

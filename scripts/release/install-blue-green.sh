@@ -163,11 +163,16 @@ fi
 install -m 0644 "$COMPOSE_TEMPLATE" "$INSTALL_DIR/docker-compose.yaml"
 install -m 0644 "$EDGE_CONFIG" "$INSTALL_DIR/nginx/conf.d/default.conf"
 install -m 0644 "$UPSTREAM_CONFIG" "$INSTALL_DIR/nginx/conf.d/upstream.conf"
-if [[ -d "${SCRIPT_DIR}/website" && -f "${WEBSITE_CONFIG}" ]]; then
-  mkdir -p "$INSTALL_DIR/website"
-  cp -R "${SCRIPT_DIR}/website/." "$INSTALL_DIR/website/"
-  install -m 0644 "$WEBSITE_CONFIG" "$INSTALL_DIR/nginx/website.conf"
-fi
+# docs-site: 旧 website 部署已停用。安装包里的 website/ 不再被复制到
+# $INSTALL_DIR（那里现在是 VitePress 源码，复制过去只会得到一个没有
+# index.html 的目录），nginx/website.conf 也不再被写入，避免把旧配置
+# 覆盖到文档站使用的位置。文档站由 docs.yml 的独立容器 hypercdr-docs
+# 从 /var/lib/hypercdr-docs-site 提供。恢复时取消下面五行注释即可。
+# if [[ -d "${SCRIPT_DIR}/website" && -f "${WEBSITE_CONFIG}" ]]; then
+#   mkdir -p "$INSTALL_DIR/website"
+#   cp -R "${SCRIPT_DIR}/website/." "$INSTALL_DIR/website/"
+#   install -m 0644 "$WEBSITE_CONFIG" "$INSTALL_DIR/nginx/website.conf"
+# fi
 install -m 0755 "$DEPLOY_SCRIPT" "$INSTALL_DIR/deploy-blue-green.sh"
 install -m 0644 "$REGISTRY_HELPER" "$INSTALL_DIR/registry-config.sh"
 install -m 0755 "$START_SCRIPT" "$INSTALL_DIR/start-platform.sh"
@@ -246,9 +251,12 @@ mv "${INSTALL_DIR}/.env.tmp" "${INSTALL_DIR}/.env"
 
 if [[ ! -f "${INSTALL_DIR}/.active_color" ]]; then printf 'blue\n' >"${INSTALL_DIR}/.active_color"; fi
 if [[ "$EXECUTE" == true ]]; then
-  if [[ "$INSTALL_WEBSITE" == true ]] && docker inspect nginx-proxy-manager >/dev/null 2>&1; then
-    docker stop nginx-proxy-manager >/dev/null
-  fi
+  # docs-site: 不再停 nginx-proxy-manager。它是 hypercdr.com 的反向代理入口，
+  # 停掉会让整个官网失联，而文档站换成独立容器后也不需要腾出端口。
+  # 恢复时取消下面三行注释即可。
+  # if [[ "$INSTALL_WEBSITE" == true ]] && docker inspect nginx-proxy-manager >/dev/null 2>&1; then
+  #   docker stop nginx-proxy-manager >/dev/null
+  # fi
   if ! HCDR_INSTALL_DIR="$INSTALL_DIR" "$INSTALL_DIR/deploy-blue-green.sh" "$VERSION"; then
     rollback_legacy_migration
     exit 1

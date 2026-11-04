@@ -50,6 +50,21 @@ jobs:
       - name: Test, type-check, and build outside the source tree
         run: ./scripts/build-frontend.sh
 
+  # 文档站与平台前端是两套构建。这里只构建、不部署，让中英文页面配对
+  # 和 VitePress 构建错误在 PR 阶段就暴露，而不是等到发布时才失败。
+  website:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - name: Build the docs site
+        run: ./website/build.sh
+
   repository:
     runs-on: ubuntu-latest
     steps:

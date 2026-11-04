@@ -243,9 +243,12 @@ start_current() {
   local current
   current="$(read_active_color)"
   compose up -d hypercdr-postgres hypercdr-edge hypercdr-cluster-registration-executor
-  if [[ "${HCDR_INSTALL_WEBSITE:-false}" == "true" ]]; then
-    compose --profile website up -d hypercdr-website
-  fi
+  # docs-site: 不再启动 hypercdr-website。它和文档站容器 hypercdr-docs 抢同一个
+  # 端口（12445），一旦被拉起会让文档站容器绑定失败。站点由 docs.yml 的独立
+  # 容器维护，与蓝绿发布无关。恢复时取消下面三行注释即可。
+  # if [[ "${HCDR_INSTALL_WEBSITE:-false}" == "true" ]]; then
+  #   compose --profile website up -d hypercdr-website
+  # fi
   start_color "$current" || die "active color $current did not become healthy"
   log "active color started: $current"
 }
@@ -288,9 +291,12 @@ deploy_version() {
 
   ensure_edge_tls
   compose up -d hypercdr-postgres hypercdr-edge
-  if [[ "${HCDR_INSTALL_WEBSITE:-false}" == "true" ]]; then
-    compose --profile website up -d hypercdr-website
-  fi
+  # docs-site: 不再启动 hypercdr-website。它和文档站容器 hypercdr-docs 抢同一个
+  # 端口（12445），一旦被拉起会让文档站容器绑定失败。站点由 docs.yml 的独立
+  # 容器维护，与蓝绿发布无关。恢复时取消下面三行注释即可。
+  # if [[ "${HCDR_INSTALL_WEBSITE:-false}" == "true" ]]; then
+  #   compose --profile website up -d hypercdr-website
+  # fi
   compose pull "hypercdr-platform-api-${candidate}" "hypercdr-platform-frontend-${candidate}"
   start_color "$candidate" || die "candidate color $candidate failed health checks; active color remains $current"
 

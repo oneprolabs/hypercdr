@@ -1,0 +1,88 @@
+/**
+ * HyperCDR 文档站样式。
+ * 色彩取自官网：主蓝 #335cff，紫蓝渐变 #335cff → #7b61ff，深色底 #101827。
+ */
+
+:root {
+  --hcdr-blue: #335cff;
+  --hcdr-blue-dark: #2447d8;
+  --hcdr-violet: #7b61ff;
+  --hcdr-ink: #18212f;
+  --hcdr-muted: #667085;
+  --hcdr-line: #e4e8ef;
+  --hcdr-paper: #f7f9fc;
+
+  --vp-c-brand-1: var(--hcdr-blue);
+  --vp-c-brand-2: var(--hcdr-blue-dark);
+  --vp-c-brand-3: #1c39b8;
+  --vp-c-brand-soft: rgba(51, 92, 255, 0.12);
+
+  --vp-c-bg: #ffffff;
+  --vp-c-bg-alt: var(--hcdr-paper);
+  --vp-c-bg-soft: #f2f5fb;
+  --vp-c-bg-elv: #ffffff;
+
+  --vp-c-text-1: var(--hcdr-ink);
+  --vp-c-text-2: var(--hcdr-muted);
+  --vp-c-text-3: #8b95a7;
+
+  --vp-c-divider: var(--hcdr-line);
+  --vp-c-border: #d8dee9;
+  --vp-c-gutter: var(--hcdr-line);
+
+  --vp-font-family-base: Inter, "SF Pro Text", "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", "Noto Sans CJK SC", ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, sans-serif;
+  --vp-font-family-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  --vp-sidebar-width: 272px;
+  --vp-layout-max-width: 1480px;
+
+  --hcdr-radius: 12px;
+  --hcdr-shadow: 0 1px 2px rgba(24, 33, 47, 0.04), 0 8px 24px rgba(24, 33, 47, 0.06);
+}
+
+.dark {
+  --hcdr-blue: #7f9cff;
+  --hcdr-blue-dark: #a5b8ff;
+  --hcdr-ink: #e8eefc;
+  --hcdr-muted: #94a1b8;
+  --hcdr-line: #263248;
+  --hcdr-paper: #141d2c;
+
+  --vp-c-brand-1: #7f9cff;
+  --vp-c-brand-2: #a5b8ff;
+  --vp-c-brand-3: #c3d0ff;
+  --vp-c-brand-soft: rgba(127, 156, 255, 0.16);
+
+  --vp-c-bg: #0f1623;
+  --vp-c-bg-alt: #141d2c;
+  --vp-c-bg-soft: #1b2536;
+  --vp-c-bg-elv: #182234;
+
+  --vp-c-text-1: var(--hcdr-ink);
+  --vp-c-text-2: var(--hcdr-muted);
+  --vp-c-text-3: #74819a;
+
+  --vp-c-divider: var(--hcdr-line);
+  --vp-c-border: #2f3d57;
+  --vp-c-gutter: var(--hcdr-line);
+
+  --hcdr-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 30px rgba(0, 0, 0, 0.28);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+
+body {
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 本文件只放设计 token 与全局基础排版。
+ * 文档站版式见 docs.css，官网首页见 home.css。 */

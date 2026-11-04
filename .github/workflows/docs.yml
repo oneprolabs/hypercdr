@@ -1,0 +1,242 @@
+name: Publish Docs Site
+
+# 只负责 VitePress 文档站（官网首页 + 中英文文档），并且刻意与 release.yml
+# 的部署链路隔离到"零交集"：
+#
+#   * 站点文件放在 /var/lib/hypercdr-docs-site/site
+#   * nginx 配置放在 /var/lib/hypercdr-docs-site/nginx.conf
+#   * 服务由独立容器 hypercdr-docs 提供（不属于 docker-compose.yaml 的任何 service）
+#
+# 因此 release 部署里的 install-blue-green.sh / deploy-blue-green.sh 就算把
+# /var/lib/hypercdr/website 覆盖成源码、把 nginx/website.conf 写回旧版本，
+# 也不会影响这个站点。文档的每一次变更只经由本工作流生效。
+#
+# 唯一与 release 共享的东西是 TLS 证书（/var/lib/hypercdr/tls.crt|key，只读挂载），
+# 它由 release 首次部署生成；缺失时本工作流会明确报错而不是自己造一份。
+#
+# 可覆盖的仓库变量（Settings -> Variables）：
+#   DOCS_SITE_DIR   站点目录，默认 /var/lib/hypercdr-docs-site/site
+#   DOCS_CONF       容器挂载的 nginx 配置，默认 /var/lib/hypercdr-docs-site/nginx.conf
+#   DOCS_CONTAINER  容器名，默认 hypercdr-docs
+#   DOCS_HTTP_PORT  对外端口，默认 12445（nginx-proxy-manager 反代 hypercdr.com 的上游）
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+# 独立并发组，不与 hypercdr-release 的排队和取消互相影响。
+concurrency:
+  group: hypercdr-docs-site
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # 与 release.yml 的 deploy 共用 production 环境，保证 SSH_PRIVATE_KEY 等
+    # 环境级 secret 可解析。若该环境配置了 required reviewers，文档更新也会
+    # 走审批；想免审批就把 secret 提到仓库级并删掉这一行。
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      # 与本地、与安装包走同一套构建：website/build.sh 会校验中英文页面一一对应，
+      # 并断言产物里有 index.html / docs/index.html / en/index.html。
+      - name: Build docs site
+        run: ./website/build.sh
+
+      - name: Render deployment payload
+        run: |
+          set -euo pipefail
+          payload="${RUNNER_TEMP}/docs-payload"
+          rm -rf "${payload}"
+          mkdir -p "${payload}/site"
+          cp -a website/.vitepress/dist/. "${payload}/site/"
+          for f in index.html docs/index.html en/index.html 404.html; do
+            test -f "${payload}/site/${f}" || { echo "ERROR: missing ${f} in build output" >&2; exit 1; }
+          done
+          cp website/deploy/nginx.conf "${payload}/nginx.conf"
+          echo "payload ready: $(find "${payload}" -type f | wc -l) files"
+
+      # 静态产物整目录压成一个流推过去，先落到 /tmp 的 payload 目录，
+      # 由下一步决定何时替换线上目录。
+      - name: Upload payload to the server
+        env:
+          DEPLOY_HOST: 47.236.253.138
+          DEPLOY_SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "${HOME}/.ssh"
+          printf '%s\n' "${DEPLOY_SSH_KEY}" > "${HOME}/.ssh/deploy_key"
+          chmod 600 "${HOME}/.ssh/deploy_key"
+          ssh-keyscan -H "${DEPLOY_HOST}" >> "${HOME}/.ssh/known_hosts" 2>/dev/null
+          tar -C "${RUNNER_TEMP}/docs-payload" -czf - . \
+            | ssh -i "${HOME}/.ssh/deploy_key" -o StrictHostKeyChecking=yes "root@${DEPLOY_HOST}" \
+                'rm -rf /tmp/hypercdr-docs-payload \
+                 && mkdir -p /tmp/hypercdr-docs-payload \
+                 && tar -xzf - -C /tmp/hypercdr-docs-payload'
+
+      - name: Activate docs site
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          DOCS_SITE_DIR: ${{ vars.DOCS_SITE_DIR || '/var/lib/hypercdr-docs-site/site' }}
+          DOCS_CONF: ${{ vars.DOCS_CONF || '/var/lib/hypercdr-docs-site/nginx.conf' }}
+          DOCS_CONTAINER: ${{ vars.DOCS_CONTAINER || 'hypercdr-docs' }}
+          DOCS_HTTP_PORT: ${{ vars.DOCS_HTTP_PORT || '12445' }}
+        with:
+          host: 47.236.253.138
+          username: root
+          port: 22
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          command_timeout: 600s
+          envs: DOCS_SITE_DIR,DOCS_CONF,DOCS_CONTAINER,DOCS_HTTP_PORT
+          script: |
+            set -eu
+            payload=/tmp/hypercdr-docs-payload
+            deploy_path=/var/lib/hypercdr
+            env_file="${deploy_path}/.env"
+
+            if [ ! -f "${payload}/site/index.html" ]; then
+              echo "ERROR: ${payload}/site has no index.html; the upload step did not deliver the site." >&2
+              exit 1
+            fi
+            command -v docker >/dev/null 2>&1 || { echo "ERROR: docker is required on the deploy host." >&2; exit 1; }
+
+            # 下面会清空 DOCS_SITE_DIR 的全部内容，先挡住明显误配的系统目录
+            case "${DOCS_SITE_DIR}" in
+              /|/usr|/usr/share|/usr/local|/var|/var/www|/etc|/opt|/root|/home|/var/lib|/var/lib/hypercdr)
+                echo "ERROR: refusing to deploy into ${DOCS_SITE_DIR}; choose a dedicated directory." >&2
+                exit 1
+                ;;
+            esac
+
+            # 镜像与证书沿用 release 部署写进 .env 的值，避免两套版本各说各话
+            image=""
+            cert=""
+            key=""
+            if [ -f "${env_file}" ]; then
+              image="$(sed -n 's|^HCDR_EDGE_IMAGE=||p' "${env_file}" | tail -1)"
+              cert="$(sed -n 's|^HCDR_TLS_CERT_FILE=||p' "${env_file}" | tail -1)"
+              key="$(sed -n 's|^HCDR_TLS_KEY_FILE=||p' "${env_file}" | tail -1)"
+            fi
+            image="${image:-registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:nginx-1.27-alpine}"
+            cert="${cert:-${deploy_path}/tls.crt}"
+            key="${key:-${deploy_path}/tls.key}"
+            if [ ! -s "${cert}" ] || [ ! -s "${key}" ]; then
+              echo "ERROR: TLS certificate is missing (${cert} / ${key})." >&2
+              echo "       Run a release deploy once so ensure_edge_tls generates it, then re-run this workflow." >&2
+              exit 1
+            fi
+
+            mkdir -p "${DOCS_SITE_DIR}" "$(dirname "${DOCS_CONF}")"
+            find "${DOCS_SITE_DIR}" -mindepth 1 -delete
+            cp -a "${payload}/site/." "${DOCS_SITE_DIR}/"
+            chmod -R a+rX "${DOCS_SITE_DIR}"
+            test -f "${DOCS_SITE_DIR}/index.html"
+            test -f "${DOCS_SITE_DIR}/docs/index.html"
+            test -f "${DOCS_SITE_DIR}/en/index.html"
+            echo "site: $(find "${DOCS_SITE_DIR}" -type f | wc -l) files under ${DOCS_SITE_DIR}"
+
+            conf_changed=false
+            if ! cmp -s "${payload}/nginx.conf" "${DOCS_CONF}" 2>/dev/null; then
+              conf_changed=true
+            fi
+            install -m 0644 "${payload}/nginx.conf" "${DOCS_CONF}"
+
+            # 可选的 hypercdr-website 容器占着同一个端口，必须让位。它由 release
+            # 部署按 HCDR_INSTALL_WEBSITE 拉起，所以同时把开关置为 false，否则
+            # 下一次 release 会把它重新启动，抢走端口让我们的容器起不来。
+            if docker ps -a --format '{{.Names}}' | grep -qx hypercdr-website; then
+              docker update --restart=no hypercdr-website >/dev/null 2>&1 || true
+              if docker ps --format '{{.Names}}' | grep -qx hypercdr-website; then
+                echo "stopping hypercdr-website: it holds port ${DOCS_HTTP_PORT}"
+                docker stop hypercdr-website >/dev/null
+              fi
+            fi
+            if [ -f "${env_file}" ]; then
+              if grep -q '^HCDR_INSTALL_WEBSITE=' "${env_file}"; then
+                sed -i 's|^HCDR_INSTALL_WEBSITE=.*|HCDR_INSTALL_WEBSITE=false|' "${env_file}"
+              else
+                printf '\nHCDR_INSTALL_WEBSITE=false\n' >> "${env_file}"
+              fi
+              echo "HCDR_INSTALL_WEBSITE=false set in ${env_file}"
+            fi
+
+            # 容器存在但镜像或挂载点变了（比如 release 更新了 edge 镜像、或
+            # DOCS_SITE_DIR 被改过），必须重建，否则会继续用旧配置。
+            need_recreate=true
+            if docker ps -a --format '{{.Names}}' | grep -qx "${DOCS_CONTAINER}"; then
+              current_image="$(docker inspect --format '{{.Config.Image}}' "${DOCS_CONTAINER}" 2>/dev/null || true)"
+              current_site="$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/usr/share/nginx/html"}}{{.Source}}{{end}}{{end}}' "${DOCS_CONTAINER}" 2>/dev/null || true)"
+              current_conf="$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/etc/nginx/conf.d/default.conf"}}{{.Source}}{{end}}{{end}}' "${DOCS_CONTAINER}" 2>/dev/null || true)"
+              if [ "${current_image}" = "${image}" ] && [ "${current_site}" = "${DOCS_SITE_DIR}" ] && [ "${current_conf}" = "${DOCS_CONF}" ]; then
+                need_recreate=false
+              else
+                echo "recreating ${DOCS_CONTAINER}: image or mounts changed"
+              fi
+            fi
+
+            if [ "${need_recreate}" = true ]; then
+              docker rm -f "${DOCS_CONTAINER}" >/dev/null 2>&1 || true
+              echo "creating ${DOCS_CONTAINER} from ${image}"
+              docker run -d --name "${DOCS_CONTAINER}" --restart unless-stopped \
+                -p "${DOCS_HTTP_PORT}:443" \
+                -v "${DOCS_SITE_DIR}:/usr/share/nginx/html:ro" \
+                -v "${DOCS_CONF}:/etc/nginx/conf.d/default.conf:ro" \
+                -v "${cert}:/etc/hypercdr/tls/tls.crt:ro" \
+                -v "${key}:/etc/hypercdr/tls/tls.key:ro" \
+                "${image}" >/dev/null
+            else
+              if ! docker ps --format '{{.Names}}' | grep -qx "${DOCS_CONTAINER}"; then
+                echo "starting existing container ${DOCS_CONTAINER}"
+                docker start "${DOCS_CONTAINER}" >/dev/null
+              fi
+              # 静态文件是 bind mount，nginx 实时读取，只有配置变化才需要重载
+              if [ "${conf_changed}" = true ]; then
+                docker exec "${DOCS_CONTAINER}" nginx -t
+                docker exec "${DOCS_CONTAINER}" nginx -s reload
+                echo "nginx config changed, reloaded ${DOCS_CONTAINER}"
+              else
+                echo "nginx config unchanged, no reload"
+              fi
+            fi
+
+            docker ps --filter "name=^${DOCS_CONTAINER}$" --format 'container: {{.Names}} {{.Status}} {{.Ports}}'
+
+            if command -v curl >/dev/null 2>&1; then
+              ready=false
+              for _ in 1 2 3 4 5 6 7 8 9 10; do
+                if curl -ksS -o /dev/null "https://127.0.0.1:${DOCS_HTTP_PORT}/" 2>/dev/null; then ready=true; break; fi
+                sleep 2
+              done
+              if [ "${ready}" = false ]; then
+                echo "ERROR: ${DOCS_CONTAINER} did not answer on port ${DOCS_HTTP_PORT}" >&2
+                docker logs --tail 40 "${DOCS_CONTAINER}" >&2 || true
+                exit 1
+              fi
+              for path in / /docs/ /en/; do
+                code="$(curl -ksS -o /dev/null -w '%{http_code}' "https://127.0.0.1:${DOCS_HTTP_PORT}${path}" 2>/dev/null || echo 000)"
+                echo "probe ${path} -> ${code}"
+                if [ "${code}" != "200" ]; then
+                  echo "ERROR: ${path} returned ${code} on port ${DOCS_HTTP_PORT}" >&2
+                  exit 1
+                fi
+              done
+            else
+              echo "WARN: curl is not available on the server, skipping probes" >&2
+            fi
+
+            rm -rf "${payload}"
+            echo "docs site published to ${DOCS_SITE_DIR} in container ${DOCS_CONTAINER}"

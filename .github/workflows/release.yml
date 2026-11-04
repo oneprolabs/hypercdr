@@ -333,10 +333,13 @@ jobs:
             mkdir -p "${deploy_path}/releases/${{ needs.publish.outputs.image_version }}"
             curl -fsSL "https://github.com/${{ github.repository }}/releases/download/${{ startsWith(needs.publish.outputs.image_version, 'ce-v') && needs.publish.outputs.image_version || format('v{0}', needs.publish.outputs.image_version) }}/release-manifest.json" \
               -o "${deploy_path}/releases/${{ needs.publish.outputs.image_version }}/release-manifest.json"
-            if curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${ref}/website/index.html" -o "${deploy_path}/website/index.html.tmp"; then
-              mkdir -p "${deploy_path}/website"
-              mv "${deploy_path}/website/index.html.tmp" "${deploy_path}/website/index.html"
-            fi
+            # docs-site: 旧 website 部署已停用。文档站改由 .github/workflows/docs.yml
+            # 以独立容器 hypercdr-docs 发布，不再写入 ${deploy_path}/website，
+            # 也不会与容器挂载的目录产生任何交集。恢复时取消下面四行注释即可。
+            # if curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${ref}/website/index.html" -o "${deploy_path}/website/index.html.tmp"; then
+            #   mkdir -p "${deploy_path}/website"
+            #   mv "${deploy_path}/website/index.html.tmp" "${deploy_path}/website/index.html"
+            # fi
             mkdir -p "${deploy_path}/nginx/conf.d"
             legacy_install=false
             if [ -f "${deploy_path}/.env" ] && { \
