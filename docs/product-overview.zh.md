@@ -4,7 +4,7 @@
 
 HyperCDR 是面向 Kubernetes 工作负载的云原生容灾与恢复平台。平台由中控面、集群 Agent、对象存储和 Kubernetes 原生备份/恢复组件组成，用于将集群资源、应用配置和持久化数据纳入统一的保护、恢复验证和运维流程。
 
-HyperCDR 的核心价值是把“保护、验证、恢复”组织成一条可追踪的 Kubernetes 应用容灾流程：管理员在中控平台登记集群和存储，选择需要保护的应用，按策略生成恢复点，再用 Drill 验证恢复结果，必要时执行 Restore。
+HyperCDR 的核心价值是把“保护、验证、恢复”组织成一条可追踪的 Kubernetes 应用容灾流程：管理员在中控平台登记集群和存储，选择需要保护的应用，按策略生成恢复点，再用 Drill 验证恢复结果，按业务需要评审并执行正式接管。
 
 HyperCDR 不是通用的虚拟机迁移产品。本文只介绍当前版本已提供的 Kubernetes 应用保护能力，不将 HyperBDR 的物理机、VMware 无代理、公有云专用接口或跨平台迁移能力作为 HyperCDR 功能承诺。
 
@@ -22,32 +22,27 @@ HyperCDR 不是通用的虚拟机迁移产品。本文只介绍当前版本已�
 |---|---|
 | 日常保护 | 为应用建立保护配置，按策略执行同步/备份并检查最新恢复点。 |
 | 恢复可用性验证 | 在与生产隔离的目标 Namespace 执行 Drill，检查工作负载、PVC、Service 和业务数据。 |
-| 生产恢复 | 评审恢复点、目标集群和资源映射后执行 Restore，并完成应用级验收。 |
+| 正式接管 | 评审恢复点、目标集群和资源映射后，使用页面提供的 Takeover 流程，并完成应用级验收。 |
 | 多团队协作 | 使用组织、成员和角色权限隔离业务资源，按职责分配平台管理与容灾操作。 |
 
 实际支持范围取决于 Kubernetes 发行版、Agent 版本、Velero/OADP 路径、CSI/存储驱动和对象存储兼容性；部署前应结合[适配范围](deployment/support-scope.zh.md)与现场验证确认。
 
-## 3. 总体架构
+## 3. 产品组成
 
 从用户视角，平台包含三个协作部分：中控平台负责统一管理，集群 Agent 负责在目标集群执行任务，对象存储负责保存备份数据。用户不需要直接操作平台内部服务；只需确保这些部分之间的网络和权限满足安装及注册要求。
 
-```text
-浏览器 ── HTTPS 12443 ── Edge ── 活动前端/API（蓝或绿）
-                                      │
-                                      ├── PostgreSQL
-                                      ├── 注册执行器 ── Kubernetes API
-                                      └── WSS 出站连接 ── 集群 Agent
-
-集群 Agent ── Kubernetes API/资源 ── Velero 或 OpenShift OADP ── 对象存储
-```
+| 产品组成 | 用户用途 | 使用前应准备 |
+|---|---|---|
+| 中控平台 | 统一管理集群、保护配置、恢复点和任务 | Linux 部署主机、可访问的 HTTPS 地址和管理员账号 |
+| 集群 Agent | 上报资源、接收任务并返回执行结果 | 集群管理权限、镜像访问和到中控的出站网络 |
+| 备份/恢复组件 | 在集群内执行资源与持久化数据保护 | 与发行版匹配的 Velero 或 OpenShift OADP 路径，以及可用存储驱动 |
+| 对象存储仓库 | 保存备份数据供后续恢复使用 | Bucket、访问凭据、集群可访问的服务地址 |
 
 ### 3.1 中控平台
 
-- React 前端提供登录、集群、存储、策略、容灾和任务页面。
-- Go API 负责身份、组织隔离、资源管理、任务编排、Agent 通信和审计。
-- PostgreSQL 持久化用户、组织、集群、策略、任务、恢复点和平台配置。
-- HTTPS Edge 在宿主机 `12443` 终止 TLS，并将流量转发到当前蓝/绿前端和 API。
-- 可选产品门户单独使用 `12445`，不属于中控登录页。
+用户通过浏览器访问中控平台，完成集群接入、存储配置、策略管理和容灾操作，并在任务详情中跟踪执行结果。默认 HTTPS 入口为 `12443`；安装时应选择浏览器和所有受管集群都能访问的地址。
+
+中控平台与可选产品门户是两个不同服务。只安装中控即可使用管理功能，不需要额外安装产品门户。平台配置、用户和任务记录需要单独备份，不能仅依赖应用备份仓库恢复管理平台。
 
 ### 3.2 集群 Agent
 
@@ -102,13 +97,27 @@ Drill 用于在隔离目标中验证恢复流程和恢复点可用性。演练�
 
 ## 7. 中控平台功能地图
 
-当前社区版的中控按业务域提供 Dashboard、Clusters、Configuration、Disaster Recovery、Tasks 和 Settings 等入口。Dashboard 用于总览；Clusters 管理注册集群、Agent、清单、组件升级和日志；Configuration 管理 Storage、Policies 和 Tags；Disaster Recovery 管理保护配置、恢复点、Drill、Restore 和 Takeover；Tasks 展示任务状态、阶段、事件与详细日志；Settings 管理个人、组织、邮件、登录和平台升级。菜单会随版本和权限变化，页面不可见不代表绕过权限调用 API。
+当前实机中控的一级入口包括 **Dashboard、DR、Configuration、Operations、Settings**。常用功能位置如下，页面可见范围还受账号权限影响。
+
+| 功能入口 | 主要用途 |
+|---|---|
+| Dashboard | 查看组织资源、保护健康、同步与恢复活动和当前告警 |
+| Configuration → Clusters | 注册集群、检查 Agent 和组件状态、查看节点与 Namespace |
+| Configuration → Storage | 管理共享备份仓库、连接配置及验证状态 |
+| Configuration → Policies | 管理调度、恢复点配额与保留规则 |
+| Configuration → Tag Management | 管理资源分类标签；标签不等于保护范围 |
+| DR → Application DR | 按选择应用、设置 DR、运行 DR 三阶段管理保护 |
+| DR → Restore Points | 查看恢复点，选择后进入 Drill 或 Takeover |
+| DR → Backup & Recovery Tasks | 查看备份和恢复类任务摘要、进度与事件 |
+| Settings | 按权限管理个人、组织和平台设置 |
 
 所有业务资源按组织（tenant）隔离。平台管理员可以管理用户和组织，但不能通过 URL、组织 ID 或请求头切换到其他组织的集群、存储、策略、应用、任务或恢复点。
 
 ## 8. 三类集群与执行组件
 
-当前注册接口明确支持 `native-kubernetes`、`huaweicloud-cce` 和 `openshift` 三类集群。
+注册向导提供 Native Kubernetes、Huawei Cloud CCE 和 OpenShift 三种选择。应按实际发行版选择类型，而不是根据集群名字判断。
+
+![注册向导提供的三类集群](assets/images/user-guide/cluster-types.png)
 
 ### 8.1 Native Kubernetes
 
@@ -116,7 +125,7 @@ Drill 用于在隔离目标中验证恢复流程和恢复点可用性。演练�
 
 ### 8.2 Huawei Cloud CCE
 
-CCE 使用独立的 kubeconfig 检查和注册会话。平台先建立临时上传会话并检查 context，再创建注册任务；会话绑定组织和上传者，平台重启后需重新上传并检查。CCE 仍通过 Agent、Kubernetes API、Velero 和对象存储执行保护，不等同于直接调用云厂商备份 API。
+用于接入华为云 CCE 集群。注册时应准备目标集群的 kubeconfig，并按向导检查访问权限和 context；如果上传信息已失效，应重新上传并检查。CCE 的保护仍需要集群 Agent、备份组件和可访问的对象存储，不等同于启用云厂商备份服务。
 
 ### 8.3 OpenShift
 
@@ -126,7 +135,7 @@ OpenShift 采用 OADP 兼容路径。保护和恢复受 OADP、项目权限、Se
 
 ## 9. Agent、Velero/OADP 与数据路径
 
-Agent 主动通过出站 WSS 连接中控，报告 Kubernetes 版本、节点、Namespace、资源和组件状态，并接收 inventory、storage-sync、backup、restore、drill、takeover、retention-cleanup、upgrade 和 unregister 等任务。中控不要求 Agent 提供入站端口，但集群必须能访问中控 HTTPS/WSS、镜像仓库和对象存储。
+Agent 主动连接中控，报告集群版本、节点、Namespace、资源和组件状态，执行资源发现、保护、恢复和组件维护任务。中控不要求 Agent 提供入站端口，但集群必须能访问中控 HTTPS/WSS、镜像仓库和对象存储。
 
 Agent 负责通信、编排和结果回报；Velero/OADP 负责 Kubernetes 资源和持久化数据；对象存储保存备份数据；PostgreSQL 保存平台元数据和任务状态。注销脚本不会删除应用 Namespace、Longhorn、外部对象存储或其他命名空间的 Velero 资源。
 
@@ -135,8 +144,8 @@ Agent 负责通信、编排和结果回报；Velero/OADP 负责 Kubernetes 资�
 - **保护配置**：将源集群、应用/Namespace、策略和存储仓库组合为可执行关系。
 - **同步/备份**：Agent 执行存储准备、备份或状态推进，平台接收事件并建立或更新恢复点。
 - **恢复点**：由源集群、保护配置、备份任务和 Velero 备份名关联确定，可查看状态、保留信息和内容清单。
-- **Restore**：向目标集群正式恢复资源和数据。
-- **Drill**：向隔离目标验证恢复链路，不等同于生产接管。
+- **Restore**：恢复任务能力及任务记录类型；当前已核验的恢复点操作入口为 Drill 和 Takeover，没有独立 Restore 创建按钮。
+- **Drill**：验证恢复链路，演练时应选择隔离目标并控制网络访问；不等同于生产接管，操作名称也不保证目标自动隔离。
 - **Takeover**：按容灾切换流程执行接管，必须先通过校验和变更审批。
 
 恢复点处于创建中、来源不匹配、保护配置已删除或仓库不可访问时，不应启动恢复。任务成功后仍需检查目标工作负载、PVC、Service、应用健康和数据；删除平台恢复点记录也不应被理解为立即擦除对象存储全部数据。
@@ -147,9 +156,22 @@ Agent 负责通信、编排和结果回报；Velero/OADP 负责 Kubernetes 资�
 
 登录挑战支持图片验证码和 Cloudflare Turnstile。图片验证码为四位数字/字母且字母不区分大小写；Turnstile 需要有效 key、浏览器访问 Cloudflare 控件和服务端出站校验。实际模式以安装目录 `.env` 为准。
 
-## 12. 149 实机截图
+## 12. 从保护到恢复的使用流程
 
-登录入口已在 149 开发环境实际访问核验。登录后的业务截图需要有效账号和测试数据，因此不使用伪造的集群或任务页面。
+![应用保护的三个操作阶段](assets/images/user-guide/protection-stages.png)
 
-![HyperCDR 149 开发环境登录页](assets/images/overview/login-149.png)
+1. **准备环境**：安装中控，注册集群并确认 Agent 在线，配置可访问的对象存储。
+2. **选择应用**：在源集群中选择业务 Namespace，确认实际需要保护的资源和持久化数据。
+3. **设置 DR**：完成保护范围、目标集群、仓库、策略与应用 Hooks 配置。
+4. **运行保护**：执行同步/备份，确认产生可用恢复点，检查任务阶段与事件。
+5. **验证恢复**：用 Drill 在隔离目标验证应用恢复；需要正式接管时另行评审 Takeover。
+6. **持续维护**：检查最新恢复点、Agent、存储与失败任务，定期复核演练结果。
+
+图中数量来自测试环境，不代表容量上限或推荐规模。点击阶段卡片进入相应工作区，不会因为界面显示 Protected 就自动证明业务数据已经通过恢复验收。
+
+### 下一步
+
+- 首次部署请阅读[产品安装](deployment/product-installation.zh.md)。
+- 已安装平台请按[用户使用手册](user-guide/product-user-manual.zh.md)完成集群、存储、策略和应用保护配置。
+- 确认发行版、存储驱动和拓扑是否适用，请阅读[适配范围](deployment/support-scope.zh.md)，并在目标环境完成验证。
 
