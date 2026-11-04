@@ -2,7 +2,7 @@
 
 本文面向平台管理员，覆盖发行版在线安装、离线安装、参数、验收、升级和卸载。在线入口为 `deploy/online/install.sh`；Release 安装包内的 `scripts/release/install-blue-green.sh` 负责实际部署。
 
-**目录**
+## 目录
 
 - [1. 安装前准备](#1-安装前准备)
 - [2. 在线安装](#2-在线安装)
