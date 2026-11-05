@@ -14,11 +14,12 @@ const gettingStarted: DefaultTheme.SidebarItem[] = [
     items: [
       { text: '快速开始', link: '/docs/' },
       { text: '安装 HyperCDR', link: '/docs/getting-started/install' },
-      { text: '第一次恢复验证', link: '/docs/getting-started/first-recovery' },
+      // 「首次使用」放在用户指南板块里，这里只做入口，不复制第二份内容。
+      { text: '第一次恢复验证', link: '/docs/user-guide/first-use' },
     ],
   },
   {
-    text: '装完之后',
+    text: '安装之后',
     items: [
       { text: '安装详解', link: '/docs/deployment/install' },
       { text: '配置参考', link: '/docs/deployment/configuration' },
@@ -30,30 +31,28 @@ const gettingStarted: DefaultTheme.SidebarItem[] = [
 /** 产品概览：先讲清是什么、由哪些部分组成、有哪些核心概念。 */
 const product: DefaultTheme.SidebarItem[] = [
   {
-    text: '产品概览',
+    text: '产品',
     items: [
-      { text: 'HyperCDR 是什么', link: '/docs/product/' },
-      { text: '中控架构', link: '/docs/product/architecture' },
+      { text: '产品概览', link: '/docs/product/' },
+      { text: '控制台架构', link: '/docs/product/architecture' },
       { text: '核心概念', link: '/docs/product/concepts' },
     ],
   },
 ]
 
-/** 安装部署：从环境准备到可登录的控制台。 */
+/** 安装部署：部署形态与规划，安装步骤在「快速开始」板块。 */
 const deployment: DefaultTheme.SidebarItem[] = [
   {
     text: '安装部署',
     items: [
-      { text: '部署指南', link: '/docs/deployment/' },
-      { text: '安装前准备', link: '/docs/deployment/install#prepare' },
-      { text: '执行安装', link: '/docs/deployment/install#run' },
-      { text: '检查安装结果', link: '/docs/deployment/install#verify' },
+      { text: '部署规划', link: '/docs/deployment/' },
+      { text: '安装详解', link: '/docs/deployment/install' },
+      { text: '配置参考', link: '/docs/deployment/configuration' },
     ],
   },
   {
     text: '安装之后',
     items: [
-      { text: '配置参考', link: '/docs/deployment/configuration' },
       { text: '更改平台访问地址', link: '/docs/deployment/configuration#access-url' },
     ],
   },

@@ -184,7 +184,6 @@ onBeforeUnmount(() => clearTimeout(copiedTimer))
             </button>
           </div>
           <code data-install-command>{{ copy.openSource.install.command }}</code>
-          <small>{{ copy.openSource.install.footer }}</small>
         </div>
       </section>
 

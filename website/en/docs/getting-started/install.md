@@ -1,29 +1,29 @@
 ---
 title: Install HyperCDR
-description: "Install HyperCDR Community edition on your own Linux host: prerequisites, running the online installer, checking the result and signing in for the first time."
+description: "Prerequisites, access URL and certificates, the online install command, result checks and first sign-in for HyperCDR Community edition."
 ---
 
 # Install HyperCDR
 
 Community edition is deployed on a Linux host you own. The online installer downloads and deploys a specific release, the control plane runs on Docker Compose with blue-green switching for API and frontend, and PostgreSQL provides shared persistence.
 
-This page walks through installing a control plane from scratch. For the full parameter list, offline packages, upgrades and uninstall, see [Installing the Community edition](/en/docs/deployment/install); for what to do next, see [First verified recovery](/en/docs/getting-started/first-recovery).
+If you only need to complete the installation, [Quick start](/en/docs/) gives the three-step shortest path. This page covers the conditions to confirm before installing; parameters, non-interactive installs, offline packages, upgrade, rollback and uninstall are in [Install in detail](/en/docs/deployment/install).
 
 ## Before you install
 
 | Item | Requirement |
 | --- | --- |
-| Operating system | A Linux host with root or `sudo` |
+| Host | A long-running Linux host with root or `sudo` |
 | Container runtime | Docker Engine and Docker Compose v2 (`docker compose`), daemon running |
 | Base tools | Bash, curl, tar and OpenSSL; `flock` for the deployment lock (usually from util-linux) and `jq` for manifest checks |
 | Access URL | An HTTPS origin reachable from browsers and every managed cluster; default port `12443` |
 | Capacity | Plan for the database, logs and retained releases; application backups go to the object storage you configure, not the install directory |
 | Outbound network | Install host to GitHub Releases and the image registry; cluster agents to the control plane on `12443/tcp`; agents and cluster components to object storage |
-| Ports | `12443/tcp` for the console and API; the documentation site is deployed independently and the installer binds no port for it |
+| Ports | `12443/tcp` for the console and API |
 
-::: warning What the installer does not manage
+::: warning What the installer does not handle
 
-The installer does not install Docker, and it does not install Harbor, Nginx Proxy Manager or external object storage. A command existing does not mean the service works; the Docker daemon, image pulls and port reachability each have to succeed once for real.
+The installer does not install Docker, and it does not install Harbor, Nginx Proxy Manager or external object storage. A command existing does not mean the service works; the Docker daemon, image pulls and port reachability each need to be verified once.
 
 :::
 
@@ -75,19 +75,7 @@ curl -fL --progress-bar \
 
 The script prints **Version**, **Base URL** and **Install directory**. At `Continue installation? [y/N]` you must type `y` and press Enter; Enter or anything else cancels. When run through a pipe, the prompt reads from `/dev/tty`.
 
-Common parameters:
-
-| Parameter | Required | Description |
-| --- | :---: | --- |
-| `--base-url URL` | Yes | External HTTPS origin of the control plane, port `12443` by default |
-| `--version VERSION` | No | Release version such as `ce-v0.0.13`; defaults to the latest stable build |
-| `--install-dir PATH` | No | Install directory, `/var/lib/hypercdr` by default |
-| `--registry REGISTRY` | No | Override the default image registry |
-| `--install-website` | No | Legacy product portal compatibility flag; not recommended for new deployments |
-| `--auth-challenge MODE` | No | `auto`, `image` or `turnstile` |
-| `--yes` | No | Skip the installation confirmation; use for automation |
-
-`--install-website` is a flag without a value and does not accept `true`/`false`; current source no longer deploys the legacy portal automatically, so do not rely on it for new deployments. The entry script also parses `--public-base-url` but does not pass it downstream, so do not rely on it to change the registration address; `--base-url` is authoritative.
+The full description of `--install-website`, `--registry`, `--auth-challenge`, `--yes` and the rest is in [Install in detail](/en/docs/deployment/install).
 
 ## Check the result
 
@@ -100,7 +88,7 @@ curl -kfsS -o /dev/null -w 'ready=%{http_code}\n' https://platform.example.com:1
 
 Edge, API, frontend, PostgreSQL, the registration executor and the upgrade runner should all be healthy, and `/readyz` should return `200`. Hosts without systemd must manage the platform and upgrade runner themselves; containers starting does not mean the upgrade action in the UI can execute.
 
-A successful install gives you one entry point: `https://<host>:12443`, which hosts clusters, storage, policies, DR, tasks and platform settings. The documentation site is deployed independently, and the installer neither deploys it nor takes a port for it.
+After installation there is one access entry point: `https://<host>:12443`, which hosts clusters, storage, policies, DR, tasks and platform settings. The documentation site is deployed independently, and the installer neither deploys it nor takes a port for it.
 
 ::: warning The limits of health checks
 
@@ -112,19 +100,12 @@ A passing `/healthz` only means the service started. A passing `/readyz` still d
 
 Open `https://<host>:12443`. The initial account is `admin` with password `admin123`; **change it immediately after the first sign-in**. The login challenge is either an image captcha or Cloudflare Turnstile depending on the `--auth-challenge` choice; the mode in the install directory's `.env` is authoritative.
 
-Before declaring the environment deliverable, confirm in order:
-
-1. The login page loads and the challenge matches the configured mode.
-2. The initial administrator can sign in, and still can after changing the password.
-3. The six components and `/readyz` are all healthy.
-4. A test cluster registers, the agent shows online and reports nodes and namespaces.
-5. Object storage passes the connection test.
-6. A minimal policy produces a restore point.
+Opening the login page only proves that the entry point is reachable. Acceptance requires registering a test cluster, configuring object storage and producing the first restore point; [First use](/en/docs/user-guide/first-use) covers these three steps in order.
 
 ## Next steps
 
 <div class="hcdr-grid hcdr-grid-3">
-  <a class="hcdr-card" href="/en/docs/getting-started/first-recovery"><b>First verified recovery</b><span>Register a cluster, configure storage and policies, and validate recovery with an isolated drill.</span></a>
+  <a class="hcdr-card" href="/en/docs/user-guide/first-use"><b>First use</b><span>Register a cluster, configure storage and policies, and validate recovery with an isolated drill.</span></a>
   <a class="hcdr-card" href="/en/docs/deployment/install"><b>Install in detail</b><span>Every parameter, non-interactive installs, offline packages, upgrade, rollback, uninstall and troubleshooting.</span></a>
   <a class="hcdr-card" href="/en/docs/deployment/configuration"><b>Configuration reference</b><span>Environment variables, challenge modes, registration settings and access URL changes.</span></a>
 </div>

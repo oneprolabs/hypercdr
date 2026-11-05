@@ -94,7 +94,6 @@ export interface HomeCopy {
       copy: string
       copied: string
       command: string
-      footer: string
     }
   }
   contact: {
@@ -118,8 +117,9 @@ const GITHUB = 'https://github.com/oneprolabs/hypercdr'
 const RELEASES = 'https://github.com/oneprolabs/hypercdr/releases'
 const ISSUES = 'https://github.com/oneprolabs/hypercdr/issues'
 const LOGIN = 'https://app.hypercdr.com/login'
-const INSTALL_COMMAND = `# 安装最新版本与官网
-$ curl -fL --progress-bar https://raw.githubusercontent.com/oneprolabs/hypercdr/main/deploy/online/install.sh | sudo bash -s -- --base-url https://your-host:12443 --install-dir /var/lib/hypercdr --yes`
+const INSTALL_CMD_TAIL = `curl -fL --progress-bar https://raw.githubusercontent.com/oneprolabs/hypercdr/main/deploy/online/install.sh | sudo bash -s -- --base-url https://your-host:12443 --install-dir /var/lib/hypercdr --yes`
+const INSTALL_COMMAND_ZH = `# 安装最新版本\n$ ${INSTALL_CMD_TAIL}`
+const INSTALL_COMMAND_EN = `# Install the latest release\n$ ${INSTALL_CMD_TAIL}`
 
 const zh: HomeCopy = {
   nav: [
@@ -147,7 +147,7 @@ const zh: HomeCopy = {
     eyebrowHref: GITHUB,
     titleLine1: '保护你的集群。',
     titleLine2: '让恢复有把握。',
-    lede: 'HyperCDR 是面向 Kubernetes 与 OpenShift 的开源容器容灾控制面。保护工作负载、验证恢复结果，并在一个清晰的操作面里管理所有集群。',
+    lede: 'HyperCDR 是面向 Kubernetes 与 OpenShift 的开源容器容灾平台。可以保护工作负载、验证恢复结果，并在同一个控制台里管理所有集群。',
     primaryLabel: '免费试用 HyperCDR',
     primaryNote: '',
     primaryHref: LOGIN,
@@ -177,7 +177,7 @@ const zh: HomeCopy = {
   capabilities: {
     kicker: '产品能力',
     title: '备份只是起点。',
-    description: '用一个控制面完成让恢复真正可靠的所有工作。',
+    description: '从保护到恢复的每一步，都在同一个平台里完成。',
     items: [
       {
         icon: '◈',
@@ -206,14 +206,14 @@ const zh: HomeCopy = {
       },
       {
         icon: '⌘',
-        title: '统一控制面',
-        description: '集群、策略、任务、存储与平台升级集中在同一处可见，减少信息割裂。',
+        title: '统一管理',
+        description: '集群、策略、任务、存储和平台升级都在同一处查看，不必来回切换。',
       },
     ],
   },
   useCases: {
     kicker: '应用场景',
-    title: '为真实恢复场景而建。',
+    title: '常见的使用场景',
     items: [
       {
         index: '01',
@@ -227,14 +227,14 @@ const zh: HomeCopy = {
       },
       {
         index: '03',
-        title: '证明恢复真的可用',
-        description: '不靠猜测地做恢复演练，在事故替你决定之前掌握就绪度。',
+        title: '确认恢复可用',
+        description: '用容灾演练确认恢复可用，不必等故障发生才知道结果。',
       },
     ],
   },
   howItWorks: {
     kicker: '工作原理',
-    title: '工作负载留在你的集群里，控制面让恢复清晰可查。',
+    title: '工作负载留在你的集群里，控制台负责调度和记录。',
     description: 'HyperCDR 协调保护策略与任务执行，Agent 在你掌控的集群内完成实际动作，备份写入你指定的对象存储。',
     steps: [
       { title: '生产集群', description: '工作负载与保护策略' },
@@ -245,9 +245,9 @@ const zh: HomeCopy = {
   },
   openSource: {
     kicker: '社区',
-    title: '开源，一条清晰的生产路径。',
+    title: '开源版可以直接用于生产',
     description:
-      '用 Docker 在自己的 Linux 主机上运行 HyperCDR。在线安装器会下载并部署已发布的版本；文档站独立部署，不占中控端口。',
+      '用 Docker 在自己的 Linux 主机上运行 HyperCDR。在线安装器会下载并部署已发布的版本。',
     actions: [
       { label: '在 GitHub 查看', href: GITHUB, external: true },
       { label: '安装指南', href: '/docs/getting-started/install' },
@@ -258,13 +258,12 @@ const zh: HomeCopy = {
       note: '在线安装器',
       copy: '复制命令',
       copied: '已复制',
-      command: INSTALL_COMMAND,
-      footer: '已验证的发布版本 · 控制面 12443 · 文档站独立部署',
+      command: INSTALL_COMMAND_ZH,
     },
   },
   contact: {
     kicker: '联系我们',
-    title: '构建一份团队能信任的恢复计划。',
+    title: '需要私有部署或技术支持？',
     items: [
       {
         title: '企业部署',
@@ -281,7 +280,7 @@ const zh: HomeCopy = {
     ],
   },
   footer: {
-    description: 'OneProLabs 出品的开源容器容灾控制面。',
+    description: 'OneProLabs 出品的开源容器容灾平台。',
     columns: [
       {
         title: '产品',
@@ -335,7 +334,7 @@ const en: HomeCopy = {
     eyebrowHref: GITHUB,
     titleLine1: 'Protect your clusters.',
     titleLine2: 'Recover with confidence.',
-    lede: 'HyperCDR is an open source disaster recovery control plane for Kubernetes and OpenShift. Protect workloads, verify recovery, and manage every cluster from one clear operational surface.',
+    lede: 'HyperCDR is an open source container disaster recovery platform for Kubernetes and OpenShift. Protect workloads, verify recovery, and manage every cluster from one console.',
     primaryLabel: 'Try HyperCDR',
     primaryNote: 'Free',
     primaryHref: LOGIN,
@@ -365,7 +364,7 @@ const en: HomeCopy = {
   capabilities: {
     kicker: 'Capabilities',
     title: 'Backup is only the beginning.',
-    description: 'One control plane for the work that makes recovery dependable.',
+    description: 'Every step from protection to recovery happens in one platform.',
     items: [
       {
         icon: '◈',
@@ -394,14 +393,14 @@ const en: HomeCopy = {
       },
       {
         icon: '⌘',
-        title: 'One control plane',
-        description: 'Keep clusters, policies, tasks, storage, and platform upgrades visible in one place.',
+        title: 'Unified management',
+        description: 'See clusters, policies, tasks, storage, and platform upgrades in one place instead of switching between tools.',
       },
     ],
   },
   useCases: {
     kicker: 'Use cases',
-    title: 'Built for real recovery scenarios.',
+    title: 'Common use cases',
     items: [
       {
         index: '01',
@@ -416,15 +415,15 @@ const en: HomeCopy = {
       },
       {
         index: '03',
-        title: 'Prove recovery works',
+        title: 'Confirm recovery works',
         description:
-          'Run recovery drills without guessing. Track readiness before an incident makes the decision for you.',
+          'Use DR drills to confirm recovery works, instead of finding out during an incident.',
       },
     ],
   },
   howItWorks: {
     kicker: 'How it works',
-    title: 'Your workloads stay protected. The control plane makes recovery clear.',
+    title: 'Workloads stay in your clusters; the control plane schedules and records.',
     description:
       'HyperCDR coordinates policy and execution while agents operate inside the clusters you control.',
     steps: [
@@ -436,9 +435,9 @@ const en: HomeCopy = {
   },
   openSource: {
     kicker: 'Community',
-    title: 'Open source. One clear path to production.',
+    title: 'The open source edition is ready for production',
     description:
-      'Run HyperCDR on your own Linux host with Docker. The online installer downloads and deploys a verified release; the documentation site is deployed independently.',
+      'Run HyperCDR on your own Linux host with Docker. The online installer downloads and deploys a verified release.',
     actions: [
       { label: 'View on GitHub', href: GITHUB, external: true },
       { label: 'Installation guide', href: '/en/docs/getting-started/install' },
@@ -449,13 +448,12 @@ const en: HomeCopy = {
       note: 'Online installer',
       copy: 'Copy command',
       copied: 'Copied',
-      command: INSTALL_COMMAND,
-      footer: 'Verified release · Control plane on 12443 · Docs deployed separately',
+      command: INSTALL_COMMAND_EN,
     },
   },
   contact: {
     kicker: 'Contact',
-    title: 'Build a recovery plan your team can trust.',
+    title: 'Need a private deployment or support?',
     items: [
       {
         title: 'Enterprise deployment',
@@ -472,7 +470,7 @@ const en: HomeCopy = {
     ],
   },
   footer: {
-    description: 'Open source disaster recovery control plane by OneProLabs.',
+    description: 'Open source container disaster recovery platform by OneProLabs.',
     columns: [
       {
         title: 'Product',

@@ -15,7 +15,7 @@ const gettingStarted: DefaultTheme.SidebarItem[] = [
     items: [
       { text: 'Quick start', link: '/en/docs/' },
       { text: 'Install HyperCDR', link: '/en/docs/getting-started/install' },
-      { text: 'First verified recovery', link: '/en/docs/getting-started/first-recovery' },
+      { text: 'First verified recovery', link: '/en/docs/user-guide/first-use' },
     ],
   },
   {
@@ -31,9 +31,9 @@ const gettingStarted: DefaultTheme.SidebarItem[] = [
 /** 产品概览 */
 const product: DefaultTheme.SidebarItem[] = [
   {
-    text: 'Product overview',
+    text: 'Product',
     items: [
-      { text: 'What is HyperCDR', link: '/en/docs/product/' },
+      { text: 'Product overview', link: '/en/docs/product/' },
       { text: 'Control plane architecture', link: '/en/docs/product/architecture' },
       { text: 'Core concepts', link: '/en/docs/product/concepts' },
     ],
@@ -45,10 +45,9 @@ const deployment: DefaultTheme.SidebarItem[] = [
   {
     text: 'Deployment',
     items: [
-      { text: 'Deployment guide', link: '/en/docs/deployment/' },
-      { text: 'Before you install', link: '/en/docs/deployment/install#prepare' },
-      { text: 'Run the installation', link: '/en/docs/deployment/install#run' },
-      { text: 'Verify the result', link: '/en/docs/deployment/install#verify' },
+      { text: 'Deployment planning', link: '/en/docs/deployment/' },
+      { text: 'Install in detail', link: '/en/docs/deployment/install' },
+      { text: 'Configuration reference', link: '/en/docs/deployment/configuration' },
     ],
   },
   {

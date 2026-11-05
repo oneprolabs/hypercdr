@@ -527,12 +527,6 @@ html:has(.hcdr-home) {
   white-space:pre-wrap;
   color:#334155
 }
-.install-card>small {
-  display:block;
-  padding:0 22px 18px;
-  color:#7a8798;
-  font-size:11px
-}
 .contact-grid {
   display:grid;
   grid-template-columns:1fr 1fr;
