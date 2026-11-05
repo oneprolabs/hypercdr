@@ -40,6 +40,16 @@ html:has(.hcdr-home) {
   color:inherit;
   text-decoration:none
 }
+/* 吸顶容器：通栏底色 + 分隔线，向下浏览时导航常驻。
+   移动端抽屉是 .main-nav 的绝对定位子元素，锚点必须落在 header 上，
+   所以 .site-header 需要 position:relative（见下方 editorial 段）。 */
+.site-header-shell {
+  position:sticky;
+  top:0;
+  z-index:50;
+  background:#fbfcfe;
+  border-bottom:1px solid #edf0f5
+}
 .site-header {
   height:76px;
   display:flex;
@@ -584,9 +594,9 @@ html:has(.hcdr-home) {
   font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif
 }
 .site-header {
+  position:relative;
   max-width:1180px;
-  height:84px;
-  border-bottom:1px solid #edf0f5
+  height:84px
 }
 .brand {
   font-family:Inter,ui-sans-serif,sans-serif;
@@ -708,7 +718,8 @@ html:has(.hcdr-home) {
     z-index:3;
     left:12px;
     right:12px;
-    top:88px;
+    /* 贴着吸顶导航的下边缘：留缝会把滚动中的深色分区漏出来 */
+    top:84px;
     padding:18px;
     background:#fff;
     border:1px solid var(--line);
@@ -814,4 +825,10 @@ html[lang^='zh'] .hcdr-home .hero h1 {
   font-size: clamp(28px, 12.4cqw, 62px);
   letter-spacing: -0.015em;
   line-height: 1.16;
+}
+
+/* 吸顶导航高 84px，锚点跳转时给标题留出这段空间，
+   否则导航里的「产品能力」等链接会把分区标题压在头部下面。 */
+.hcdr-home [id] {
+  scroll-margin-top: 104px;
 }

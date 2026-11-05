@@ -86,3 +86,97 @@ body {
 
 /* 本文件只放设计 token 与全局基础排版。
  * 文档站版式见 docs.css，官网首页见 home.css。 */
+
+/* ---------- 返回顶部按钮（BackToTop.vue，官网与文档站共用） ---------- */
+
+.hcdr-back-to-top {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 50%;
+  background: var(--vp-c-bg-elv);
+  color: var(--vp-c-text-2);
+  box-shadow: var(--hcdr-shadow);
+  cursor: pointer;
+  /* 隐藏态不占位、不可点，但仍参与淡入过渡 */
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(8px);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease,
+    color 0.2s ease, border-color 0.2s ease;
+}
+
+.hcdr-back-to-top.is-visible {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+}
+
+.hcdr-back-to-top:hover {
+  color: var(--vp-c-brand-1);
+  border-color: var(--vp-c-brand-1);
+}
+
+.hcdr-back-to-top:focus-visible {
+  outline: 2px solid var(--vp-c-brand-1);
+  outline-offset: 3px;
+}
+
+.hcdr-back-to-top svg {
+  width: 18px;
+  height: 18px;
+}
+
+@media (max-width: 768px) {
+  .hcdr-back-to-top {
+    right: 16px;
+    bottom: 16px;
+    width: 40px;
+    height: 40px;
+  }
+
+  .hcdr-back-to-top svg {
+    width: 16px;
+    height: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hcdr-back-to-top {
+    transition: none;
+  }
+}
+
+
+/* 深色模式下 --vp-c-bg-elv 与页面底色太接近，补一点亮度和描边 */
+.dark .hcdr-back-to-top {
+  background: #1f2b3f;
+  border-color: #3a4a68;
+  color: #c7d2e0;
+}
+
+.dark .hcdr-back-to-top:hover {
+  border-color: var(--vp-c-brand-1);
+  color: var(--vp-c-brand-1);
+}
+
+/* 官网首页是固定浅色版式（home.css 不响应 .dark），
+   按钮不能跟着系统深色偏好翻转，否则浅色页面上会出现深色圆点。 */
+.hcdr-back-to-top.is-home {
+  background: #ffffff;
+  color: #647083;
+  border-color: #dfe5f0;
+  box-shadow: 0 6px 18px rgba(36, 59, 112, 0.12);
+}
+
+.hcdr-back-to-top.is-home:hover {
+  color: #1d4ed8;
+  border-color: #1d4ed8;
+}
