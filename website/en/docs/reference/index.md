@@ -1,6 +1,6 @@
 ---
 title: Reference
-description: Terminology, support and compatibility scope, limitations and security recommendations, plus dedicated notes on CCE and OpenShift.
+description: FAQ, terminology, support and compatibility scope, limitations and security recommendations, plus dedicated notes on CCE and OpenShift.
 ---
 
 # Reference
@@ -10,6 +10,7 @@ This section collects **boundary** material: term definitions, validated combina
 ## Section contents
 
 <div class="hcdr-grid hcdr-grid-3">
+  <a class="hcdr-card" href="/en/docs/reference/faq"><b>FAQ</b><span>Where to look first for a given symptom, plus the misreadings that cost the most time.</span></a>
   <a class="hcdr-card" href="/en/docs/reference/glossary"><b>Glossary</b><span>Terms that recur in the platform, with a short definition.</span></a>
   <a class="hcdr-card" href="/en/docs/reference/support-scope"><b>Support and compatibility scope</b><span>Validated entry points and combinations, and paths that exist only in code.</span></a>
   <a class="hcdr-card" href="/en/docs/reference/limitations"><b>Limitations and security recommendations</b><span>What the product cannot do, and unsafe defaults that need attention after deployment.</span></a>

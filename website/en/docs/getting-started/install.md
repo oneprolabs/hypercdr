@@ -96,6 +96,16 @@ A passing `/healthz` only means the service started. A passing `/readyz` still d
 
 :::
 
+Acceptance has three parts; the itemised list is in [post-install checks](/en/docs/deployment/install#post-install-checks):
+
+| Part | Passes when |
+| --- | --- |
+| Host side | Edge, API, frontend, PostgreSQL, the registration executor and the upgrade executor are healthy, and `/readyz` returns `200` |
+| Browser side | The sign-in page opens, the captcha matches the install mode, and you can sign in and change the password |
+| Business side | The test cluster is online, the storage test passes, a restore point is produced, and an isolated drill succeeds |
+
+The first two only prove the control plane is alive; the third proves it can actually protect a workload.
+
 ## First sign-in
 
 Open `https://<host>:12443`. The initial account is `admin` with password `admin123`; **change it immediately after the first sign-in**. The login challenge is either an image captcha or Cloudflare Turnstile depending on the `--auth-challenge` choice; the mode in the install directory's `.env` is authoritative.

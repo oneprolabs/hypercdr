@@ -1,6 +1,6 @@
 ---
 title: 使用手册
-description: 按功能模块组织的 HyperCDR 操作说明：仪表盘、集群、存储、策略、应用容灾、任务、演练与 Agent 卸载。
+description: 按功能模块组织的 HyperCDR 操作说明：仪表盘、集群、存储、策略、应用容灾、任务、演练、接管与邮件服务。
 ---
 
 # 使用手册
@@ -18,7 +18,7 @@ description: 按功能模块组织的 HyperCDR 操作说明：仪表盘、集群
 5. 创建保护策略和应用保护配置；
 6. 执行一次同步或备份，确认生成可用恢复点；
 7. 在隔离环境执行 Drill，检查工作负载、PVC 和应用数据；
-8. 需要正式接管时走 Takeover，并在任务详情中完成验收。
+8. 需要正式接管时走 [Takeover](/docs/manual/takeover)，先看就绪度结论，再切换并完成业务验收。
 
 > 任务列表中的成功状态只表示平台侧执行流程结束。生产验收仍需检查 Pod、PVC、Service、应用健康状态和实际数据。
 
@@ -31,8 +31,10 @@ description: 按功能模块组织的 HyperCDR 操作说明：仪表盘、集群
 | [对象存储](/docs/manual/storage) | 配置备份数据的写入位置 | 可访问的 S3 兼容存储 |
 | [保护策略](/docs/manual/policies) | 定义备份计划与保留规则 | 存储已配置 |
 | [应用容灾保护](/docs/manual/application-dr) | 定义受保护应用与恢复目标 | 集群、存储、策略 |
-| [任务与恢复点](/docs/manual/tasks) | 查看备份执行结果 | 已触发的保护任务 |
+| [任务与恢复点](/docs/manual/tasks) | 查看备份执行结果，清理不再需要的恢复点 | 已触发的保护任务 |
 | [容灾演练](/docs/manual/drill) | 验证恢复点是否可用 | 存在可用恢复点 |
+| [正式接管](/docs/manual/takeover) | 把业务切换到目标集群 | 就绪度评估有结论、变更已审批 |
+| [邮件服务](/docs/manual/email-service) | 配置 SMTP，让邀请与找回密码邮件能发出 | 平台管理员账号 |
 | [卸载集群 Agent](/docs/manual/agent-uninstall) | 从平台下线集群 | Agent Namespace 可访问 |
 
 依赖顺序如下：

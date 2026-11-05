@@ -93,7 +93,14 @@ const manual: DefaultTheme.SidebarItem[] = [
       { text: '应用容灾保护', link: '/docs/manual/application-dr' },
       { text: '任务与恢复点', link: '/docs/manual/tasks' },
       { text: '容灾演练', link: '/docs/manual/drill' },
+      { text: '正式接管', link: '/docs/manual/takeover' },
       { text: '卸载集群 Agent', link: '/docs/manual/agent-uninstall' },
+    ],
+  },
+  {
+    text: '平台设置',
+    items: [
+      { text: '邮件服务', link: '/docs/manual/email-service' },
     ],
   },
 ]
@@ -113,6 +120,7 @@ const operations: DefaultTheme.SidebarItem[] = [
     text: '维护与排障',
     items: [
       { text: '故障排查', link: '/docs/operations/troubleshooting' },
+      { text: '诊断日志', link: '/docs/operations/logging' },
       { text: '构建与发布维护', link: '/docs/operations/release' },
     ],
   },
@@ -124,6 +132,7 @@ const reference: DefaultTheme.SidebarItem[] = [
     text: '参考',
     items: [
       { text: '参考总览', link: '/docs/reference/' },
+      { text: '常见问题', link: '/docs/reference/faq' },
       { text: '术语表', link: '/docs/reference/glossary' },
       { text: '支持与适配范围', link: '/docs/reference/support-scope' },
       { text: '限制与安全建议', link: '/docs/reference/limitations' },

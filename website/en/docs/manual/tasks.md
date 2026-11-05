@@ -31,6 +31,51 @@ Task details usually identify whether the problem is storage access, PVC/Storage
 
 :::
 
+## Progress and events {#task-events}
+
+Task details carry two kinds of information: **progress** (percentage, duration, start and end times) and the **event timeline** (what happened at each step). Diagnose from the timeline — the percentage is only an overview.
+
+![Progress, duration and start/end times in task details](/images/user-guide/task-summary.png)
+
+The progress in this screenshot comes from an already completed task, so it is not a live example. Three things are easy to misread:
+
+- **Cluster is the cluster that actually ran the task**, which may differ from the source cluster selected on the page — especially during cross-cluster recovery;
+- **Started / Completed are shown in your selected timezone**, which may not match the cluster node's local time;
+- When recording a problem, keep the task ID, type and time together, and do not splice events from different tasks.
+
+### Reading the events
+
+![The event timeline of a completed drill task](/images/user-guide/drill-events.png)
+
+A recovery task roughly emits events in this order:
+
+```text
+storage preflight → dispatched to the agent → agent accepted → waiting for recovery → workload readiness check → completed
+```
+
+| Event | Meaning | Usable as proof of success |
+| --- | --- | --- |
+| `accepted` | The agent received the task; recovery has not started | No |
+| `workload readiness changed` | The application readiness check changed | No — judge it together with pod and replica counts |
+| `completed` | The task reports resources restored and the application ready | Only for this restore point and this target |
+
+Historical events do not disappear when a task eventually succeeds. Seeing `ContainersNotReady` followed by Ready is a normal progression. Judge from later events and the final result, never from a single old waiting message.
+
+### What each of the four detail views shows
+
+| Entry | What to read |
+| --- | --- |
+| **Recovery Details** (DR → Application DR → Recovery Status) | The full recovery stage timeline; expanding a workload event shows the pod, node and waiting reason |
+| **Sync Details** (Sync Status on the same row) | Sync stages, the latest restore point and the next schedule |
+| **DR Configuration Details** | Storage preparation failures and retries |
+| **Task Details → Task events** | Platform, agent, Kubernetes and backend events |
+
+::: tip Task events are not raw component logs
+
+These events stop at "which step failed and what it reported". For resource-level troubleshooting, read the comm-agent, Velero or node-agent output in [diagnostic logs](/en/docs/operations/logging). `Technical payload` is technical data — not an operating procedure, and not something to paste without redaction.
+
+:::
+
 ## Common failure types
 
 | Error signature | Meaning | What to do |
@@ -50,6 +95,56 @@ Confirm in **Restore Points**:
 - The retention rule has not removed it.
 
 When the restore point count stops growing, first determine whether **tasks are failing** or **the retention rule is removing old points**.
+
+![Timestamps, repositories and sizes in the restore point list](/images/user-guide/restore-points.png)
+
+| Column | How to use it |
+| --- | --- |
+| Namespace | The namespace of the protected application; check it against the protected target before recovering |
+| Restore Point | Display name; timestamps use your selected timezone |
+| Repository | The storage repository holding the backup; it must still be reachable at recovery time |
+| Original Size | The original data size the page obtained — not the actual object-storage consumption |
+| Storage Size | Shows `Unknown` when the increment is unavailable; `Unknown` is not zero and does not by itself mean the backup failed |
+| Recovery Task | The associated recovery task and its state; having no recovery task does not make the restore point unusable |
+
+The screenshot shows part of the list — scroll horizontally for the columns further right. Before selecting a restore point, check the source cluster, namespace, time and repository; do not judge from the most recent row alone.
+
+## Deleting restore points
+
+Entry point: **DR → Restore Points → More → Delete Restore Points**.
+
+Deleting sends a Velero backup deletion request to the source cluster; it is not just hiding a row in the platform. Once deleted, that point in time can no longer be recovered.
+
+### When deletion is acceptable
+
+- Retention, audit and business recovery requirements have been confirmed and deletion is authorised;
+- The source cluster's agent and storage are reachable;
+- The restore point is no longer needed for current recovery or drill plans.
+
+### Steps
+
+1. Open **DR → Restore Points**, confirm the source cluster and select the restore points to delete.
+2. Open **More → Delete Restore Points** and check the selected count, restore point names, backup identifiers and timestamps in the confirmation window.
+3. If you are not deleting, select **Cancel**. Select **Delete from Velero** only once authorisation and scope are confirmed.
+4. **Velero deletion is running** means the request is still executing — wait for the result and do not click repeatedly.
+5. Check the task result and refresh the list to confirm the expected restore points are gone. On failure, keep the error and task identifier before investigating.
+
+![The restore point deletion confirmation window](/images/user-guide/restore-point-delete.png)
+
+### Fields in the confirmation window
+
+| Item | Meaning |
+| --- | --- |
+| Selected Restore Points | The restore points in this batch; check each one before a bulk delete |
+| Velero backup identifier | The identity of the associated backup on the source cluster, used for checking and troubleshooting. Long identifiers are truncated in the list — compare them together with the restore point timestamp, not just the first few characters |
+| Delete from Velero | Actually submits the deletion request; it is not clearing filters or deselecting |
+| Submitted / running / completed | Deletion is asynchronous: a successful submission does not mean the backup data is already gone |
+
+::: danger Do not substitute client-side cleanup for platform deletion
+
+If deletion fails, do not delete objects from the bucket by hand as a workaround. Platform records and backup data will then disagree, and later troubleshooting, drills and audits will all be misleading.
+
+:::
 
 ## Recovery prerequisites
 
@@ -79,4 +174,5 @@ A successful task does not mean the application is usable. At minimum check:
 ## Related
 
 - [DR drills](/en/docs/manual/drill)
+- [Formal takeover](/en/docs/manual/takeover)
 - [Troubleshooting](/en/docs/operations/troubleshooting)

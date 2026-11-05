@@ -71,5 +71,6 @@ Include: platform version, cluster type and version, reproduction steps, redacte
 ## Related
 
 - [Platform operations and upgrades](/en/docs/operations/platform)
+- [Diagnostic logs](/en/docs/operations/logging): trace a failure by Task ID or Request ID
 - [Velero restore cache](/en/docs/operations/restore-cache)
 - [Tasks and restore points](/en/docs/manual/tasks)

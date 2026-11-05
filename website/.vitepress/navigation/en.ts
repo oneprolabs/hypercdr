@@ -94,7 +94,14 @@ const manual: DefaultTheme.SidebarItem[] = [
       { text: 'Application disaster recovery', link: '/en/docs/manual/application-dr' },
       { text: 'Tasks and restore points', link: '/en/docs/manual/tasks' },
       { text: 'DR drills', link: '/en/docs/manual/drill' },
+      { text: 'Formal takeover', link: '/en/docs/manual/takeover' },
       { text: 'Uninstall a cluster agent', link: '/en/docs/manual/agent-uninstall' },
+    ],
+  },
+  {
+    text: 'Platform settings',
+    items: [
+      { text: 'Email service', link: '/en/docs/manual/email-service' },
     ],
   },
 ]
@@ -114,6 +121,7 @@ const operations: DefaultTheme.SidebarItem[] = [
     text: 'Maintenance and troubleshooting',
     items: [
       { text: 'Troubleshooting', link: '/en/docs/operations/troubleshooting' },
+      { text: 'Diagnostic logs', link: '/en/docs/operations/logging' },
       { text: 'Build and release maintenance', link: '/en/docs/operations/release' },
     ],
   },
@@ -125,6 +133,7 @@ const reference: DefaultTheme.SidebarItem[] = [
     text: 'Reference',
     items: [
       { text: 'Reference overview', link: '/en/docs/reference/' },
+      { text: 'FAQ', link: '/en/docs/reference/faq' },
       { text: 'Glossary', link: '/en/docs/reference/glossary' },
       { text: 'Support and compatibility scope', link: '/en/docs/reference/support-scope' },
       { text: 'Limitations and security recommendations', link: '/en/docs/reference/limitations' },

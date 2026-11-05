@@ -11,6 +11,8 @@ This page combines the base resources into one protection configuration: **which
 
 ## Three stages on the page
 
+![The three operational stages of application protection](/images/user-guide/protection-stages.png)
+
 | Stage | What it shows |
 | --- | --- |
 | Source applications | The source namespaces that can currently be protected, and their status |
@@ -21,10 +23,39 @@ This page combines the base resources into one protection configuration: **which
 
 1. Select the source namespaces (multiple selections allowed).
 2. Start the protection wizard.
-3. Select **scope, target, storage, policy** in that order.
+3. Select **scope, target, storage, policy** in that order. Scope has two modes, Default and Custom, described below.
 4. Confirm and save, then return to the list and check the protection status.
 
 If storage or a policy does not exist yet, create it in the wizard. The wizard and the management page use the same creation UI; on success the page reloads with the new record selected.
+
+## Resource scope: Default and Custom {#resource-scope}
+
+**Scope** in the wizard decides which resources enter backup and recovery. There are two modes:
+
+| Mode | What you select | Fits when |
+| --- | --- | --- |
+| Default | The complete backup scope of the namespace | Most cases; no need to pick types |
+| Custom | Resource types selected within the current namespace | You need only some types, or must exclude specific ones |
+
+### How Custom behaves
+
+- It lists only the resource types that **currently have objects** in the selected namespace, along with object counts and a type classification;
+- Every row is independently selectable and selected initially;
+- Cluster-scoped resources are never added to your custom selection;
+- Protecting several namespaces at once uses the complete backup scope and does not offer Custom. For per-type granularity across namespaces, split the plan into separate protection configurations.
+
+Opening Custom shows the last successful scan immediately and refreshes in the background. A failed refresh does not reset your selection back to Default, and does not discard what you already ticked.
+
+::: warning Dependency checks are not a backup-scope guarantee
+
+Custom answers one question only: which namespace resource types enter the backup or restore scope. Whether the target environment can absorb them belongs to the readiness assessment before a [takeover](/en/docs/manual/takeover), not to this setting.
+
+:::
+
+Two things that are easy to misread:
+
+- **An empty result does not mean there are no resources.** An empty scan clears that namespace's cached entries; catalogs for other namespaces stay available.
+- **Event and platform-managed aggregated APIs do appear in the list.** They carry a visible classification so you can exclude them explicitly; the platform never removes them silently by API group or resource name.
 
 ## Protection modes for multiple namespaces
 
@@ -70,4 +101,5 @@ Saving only means the configuration was written to the database. For it to take 
 - [Protection policies](/en/docs/manual/policies)
 - [Tasks and restore points](/en/docs/manual/tasks)
 - [DR drills](/en/docs/manual/drill)
+- [Formal takeover](/en/docs/manual/takeover): readiness assessment and resource mapping
 - [Core concepts](/en/docs/product/concepts): how the objects relate to each other

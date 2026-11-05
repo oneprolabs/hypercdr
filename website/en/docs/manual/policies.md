@@ -19,6 +19,29 @@ A policy defines two things: **when backups run** and **how long restore points 
 
 You can create a policy on the Policies management page or in the protection wizard; both use the same creation UI.
 
+## Fields in the creation window {#fields}
+
+![The protection policy creation window](/images/user-guide/policy-new.png)
+
+| Field | Meaning |
+| --- | --- |
+| Policy Name | Identifies and selects the policy; include the service tier, frequency or retention requirement |
+| Schedule + Retention | Configures both the schedule and restore point retention — the combination the page recommends |
+| Schedule Only | Defines the schedule only; do not assume a retention rule is set |
+| Retention Only | Defines the restore point lifecycle only, and produces no scheduled backups by itself |
+| Interval | Sets the interval in minutes or hours |
+| Daily / Weekly / Monthly Backup | Sets a daily, weekly or monthly schedule; check the timezone shown on the page before saving |
+| Restore Point Quota | The quota on retained restore points; every retained point counts toward it |
+| Automatic Retention / Add Rule | Adds an optional automatic retention rule; without one, the quota replaces the oldest eligible restore point once full |
+
+The 5 minutes and 7 restore points in the screenshot are the form's current values, not a recommendation. Choose parameters from your data change rate, storage capacity and recovery objective.
+
+::: danger Configuring only half causes problems
+
+**Schedule Only**: backups keep running with no cleanup rule, so storage grows without bound. **Retention Only**: there is a cleanup rule but no scheduled job, so no new restore points appear. Configure both.
+
+:::
+
 ## Retention rules and capacity estimates
 
 The retention rule directly determines storage consumption. Estimate capacity as follows:

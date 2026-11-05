@@ -1,6 +1,6 @@
 ---
 title: 参考
-description: 术语、支持与适配范围、限制与安全建议，以及 CCE、OpenShift 专项说明。
+description: 常见问题、术语、支持与适配范围、限制与安全建议，以及 CCE、OpenShift 专项说明。
 ---
 
 # 参考
@@ -10,6 +10,7 @@ description: 术语、支持与适配范围、限制与安全建议，以及 CCE
 ## 本板块内容
 
 <div class="hcdr-grid hcdr-grid-3">
+  <a class="hcdr-card" href="/docs/reference/faq"><b>常见问题</b><span>按现象查起手位置，附几个常见的判断误区。</span></a>
   <a class="hcdr-card" href="/docs/reference/glossary"><b>术语表</b><span>平台中反复出现的名词及简要说明。</span></a>
   <a class="hcdr-card" href="/docs/reference/support-scope"><b>支持与适配范围</b><span>已验证的入口与组合，以及仅在代码中存在的路径。</span></a>
   <a class="hcdr-card" href="/docs/reference/limitations"><b>限制与安全建议</b><span>技术上无法实现的行为，以及部署后需要调整的不安全默认值。</span></a>

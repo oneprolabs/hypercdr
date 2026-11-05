@@ -1,6 +1,6 @@
 ---
 title: Operation manual
-description: "HyperCDR tasks organised by module: dashboard, clusters, storage, policies, application DR, tasks, drills and agent removal."
+description: "HyperCDR tasks organised by module: dashboard, clusters, storage, policies, application DR, tasks, drills, takeover and the email service."
 ---
 
 # Operation manual
@@ -18,7 +18,7 @@ For a first setup, configure in this order:
 5. Create a protection policy and an application protection configuration.
 6. Run one sync or backup and confirm that a usable restore point is produced.
 7. Run a drill in an isolated environment and check workloads, PVCs and application data.
-8. When a real takeover is required, use Takeover and complete acceptance in the task details.
+8. When a real takeover is required, run a [takeover](/en/docs/manual/takeover): read the readiness verdict first, then switch and complete business validation.
 
 > A success status in the task list only means the platform-side flow has finished. Production acceptance still requires checking Pods, PVCs, Services, application health and the actual data.
 
@@ -31,8 +31,10 @@ For a first setup, configure in this order:
 | [Object storage](/en/docs/manual/storage) | Configure where backup data is written | Reachable S3-compatible storage |
 | [Protection policies](/en/docs/manual/policies) | Define backup schedules and retention rules | Storage configured |
 | [Application DR](/en/docs/manual/application-dr) | Define protected applications and recovery targets | Clusters, storage, policy |
-| [Tasks and restore points](/en/docs/manual/tasks) | Review backup results | A protection task already triggered |
+| [Tasks and restore points](/en/docs/manual/tasks) | Review backup results and clean up restore points you no longer need | A protection task already triggered |
 | [DR drills](/en/docs/manual/drill) | Verify that a restore point is usable | A usable restore point |
+| [Formal takeover](/en/docs/manual/takeover) | Switch the business to the target cluster | A readiness verdict and an approved change |
+| [Email service](/en/docs/manual/email-service) | Configure SMTP so invitation and password recovery emails go out | A platform administrator account |
 | [Remove a cluster agent](/en/docs/manual/agent-uninstall) | Take a cluster off the platform | Agent namespace reachable |
 
 Dependencies run in this order:

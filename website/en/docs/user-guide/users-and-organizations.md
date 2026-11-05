@@ -1,6 +1,6 @@
 ---
 title: "Users, organizations and platform permissions"
-description: "Account ownership, organization isolation, Settings menu permissions, invitation and deletion rules, and bound email handling."
+description: "Account ownership, organization isolation, Settings menu permissions, sign-in and personal security, invitation and deletion rules, and bound email handling."
 ---
 
 # Users, organizations and platform permissions
@@ -59,6 +59,56 @@ Rules:
 - For a non-email sign-in account such as `admin`, enter a new email in Personal Information → Bound email and verify the current password; the system sends a confirmation link valid for 30 minutes, and the old email stays effective until confirmation. A new request replaces the old link, and a link can be used only once.
 - A verified email from Google registration becomes the sign-in account and the bound email directly, with no edit option; the Google link is identified by provider subject.
 - The old `admin_recovery_email` table and its dedicated API are removed; no separate administrator recovery address is maintained.
+
+## Sign-in and personal security {#personal-security}
+
+### The sign-in page
+
+Open `https://<control-plane address>:12443`, enter your account and password, complete the challenge, and you land on the Dashboard.
+
+| Element | Meaning |
+| --- | --- |
+| Email or login account | Your login account, or a bound email address |
+| Password | Your current password; never let it appear in a screenshot or ticket |
+| Verification Code | The image captcha field, case-insensitive for letters |
+| Create an account | Only appears when public sign-up is enabled; private deployments may hide it |
+| Forgot password | Requires the email service to be configured, otherwise nothing is delivered |
+
+- The image captcha is four digits or letters, and letters are case-insensitive;
+- If Turnstile fails, check the site configuration, the allowed hosts and the browser's outbound network;
+- A self-signed certificate triggers a browser warning; production should use a trusted certificate;
+- If sign-in succeeds but no business menus appear, check the account state and organization membership — do not edit the URL to bypass permissions.
+
+### Personal information
+
+**Settings → Personal Information** shows your login account, organization, role and bound email. **Edit profile** changes only the display name.
+
+| Field | Meaning |
+| --- | --- |
+| Name | The display name inside the organization, distinct from the login account |
+| Login account | Your current login identity; renaming does not change it |
+| Bound email | Used for password recovery and similar mail; bind and verify it first if empty |
+| Organization / Role | Your current organization and permission identity; personal information cannot switch organizations |
+
+Binding an email happens on the personal information page — see [sign-in account and bound email](#bound-email) above for the rules. Do not change someone else's email from the user management window.
+
+### Changing the password
+
+1. Open **Settings → Sign-in & Security** and select **Change password**.
+2. Enter the current and new password as the page requires: at least 8 characters, not shared with other services.
+3. Complete email verification or sign in again as prompted, and confirm the change took effect.
+
+Afterwards, confirm you can still sign in the way you expect. **Do not change a real account's password just to take a screenshot.**
+
+### Google sign-in
+
+When Google sign-in is not configured, the security page shows a not-configured notice — that is normal and does not indicate an account problem. To enable it, an administrator configures the OAuth credentials on the deployment side, and the callback must be the real origin plus `/api/v1/saas/auth/google/callback`.
+
+::: danger Keep credentials out of shared material
+
+Account passwords, email verification codes and password recovery links must never appear in documentation, screenshots or tickets.
+
+:::
 
 ## Structural changes during development {#dev-notes}
 

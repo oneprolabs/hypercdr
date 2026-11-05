@@ -27,6 +27,29 @@ A successful task only means the backup flow finished. A drill verifies whether 
 - [ ] The target scope is isolated and will not touch production resources
 - [ ] The restore cache preflight passes (see below)
 
+## Choosing the drill target {#target}
+
+![Target cluster and recovery mode in the drill wizard](/images/user-guide/drill-target.png)
+
+The wizard runs in four steps: **Restore Point → Target → Restore Options → Review**.
+
+| Option | Meaning and risk |
+| --- | --- |
+| Target cluster | The cluster that actually runs the recovery; do not judge from whether the source cluster is online |
+| Clone to new namespace | Recovers into a new namespace; prefer this for an isolated drill, and confirm the namespace is not used by production |
+| Full restore to original namespace | Recovers into the same-named namespace on the target, which may conflict with existing resources; not a default choice for an isolated drill |
+| Target namespace | The destination in clone mode; the `demo-nextcloud-drill` in the example is only the form's current value |
+
+On the Restore Point step, confirm the status is Available and check the source cluster, namespace and backup time.
+
+::: danger The name "drill" does not guarantee isolation
+
+A task called Drill is not automatically isolated. Before submitting, check the recovery mode, target cluster and namespace. Choosing the original namespace means the drill directly affects workloads already running on the target.
+
+:::
+
+Opening the wizard or selecting **Next** does not submit anything; the task is only dispatched after **Review**.
+
 ## Restore cache preflight
 
 Before the drill submits the restore, the agent reads the actual ConfigMap and StorageClass to run a preflight:

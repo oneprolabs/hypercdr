@@ -27,6 +27,29 @@ description: 在隔离环境中验证恢复点可用性，包括恢复缓存预�
 - [ ] 目标范围已隔离，不会涉及生产资源
 - [ ] 恢复缓存预检通过（见下文）
 
+## 选择演练目标 {#target}
+
+![Drill 向导中的目标集群与恢复模式](/images/user-guide/drill-target.png)
+
+向导按 **Restore Point → Target → Restore Options → Review** 四步走。
+
+| 选项 | 说明与风险 |
+| --- | --- |
+| Target cluster | 实际执行恢复的目标集群，不能只看源集群是否在线 |
+| Clone to new namespace | 恢复到新 Namespace；隔离演练优先用这个，并确认该 Namespace 没有被生产使用 |
+| Full restore to original namespace | 恢复到目标集群的同名 Namespace，可能和现有资源冲突，不该作为隔离演练的默认选择 |
+| Target namespace | 克隆模式下的目标命名空间；示例里的 `demo-nextcloud-drill` 只是表单当前值 |
+
+Restore Point 页要确认状态为 Available，并核对源集群、Namespace 和备份时间。
+
+::: danger Drill 这个名字不保证隔离
+
+叫 Drill 不代表目标自动隔离。提交前必须核对恢复模式、目标集群和 Namespace。选成原 Namespace 时，演练会直接影响目标端已有的工作负载。
+
+:::
+
+进入向导、点 **Next** 都不代表已经提交任务，**Review** 之后才真正下发。
+
 ## 恢复缓存预检
 
 演练提交恢复之前，Agent 会读取实际 ConfigMap 和 StorageClass 执行预检：

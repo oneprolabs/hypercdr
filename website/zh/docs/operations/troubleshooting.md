@@ -71,5 +71,6 @@ sudo journalctl -u hypercdr-upgrade-runner.service -n 100 --no-pager
 ## 相关
 
 - [平台运维与升级](/docs/operations/platform)
+- [诊断日志](/docs/operations/logging)：按 Task ID、Request ID 定位失败链路
 - [Velero 恢复缓存](/docs/operations/restore-cache)
 - [任务与恢复点](/docs/manual/tasks)

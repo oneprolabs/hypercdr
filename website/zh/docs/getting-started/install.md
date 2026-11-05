@@ -96,6 +96,16 @@ Edge、API、前端、PostgreSQL、注册执行器和升级执行器都应处于
 
 :::
 
+验收分三段，逐项清单见[安装后验收](/docs/deployment/install#post-install-checks)：
+
+| 阶段 | 通过标准 |
+| --- | --- |
+| 主机侧 | Edge、API、前端、PostgreSQL、注册执行器、升级执行器均健康，`/readyz` 返回 `200` |
+| 浏览器侧 | 登录页可打开、验证码与安装时的模式一致、能登录并改密 |
+| 业务侧 | 测试集群 online、存储连接测试通过、产出恢复点、隔离 Drill 成功 |
+
+前两段只证明控制台活着，第三段才证明它真能保护业务。
+
 ## 首次登录
 
 浏览器打开 `https://<host>:12443`，初始账号 `admin`，初始密码 `admin123`，**首次登录后必须修改密码**。登录挑战可能是图片验证码或 Cloudflare Turnstile，取决于安装时的 `--auth-challenge` 选择，实际模式以安装目录 `.env` 为准。

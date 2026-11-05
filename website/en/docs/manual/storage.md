@@ -32,6 +32,29 @@ The protection wizard and the management page use the same creation UI. After a 
 
 :::
 
+## Fields in the creation window {#fields}
+
+![The object storage repository creation window](/images/user-guide/storage-new.png)
+
+The screenshot shows the empty creation window before credentials are entered. Available fields differ by storage type; the table below uses S3 Compatible as the example.
+
+| Field | Meaning |
+| --- | --- |
+| Name | The repository name shown inside the control plane |
+| Type | The object storage types supported by this release |
+| Endpoint | The service address; note whether TLS and a path form are required |
+| Bucket | The bucket that holds backup data |
+| Region | Required by some backends |
+| SSL/TLS | Whether to use an encrypted connection; must match the endpoint protocol and the server certificate setup |
+| URL Style | Path puts the bucket in the request path; Virtual-host puts it in the hostname. Follow the storage provider's requirement |
+| Access / Secret key | Credentials with read, write and list permissions |
+
+::: warning How a wrong URL Style shows up
+
+It rarely reports "invalid configuration". Instead the connection test fails, or objects land somewhere you did not expect. Follow the provider's requirement rather than guessing by trial.
+
+:::
+
 ## Verifying storage usability
 
 A successful save only means the configuration was written to the database. The following checks confirm usability:

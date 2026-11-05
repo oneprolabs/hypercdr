@@ -7,6 +7,10 @@ description: How the platform overview differs from the cluster overview, how to
 
 The default page after signing in. It helps you spot **what is wrong** quickly, and does not replace the task list or the logs.
 
+![Protection activity, task trends and cluster state in the platform overview](/images/overview/dashboard-149.png)
+
+The screenshot is from the 149 environment; the numbers and cluster names are examples. Read the cluster selector and time range in the top-left corner first, then the individual metrics.
+
 ## Two views
 
 The dashboard separates the **platform overview** from the **selected cluster overview**:

@@ -1,6 +1,6 @@
 ---
 title: 安装详解
-description: HyperCDR 安装参数、非交互安装、验证码模式、离线包、升级回滚、卸载与安装故障定位。
+description: HyperCDR 安装参数、非交互安装、验证码模式、界面判读、安装后验收、离线包、升级回滚、卸载与故障定位。
 ---
 
 # 安装详解
@@ -76,6 +76,32 @@ Release 包可以附带 Turnstile Site Key 和 Secret Key。交互安装选择 `
 
 截图来自 149 开发环境，生产环境应使用正式地址和受信任证书。
 
+## 安装界面与结果判读
+
+安装过程中不要只看最后一行输出就下结论。脚本的每一段输出对应一个阶段，认错会被「取消」或「预览」骗过去，以为已经装好了。
+
+| 输出或界面 | 含义 | 下一步 |
+| --- | --- | --- |
+| Selected release version | 目标版本已确定 | 核对版本、访问地址、安装目录和确认提示 |
+| Continue installation? | 正在等人工确认 | 确认无误后输入 `y`；否则取消 |
+| Installation cancelled | 本次安装已取消 | 改参数后重新执行，不必卸载原环境 |
+| Downloading / Extracting | 正在下载或解压安装包 | 等到结束并检查错误，此时服务还没就绪 |
+| Dry run | 本地安装器只预览参数 | 核对后决定是否真正执行 |
+| 登录页可访问 | Web 入口可用 | 继续验证认证方式和实际登录 |
+| Current version | 平台当前报告的运行版本 | 结合服务状态、`/readyz` 和业务验收核对 |
+
+![安装器显示版本、访问地址、安装目录并等待确认](/images/installation/installer-confirmation.png)
+
+![选择不继续后，安装器显示取消结果](/images/installation/installer-cancelled.png)
+
+![本地安装器的参数预览输出，不是完整安装过程](/images/installation/local-package-preview.png)
+
+::: warning 取消和预览都不是安装成功
+
+`Installation cancelled` 和 dry run 都是正常的中间状态，不能当作「已装好」。真正的完成判据是服务健康、`/readyz` 返回 200、浏览器能登录并改密 —— 见下面[安装后验收](#post-install-checks)。
+
+:::
+
 ## 离线安装
 
 先在联网且已认证的发布环境下载对应 Release 资产及校验文件：
@@ -139,6 +165,54 @@ sudo /var/lib/hypercdr/uninstall.sh --purge-data --remove-images --execute
 
 平台通常由 Edge、蓝/绿 API、蓝/绿前端、PostgreSQL、注册执行器和升级执行器组成。控制台使用 `12443`，产品文档站独立部署。历史安装包可能包含使用 `12445` 的旧门户，升级前应核对所选版本说明及端口占用。
 
+## 安装后验收 {#post-install-checks}
+
+安装脚本正常退出只代表部署流程跑完了。验收要分两段：先确认入口和主机侧服务，再走一遍业务配置。
+
+### 浏览器侧
+
+| 检查对象 | 正常结果与边界 |
+| --- | --- |
+| 地址与证书 | 用规划中的平台地址访问，证书名称和信任链符合部署要求 |
+| 图片验证码 / Turnstile | 与安装时的 `--auth-challenge` 选择一致，能完成挑战 |
+| 登录 | 有效账号能进入 Dashboard，不卡在错误或验证状态 |
+| 页面版本 | 平台升级页显示的当前版本与本次安装的目标版本一致 |
+
+![安装后在平台升级页核对当前版本](/images/installation/installed-version.png)
+
+图中的 **Current version** 是平台自己报告的运行版本。在既有环境上截的图只能说明页面读到了这个值，不能单独证明一次新安装已经完成。
+
+### 主机侧
+
+```bash
+cd /var/lib/hypercdr
+sudo docker compose --env-file .env -f docker-compose.yaml ps
+sudo systemctl status hypercdr.service hypercdr-upgrade-runner.service --no-pager
+curl -fsS -o /dev/null -w 'ready=%{http_code}\n' https://platform.example.com:12443/readyz
+```
+
+Edge、API、前端、PostgreSQL、注册执行器和升级执行器都应健康，`/readyz` 返回 `200`。
+
+`curl -k` 只适合在隔离环境里测自签名证书的连通性，它**不验证证书信任**；正式环境装好受信任证书后要去掉 `-k`。`systemctl` 只在使用 systemd 的主机上适用。
+
+::: warning `/readyz` 通过不等于能恢复
+
+就绪接口只说明控制台自身可以服务请求。对象存储、Agent 注册、真实备份和恢复任务都还没验证过。
+
+:::
+
+### 业务侧七步
+
+1. 访问 `https://<host>:12443`，确认登录页、验证码和安装时选择的认证模式一致。
+2. 用初始管理员登录后**立即改密**，再检查 **Settings → Access & Sign-in** 里的平台访问地址。
+3. 注册一个测试集群，确认 Agent online、节点与 Namespace 清单已上报、inventory 能刷新。
+4. 创建对象存储并执行 **Test Storage Connection**。
+5. 创建最小测试策略，执行一次同步，确认生成恢复点并检查任务详情。
+6. 在隔离 Namespace 执行一次 Drill，验证工作负载、PVC 和应用数据。
+7. 需要邮件功能时，先在 **Settings → Email Service** 配好 SMTP 并发送测试邮件，否则邀请和找回密码都发不出去。
+
+七步走完才算「装好」。前两步只能证明控制台活着。
+
 ## 常见问题与故障定位
 
 | 现象 | 优先检查 |
@@ -156,7 +230,8 @@ sudo /var/lib/hypercdr/uninstall.sh --purge-data --remove-images --execute
 
 ## 后续步骤
 
-- 安装后的完整验收流程：[首次使用](/docs/user-guide/first-use)
+- 安装后的浏览器、主机侧与业务侧验收：[安装后验收](#post-install-checks)
+- 从零走一遍完整业务链路：[首次使用](/docs/user-guide/first-use)
 - 配置项与验证码模式：[配置参考](/docs/deployment/configuration)
 - 更换访问地址：[更改平台访问地址](/docs/deployment/configuration#access-url)
 - 安装后出现问题：[故障排查](/docs/operations/troubleshooting)

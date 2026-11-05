@@ -1,6 +1,6 @@
 ---
 title: Install in detail
-description: "HyperCDR install parameters, non-interactive installs, captcha modes, offline packages, upgrade, rollback, uninstall and install troubleshooting."
+description: "HyperCDR install parameters, non-interactive installs, captcha modes, reading installer output, post-install checks, offline packages, upgrade, rollback, uninstall and install troubleshooting."
 ---
 
 # Install in detail
@@ -76,6 +76,32 @@ An unreachable Cloudflare endpoint at runtime does not switch to the image captc
 
 The screenshot comes from the 149 development environment. Production should use the real address and a trusted certificate.
 
+## Reading the installer output
+
+Do not judge the result from the last line of output. Every block corresponds to a stage, and mixing them up is how an operator mistakes "cancelled" or "preview" for "installed".
+
+| Output or screen | Meaning | What to do next |
+| --- | --- | --- |
+| Selected release version | The target version is fixed | Verify version, access URL, install directory and the confirmation prompt |
+| Continue installation? | Waiting for a human decision | Type `y` once everything is correct; otherwise cancel |
+| Installation cancelled | This install was cancelled | Fix the parameters and run again — no need to uninstall the old environment |
+| Downloading / Extracting | Downloading or unpacking the package | Wait for it to finish and watch for errors; services are not ready yet |
+| Dry run | The local installer only previews parameters | Review, then decide whether to actually execute |
+| Sign-in page reachable | The web entry point responds | Continue by validating the challenge mode and a real sign-in |
+| Current version | The runtime version the platform reports | Cross-check against service health, `/readyz` and business acceptance |
+
+![The installer showing version, access URL and install directory while waiting for confirmation](/images/installation/installer-confirmation.png)
+
+![The installer reporting a normal cancellation after declining to continue](/images/installation/installer-cancelled.png)
+
+![Parameter preview output from the local installer — not a complete installation](/images/installation/local-package-preview.png)
+
+::: warning Cancelled and preview are not success
+
+`Installation cancelled` and a dry run are normal intermediate states, never proof of a finished install. The real criteria are healthy services, `/readyz` returning 200, and a browser that can sign in and change the password — see [post-install checks](#post-install-checks).
+
+:::
+
 ## Offline installation
 
 First download the matching release assets and checksum file from a networked, authenticated release environment:
@@ -139,6 +165,54 @@ The installer prepares TLS files, random runtime secrets, Compose configuration,
 
 The platform usually consists of Edge, blue/green API, blue/green frontend, PostgreSQL, the registration executor and the upgrade runner. The control plane uses `12443`; the documentation site is deployed independently. Historical installer packages may include the legacy portal on `12445`; before upgrading, check the release notes of the selected version and the port usage.
 
+## Post-install checks {#post-install-checks}
+
+The installer exiting cleanly only means the deployment flow finished. Acceptance runs in three parts: the entry point and host services first, then one pass through the business configuration.
+
+### Browser side
+
+| Check | Expected result and limits |
+| --- | --- |
+| Address and certificate | The platform is reachable at the planned address, and the certificate name and chain match the deployment requirements |
+| Image captcha / Turnstile | Matches the `--auth-challenge` choice made during the install, and the challenge can be completed |
+| Sign-in | A valid account reaches the Dashboard and does not stall on an error or challenge state |
+| Page version | The current version shown on the platform upgrade page matches the version installed |
+
+![Checking the current version on the platform upgrade page after installing](/images/installation/installed-version.png)
+
+**Current version** is the runtime version the platform reports. A screenshot taken on an existing environment only shows that the page reads this value; on its own it does not prove a new installation completed.
+
+### Host side
+
+```bash
+cd /var/lib/hypercdr
+sudo docker compose --env-file .env -f docker-compose.yaml ps
+sudo systemctl status hypercdr.service hypercdr-upgrade-runner.service --no-pager
+curl -fsS -o /dev/null -w 'ready=%{http_code}\n' https://platform.example.com:12443/readyz
+```
+
+Edge, API, frontend, PostgreSQL, the registration executor and the upgrade executor should all be healthy, and `/readyz` should return `200`.
+
+`curl -k` is only for checking connectivity against a self-signed certificate in an isolated environment — it does **not** validate trust. Remove `-k` once a trusted certificate is installed. `systemctl` applies only to hosts running systemd.
+
+::: warning A passing `/readyz` does not mean recovery works
+
+The readiness endpoint only proves the control plane can serve requests. Object storage, agent registration, real backups and real recovery tasks remain unverified.
+
+:::
+
+### Seven business steps
+
+1. Open `https://<host>:12443` and confirm the sign-in page, the captcha and the authentication mode match the install.
+2. Sign in as the initial administrator, **change the password immediately**, then check the platform address under **Settings → Access & Sign-in**.
+3. Register a test cluster and confirm the agent is online, node and namespace inventories were reported, and the inventory refreshes.
+4. Create object storage and run **Test Storage Connection**.
+5. Create a minimal test policy, run one sync, confirm a restore point is produced, and check the task details.
+6. Run a drill in an isolated namespace and validate workloads, PVCs and application data.
+7. If email is needed, configure SMTP under **Settings → Email Service** and send a test message — otherwise invitations and password recovery cannot be delivered.
+
+Only after all seven steps is the platform accepted. The first two only prove the control plane is alive.
+
 ## Common issues and troubleshooting
 
 | Symptom | Check first |
@@ -156,7 +230,8 @@ The platform usually consists of Edge, blue/green API, blue/green frontend, Post
 
 ## Next steps
 
-- Full acceptance after the install: [First use](/en/docs/user-guide/first-use)
+- Browser, host and business checks after installing: [Post-install checks](#post-install-checks)
+- Walk the full business flow from scratch: [First use](/en/docs/user-guide/first-use)
 - Configuration items and captcha modes: [Configuration reference](/en/docs/deployment/configuration)
 - Change the access address: [Change the platform access address](/en/docs/deployment/configuration#access-url)
 - Problems after the install: [Troubleshooting](/en/docs/operations/troubleshooting)
