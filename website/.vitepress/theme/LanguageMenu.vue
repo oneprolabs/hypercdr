@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useSiteLanguages } from './useSiteLanguages'
+import { rememberLocale } from './useLocalePreference'
 
 /**
  * 首页的语言下拉。
@@ -22,6 +23,12 @@ const trigger = ref<HTMLButtonElement | null>(null)
 
 function close() {
   open.value = false
+}
+
+/** 首页的下拉是整页跳转，必须在离开前记下选择，否则首屏脚本还会再分流一次 */
+function choose(code: string) {
+  rememberLocale(code)
+  close()
 }
 
 function handlePointerDown(event: PointerEvent) {
@@ -69,7 +76,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', handlePointerD
         :href="item.href"
         :hreflang="item.hreflang"
         :lang="item.hreflang"
-        @click="close"
+        @click="choose(item.code)"
       >{{ item.title }}</a>
     </div>
   </div>

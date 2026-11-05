@@ -1,12 +1,19 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import DefaultTheme from 'vitepress/theme'
 import { useData } from 'vitepress'
 import HomeLanding from './HomeLanding.vue'
 import BackToTop from './BackToTop.vue'
+import { rememberLocale } from './useLocalePreference'
 
-const { frontmatter } = useData()
+const { frontmatter, localeIndex } = useData()
 const isHome = computed(() => frontmatter.value.layout === 'hcdr-home')
+
+/**
+ * 文档站的语言切换走前端路由，不会整页重载，所以在语言变化时补记一次偏好。
+ * 首页的语言下拉是整页跳转，由 LanguageMenu 自己在点击时记录。
+ */
+watch(localeIndex, (next) => rememberLocale(next))
 </script>
 
 <template>
