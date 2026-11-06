@@ -33,6 +33,8 @@ import {
 } from '../recovery/types';
 import { isActiveTaskStatus, isCompletedTaskStatus, isFailedStatus, isSucceededStatus, taskHasWarning } from '../recovery/task-status';
 import { selectPointedPlanTask } from '../recovery/plan-task-selection';
+import { preferTaskSnapshot } from '../recovery/progress-snapshot';
+import { protectionCleanupBlockingTasks } from '../recovery/protection-cleanup-guard';
 import {
   TaskErrorDetailBlock, TaskErrorStatus, TaskFinalResult, TaskOriginLabel, TaskProcessTimeline,
   canRetryDrActivation, drStatusForPlan, formatAge, formatBytes, formatBytesPerSecond,
@@ -513,7 +515,7 @@ export default function ApplicationDrPage(props: {
         ? plan?.latestRecoveryTaskId
         : '';
     const selected = selectPointedPlanTask(matching, latestTaskId);
-    return selected ? refreshedDrTasks[selected.id] || selected : undefined;
+    return selected ? preferTaskSnapshot(refreshedDrTasks[selected.id], selected) : undefined;
   };
   const recoveryTaskForUnit = (app: AppItem) => taskForUnit(recoveryTasks, app, ['restore', 'drill', 'takeover']);
   useEffect(() => {
@@ -1578,6 +1580,12 @@ export default function ApplicationDrPage(props: {
     .filter((app): app is AppItem => Boolean(app));
   const selectedRunNotReadyRows = selectedRunRows.filter(app => !isProtectionPlanReady(protectionPlanForApp(app)?.status));
   const selectedRunHasCleanupRunning = selectedRunRows.some(app => isProtectionPlanCleaning(protectionPlanForApp(app)?.status));
+  const selectedCleanupBlockingTasks = protectionCleanupBlockingTasks(
+    selectedRunRows.map(app => app.protectionPlanId || '').filter(Boolean),
+    [...platformTasks, ...Object.values(syncTasks), ...Object.values(recoveryTasks), ...Object.values(submittingSyncTasks), ...Object.values(refreshedDrTasks)],
+  );
+  const selectedRunHasActiveTasks = selectedCleanupBlockingTasks.length > 0;
+  const cleanupBlockedReason = 'Protection plan has tasks in progress. Wait for them to finish before cleanup.';
   const selectedRunActiveSyncTasks = selectedRunRows
     .map(row => taskForUnit(syncTasks, row))
     .filter((task): task is ApiTask => Boolean(task?.id && isActiveTaskStatus(task.status)));
@@ -2217,6 +2225,10 @@ export default function ApplicationDrPage(props: {
     warmWizardResourceCatalog(selectedApp);
   };
   const deleteDrConfiguration = async () => {
+	if (selectedRunHasActiveTasks) {
+		toast(cleanupBlockedReason);
+		return;
+	}
 	if (cleanupSubmittingRef.current) return;
     if (selectedRunApps.length === 0) {
       toast('Select applications to cleanup resources');
@@ -2835,7 +2847,7 @@ export default function ApplicationDrPage(props: {
                             <Trash2 size={14} className="text-amber-500" />Cleanup Drill
                           </button>
                           <button
-                            disabled={selectedRunApps.length === 0 || selectedRunHasCleanupRunning}
+                            disabled={selectedRunApps.length === 0 || selectedRunHasCleanupRunning || selectedRunHasActiveTasks}
                             onClick={() => {
                               setAppBulkMenuOpen(false);
                               setOperationConfirm('remove-config');
@@ -2961,7 +2973,7 @@ export default function ApplicationDrPage(props: {
                     <p>Delete drill namespace <strong>{String(selectedRunDrillTask?.payload?.targetNamespace || '-')}</strong> from target cluster <strong>{selectedRunDrillTask?.payload?.targetClusterName || selectedRunRows[0]?.targetCluster || 'configured target'}</strong>. The DR configuration, policy, restore points, source namespace, and object-storage data are retained.</p>
                   )}
                   {operationConfirm === 'remove-config' && (
-                    <p>Scheduled sync, restore points, this plan, and its object-storage data will be deleted. Existing drill or takeover workloads are not deleted.</p>
+                    <p>Scheduled sync, restore points (including retained points), this plan, and its object-storage data will be deleted. Cleanup is blocked while tasks are in progress. Existing drill or takeover workloads are not deleted.</p>
                   )}
                 </div>
                 {operationConfirm === 'remove-config' && <p className="mt-4 text-xs font-semibold leading-5 text-slate-500">Clean up drill resources first if they are no longer required.</p>}
@@ -2970,6 +2982,7 @@ export default function ApplicationDrPage(props: {
                 <button type="button" onClick={() => setOperationConfirm(null)}>Cancel</button>
                 <button
                   type="button"
+                  disabled={operationConfirm === 'remove-config' && (selectedRunHasActiveTasks || selectedRunHasCleanupRunning)}
                   className="!bg-rose-600 !text-white hover:!bg-rose-700"
                   onClick={() => {
                     const action = operationConfirm;

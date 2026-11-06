@@ -2935,6 +2935,10 @@ func (c *Client) buildVolumeProgressPayload(ctx context.Context, object kube.App
 	for _, item := range progress.Items {
 		items = append(items, map[string]any{
 			"kind":             item.Kind,
+			"volume":           item.Volume,
+			"pod":              item.Pod,
+			"namespace":        item.Namespace,
+			"startedAt":        item.StartedAt,
 			"name":             item.Name,
 			"phase":            item.Phase,
 			"bytesDone":        item.BytesDone,
@@ -2949,6 +2953,8 @@ func (c *Client) buildVolumeProgressPayload(ctx context.Context, object kube.App
 		})
 	}
 	payload := map[string]any{
+		"discoveryComplete":   progress.DiscoveryComplete,
+		"discoveryCount":      progress.DiscoveryCount,
 		"operation":           operation,
 		"bytesDone":           progress.BytesDone,
 		"totalBytes":          progress.TotalBytes,
@@ -3359,10 +3365,11 @@ func estimateBytesPerSecond(samples []volumeProgressSample) float64 {
 }
 
 func volumeProgressMessage(operation string, progress kube.VolumeProgress, speedBytesPerSecond float64, etaSeconds int64, percent int) string {
-	verb := "Processing"
 	if operation == "backup" {
-		verb = "Backing up"
-	} else if operation == "restore" {
+		return "Backing up volume data: processed " + formatBytes(progress.BytesDone) + ". Per-volume sizes are estimates until backup completes."
+	}
+	verb := "Processing"
+	if operation == "restore" {
 		verb = "Restoring"
 	}
 	if progress.KnownTotal && progress.TotalBytes > 0 {
@@ -3614,6 +3621,13 @@ func (c *Client) sendVeleroBackupEvent(backup kube.VeleroBackupSummary) error {
 	signature := fmt.Sprintf("%s|%s|%d", backup.Phase, backup.ResourceVersion, progress)
 	if volumePayload != nil {
 		signature = fmt.Sprintf("%s|%v|%v|%v", signature, volumePayload["bytesDone"], volumePayload["totalBytes"], volumePayload["etaSeconds"])
+		items, _ := volumePayload["items"].([]map[string]any)
+		states := make([]string, 0, len(items))
+		for _, item := range items {
+			states = append(states, fmt.Sprintf("%v/%v/%v/%v/%v/%v/%v", item["kind"], item["name"], item["phase"], item["startedAt"], item["knownTotal"], item["bytesDone"], item["totalBytes"]))
+		}
+		slices.Sort(states)
+		signature += fmt.Sprintf("|%v|%v|", volumePayload["discoveryComplete"], volumePayload["discoveryCount"]) + strings.Join(states, "|")
 	}
 	if c.backupEvents[backup.Name] == signature {
 		return nil

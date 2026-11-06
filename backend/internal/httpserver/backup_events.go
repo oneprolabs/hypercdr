@@ -433,6 +433,9 @@ func sameVeleroEventPayload(existing map[string]any, incoming map[string]any) bo
 	if existingKind := fmt.Sprint(existing["kind"]); existingKind != "" && fmt.Sprint(incoming["kind"]) != "" && existingKind != fmt.Sprint(incoming["kind"]) {
 		return false
 	}
+	if volumeProgressState(mapFromAny(existing["volumeProgress"])) != volumeProgressState(mapFromAny(incoming["volumeProgress"])) {
+		return false
+	}
 	existingResourceVersion := fmt.Sprint(existing["resourceVersion"])
 	incomingResourceVersion := fmt.Sprint(incoming["resourceVersion"])
 	if existingResourceVersion != "" && incomingResourceVersion != "" {
@@ -454,6 +457,27 @@ func sameVeleroEventPayload(existing map[string]any, incoming map[string]any) bo
 	return fmt.Sprint(existingVolume["bytesDone"]) == fmt.Sprint(incomingVolume["bytesDone"]) &&
 		fmt.Sprint(existingVolume["totalBytes"]) == fmt.Sprint(incomingVolume["totalBytes"]) &&
 		fmt.Sprint(existingVolume["knownTotal"]) == fmt.Sprint(incomingVolume["knownTotal"])
+}
+
+func volumeProgressState(progress map[string]any) string {
+	state := map[string]any{}
+	for _, key := range []string{"discoveryComplete", "discoveryCount", "bytesDone", "totalBytes", "knownTotal", "allTotalsKnown", "itemCount", "runningCount", "completedCount", "failedCount"} {
+		state[key] = progress[key]
+	}
+	items := []string{}
+	for _, raw := range sliceFromAny(progress["items"]) {
+		item := mapFromAny(raw)
+		stable := map[string]any{}
+		for _, key := range []string{"kind", "name", "phase", "startedAt", "volume", "pod", "namespace", "bytesDone", "totalBytes", "knownTotal", "message", "errorCode"} {
+			stable[key] = item[key]
+		}
+		encoded, _ := json.Marshal(stable)
+		items = append(items, string(encoded))
+	}
+	sort.Strings(items)
+	state["items"] = items
+	encoded, _ := json.Marshal(state)
+	return string(encoded)
 }
 
 func isTerminalVeleroPhase(phase string) bool {
@@ -1013,28 +1037,6 @@ func (r *Router) createProtectionCleanupTask(plan store.ProtectionPlan) (store.T
 		ProtectionPlanID: plan.ID,
 	})
 	if err != nil {
-		return store.Task{}, "", err
-	}
-	policy, found, err := r.findPolicy(plan.PolicyID)
-	if err != nil {
-		return store.Task{}, "", err
-	}
-	if found {
-		retained, err := store.RetentionSelections(points, policy.RetentionRules, policy.RetentionTimezone, time.Now().UTC())
-		if err != nil {
-			return store.Task{}, "", err
-		}
-		if len(retained) > 0 {
-			return store.Task{}, "", store.ErrRestorePointLocked
-		}
-	}
-	var deletionIDs []string
-	for _, point := range points {
-		if point.Status != "deleted" {
-			deletionIDs = append(deletionIDs, point.ID)
-		}
-	}
-	if err := r.store.ClaimRestorePointDeletion(deletionIDs); err != nil {
 		return store.Task{}, "", err
 	}
 	restorePoints := make([]map[string]any, 0, len(points))

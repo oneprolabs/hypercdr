@@ -1,9 +1,13 @@
 import React from 'react';
-import { AlertTriangle, Boxes, Calendar, Check, ClipboardList, Clock, FileCog, Gauge, HardDrive, KeyRound, LoaderCircle, MoreVertical, Network, RefreshCw, Settings2, User, X } from 'lucide-react';
+import { AlertTriangle, Boxes, Calendar, ClipboardList, Clock, FileCog, Gauge, HardDrive, KeyRound, MoreVertical, Network, RefreshCw, Settings2, User, X } from 'lucide-react';
 import { formatLocalDateTime, parseUTCInstant } from '../../lib/date-time';
 import type { AppItem, ResourceCategoryKey, ResourceKindSummary, ResourceRef } from '../clusters/types';
 import type { ApiRestorePoint, ApiTask, ApiTaskEvent, VolumeProgressInfo } from './types';
 import { isActiveTaskStatus, isFailedStatus, taskHasWarning } from './task-status';
+import { transferPercent } from './progress-snapshot';
+import { SyncVolumeProgress } from './sync-volume-progress';
+import { TransferProgress } from './transfer-progress';
+import { TimelineItem } from './timeline-item';
 import { workloadReadinessEvents, workloadReadinessSnapshot, type WorkloadTimelineEvent } from './workload-readiness';
 import { groupTaskEventsByStage, keyTaskEvents, latestVisibleTaskEvent, reachedTaskStages } from './task-stage-model';
 export { groupTaskEventsByStage, keyTaskEvents, latestVisibleTaskEvent, reachedTaskStages } from './task-stage-model';
@@ -127,9 +131,9 @@ export function latestVolumeProgress(events?: ApiTaskEvent[]): VolumeProgressInf
       totalBytes: Number(progress.totalBytes || 0),
 	  incrementalBytes: Number(progress.incrementalBytes || 0),
 	  incrementalCount: Number(progress.incrementalCount || 0),
-      knownTotal: Boolean(progress.knownTotal),
+      knownTotal: transferPercent(progress) !== undefined,
       allTotalsKnown: Boolean(progress.allTotalsKnown),
-      percent: Number(progress.percent || 0),
+      percent: transferPercent(progress) ?? 0,
       speedBytesPerSecond: Number(progress.speedBytesPerSecond || 0),
       etaSeconds: Number(progress.etaSeconds || 0),
       itemCount: Number(progress.itemCount || 0),
@@ -691,96 +695,62 @@ export function TaskProcessTimeline({ task, events }: { task: ApiTask; events: A
   const visibleEvents = keyTaskEvents(events.filter(event => !event.taskId || event.taskId === task.id));
   const stageGroups = groupTaskEventsByStage(task, visibleEvents);
   const reachedStages = reachedTaskStages(stageGroups);
-  const transferProgress = taskProgressInfo(task, events) || latestVolumeProgress(events);
   const transferStage = ['drill', 'restore', 'takeover'].includes(task.type) ? 'restoring_data' : 'backing_up_data';
+  const transferCompleted = stageGroups.find(stage => stage.id === transferStage)?.status === 'completed';
+  let transferProgress = taskProgressInfo(task, events) || latestVolumeProgress(events);
+  if (transferCompleted && !transferProgress?.knownTotal) {
+    const completedEvents = events.filter(event => {
+      const progress = event.payload?.velero?.volumeProgress;
+      return progress && transferPercent(progress) === 100;
+    });
+    transferProgress = latestVolumeProgress(completedEvents) || transferProgress;
+  }
   const workloadEvents = workloadReadinessEvents(task, events);
   return (
     <div className="hbdr-task-detail-section">
       <div className="hbdr-task-stage-groups" aria-label="Task stages" aria-live="polite">
-        {reachedStages.map(stage => (
+        {reachedStages.map(stage => {
+          const stageEvents = stage.events.filter(event => !(stage.id === 'backing_up_data' && ['progress', 'backup_progress'].includes(event.reason) && event.level !== 'error' && event.level !== 'warning' && event.level !== 'warn' && event.payload?.velero?.volumeProgress));
+          return (
           <TimelineItem
             key={stage.id}
             status={stage.status}
             title={stage.name}
             className="hbdr-task-stage-group"
           >
-            {stage.id === transferStage && transferProgress?.knownTotal && (
+            {stage.id === transferStage && stage.status !== 'not_started' && transferStage === 'backing_up_data' && <SyncVolumeProgress task={task} events={events} completed={transferCompleted} />}
+            {stage.id === transferStage && stage.status !== 'not_started' && transferStage !== 'backing_up_data' && (
               <div className="hbdr-task-status-detail hbdr-task-log-progress" role="status" aria-live="polite">
-                <i className="hbdr-task-status-inline-track"><b style={{ width: `${Math.max(0, Math.min(100, transferProgress.percent))}%` }} /></i>
-                <span>{formatPercent(transferProgress.percent)}% · {formatBytes(transferProgress.bytesDone)} / {formatBytes(transferProgress.totalBytes)}{transferProgress.speedBytesPerSecond > 0 ? ` · ${formatBytesPerSecond(transferProgress.speedBytesPerSecond)}` : ''}</span>
+                <TransferProgress percent={transferCompleted ? 100 : transferProgress?.knownTotal ? transferProgress.percent : undefined} label="Volume data restore progress" />
+                <span>{transferProgress?.knownTotal ? `${formatPercent(transferProgress.percent)}% · ${formatBytes(transferProgress.bytesDone)} / ${formatBytes(transferProgress.totalBytes)}${transferProgress.speedBytesPerSecond > 0 ? ` · ${formatBytesPerSecond(transferProgress.speedBytesPerSecond)}` : ''}` : transferCompleted ? 'Data transfer completed.' : 'Determining transfer size…'}</span>
               </div>
             )}
             {stage.id === 'waiting_for_workloads' && workloadEvents.length > 0 && <div className="hbdr-task-detail-events" aria-label="Workload readiness events">
               {workloadEvents.map(event => <WorkloadReadinessEvent key={event.id} event={event} />)}
               {stage.status === 'failed' && <WorkloadReadinessEvent event={{ id: 'readiness-failed', at: task.completedAt || stage.events.at(-1)?.createdAt || '', status: 'failed', summary: /TIMEOUT/.test(task.errorCode || '') ? 'Timed out waiting for workloads to become ready.' : 'Workload readiness check failed.', detail: task.errorMessage || stage.events.find(event => event.level === 'error')?.message || 'See the final task result for diagnostic details.' }} />}
             </div>}
-            {stage.events.length > 0 && !(stage.id === 'waiting_for_workloads' && workloadEvents.length > 0) && (
+            {stageEvents.length > 0 && !(stage.id === 'waiting_for_workloads' && workloadEvents.length > 0) && (
               <div className="hbdr-task-detail-events" aria-label={`${stage.name} events`}>
-                {stage.events.map(event => (
+                {stageEvents.map(event => (
                   <TaskStageEvent key={event.id} event={event} current={!terminal && event.id === stage.currentEventId} />
                 ))}
               </div>
             )}
           </TimelineItem>
-        ))}
+          );
+        })}
         {reachedStages.length === 0 && <p className="hbdr-task-detail-empty">Waiting for task events...</p>}
       </div>
     </div>
   );
 }
 
-type TimelineStatus = 'completed' | 'in_progress' | 'failed' | 'warning' | 'not_started' | 'waiting';
-
 function WorkloadReadinessEvent({ event }: { event: WorkloadTimelineEvent }) {
-  const [copyState, setCopyState] = React.useState('Copy');
-  React.useEffect(() => {
-    if (copyState === 'Copy') return;
-    const timer = window.setTimeout(() => setCopyState('Copy'), 2500);
-    return () => window.clearTimeout(timer);
-  }, [copyState]);
-  const copyImage = async () => {
-    try {
-      await navigator.clipboard.writeText(event.image || '');
-      setCopyState('Copied');
-    } catch {
-      setCopyState('Copy failed; select address');
-    }
-  };
-  const imageAddress = event.image && <div className="hbdr-task-image-address"><code>{event.image}</code><button type="button" onClick={copyImage} aria-label={`Copy image ${event.image}`}>{copyState}</button></div>;
+  const imageAddress = event.image && <div className="hbdr-task-image-address"><code title={event.image}>{event.image}</code></div>;
   return <TimelineItem status={event.status} title={<><time>[{formatLocalDateTime(event.at) || '-'}]</time><span>{event.summary}{event.count && event.count > 1 ? ` (${event.count} occurrences)` : ''}</span></>} className="hbdr-task-log-entry">
-    {!event.imageInDetails && imageAddress}
-    {event.detail && <details className="hbdr-task-log-detail"><summary>View details</summary>{event.imageInDetails && imageAddress}<p>{event.detail}</p>{event.count && event.count > 1 && event.lastAt && <p>Last observed: {formatLocalDateTime(event.lastAt)}</p>}</details>}
+    {imageAddress}
+    {event.detail && ['warning', 'failed'].includes(event.status) && <details className="hbdr-task-log-detail"><summary>Error details</summary><p>{event.detail}</p>{event.count && event.count > 1 && event.lastAt && <p>Last observed: {formatLocalDateTime(event.lastAt)}</p>}</details>}
   </TimelineItem>;
-}
-
-function TimelineMarker({ status }: { status: TimelineStatus }) {
-  const label = status === 'in_progress' ? 'In progress' : status.replace('_', ' ');
-  return (
-    <span className={`hbdr-timeline-marker is-${status}`} role="img" aria-label={label}>
-      {status === 'completed' && <Check size={11} strokeWidth={3} />}
-      {status === 'in_progress' && <LoaderCircle size={12} strokeWidth={2.5} />}
-      {status === 'failed' && <X size={11} strokeWidth={3} />}
-      {status === 'warning' && <AlertTriangle size={10} strokeWidth={2.7} />}
-    </span>
-  );
-}
-
-function TimelineItem({ status, title, className = '', children }: {
-  status: TimelineStatus;
-  title: React.ReactNode;
-  className?: string;
-  children?: React.ReactNode;
-}) {
-  return (
-    <section className={`hbdr-timeline-item is-${status} ${className}`.trim()}>
-      <span className="hbdr-timeline-rail" aria-hidden="true" />
-      <TimelineMarker status={status} />
-      <div className="hbdr-timeline-content">
-        <strong className="hbdr-timeline-title">{title}</strong>
-        {children}
-      </div>
-    </section>
-  );
 }
 
 function TaskStageEvent({ event, current }: { event: ApiTaskEvent; current: boolean }) {

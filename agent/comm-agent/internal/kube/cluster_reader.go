@@ -844,6 +844,10 @@ func backupInventoryVolumeProgressPayload(progress VolumeProgress) map[string]an
 	for _, item := range progress.Items {
 		items = append(items, map[string]any{
 			"kind":             item.Kind,
+			"volume":           item.Volume,
+			"pod":              item.Pod,
+			"namespace":        item.Namespace,
+			"startedAt":        item.StartedAt,
 			"name":             item.Name,
 			"phase":            item.Phase,
 			"bytesDone":        item.BytesDone,
@@ -856,6 +860,8 @@ func backupInventoryVolumeProgressPayload(progress VolumeProgress) map[string]an
 	}
 	return map[string]any{
 		"operation":         "backup",
+		"discoveryComplete": progress.DiscoveryComplete,
+		"discoveryCount":    progress.DiscoveryCount,
 		"bytesDone":         progress.BytesDone,
 		"totalBytes":        progress.TotalBytes,
 		"incrementalBytes":  progress.IncrementalBytes,

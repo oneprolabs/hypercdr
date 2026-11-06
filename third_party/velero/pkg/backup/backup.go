@@ -626,9 +626,11 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 		wg.Wait()
 	}()
 
+	resourceTraversalCompleted := false
 	// Wait for all the ItemBlocks to be processed
 	select {
 	case <-done:
+		resourceTraversalCompleted = true
 		log.Info("done processing ItemBlocks")
 	case <-responseCtx.Done():
 		log.Info("ItemBlock processing canceled")
@@ -650,6 +652,11 @@ func (kb *kubernetesBackupper) BackupWithResolvers(
 		}
 	}
 
+	if resourceTraversalCompleted {
+		if err := kb.publishVolumeDiscovery(backupRequest.Backup); err != nil {
+			log.WithError(err).Info("Volume discovery status could not be published")
+		}
+	}
 	processedPVBs := itemBackupper.podVolumeBackupper.WaitAllPodVolumesProcessed(log)
 	backupRequest.PodVolumeBackups = append(backupRequest.PodVolumeBackups, processedPVBs...)
 

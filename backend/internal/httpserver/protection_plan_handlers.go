@@ -475,12 +475,32 @@ func (r *Router) deleteProtectionPlan(w http.ResponseWriter, req *http.Request) 
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "protection_plan_not_found"})
 		return
 	}
-	plan, _, err = r.store.UpdateProtectionPlanStatus(id, "cleanup_running")
+	err = r.store.BeginProtectionPlanCleanup(id)
+	if errors.Is(err, store.ErrProtectionPlanBusy) {
+		blockingTasks := []map[string]any{}
+		pointIDs := map[string]bool{}
+		if points, listErr := r.store.ListRestorePoints(store.RestorePointFilter{ProtectionPlanID: id, IncludeDeleted: true}); listErr == nil {
+			for _, point := range points {
+				pointIDs[point.ID] = true
+			}
+		}
+		if tasks, listErr := r.store.ListTasks(""); listErr == nil {
+			for _, task := range tasks {
+				payloadPointID, _ := task.Payload["restorePointId"].(string)
+				if (task.ProtectionPlanID == id || pointIDs[task.RestorePointID] || pointIDs[payloadPointID]) && isActiveTaskStatus(task.Status) {
+					blockingTasks = append(blockingTasks, map[string]any{"id": task.ID, "type": task.Type, "status": task.Status})
+				}
+			}
+		}
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "protection_plan_busy", "message": "Protection plan has tasks in progress. Wait for them to finish before cleaning up the plan and its backup data.", "blockingTasks": blockingTasks})
+		return
+	}
 	if err != nil {
 		r.logger.Error("failed to mark protection plan cleanup running", "error", err, "id", id)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "mark_cleanup_running_failed", "message": err.Error()})
 		return
 	}
+	plan.Status = "cleanup_running"
 	cleanupTask, cleanupWarning, err := r.createProtectionCleanupTask(plan)
 	if err != nil {
 		r.logger.Error("failed to create protection cleanup task", "error", err, "id", id)

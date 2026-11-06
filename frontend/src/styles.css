@@ -23619,7 +23619,7 @@ html[data-theme='dark'] #root .hbdr-task-detail-error section {
    textual Steps example while keeping status markers visible. */
 .hbdr-task-stage-groups { gap: 0; }
 .hbdr-task-image-address { display: flex; align-items: flex-start; gap: 8px; margin-top: 5px; min-width: 0; }
-.hbdr-task-image-address code { min-width: 0; overflow-wrap: anywhere; color: var(--hc-text-2); font-family: var(--font-mono); font-size: 10.5px; }
+.hbdr-task-image-address code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--hc-text-2); font-family: var(--font-mono); font-size: 10.5px; }
 .hbdr-task-image-address button { flex-shrink: 0; border: 1px solid var(--hc-border); border-radius: 4px; padding: 1px 6px; color: var(--hc-text-2); background: var(--hc-surface); font-size: 10.5px; cursor: pointer; }
 .hbdr-task-detail-events .hbdr-timeline-marker.is-waiting { background: var(--hc-surface); border: 1px solid var(--hc-text-3); }
 .hbdr-task-detail-events details summary { cursor: pointer; }
@@ -29595,5 +29595,24 @@ html[data-theme='dark'] #root .hbdr-dr-task-log-drawer .hbdr-task-final-result.i
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
+.hbdr-sync-volume-progress { margin-top: 10px; padding: 12px; border-radius: 6px; background: var(--hc-sunken); color: var(--hc-text-2); font-size: 12px; }
+.hbdr-sync-volume-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; }
+.hbdr-sync-volume-heading strong { color: var(--hc-text); font-weight: 500; }
+.hbdr-sync-volume-value { margin: 5px 0; color: var(--hc-text); font: 500 18px/1.5 'IBM Plex Mono', monospace; }
+.hbdr-sync-volume-progress summary { margin-top: 10px; color: var(--hc-accent); cursor: pointer; }
+.hbdr-sync-volume-row { padding: 10px 0; margin-top: 6px; border-top: 1px solid var(--hc-border); overflow-wrap: anywhere; }
+.hbdr-sync-volume-context { margin-top: 3px; font-family: 'IBM Plex Mono', monospace; }
+.hbdr-transfer-progress-track { width: 100%; height: 5px; margin: 8px 0; overflow: hidden; border-radius: 4px; background: var(--hc-border); }
+.hbdr-transfer-progress-track > div { height: 100%; background: var(--hc-accent); }
+.hbdr-task-log-progress { display: block; margin-top: 6px; font-size: 11.5px; line-height: 1.5; font-weight: 400; }
+.hbdr-sync-volume-track.is-scanning { background: repeating-linear-gradient(110deg, var(--hc-border) 0 12px, var(--hc-sunken) 12px 22px); }
+.hbdr-sync-volume-note { margin-top: 10px; }
+.hbdr-sync-transfer-body { flex: 1; min-width: 0; }
+.hbdr-sync-volume-timeline .hbdr-sync-transfer-body { margin-top: 6px; font-size: 11.5px; line-height: 1.5; }
+.hbdr-sync-volume-timeline .hbdr-sync-volume-context { font-family: inherit; }
+.hbdr-sync-volume-timeline summary { margin-top: 7px; color: var(--hc-accent); cursor: pointer; }
+.hbdr-sync-volume-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hbdr-sync-volume-row .hbdr-sync-volume-heading { flex-wrap: nowrap; }
+.hbdr-sync-volume-row .hbdr-sync-volume-heading > span { flex: none; }
  html[data-theme='dark'] #root .premium-app .hbdr-policy-drawer .hbdr-policy-composition-card{background:var(--hc-sunken)!important;border-color:var(--hc-border)!important;color:var(--hc-text-2)!important}
  html[data-theme='dark'] #root .premium-app .hbdr-policy-drawer .hbdr-policy-composition-card[aria-pressed='true']{background:color-mix(in srgb,var(--hc-accent) 15%,var(--hc-surface))!important;border-color:var(--hc-accent)!important;color:var(--hc-text)!important}

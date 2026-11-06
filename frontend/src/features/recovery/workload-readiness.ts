@@ -24,7 +24,6 @@ export type WorkloadTimelineEvent = {
   summary: string;
   status: 'completed' | 'waiting' | 'warning' | 'failed';
   image?: string;
-  imageInDetails?: boolean;
   detail?: string;
   count?: number;
   lastAt?: string;
@@ -37,6 +36,7 @@ export function workloadReadinessEvents(task: ApiTask, events: ApiTaskEvent[]): 
   samples.sort((left, right) => Date.parse(left.payload.readinessObservedAt || left.at || '') - Date.parse(right.payload.readinessObservedAt || right.at || ''));
   const rows = new Map<string, WorkloadTimelineEvent>();
   const states = new Map<string, string>();
+  const imageStates = new Map<string, { at: number; rank: number; startedAt?: string }>();
   let lastError = '';
   let latestPayload: Record<string, any> | undefined;
   for (const sample of samples) {
@@ -50,16 +50,22 @@ export function workloadReadinessEvents(task: ApiTask, events: ApiTaskEvent[]): 
     if (!error && lastError) rows.set(`observation-recovered-${at}`, { id: `observation-recovered-${at}`, at, summary: 'Workload status checks resumed.', status: 'completed' });
     lastError = error;
     for (const image of payload.readiness?.ImageEvents || []) {
-      const key = `${image.PodUID}/${image.Container}/${image.Image}`;
+      const key = `${image.PodUID || image.Pod}/${image.Container}/${image.Image}`;
       const failure = ['Failed', 'BackOff'].includes(image.Reason);
-      const id = failure ? `image-failure-${key}` : `image-${image.ID || `${key}/${image.Reason}`}`;
+      const id = `image-${key}`;
+      const observed = Date.parse(image.LastAt || image.FirstAt || at) || 0;
+      const rank = ['Pulled', 'ImageCached'].includes(image.Reason) ? 3 : failure ? 2 : 1;
+      const prior = imageStates.get(key);
+      const startedAt = prior?.startedAt || (image.Reason === 'Pulling' ? image.FirstAt : undefined);
+      if (prior && (observed < prior.at || observed === prior.at && rank < prior.rank)) continue;
+      imageStates.set(key, { at: observed, rank, startedAt });
       const subject = `${image.DisplayName || image.Pod}${image.Container ? ` / ${image.Container}` : ''}`;
       const message = String(image.Message || '').toLowerCase();
       const cause = /timeout|timed out/.test(message) ? 'registry connection timed out' : /unauthorized|authentication required|pull access denied/.test(message) ? 'registry access denied' : /manifest unknown|not found/.test(message) ? 'image not found' : /certificate|tls/.test(message) ? 'registry TLS error' : '';
-      const action = image.Reason === 'Pulling' ? 'Pulling image' : image.Reason === 'ImageCached' ? 'Using locally cached image' : image.Reason === 'Pulled' ? 'Image pulled successfully' : `Image pull failed${cause ? `: ${cause}` : ''}`;
+      const elapsed = startedAt ? Math.floor((Date.parse(at) - Date.parse(startedAt)) / 1000) : 0;
+      const action = image.Reason === 'Pulling' ? `Pulling image${elapsed > 0 ? ` · Elapsed ${elapsed}s` : ''}` : image.Reason === 'ImageCached' ? 'Using locally cached image' : image.Reason === 'Pulled' ? 'Image pulled successfully' : `Image pull failed${cause ? `: ${cause}` : ''}${image.Reason === 'BackOff' ? ' · Retrying' : ''}`;
       const previous = rows.get(id);
-      if (failure && previous && image.Reason === 'BackOff') { previous.count = Math.max(previous.count || 1, image.Count || 1); if (Date.parse(image.LastAt || '') > Date.parse(previous.lastAt || '')) previous.lastAt = image.LastAt; continue; }
-      rows.set(id, { id, at: previous?.at || image.FirstAt || at, summary: `${subject}: ${action}.`, status: failure ? 'warning' : image.Reason === 'Pulling' ? 'waiting' : 'completed', image: image.Image, imageInDetails: image.Reason === 'Pulled', detail: `${image.Pod}${image.Node ? ` · Node ${image.Node}` : ''}\n${image.Message || ''}`, count: Math.max(previous?.count || 1, image.Count || 1), lastAt: image.LastAt });
+      rows.set(id, { id, at: previous?.at || image.FirstAt || at, summary: `${subject}: ${action}.`, status: failure ? 'warning' : image.Reason === 'Pulling' ? 'waiting' : 'completed', image: image.Image, detail: failure ? `${image.Pod}${image.Node ? ` · Node ${image.Node}` : ''}\n${String(image.Message || '').split(String(image.Image)).join('[image]')}` : undefined, count: failure ? Math.max(previous?.count || 1, image.Count || 1) : undefined, lastAt: image.LastAt });
     }
     const pods = (payload.readiness?.Objects || []).filter(object => object.Kind === 'Pod');
     for (const object of pods) {

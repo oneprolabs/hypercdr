@@ -84,7 +84,7 @@ function taskEventStageId(event: ApiTaskEvent, recovery: boolean, storageSync = 
     return 'preparing_storage';
   }
   if (!recovery) {
-    if (reason === 'backup_completed') return 'creating_restore_point';
+    if (reason === 'backup_completed' || reason.startsWith('quota_replacement') || reason.startsWith('restore_point_')) return 'creating_restore_point';
     if (['finalizing', 'completed'].includes(reason)) return 'finalizing_sync';
     if (['progress', 'backup_progress'].includes(reason) || reason.includes('volume') || reason.includes('backup')) return 'backing_up_data';
     return 'preparing_backup';
@@ -146,7 +146,16 @@ export function groupTaskEventsByStage(task: ApiTask, events: ApiTaskEvent[]): T
   // current observed stage; historical events must not move it backwards.
   const snapshotIsCurrent = Boolean(task.payload?.lastStatusAt) && (!currentEvent || Date.parse(String(task.payload.lastStatusAt)) >= Date.parse(currentEvent.createdAt));
   const eventStageID = currentEvent ? taskEventStageId(currentEvent, recovery, storageSync) : '';
-  const currentStageID = snapshotIsCurrent ? snapshotCurrentStageID || eventStageID : eventStageID || snapshotCurrentStageID;
+  let currentStageID = snapshotIsCurrent ? snapshotCurrentStageID || eventStageID : eventStageID || snapshotCurrentStageID;
+  if (!recovery && !storageSync) {
+    const quotaPending = ['data_ready', 'deleting_old_point'].includes(String(task.payload?.quotaStage || ''));
+    const transferObserved = Boolean(task.payload?.volumeProgress || task.payload?.velero?.volumeProgress || Number(task.payload?.progressMetrics?.totalBytes) > 0);
+    const reachedIndex = Math.max(
+      quotaPending ? 2 : transferObserved ? 1 : 0,
+      ...taskEvents.map(event => definitions.findIndex(stage => stage.id === taskEventStageId(event, false))),
+    );
+    currentStageID = definitions[quotaPending && isActiveTaskStatus(task.status) ? 2 : reachedIndex].id;
+  }
   const taskFailed = isFailedStatus(task.status);
   const taskActive = isActiveTaskStatus(task.status);
   const taskSucceeded = !taskActive && !taskFailed && ['succeeded', 'completed', 'success'].includes(String(task.status || '').toLowerCase());
@@ -158,7 +167,7 @@ export function groupTaskEventsByStage(task: ApiTask, events: ApiTaskEvent[]): T
       const currentIndex = definitions.findIndex(item => item.id === currentStageID);
       status = taskSucceeded
         ? 'completed'
-        : eventsForStage.length === 0 || index > currentIndex
+        : index > currentIndex
           ? 'not_started'
           : index < currentIndex
             ? 'completed'

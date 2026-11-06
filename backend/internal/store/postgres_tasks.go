@@ -33,6 +33,7 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 		tenantID = DefaultTenantID
 	}
 	if input.ProtectionPlanID != "" {
+		var planStatus string
 		// Locking the plan serializes same-plan task creation and makes insertion
 		// plus pointer publication one atomic ordering boundary.
 		if scanErr := tx.QueryRow(`select tenant_id from protection_plans where id=$1 for update`, input.ProtectionPlanID).Scan(&tenantID); scanErr != nil {
@@ -40,6 +41,12 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 				return Task{}, fmt.Errorf("protection plan %s not found while creating %s task", input.ProtectionPlanID, input.Type)
 			}
 			return Task{}, scanErr
+		}
+		if err := tx.QueryRow(`select status from protection_plans where id=$1`, input.ProtectionPlanID).Scan(&planStatus); err != nil {
+			return Task{}, err
+		}
+		if (planStatus == "cleanup_running" || planStatus == "cleaning" || planStatus == "cleanup_failed") && input.Type != "protection-cleanup" {
+			return Task{}, ErrProtectionPlanBusy
 		}
 	} else if input.ClusterID != "" {
 		_ = tx.QueryRow(`select tenant_id from clusters where id=$1`, input.ClusterID).Scan(&tenantID)
@@ -81,6 +88,9 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 		}
 		if pointPlan != input.ProtectionPlanID {
 			if err := quotaPlanLock(tx, pointPlan); err != nil {
+				return Task{}, err
+			}
+			if err := tx.QueryRow(`select coalesce(metadata->>'retentionState',''),coalesce(task_created_at,created_at) from restore_points where id=$1 and tenant_id=$2 and status='available'`, pointID, tenantID).Scan(&state, &timestamp); err != nil {
 				return Task{}, err
 			}
 		}

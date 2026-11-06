@@ -58,3 +58,44 @@ test('cached images are distinct from successful downloads and pods stay separat
   assert.equal(rows.filter(row => row.summary.includes('locally cached')).length, 2);
   assert.equal(rows.filter(row => row.summary.includes('pulled successfully')).length, 0);
 });
+
+test('image lifecycle updates one row and old pulling events cannot replace success', () => {
+  const image = { ID: 'pull', PodUID: 'pod', Pod: 'app-0', Container: 'app', Image: 'registry/app:v1', Reason: 'Pulling', FirstAt: '2026-11-06T00:00:00Z' };
+  const pulled = { ...image, ID: 'pulled', Reason: 'Pulled', FirstAt: '2026-11-06T00:00:20Z' };
+  const sample = (at, images) => ({ createdAt: at, payload: { velero: { readinessObservedAt: at, readiness: { ImageEvents: images } } } });
+  const rows = workloadReadinessEvents({ status: 'succeeded', payload: {} }, [
+    sample('2026-11-06T00:00:10Z', [image]),
+    sample('2026-11-06T00:00:21Z', [pulled, image]),
+  ]).filter(row => row.image);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].status, 'completed');
+  assert.match(rows[0].summary, /pulled successfully/);
+  assert.equal(rows[0].detail, undefined);
+  assert.equal(rows[0].at, image.FirstAt);
+});
+
+test('pull elapsed time uses recorded observations and cached images have no redundant details', () => {
+  const image = { PodUID: 'pod', Pod: 'app-0', Container: 'app', Image: 'registry/app:v1', Reason: 'Pulling', FirstAt: '2026-11-06T00:00:00Z' };
+  const task = { status: 'running', payload: { readinessObservedAt: '2026-11-06T00:00:35Z', readiness: { ImageEvents: [image] } } };
+  const row = workloadReadinessEvents(task, []).find(row => row.image);
+  assert.match(row.summary, /Elapsed 35s/);
+  assert.equal(row.detail, undefined);
+  const cached = workloadReadinessEvents({ payload: { readiness: { ImageEvents: [{ ...image, Reason: 'ImageCached', Message: 'Image already present' }] } } }, []).find(row => row.image);
+  assert.equal(cached.detail, undefined);
+  assert.doesNotMatch(cached.summary, /Elapsed|pulled successfully/);
+});
+
+test('image failures expose diagnostics without repeating the image address and recover in place', () => {
+  const image = { PodUID: 'pod', Pod: 'app-0', Node: 'node-1', Container: 'app', Image: 'registry/app:v1', Reason: 'BackOff', Count: 3, FirstAt: '2026-11-06T00:00:10Z', Message: 'Back-off pulling image "registry/app:v1": unauthorized' };
+  const row = workloadReadinessEvents({ payload: { readiness: { ImageEvents: [image] } } }, []).find(row => row.image);
+  assert.match(row.summary, /registry access denied.*Retrying/);
+  assert.match(row.detail, /app-0.*Node node-1/);
+  assert.doesNotMatch(row.detail, /registry\/app:v1/);
+  assert.equal(row.count, 3);
+  const pulled = { ...image, Reason: 'Pulled', FirstAt: '2026-11-06T00:00:30Z' };
+  const rows = workloadReadinessEvents({ payload: { readiness: { ImageEvents: [image, pulled] } } }, []).filter(row => row.image);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].status, 'completed');
+  assert.equal(rows[0].detail, undefined);
+  assert.equal(rows[0].count, undefined);
+});

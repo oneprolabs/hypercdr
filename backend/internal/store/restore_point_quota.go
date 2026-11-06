@@ -13,10 +13,46 @@ var ErrRestorePointLocked = errors.New("restore point is retained, in use, or be
 var ErrRestorePointReplacementPending = errors.New("restore point replacement pending")
 
 type RestorePointLifecycleRepository interface {
+	BeginProtectionPlanCleanup(string) error
 	SetRestorePointRetention(string, string, bool) error
 	ClaimRestorePointDeletion([]string) error
 	PendingRestorePointReplacements() ([]RestorePointReplacement, error)
 	BeginRestorePointReplacement(string, string) error
+}
+
+func (s *PostgresStore) BeginProtectionPlanCleanup(planID string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := quotaPlanLock(tx, planID); err != nil {
+		return err
+	}
+	var status string
+	if err := tx.QueryRow(`select status from protection_plans where id=$1`, planID).Scan(&status); err != nil {
+		return err
+	}
+	if status == "cleanup_running" || status == "cleaning" {
+		return ErrProtectionPlanBusy
+	}
+	var busy bool
+	if err := tx.QueryRow(`select exists(select 1 from tasks where (protection_plan_id=$1 or restore_point_id in (select id from restore_points where protection_plan_id=$1) or payload->>'restorePointId' in (select id::text from restore_points where protection_plan_id=$1)) and status not in ('succeeded','failed','canceled','cancelled')) or exists(select 1 from restore_point_reservations where protection_plan_id=$1 and state in ('reserved','data_ready','deleting'))`, planID).Scan(&busy); err != nil {
+		return err
+	}
+	if busy {
+		return ErrProtectionPlanBusy
+	}
+	if _, err := tx.Exec(`update restore_points set metadata=metadata || '{"retentionState":"pending_delete"}'::jsonb where protection_plan_id=$1 and status!='deleted'`, planID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`update protection_plans set status='cleanup_running',updated_at=now() where id=$1`, planID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`update protection_plan_schedules set enabled=false,updated_at=now() where protection_plan_id=$1`, planID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 type RestorePointReplacement struct {
@@ -114,10 +150,16 @@ func prepareRestorePointDeletion(tx *sql.Tx, task Task) error {
 		if status == "deleted" {
 			continue
 		}
-		if metadata["manualRetained"] == true || metadata["drillRetained"] == true {
+		var fullCleanup bool
+		if task.Type == "protection-cleanup" && task.ProtectionPlanID == planID {
+			if err := tx.QueryRow(`select status='cleanup_running' from protection_plans where id=$1`, planID).Scan(&fullCleanup); err != nil {
+				return err
+			}
+		}
+		if !fullCleanup && (metadata["manualRetained"] == true || metadata["drillRetained"] == true) {
 			return ErrRestorePointLocked
 		}
-		if owner, ok := metadata["replacementTaskId"].(string); ok && owner != "" {
+		if owner, ok := metadata["replacementTaskId"].(string); ok && owner != "" && !fullCleanup {
 			var state string
 			if err := tx.QueryRow(`select state from restore_point_reservations where task_id=$1 and replacement_point_id=$2 for update`, owner, target.ID).Scan(&state); err != nil {
 				return err
@@ -137,7 +179,7 @@ func prepareRestorePointDeletion(tx *sql.Tx, task Task) error {
 				return ErrRestorePointLocked
 			}
 		}
-		if task.Payload["manualDelete"] != true || metadata["replacementTaskId"] != nil {
+		if !fullCleanup && (task.Payload["manualDelete"] != true || metadata["replacementTaskId"] != nil) {
 			policy, err := quotaPolicy(tx, planID)
 			if err != nil {
 				return err

@@ -11,7 +11,7 @@
     "test:extensions": "node --experimental-strip-types --test src/app/extensions.test.mjs",
     "test:workload-readiness": "node --experimental-strip-types --test src/features/recovery/workload-readiness.test.mjs src/features/policies/retention-model.test.mjs",
     "test:topology": "node --experimental-strip-types --test src/features/clusters/dr-topology.test.mjs",
-    "test:task-ui": "node --experimental-strip-types --test src/features/recovery/task-stage-model.test.mjs src/features/recovery/plan-task-selection.test.mjs src/lib/date-time.test.mjs src/lib/cluster-compatibility.test.mjs src/lib/recovery-images.test.mjs src/lib/drill-wizard.test.mjs",
+    "test:task-ui": "node --experimental-strip-types --test src/features/recovery/sync-volume-model.test.mjs src/features/recovery/progress-snapshot.test.mjs src/features/recovery/protection-cleanup-guard.test.mjs src/features/recovery/task-stage-model.test.mjs src/features/recovery/plan-task-selection.test.mjs src/lib/date-time.test.mjs src/lib/cluster-compatibility.test.mjs src/lib/recovery-images.test.mjs src/lib/drill-wizard.test.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 3002",
     "visual:compare": "env -u DISPLAY -u WAYLAND_DISPLAY -u XAUTHORITY PLAYWRIGHT_BROWSERS_PATH=/data/software/ms-playwright node scripts/visual-compare.mjs",

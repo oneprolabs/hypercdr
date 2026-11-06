@@ -3,6 +3,7 @@ import { getTask, listTaskEvents } from '../../api/tasks';
 import type { AppItem } from '../clusters/types';
 import { listItems, type ApiTask, type ApiTaskEvent } from '../recovery/types';
 import { taskFailureSummary } from '../recovery/task-ui';
+import { preferTaskSnapshot } from '../recovery/progress-snapshot';
 
 type TaskDetail = { app: AppItem; task: ApiTask; failure?: ReturnType<typeof taskFailureSummary> } | null;
 
@@ -40,7 +41,7 @@ export function useDrTaskEvents({ displayedDrTaskKey, hasActiveDisplayedTask, re
       if (cancelled) return;
       setRefreshedTasks(prev => {
         const next = { ...prev };
-        for (const [taskId, , task] of entries) if (task) next[taskId] = task;
+        for (const [taskId, , task] of entries) if (task) next[taskId] = preferTaskSnapshot(prev[taskId], task);
         return next;
       });
       setDrTaskEvents(prev => {
@@ -85,7 +86,10 @@ export function useDrTaskEvents({ displayedDrTaskKey, hasActiveDisplayedTask, re
     const taskId = syncTaskDetail?.task.id;
     if (!taskId) return;
     let cancelled = false;
+    let loading = false;
     const refreshOpenTask = async () => {
+      if (loading) return;
+      loading = true;
       try {
         const [eventResult, latest] = await Promise.all([
           listTaskEvents(taskId),
@@ -98,15 +102,18 @@ export function useDrTaskEvents({ displayedDrTaskKey, hasActiveDisplayedTask, re
           const unchanged = current.length === nextEvents.length && current.every((event, index) => event.id === nextEvents[index]?.id);
           return unchanged ? prev : { ...prev, [taskId]: nextEvents };
         });
-        if (latest) setRefreshedTasks(prev => ({ ...prev, [taskId]: latest }));
+        if (latest) setRefreshedTasks(prev => ({ ...prev, [taskId]: preferTaskSnapshot(prev[taskId], latest) }));
         if (latest) setSyncTaskDetail(prev => {
           if (prev?.task.id !== taskId) return prev;
+          if (preferTaskSnapshot(prev.task, latest) === prev.task) return prev;
           const currentSignature = JSON.stringify([prev.task.status, prev.task.progress, prev.task.errorCode, prev.task.errorMessage, prev.task.payload]);
           const nextSignature = JSON.stringify([latest.status, latest.progress, latest.errorCode, latest.errorMessage, latest.payload]);
           return currentSignature === nextSignature ? prev : { ...prev, task: latest, failure: undefined };
         });
       } catch {
         // Keep the last successful snapshot visible while the next live refresh retries.
+      } finally {
+        loading = false;
       }
     };
     void refreshOpenTask();

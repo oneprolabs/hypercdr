@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -145,6 +146,8 @@ type ManifestStatus struct {
 }
 
 type VolumeProgress struct {
+	DiscoveryComplete bool
+	DiscoveryCount    int
 	Items             []VolumeProgressItem
 	BytesDone         int64
 	TotalBytes        int64
@@ -193,6 +196,10 @@ type RestoreResultSummary struct {
 }
 
 type VolumeProgressItem struct {
+	Volume           string
+	Pod              string
+	Namespace        string
+	StartedAt        string
 	Kind             string
 	Name             string
 	Phase            string
@@ -394,10 +401,31 @@ func (a *DynamicManifestApplier) GetManifestStatus(ctx context.Context, object A
 }
 
 func (a *DynamicManifestApplier) GetBackupVolumeProgress(ctx context.Context, namespace string, backupName string) (VolumeProgress, error) {
-	return a.getVolumeProgress(ctx, namespace, backupName, []volumeProgressResource{
+	if a.client == nil || namespace == "" || backupName == "" {
+		return VolumeProgress{}, nil
+	}
+	backup, backupErr := a.client.Resource(schema.GroupVersionResource{Group: "velero.io", Version: "v1", Resource: "backups"}).Namespace(namespace).Get(ctx, backupName, metav1.GetOptions{})
+	progress, err := a.getVolumeProgress(ctx, namespace, backupName, []volumeProgressResource{
 		{GVR: schema.GroupVersionResource{Group: "velero.io", Version: "v1", Resource: "podvolumebackups"}, Kind: "PodVolumeBackup", Label: "velero.io/backup-name"},
 		{GVR: schema.GroupVersionResource{Group: "velero.io", Version: "v2alpha1", Resource: "datauploads"}, Kind: "DataUpload", Label: "velero.io/backup-name"},
 	})
+	if backupErr == nil && backup.GetUID() != "" {
+		marker := backup.GetAnnotations()["hypercdr.io/pod-volume-discovery"]
+		parts := strings.Split(marker, ":")
+		if len(parts) == 2 && parts[0] == string(backup.GetUID()) {
+			count, scanErr := strconv.Atoi(parts[1])
+			if scanErr == nil && count >= 0 && len(progress.Items) == count {
+				progress.DiscoveryComplete = true
+				progress.DiscoveryCount = count
+				for _, item := range progress.Items {
+					if item.Kind != "PodVolumeBackup" {
+						progress.DiscoveryComplete = false
+					}
+				}
+			}
+		}
+	}
+	return progress, err
 }
 
 func (a *DynamicManifestApplier) ListVeleroBackups(ctx context.Context, namespace string, limit int) ([]VeleroBackupSummary, error) {
@@ -628,7 +656,19 @@ func volumeProgressFromItem(kind string, item unstructured.Unstructured) VolumeP
 		incrementalKnown = true
 	}
 	message, _, _ := unstructured.NestedString(item.Object, "status", "message")
+	volume, _, _ := unstructured.NestedString(item.Object, "spec", "volume")
+	pod, _, _ := unstructured.NestedString(item.Object, "spec", "pod", "name")
+	namespace, _, _ := unstructured.NestedString(item.Object, "spec", "pod", "namespace")
+	if volume == "" {
+		volume, _, _ = unstructured.NestedString(item.Object, "spec", "sourcePVC")
+		namespace, _, _ = unstructured.NestedString(item.Object, "spec", "sourceNamespace")
+	}
+	startedAt, _, _ := unstructured.NestedString(item.Object, "status", "startTimestamp")
 	return VolumeProgressItem{
+		Volume:           volume,
+		Pod:              pod,
+		Namespace:        namespace,
+		StartedAt:        startedAt,
 		Kind:             kind,
 		Name:             item.GetName(),
 		Phase:            phase,

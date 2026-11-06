@@ -129,6 +129,40 @@ test('marks sync finalization completed when persisted task outcome is successfu
   assert.deepEqual(groups.map(group => group.status), ['completed', 'completed', 'completed', 'completed']);
 });
 
+test('quota replacement belongs to restore point creation after completed data transfer', () => {
+  for (const quotaStage of ['data_ready', 'deleting_old_point']) {
+    const syncTask = { id: 'task-current', type: 'backup', status: 'finalizing', payload: { quotaStage } };
+    const events = [
+      event('1', 'accepted', '2026-11-05T02:03:11Z'),
+      event('2', 'backup_progress', '2026-11-05T02:03:13Z'),
+      event('3', 'quota_replacement', '2026-11-05T02:03:38Z'),
+    ];
+    const groups = groupTaskEventsByStage(syncTask, events);
+    assert.deepEqual(groups.map(group => group.status), ['completed', 'completed', 'in_progress', 'not_started']);
+    assert.equal(groups[2].events[0].id, '3');
+    assert.equal(groups[2].currentEventId, '3');
+    assert.equal(reachedTaskStages(groups).length, 3);
+    assert.deepEqual(groupTaskEventsByStage(syncTask, []).map(group => group.status), ['completed', 'completed', 'in_progress', 'not_started']);
+  }
+});
+
+test('replacement warnings and publication stay in restore point creation without regressing on late preparation events', () => {
+  const syncTask = { id: 'task-current', type: 'backup', status: 'finalizing' };
+  for (const reason of ['quota_replacement', 'quota_replacement_pending', 'restore_point_published']) {
+    const groups = groupTaskEventsByStage(syncTask, [
+      event('1', reason, '2026-11-05T02:03:38Z'),
+      event('2', 'accepted', '2026-11-05T02:03:39Z'),
+    ]);
+    assert.equal(groups[2].events[0].id, '1');
+    assert.deepEqual(groups.map(group => group.status), ['completed', 'completed', 'in_progress', 'not_started']);
+  }
+});
+
+test('persisted transfer keeps its stage visible while event history is loading', () => {
+  const syncTask = { id: 'task-current', type: 'backup', status: 'running', payload: { volumeProgress: { knownTotal: false } } };
+  assert.deepEqual(groupTaskEventsByStage(syncTask, []).map(group => group.status), ['completed', 'in_progress', 'not_started', 'not_started']);
+});
+
 test('uses storage configuration stages for storage-sync tasks', () => {
   const storageTask = { id: 'storage-task', type: 'storage-sync', status: 'failed', progress: 100, clusterId: 'source' };
   const groups = groupTaskEventsByStage(storageTask, [

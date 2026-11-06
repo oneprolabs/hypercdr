@@ -94,5 +94,23 @@ func TestProtectionPlanActualLifecycleMatchesContracts(t *testing.T) {
 	if _, ok := configured["storageTasks"].([]any); !ok {
 		t.Fatal("storageTasks missing")
 	}
+	deleteRequest := tenantRequest(httptest.NewRequest("DELETE", "/api/v1/protection-plans/"+id, nil), actor)
+	deleteRequest.SetPathValue("id", id)
+	blocked := httptest.NewRecorder()
+	r.tenantGuard("plan", r.deleteProtectionPlan)(blocked, deleteRequest)
+	if blocked.Code != http.StatusConflict || !strings.Contains(blocked.Body.String(), "protection_plan_busy") || !strings.Contains(blocked.Body.String(), "blockingTasks") {
+		t.Fatalf("active configuration tasks must block cleanup: %d %s", blocked.Code, blocked.Body.String())
+	}
+	tasks, err := repo.ListTasks("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range tasks {
+		if task.ProtectionPlanID == id && isActiveTaskStatus(task.Status) {
+			if _, _, err := repo.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "succeeded", MarkDone: true}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	run("DELETE /api/v1/protection-plans/{id}", "", id, r.tenantGuard("plan", r.deleteProtectionPlan), 200)
 }
