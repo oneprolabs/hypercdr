@@ -61,7 +61,7 @@ grep -qx "${UPSTREAM_COMMIT}" "${ROOT_DIR}/UPSTREAM_BASELINE" || die "unexpected
 
 REGISTRY="${REGISTRY%/}"
 IMAGE="${HCDR_VELERO_TARGET_IMAGE:-${REGISTRY}/velero:${IMAGE_TAG}}"
-MONOREPO_COMMIT="$(git -C "${ROOT_DIR}" rev-parse HEAD 2>/dev/null || true)"
+MONOREPO_COMMIT="${HCDR_VELERO_SOURCE_COMMIT:-$(git -C "${ROOT_DIR}" rev-parse HEAD 2>/dev/null || true)}"
 [[ -n "${MONOREPO_COMMIT}" ]] || die "unable to determine source commit"
 mkdir -p "${BUILD_DIR}"
 RESTIC_ZIP="${BUILD_DIR}/restic-v${RESTIC_VERSION}.zip"
