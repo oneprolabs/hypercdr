@@ -7,6 +7,7 @@ import (
 	"hypercdr-platform/platform/backend/internal/protocol"
 	"hypercdr-platform/platform/backend/internal/store"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 )
@@ -110,6 +111,10 @@ func (r *Router) agentWebSocket(w http.ResponseWriter, req *http.Request) {
 		isNewRegistration = true
 	}
 
+	cacheSettings, cacheErr := r.store.GetClusterCacheSettings(cluster.ID)
+	if cacheErr != nil {
+		r.logger.Error("failed to load cluster cache settings", "cluster_id", cluster.ID, "error", cacheErr)
+	}
 	accepted := protocol.Message[protocol.RegisterAcceptedPayload]{
 		Version:     protocol.Version,
 		MessageID:   store.NewPublicID(),
@@ -120,6 +125,12 @@ func (r *Router) agentWebSocket(w http.ResponseWriter, req *http.Request) {
 		AgentID:     register.AgentID,
 		Timestamp:   time.Now().UTC(),
 		Payload: protocol.RegisterAcceptedPayload{
+			CacheSettings: func() *protocol.CacheSettingsCommand {
+				if cacheErr != nil {
+					return nil
+				}
+				return &protocol.CacheSettingsCommand{Namespace: r.dataProtectionNamespaceForCluster(cluster.ID), Enabled: cacheSettings.Enabled, MaxGiB: cacheSettings.MaxGiB}
+			}(),
 			AckMessageID:                    register.MessageID,
 			AckType:                         protocol.MessageAgentRegister,
 			RequestID:                       register.Payload.RequestID,
@@ -183,6 +194,7 @@ func (r *Router) agentWebSocket(w http.ResponseWriter, req *http.Request) {
 	r.logger.Info("agent registered", "cluster_id", cluster.ID, "cluster", cluster.Name)
 
 	r.hub.set(cluster.ID, conn)
+	r.hub.setCapacitySupport(cluster.ID, conn, slices.Contains(register.Payload.Agent.Capabilities, "plan-capacity-v1"))
 	r.configureAgentConnection(conn, cluster.ID)
 	pingDone := make(chan struct{})
 	pingExited := make(chan struct{})

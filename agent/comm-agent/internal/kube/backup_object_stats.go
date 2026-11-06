@@ -152,6 +152,10 @@ func (a *DynamicManifestApplier) GetBackupVolumeInfoStats(ctx context.Context, n
 }
 
 func (a *DynamicManifestApplier) GetPlanObjectStorageStats(ctx context.Context, namespace string, storageLocation string, backupNamePrefix string, repositoryNamespaces []string) (PlanObjectStorageStats, error) {
+	return a.planObjectStorageStats(ctx, namespace, storageLocation, backupNamePrefix, repositoryNamespaces, nil)
+}
+
+func (a *DynamicManifestApplier) planObjectStorageStats(ctx context.Context, namespace string, storageLocation string, backupNamePrefix string, repositoryNamespaces []string, repositories map[string]PlanObjectStorageStats) (PlanObjectStorageStats, error) {
 	backupNamePrefix = strings.TrimSpace(backupNamePrefix)
 	if strings.TrimSpace(namespace) == "" || strings.TrimSpace(storageLocation) == "" || backupNamePrefix == "" {
 		return PlanObjectStorageStats{}, nil
@@ -189,12 +193,24 @@ func (a *DynamicManifestApplier) GetPlanObjectStorageStats(ctx context.Context, 
 	for _, repoNamespace := range stats.KopiaNamespaces {
 		prefix := kopiaRepositoryPrefix(bsl.Prefix, repoNamespace)
 		stats.KopiaPrefixes = append(stats.KopiaPrefixes, prefix)
+		key := storageLocation + "/" + prefix
+		if cached, ok := repositories[key]; ok {
+			stats.KopiaBytes += cached.KopiaBytes
+			stats.KopiaObjectCount += cached.KopiaObjectCount
+			continue
+		}
+		var repository PlanObjectStorageStats
 		for object := range client.ListObjects(ctx, bsl.Bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
 			if object.Err != nil {
 				return PlanObjectStorageStats{}, object.Err
 			}
-			stats.KopiaBytes += object.Size
-			stats.KopiaObjectCount++
+			repository.KopiaBytes += object.Size
+			repository.KopiaObjectCount++
+		}
+		stats.KopiaBytes += repository.KopiaBytes
+		stats.KopiaObjectCount += repository.KopiaObjectCount
+		if repositories != nil {
+			repositories[key] = repository
 		}
 	}
 	stats.TotalBytes = stats.MetadataBytes + stats.KopiaBytes

@@ -172,6 +172,10 @@ OADP_RUNTIME_IMAGES="{{OADP_RUNTIME_IMAGES}}"
 AGENT_COMMAND="/comm-agent"
 BACKUP_BACKEND="velero"
 VELERO_IMAGE="{{VELERO_IMAGE}}"
+CACHE_PERSISTENCE_SUPPORTED=""
+case "$VELERO_IMAGE" in
+  *-cache-v1|*-cache-v1@sha256:*) CACHE_PERSISTENCE_SUPPORTED="v1" ;;
+esac
 VELERO_AWS_PLUGIN_IMAGE="{{VELERO_AWS_PLUGIN_IMAGE}}"
 VELERO_AZURE_PLUGIN_IMAGE="{{VELERO_AZURE_PLUGIN_IMAGE}}"
 VELERO_GCP_PLUGIN_IMAGE="{{VELERO_GCP_PLUGIN_IMAGE}}"
@@ -1421,6 +1425,9 @@ spec:
       labels:
         app.kubernetes.io/name: velero-node-agent
         role: node-agent
+      annotations:
+        hypercdr.io/cache-persistence-supported: "${CACHE_PERSISTENCE_SUPPORTED}"
+        hypercdr.io/cache-persistence-image: "${VELERO_IMAGE}"
     spec:
       serviceAccountName: velero
 ${IMAGE_PULL_SECRETS_BLOCK}
@@ -1507,6 +1514,30 @@ kind: ServiceAccount
 metadata:
   name: hypercdr-agent
   namespace: ${NAMESPACE}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: hypercdr-cache-clean
+  namespace: ${NAMESPACE}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: hypercdr-cache-clean
+  namespace: ${NAMESPACE}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: hypercdr-cache-clean
+subjects:
+  - kind: ServiceAccount
+    name: hypercdr-agent
+    namespace: ${NAMESPACE}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole

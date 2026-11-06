@@ -259,6 +259,18 @@ func (s *PostgresStore) listTasks(filter TaskFilter) ([]Task, error) {
 	`
 	args := []any{}
 	conditions := []string{}
+	if filter.CapacityTrigger != "" {
+		args = append(args, filter.CapacityTrigger)
+		conditions = append(conditions, fmt.Sprintf("payload->>'trigger' = $%d", len(args)))
+	}
+	if filter.CapacityScheduleDay != "" {
+		args = append(args, filter.CapacityScheduleDay)
+		conditions = append(conditions, fmt.Sprintf("payload->>'scheduleDay' = $%d", len(args)))
+	}
+	if filter.CapacityPlanID != "" {
+		args = append(args, filter.CapacityPlanID)
+		conditions = append(conditions, fmt.Sprintf("payload->'planCapacity'->'plans' @> jsonb_build_array(jsonb_build_object('planId', $%d::text))", len(args)))
+	}
 	for _, ref := range []struct{ field, value string }{
 		{"ownerId", filter.RegistrationOwnerID}, {"idempotencyKey", filter.RegistrationKey},
 		{"sessionId", filter.RegistrationSessionID},

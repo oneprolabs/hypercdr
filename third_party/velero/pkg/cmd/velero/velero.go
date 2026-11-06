@@ -19,6 +19,7 @@ package velero
 import (
 	"flag"
 	"fmt"
+	"github.com/vmware-tanzu/velero/internal/persistentcache"
 	"os"
 
 	"github.com/fatih/color"
@@ -104,6 +105,7 @@ operations can also be performed as 'velero backup get' and 'velero schedule cre
 	c.PersistentFlags().Var(&cmdColorzied, "colorized", "Show colored output in TTY. Overrides 'colorized' value from $HOME/.config/velero/config.json if present. Enabled by default")
 
 	c.AddCommand(
+		&cobra.Command{Use: "cache-clean", Hidden: true, RunE: func(cmd *cobra.Command, args []string) error { return persistentcache.Clean(persistentcache.Root) }},
 		backup.NewCommand(f),
 		schedule.NewCommand(f),
 		restore.NewCommand(f),

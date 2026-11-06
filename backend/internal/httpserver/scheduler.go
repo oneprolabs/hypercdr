@@ -62,6 +62,7 @@ func (r *Router) runSchedulerTickLocked(now time.Time) {
 		}
 	}
 	r.reconcilePlatformSchedules(now)
+	r.schedulePlanCapacity(now)
 	due, err := r.store.ListDueProtectionPlanSchedules(now)
 	if err != nil {
 		r.logger.Error("failed to list due protection plan schedules", "error", err)
@@ -83,6 +84,9 @@ func (r *Router) reconcileAbandonedMaintenanceTasks(now time.Time) {
 			continue
 		}
 		message := "No cleanup status was received from the cluster agent for 35 minutes. The maintenance task was closed so it cannot indefinitely block cluster lifecycle operations. Review the task events and cluster resources before retrying."
+		if task.Type == "plan-capacity" {
+			message = "No capacity collection status was received from the cluster agent for 35 minutes. Previous capacity values are retained. Retry the refresh after checking the cluster agent."
+		}
 		if _, _, err := r.store.UpdateTaskStatus(store.TaskStatusInput{
 			TaskID: task.ID, Status: "failed", Progress: task.Progress, MarkDone: true,
 			ErrorCode: "MAINTENANCE_STATUS_TIMEOUT", ErrorMessage: message,
@@ -95,7 +99,7 @@ func (r *Router) reconcileAbandonedMaintenanceTasks(now time.Time) {
 }
 
 func maintenanceTaskTimedOut(task store.Task, now time.Time) bool {
-	if (task.Type != "protection-cleanup" && task.Type != "retention-cleanup") || !isActiveTaskStatus(task.Status) {
+	if (task.Type != "protection-cleanup" && task.Type != "retention-cleanup" && task.Type != "plan-capacity") || !isActiveTaskStatus(task.Status) {
 		return false
 	}
 	lastActivity := task.CreatedAt

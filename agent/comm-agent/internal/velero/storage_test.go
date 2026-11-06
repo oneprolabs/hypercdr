@@ -45,6 +45,9 @@ func TestBuildBackupStorageLocationManifestMapsPathStyleConfig(t *testing.T) {
 	if got := manifest.Spec.ObjectStorage.Prefix; got != "clusters/source-a" {
 		t.Fatalf("unexpected object storage prefix %q", got)
 	}
+	if manifest.Spec.ValidationFrequency != "3m" || manifest.Spec.BackupSyncPeriod != "3m" {
+		t.Fatalf("unexpected scan periods: %+v", manifest.Spec)
+	}
 }
 
 func TestBuildStorageManifestsUsesOpenShiftOADPNamespace(t *testing.T) {
@@ -57,6 +60,9 @@ func TestBuildStorageManifestsUsesOpenShiftOADPNamespace(t *testing.T) {
 	}
 	if manifests.BackupStorageLocation.Metadata.Namespace != "openshift-adp" {
 		t.Fatalf("BSL namespace = %q", manifests.BackupStorageLocation.Metadata.Namespace)
+	}
+	if manifests.BackupStorageLocation.Spec.ValidationFrequency != "3m" || manifests.BackupStorageLocation.Spec.BackupSyncPeriod != "3m" {
+		t.Fatalf("unexpected OADP scan periods: %+v", manifests.BackupStorageLocation.Spec)
 	}
 	if manifests.Secret == nil || manifests.Secret.Metadata.Namespace != "openshift-adp" {
 		t.Fatalf("credential secret was not created in openshift-adp: %#v", manifests.Secret)

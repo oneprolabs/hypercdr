@@ -51,7 +51,7 @@ export default function ClusterActivityPanel({ logs, clusters, highlightedTaskId
     const timer = window.setTimeout(() => onHighlightComplete?.(), 5000);
     return () => window.clearTimeout(timer);
   }, [highlightedTaskId]);
-  const taskTypeLabel = (type: string) => type === 'register' ? 'Register cluster' : type === 'unregister' ? 'Unregister cluster' : type === 'agent-upgrade' ? 'Upgrade Comm Agent' : type === 'velero-upgrade' ? 'Upgrade Velero' : type;
+  const taskTypeLabel = (type: string) => type === 'plan-capacity' ? 'Capacity collection' : type === 'register' ? 'Register cluster' : type === 'unregister' ? 'Unregister cluster' : type === 'agent-upgrade' ? 'Upgrade Comm Agent' : type === 'velero-upgrade' ? 'Upgrade Velero' : type;
   const taskInitials = (entry: { log: ClusterTaskLog }) => entry.log.task.type === 'register' ? 'R' : entry.log.task.type === 'unregister' ? 'U' : entry.log.task.type === 'agent-upgrade' ? 'CA' : entry.log.task.type === 'velero-upgrade' ? 'V' : (entry.log.task.type || '?').charAt(0).toUpperCase();
   const taskAccent = (type: string) => type === 'register' ? 'bg-blue-500' : type === 'unregister' ? 'bg-rose-500' : type === 'agent-upgrade' ? 'bg-indigo-500' : type === 'velero-upgrade' ? 'bg-cyan-600' : 'bg-slate-500';
   const componentLabel = (task: ApiTask) => task.type === 'agent-upgrade' ? 'Comm Agent' : task.type === 'velero-upgrade' ? 'Velero' : 'Cluster lifecycle';

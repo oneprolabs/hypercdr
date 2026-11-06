@@ -934,6 +934,7 @@ export function taskDetailLabel(taskType: string): string {
   if (normalized === 'takeover') return 'Takeover';
   if (normalized === 'restore') return 'Restore';
   if (normalized === 'retention-cleanup') return 'Cleanup';
+  if (normalized === 'plan-capacity') return 'Capacity collection';
   if (normalized === 'protection-cleanup') return 'DR Cleanup';
   if (normalized === 'storage-sync') return 'Storage Setup';
   if (normalized === 'backup-cancel') return 'Cancel Sync';

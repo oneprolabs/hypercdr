@@ -32,7 +32,7 @@ func TestProtectionPlanContractsCoverMountedRoutes(t *testing.T) {
 			}
 		}
 	}
-	if count != 6 {
+	if count != 8 {
 		t.Fatalf("plan coverage %d", count)
 	}
 }

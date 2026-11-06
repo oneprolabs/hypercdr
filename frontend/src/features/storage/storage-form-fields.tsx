@@ -67,12 +67,9 @@ export function StorageFormFields({editingRepo,setEditingRepo,allowTypeChange}:{
                       role="switch"
                       aria-checked={ssl}
                       onClick={() => updateEditingConfig('useSsl', !ssl)}
-                      className={
-                        'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 ' +
-                        (ssl ? 'border-emerald-500 bg-emerald-500' : 'border-slate-200 bg-slate-200')
-                      }
+                      className="hbdr-settings-switch"
                     >
-                      <span className={'inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ' + (ssl ? 'translate-x-4' : 'translate-x-0.5')} />
+                      <span />
                     </button>
                   </div>
                   <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2">

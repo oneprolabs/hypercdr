@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ClusterRegistrationChoices } from './cluster-registration-choices';
+import { ClusterCacheSettingsDrawer } from './cluster-cache-settings-drawer';
 import { ResourceCreateDrawer } from '../../components/resource-create-drawer';
 import { ClusterPlatformRegistrationFields } from './cluster-platform-registration-fields';
 import { ClusterCommandRegistrationFields } from './cluster-command-registration-fields';
 import { uploadRegistrationKubeconfig, inspectRegistrationCluster, startRegistrationTask, cancelRegistrationTask } from './cluster-registration-service';
-import { AlertTriangle, Check, CheckCircle2, ChevronRight, Cloud, Edit2, Eye, GitBranch, MoreVertical, Plus, PlusCircle, RefreshCw, Server, Star, Trash2, Upload, X } from 'lucide-react';
+import { AlertTriangle, Check, CheckCircle2, ChevronRight, Cloud, Edit2, Eye, GitBranch, MoreVertical, Plus, PlusCircle, RefreshCw, Server, Settings2, Star, Trash2, Upload, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { ApiRequestError, apiGet, apiDelete, apiPatch, apiPost } from '../../api/client';
 import { SearchBar } from '../../components/search-bar';
@@ -101,6 +102,7 @@ export default function ClusterPage(props: {
 }) {
   const { clusters, loading, protectionPlans, onLoadTopology, canUpgrade, defaultClusterId, clusterMenuId, setClusterMenuId, setSelectedCluster, setDefaultCluster, unregisterCluster, onRenameCluster, onUpgradeCluster, onUpgradeVelero, onRegisterCluster, onRefreshRegistration, clusterTaskLogs, getAgentTokenForRegistration, prefetchAgentToken, openDashboard, registrationAllowed = true, openLicenseManagement, toast } = props;
   const [registerOpen, setRegisterOpen] = useState(false);
+  const [cacheCluster, setCacheCluster] = useState<Cluster | null>(null);
   const [licenseGuideOpen, setLicenseGuideOpen] = useState(false);
   const [registrationType, setRegistrationType] = useState<ClusterRegistrationType>('native-kubernetes');
   const [cceRegistrationMode, setCCERegistrationMode] = useState<CCERegistrationMode>('command');
@@ -757,6 +759,7 @@ export default function ClusterPage(props: {
 
   return (
     <motion.div key="clusters" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="hbdr-clusters-page">
+      {cacheCluster && <ClusterCacheSettingsDrawer clusterId={cacheCluster.id} name={cacheCluster.name} onClose={() => setCacheCluster(null)} onSaved={() => toast('Cache settings saved')} />}
       <div className="hbdr-clusters-workspace">
       <SearchBar title="Clusters" desc="Register clusters and maintain the default cluster." />
 
@@ -811,6 +814,7 @@ export default function ClusterPage(props: {
                       <div className="fixed inset-0 z-30" onClick={(event) => { event.stopPropagation(); setClusterMenuId(null); }} />
                       <motion.div data-cluster-menu-root initial={{ opacity: 0, scale: 0.96, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 8 }} className="cluster-card-action-menu absolute right-0 top-9 z-50 w-44 rounded-xl border border-slate-100 bg-white py-2 shadow-2xl shadow-slate-200/70 ring-1 ring-slate-950/5" onClick={(event) => event.stopPropagation()}>
                         <button onClick={(event) => { event.stopPropagation(); setClusterMenuId(null); setClusterResourceDetail({ cluster, type: 'overview' }); }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"><Eye size={15} />View Detail</button>
+                        {canUpgrade && <button onClick={() => { setClusterMenuId(null); setCacheCluster(cluster); }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"><Settings2 size={15} />Cache settings</button>}
                         <button onClick={(event) => openUnregister(cluster, event)} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-rose-600 hover:bg-rose-50"><Trash2 size={15} />Unregister Cluster</button>
                       </motion.div>
                     </>

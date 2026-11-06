@@ -2307,6 +2307,7 @@ function recentTasks(tasks: ApiTask[], days: number): ApiTask[] {
 }
 
 function taskTypeLabel(type?: string) {
+  if (type === 'plan-capacity') return 'Capacity collection';
   if (type === 'backup') return 'Data sync';
   if (type === 'drill') return 'DR drill';
   if (type === 'restore') return 'Restore';

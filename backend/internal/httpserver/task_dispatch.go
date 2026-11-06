@@ -211,6 +211,15 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 		Deadline:  time.Now().UTC().Add(30 * time.Minute),
 	}
 	switch task.Type {
+	case "plan-capacity":
+		if !r.hub.supportsCapacity(task.ClusterID) {
+			return protocol.Message[protocol.TaskDispatchPayload]{}, errors.New("agent does not support plan capacity collection")
+		}
+		command, err := capacityCommand(task.Payload)
+		if err != nil {
+			return protocol.Message[protocol.TaskDispatchPayload]{}, err
+		}
+		payload.PlanCapacity = &command
 	case "storage-sync":
 		repositoryID := stringPayload(task.Payload, "repositoryId")
 		repo, ok, err := r.store.GetStorageRepository(repositoryID)
@@ -317,6 +326,9 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 		if payload.AgentUpgrade.Image == "" {
 			return protocol.Message[protocol.TaskDispatchPayload]{}, errors.New("agent upgrade image is required")
 		}
+	case "cache-settings":
+		payload.Deadline = time.Now().UTC().Add(10 * time.Minute)
+		payload.CacheSettings = &protocol.CacheSettingsCommand{Namespace: stringPayload(task.Payload, "namespace"), Enabled: boolPayload(task.Payload, "enabled"), MaxGiB: int(int64FromAny(task.Payload["maxGiB"])), Clean: boolPayload(task.Payload, "clean")}
 	case "velero-upgrade":
 		payload.Deadline = time.Now().UTC().Add(15 * time.Minute)
 		payload.VeleroUpgrade = &protocol.VeleroUpgradeCommand{

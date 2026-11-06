@@ -388,9 +388,11 @@ export default function ApplicationDrPage(props: {
 	return plan;
   };
   const planStorageSizeForApp = (app: AppItem) => {
-    const size = recordFromUnknown(protectionPlanForApp(app)?.planStorageSize);
+    const plan = protectionPlanForApp(app);
+    if (!plan) return { label: '', title: app.storage || 'Repository' };
+    const size = recordFromUnknown(plan.planStorageSize);
     const totalBytes = numberFromUnknown(size.totalBytes);
-    if (!totalBytes) return { label: '', title: app.storage || 'Repository' };
+    if (typeof size.totalBytes !== 'number') return { label: 'Pending collection', title: app.storage || 'Repository' };
     const metadataBytes = numberFromUnknown(size.metadataBytes);
     const kopiaBytes = numberFromUnknown(size.kopiaBytes);
     const title = [

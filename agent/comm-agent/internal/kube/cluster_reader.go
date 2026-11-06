@@ -750,7 +750,6 @@ func shouldEnrichBackupInventory(summary map[string]any) bool {
 func (r *KubernetesClusterReader) enrichBackupInventory(ctx context.Context, summary map[string]any) {
 	name, _ := summary["name"].(string)
 	namespace, _ := summary["namespace"].(string)
-	storageLocation, _ := summary["storageLocation"].(string)
 	if name == "" || namespace == "" {
 		return
 	}
@@ -760,83 +759,6 @@ func (r *KubernetesClusterReader) enrichBackupInventory(ctx context.Context, sum
 		summary["volumeProgress"] = backupInventoryVolumeProgressPayload(volumeProgress)
 	}
 
-	var objectStats BackupObjectStats
-	var objectStatsErr string
-	var volumeInfoStats BackupVolumeInfoStats
-	var volumeInfoStatsErr string
-	if storageLocation != "" {
-		stats, err := applier.GetBackupObjectStats(ctx, namespace, storageLocation, name)
-		if err != nil {
-			objectStatsErr = err.Error()
-		} else {
-			objectStats = stats
-		}
-		infoStats, err := applier.GetBackupVolumeInfoStats(ctx, namespace, storageLocation, name)
-		if err != nil {
-			volumeInfoStatsErr = err.Error()
-		} else {
-			volumeInfoStats = infoStats
-		}
-	}
-
-	volumeBytes, volumeAccuracy, volumeSource := inventoryFinalVolumeBytes(volumeProgress)
-	if volumeInfoStats.Accurate {
-		volumeBytes = volumeInfoStats.VolumeBytes
-		volumeAccuracy = "accurate"
-		volumeSource = "veleroBackupVolumeInfo"
-	}
-	metadataBytes := objectStats.MetadataPackageBytes
-	uploadedMetadataBytes := metadataBytes
-	uploadedVolumeBytes := volumeBytes
-	uploadedVolumeSource := "estimatedFromVolumeBytes"
-	if volumeProgress.IncrementalCount > 0 {
-		uploadedVolumeBytes = volumeProgress.IncrementalBytes
-		uploadedVolumeSource = "veleroIncrementalBytes"
-	}
-	totalBytes := metadataBytes + volumeBytes
-	uploadedBytes := uploadedMetadataBytes + uploadedVolumeBytes
-	sizeStatus := "complete"
-	if objectStatsErr != "" || volumeAccuracy != "accurate" {
-		sizeStatus = "partial"
-	}
-	size := map[string]any{
-		"sizeStatus":             sizeStatus,
-		"totalBytes":             totalBytes,
-		"metadataBytes":          metadataBytes,
-		"volumeBytes":            volumeBytes,
-		"uploadedBytes":          uploadedBytes,
-		"uploadedMetadataBytes":  uploadedMetadataBytes,
-		"uploadedVolumeBytes":    uploadedVolumeBytes,
-		"incrementalVolumeBytes": volumeProgress.IncrementalBytes,
-		"incrementalVolumeCount": volumeProgress.IncrementalCount,
-		"sources": map[string]any{
-			"metadataBytes":         "objectStoreBackupArtifacts",
-			"volumeBytes":           volumeSource,
-			"uploadedMetadataBytes": "objectStoreBackupArtifacts",
-			"uploadedVolumeBytes":   uploadedVolumeSource,
-		},
-		"accuracy": map[string]any{
-			"totalBytes":            "mixed",
-			"metadataBytes":         "accurate",
-			"volumeBytes":           volumeAccuracy,
-			"uploadedBytes":         "mixed",
-			"uploadedMetadataBytes": "accurate",
-			"uploadedVolumeBytes":   "estimated",
-		},
-		"metadataObjectCount": objectStats.ObjectCount,
-		"metadataPrefix":      objectStats.Prefix,
-		"volumeInfoCount":     volumeInfoStats.VolumeCount,
-		"volumeInfoKey":       volumeInfoStats.Key,
-		"storageLocation":     storageLocation,
-	}
-	if objectStatsErr != "" {
-		size["metadataStatsError"] = objectStatsErr
-	}
-	if volumeInfoStatsErr != "" {
-		size["volumeInfoStatsError"] = volumeInfoStatsErr
-	}
-	summary["size"] = size
-	summary["sizeBytes"] = totalBytes
 }
 
 func backupInventoryVolumeProgressPayload(progress VolumeProgress) map[string]any {

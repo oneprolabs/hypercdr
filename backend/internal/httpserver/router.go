@@ -15,6 +15,7 @@ import (
 )
 
 type Router struct {
+	cacheSettingsMu        sync.Mutex
 	workerContext          context.Context
 	stopWorkers            context.CancelFunc
 	workers                sync.WaitGroup
@@ -353,6 +354,9 @@ func validReleaseToken(expected, provided string) bool {
 
 func requiresAdmin(req *http.Request) bool {
 	p := req.URL.Path
+	if strings.HasPrefix(p, "/api/v1/clusters/") && strings.Contains(p, "/cache-settings") && req.Method != http.MethodGet {
+		return true
+	}
 	if strings.HasPrefix(p, "/api/v1/users") {
 		return true
 	}

@@ -137,11 +137,18 @@ type MigrationRepository interface {
 
 // ClusterRepository defines the persisted cluster operations.
 type ClusterRepository interface {
+	GetClusterCacheSettings(clusterID string) (ClusterCacheSettings, error)
+	SaveClusterCacheSettings(clusterID string, settings ClusterCacheSettings) error
 	ListClusters() ([]Cluster, error)
 	UpdateCluster(input ClusterUpdateInput) (Cluster, bool, error)
 	SetClusterConnectionStatus(clusterID string, status string) (Cluster, bool, error)
 	SetDefaultCluster(clusterID string) (Cluster, bool, error)
 	DeleteCluster(clusterID string) (bool, error)
+}
+
+type ClusterCacheSettings struct {
+	Enabled bool `json:"enabled"`
+	MaxGiB  int  `json:"maxGiB"`
 }
 
 // ApplicationRepository defines the persisted application operations.
@@ -195,6 +202,7 @@ type ProtectionRepository interface {
 	GetProtectionPlan(id string) (ProtectionPlan, bool, error)
 	UpdateProtectionPlanStatus(id string, status string) (ProtectionPlan, bool, error)
 	UpdateProtectionPlanStorageSize(id string, size map[string]any) (ProtectionPlan, bool, error)
+	SavePlanCapacityResult(planID, clusterID, tenantID string, result map[string]any, requestedAt time.Time) error
 	UpsertProtectionPlanSchedule(input ProtectionPlanScheduleInput) (ProtectionPlanSchedule, error)
 	GetProtectionPlanSchedule(planID string) (ProtectionPlanSchedule, bool, error)
 	ListDueProtectionPlanSchedules(now time.Time) ([]ProtectionPlanSchedule, error)
@@ -262,6 +270,9 @@ type UpgradeRepository interface {
 // TaskFilter keeps list endpoints from loading and decoding the complete task
 // history when a page only needs a small, recent operational view.
 type TaskFilter struct {
+	CapacityTrigger       string
+	CapacityScheduleDay   string
+	CapacityPlanID        string
 	TenantID              string
 	RegistrationOwnerID   string
 	RegistrationKey       string

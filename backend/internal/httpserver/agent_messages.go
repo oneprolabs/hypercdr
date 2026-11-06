@@ -380,6 +380,27 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 				}
 				return
 			}
+			if existingTask.Type == "plan-capacity" {
+				if existingTask.CommandID != completed.Payload.CommandID {
+					_ = r.writeEventError(conn, clusterID, completed.AgentID, completed.MessageID, completed.Type, completed.Payload.TaskID, completed.Payload.CommandID, "CAPACITY_COMMAND_MISMATCH", "Capacity command does not match", false)
+					continue
+				}
+				if existingTask.Status != "failed" && existingTask.Status != "cancelled" {
+					err = r.persistCapacityReport(existingTask, completed.Payload.PlanCapacity)
+					if err == nil {
+						_, _, err = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: existingTask.ID, Status: "succeeded", Progress: 100, MarkDone: true, Payload: map[string]any{"capacityReport": completed.Payload.PlanCapacity}})
+					}
+					if err != nil {
+						_ = r.writeEventError(conn, clusterID, completed.AgentID, completed.MessageID, completed.Type, completed.Payload.TaskID, completed.Payload.CommandID, "CAPACITY_RESULT_SAVE_FAILED", err.Error(), true)
+						continue
+					}
+					_ = r.addTaskEventIfChanged(store.TaskEventInput{TaskID: existingTask.ID, Level: "info", Reason: "completed", Message: "Plan capacity collection completed", Payload: map[string]any{"capacityReport": completed.Payload.PlanCapacity}})
+				}
+				if completed.Payload.AckRequired {
+					_ = r.writeEventAck(conn, clusterID, completed.AgentID, completed.MessageID, completed.Type, completed.Payload.TaskID, completed.Payload.CommandID)
+				}
+				continue
+			}
 			if existingTask.Type == "backup" && isForceStoppedBackupTask(existingTask) {
 				_ = r.store.AddTaskEvent(store.TaskEventInput{
 					TaskID:  existingTask.ID,

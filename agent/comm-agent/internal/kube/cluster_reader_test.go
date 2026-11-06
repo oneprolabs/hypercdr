@@ -96,6 +96,29 @@ func int32Ptr(value int32) *int32 {
 	return &value
 }
 
+func TestCompletedBackupInventoryDoesNotReadObjectStorageConfiguration(t *testing.T) {
+	dynamic := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		{Group: "velero.io", Version: "v1", Resource: "podvolumebackups"}:  "PodVolumeBackupList",
+		{Group: "velero.io", Version: "v2alpha1", Resource: "datauploads"}: "DataUploadList",
+	})
+	reader := NewKubernetesClusterReaderWithClients(nil, dynamic, nil)
+	for repeat := 0; repeat < 3; repeat++ {
+		summary := map[string]any{"name": "backup", "namespace": "hypercdr-agent", "storageLocation": "default", "phase": "Completed"}
+		reader.enrichBackupInventory(context.Background(), summary)
+		if _, present := summary["size"]; present {
+			t.Fatal("inventory must not produce replacement final size measurements")
+		}
+		if _, present := summary["sizeBytes"]; present {
+			t.Fatal("inventory must not produce a partial final size")
+		}
+	}
+	for _, action := range dynamic.Actions() {
+		if resource := action.GetResource().Resource; resource == "backupstoragelocations" || resource == "secrets" {
+			t.Fatalf("inventory attempted to access object storage configuration: %s", resource)
+		}
+	}
+}
+
 func TestReadNamespaceAPIsReturnsOnlyRestorableNamespaceAndRelatedClusterTypes(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	discoveryClient := clientset.Discovery().(*fakediscovery.FakeDiscovery)

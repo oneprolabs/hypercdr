@@ -176,8 +176,13 @@ func (r *BackupMicroService) RunCancelableDataPath(ctx context.Context) (string,
 
 	log.Debug("Async fs br created")
 
+	cacheIdentity := pvb.Spec.Pod.Namespace + "/" + pvb.Spec.Pod.Name + "/" + pvb.Spec.Volume
+	if pvcUID := pvb.Labels[velerov1api.PVCUIDLabel]; pvcUID != "" {
+		cacheIdentity = "pvc/" + pvcUID
+	}
 	if err := fsBackup.Init(ctx, &datapath.FSBRInitParam{
 		BSLName:           pvb.Spec.BackupStorageLocation,
+		CacheIdentity:     cacheIdentity,
 		SourceNamespace:   pvb.Spec.Pod.Namespace,
 		UploaderType:      pvb.Spec.UploaderType,
 		RepositoryType:    velerov1api.BackupRepositoryTypeKopia,

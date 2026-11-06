@@ -115,5 +115,6 @@ func (r *Router) acceptBackupCompletion(task store.Task, payload protocol.TaskCo
 		return store.ErrBackupResultIncomplete
 	}
 	r.reconcileRetention(point.ProtectionPlanID, point.BackupTaskID)
+	r.collectInitialPlanCapacityAfterBackup(point.ProtectionPlanID)
 	return nil
 }

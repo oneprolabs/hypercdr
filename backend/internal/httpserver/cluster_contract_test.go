@@ -79,7 +79,7 @@ func TestClusterContractsCoverMountedOperations(t *testing.T) {
 			t.Fatal("placeholder success remains")
 		}
 	}
-	if count != 11 {
+	if count != 14 {
 		t.Fatalf("coverage %d", count)
 	}
 }

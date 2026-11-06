@@ -40,6 +40,7 @@ const (
 )
 
 type Client struct {
+	capacityMu     sync.Mutex
 	cfg            config.Config
 	logger         *slog.Logger
 	conn           *websocket.Conn
@@ -252,9 +253,10 @@ func (c *Client) Register() (protocol.RegisterAcceptedPayload, error) {
 		AgentCredential: c.cfg.AgentCredential,
 		Cluster:         clusterSummary,
 		Agent: protocol.AgentSummary{
-			Version:   c.cfg.AgentVersion,
-			Namespace: c.cfg.Namespace,
-			PodName:   c.cfg.PodName,
+			Capabilities: []string{"plan-capacity-v1"},
+			Version:      c.cfg.AgentVersion,
+			Namespace:    c.cfg.Namespace,
+			PodName:      c.cfg.PodName,
 		},
 		Velero: protocol.VeleroSummary{
 			Installed: false,
@@ -294,6 +296,19 @@ func (c *Client) Register() (protocol.RegisterAcceptedPayload, error) {
 		c.cfg.ClusterID = accepted.Payload.ClusterID
 		c.cfg.AgentCredential = accepted.Payload.AgentCredential
 		c.cfg.InstallToken = ""
+		if settings := accepted.Payload.CacheSettings; settings != nil {
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				defer cancel()
+				if runtime, ok := c.agentRuntime.(interface {
+					ConfigureCache(context.Context, string, bool, int, bool) error
+				}); ok {
+					if err := runtime.ConfigureCache(ctx, settings.Namespace, settings.Enabled, settings.MaxGiB, false); err != nil {
+						c.logger.Warn("cache settings not applied", "error", err)
+					}
+				}
+			}()
+		}
 		return accepted.Payload, nil
 	case protocol.MessagePlatformRegisterRejected:
 		var rejected protocol.Message[protocol.RegisterRejectedPayload]
@@ -754,6 +769,10 @@ func (c *Client) executeTask(task protocol.TaskDispatchPayload) {
 	}
 	c.logger.Info("task received", "task_id", task.TaskID, "type", task.Type, "command_id", task.CommandID)
 	switch task.Type {
+	case "plan-capacity":
+		c.executePlanCapacityTask(task)
+	case "cache-settings":
+		c.executeCacheSettingsTask(task)
 	case "backup":
 		c.executeBackupTask(task)
 	case "backup-cancel":
@@ -3090,46 +3109,6 @@ func (c *Client) attachBackupSizeStats(ctx context.Context, object kube.AppliedO
 	payload["restorePointSize"] = restorePointSize
 	payload["sizeBytes"] = totalBytes
 	delete(payload, "volumeProgress")
-
-	c.attachPlanObjectStorageStats(ctx, object, storageLocation, payload)
-}
-
-func (c *Client) attachPlanObjectStorageStats(ctx context.Context, object kube.AppliedObject, storageLocation string, payload map[string]any) {
-	if c.statsReader == nil || object.Kind != "Backup" || storageLocation == "" || payload == nil {
-		return
-	}
-	planID := backupPlanIDFromPayload(payload)
-	backupNamePrefix := backupNamePrefixForPlan(planID)
-	if backupNamePrefix == "" {
-		return
-	}
-	namespaces := backupNamespacesFromPayload(payload)
-	stats, err := c.statsReader.GetPlanObjectStorageStats(ctx, object.Namespace, storageLocation, backupNamePrefix, namespaces)
-	if err != nil {
-		payload["sizeStatus"] = "partial"
-		payload["sizeWarnings"] = appendWarning(payload["sizeWarnings"], map[string]any{
-			"scope":   "planStorageSize",
-			"code":    "PLAN_STORAGE_SIZE_SCAN_FAILED",
-			"message": err.Error(),
-		})
-		return
-	}
-	payload["planStorageSize"] = map[string]any{
-		"totalBytes":    stats.TotalBytes,
-		"metadataBytes": stats.MetadataBytes,
-		"kopiaBytes":    stats.KopiaBytes,
-	}
-}
-
-func appendWarning(existing any, warning map[string]any) []map[string]any {
-	warnings := []map[string]any{}
-	for _, item := range sliceFromAny(existing) {
-		if mapped := wsMapFromAny(item); len(mapped) > 0 {
-			warnings = append(warnings, mapped)
-		}
-	}
-	warnings = append(warnings, warning)
-	return warnings
 }
 
 func sliceFromAny(value any) []any {
@@ -3609,14 +3588,6 @@ func (c *Client) sendVeleroBackupEvent(backup kube.VeleroBackupSummary) error {
 	}
 	if volumePayload != nil {
 		velero["volumeProgress"] = volumePayload
-	}
-	if backup.Phase == "Completed" {
-		c.attachBackupSizeStats(context.Background(), kube.AppliedObject{
-			APIVersion: "velero.io/v1",
-			Kind:       "Backup",
-			Namespace:  backup.Namespace,
-			Name:       backup.Name,
-		}, velero)
 	}
 	signature := fmt.Sprintf("%s|%s|%d", backup.Phase, backup.ResourceVersion, progress)
 	if volumePayload != nil {

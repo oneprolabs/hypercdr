@@ -1,4 +1,5 @@
 import type { useNamespaceDetail } from './use-namespace-detail';
+import { PlanCapacityControl } from './plan-capacity-control';
 import { useEffect, useState } from 'react';
 import { apiPatch, apiPost } from '../../api/client';
 import { ModalFrame } from '../../components/modal-frame';
@@ -273,7 +274,7 @@ export default function NamespaceDetailDrawer({detail, catalog, presentation, on
                   <div className="hbdr-app-detail-config-item">
                     <p>Repository</p>
                     <strong title={detailStorage}>{detailStorage}</strong>
-                    {storageUsage.label && <em>{storageUsage.label}</em>}
+                    {detailPlanId ? <PlanCapacityControl key={detailPlanId} planId={detailPlanId} /> : storageUsage.label && <em>{storageUsage.label}</em>}
                   </div>
                   <div className="hbdr-app-detail-config-item">
                     <p>DR Pair</p>
@@ -547,7 +548,7 @@ export default function NamespaceDetailDrawer({detail, catalog, presentation, on
                   <div><span>TLS</span><strong>{detailRepository.useTls ? 'Enabled' : 'Disabled'}</strong></div>
                   <div><span>URL Style</span><strong>{detailRepository.urlStyle || 'path'}</strong></div>
                   <div><span>Status</span><strong>{detailRepository.status}</strong></div>
-                  <div><span>Storage Used</span><strong>{storageUsage.label || '-'}</strong></div>
+                  <div><span>Storage Used</span>{detailPlanId ? <PlanCapacityControl key={detailPlanId} planId={detailPlanId} /> : <strong>{storageUsage.label || '-'}</strong>}</div>
                   <div><span>Last Verified</span><strong>{detailRepository.lastValidatedAt ? formatLocalDateTime(detailRepository.lastValidatedAt) : 'Never'}</strong></div>
                 </div>
               ) : (

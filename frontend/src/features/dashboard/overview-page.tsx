@@ -10,7 +10,7 @@ import { buildOverviewModel, buildPlatformAlerts, activeTask, failedTask, taskCo
 
 type ProductInfo = { product?: string; edition?: string; license?: { mode?: string; status?: string; detail?: string } };
 const ranges = [{ label: 'Last 24 hours', days: 1 }, { label: 'Last 7 days', days: 7 }, { label: 'Last 30 days', days: 30 }];
-const taskTypeLabel = (type: string) => ({ backup: 'Data sync', drill: 'DR drill', restore: 'Restore', takeover: 'Takeover', 'storage-sync': 'Storage sync', 'schedule-sync': 'Schedule configuration', 'protection-cleanup': 'Protection cleanup' })[type] || type;
+const taskTypeLabel = (type: string) => ({ backup: 'Data sync', drill: 'DR drill', restore: 'Restore', takeover: 'Takeover', 'storage-sync': 'Storage sync', 'schedule-sync': 'Schedule configuration', 'protection-cleanup': 'Protection cleanup', 'plan-capacity': 'Capacity collection' })[type] || type;
 const taskStatusLabel = (status: string) => ({ succeeded: 'Succeeded', completed: 'Succeeded', canceled: 'Canceled', cancelled: 'Canceled' })[status] || (activeTask(status) ? 'Running' : failedTask(status) ? 'Failed' : status || 'Unknown');
 const daysAgo = (time: number | null, now: number) => time ? `${Math.max(0, Math.floor((now - time) / 86400000))}d ago` : 'N/A';
 

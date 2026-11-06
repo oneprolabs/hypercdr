@@ -34,6 +34,8 @@ type protectionPlanResponse struct {
 
 func protectionPlanPayloadContract(pattern string) (payloadContract, int, bool) {
 	contracts := map[string]payloadContract{
+		"POST /api/v1/protection-plans/{id}/capacity/refresh":    {Response: reflect.TypeFor[capacityTaskResponse]()},
+		"GET /api/v1/protection-plans/{id}/capacity":             {Response: reflect.TypeFor[capacityStateResponse]()},
 		"PUT /api/v1/protection-plans/{id}":                      {Request: reflect.TypeFor[store.ProtectionPlanInput](), Response: reflect.TypeFor[protectionPlanResponse](), Required: []string{"sourceClusterId", "storageRepoId"}},
 		"GET /api/v1/protection-plans":                           {Response: reflect.TypeFor[listResponse[store.ProtectionPlan]]()},
 		"POST /api/v1/protection-plans":                          {Request: reflect.TypeFor[store.ProtectionPlanInput](), Response: reflect.TypeFor[protectionPlanResponse](), Required: []string{"sourceClusterId", "storageRepoId"}},
@@ -46,7 +48,7 @@ func protectionPlanPayloadContract(pattern string) (payloadContract, int, bool) 
 	switch pattern {
 	case "POST /api/v1/protection-plans":
 		status = 201
-	case "POST /api/v1/protection-plans/{id}/activate", "POST /api/v1/protection-plans/{id}/storage/reconfigure":
+	case "POST /api/v1/protection-plans/{id}/activate", "POST /api/v1/protection-plans/{id}/storage/reconfigure", "POST /api/v1/protection-plans/{id}/capacity/refresh":
 		status = 202
 	}
 	return c, status, ok

@@ -69,9 +69,10 @@ type ClusterSummary struct {
 }
 
 type AgentSummary struct {
-	Version   string `json:"version"`
-	Namespace string `json:"namespace"`
-	PodName   string `json:"podName"`
+	Capabilities []string `json:"capabilities,omitempty"`
+	Version      string   `json:"version"`
+	Namespace    string   `json:"namespace"`
+	PodName      string   `json:"podName"`
 }
 
 type VeleroSummary struct {
@@ -81,19 +82,20 @@ type VeleroSummary struct {
 }
 
 type RegisterAcceptedPayload struct {
-	AckMessageID                    string          `json:"ackMessageId,omitempty"`
-	AckType                         string          `json:"ackType,omitempty"`
-	RequestID                       string          `json:"requestId,omitempty"`
-	TenantID                        string          `json:"tenantId"`
-	ClusterID                       string          `json:"clusterId"`
-	ClusterName                     string          `json:"clusterName"`
-	AgentCredential                 string          `json:"agentCredential"`
-	HeartbeatIntervalSeconds        int             `json:"heartbeatIntervalSeconds"`
-	InventoryResyncIntervalSeconds  int             `json:"inventoryResyncIntervalSeconds,omitempty"`
-	InventoryChangeDebounceSeconds  int             `json:"inventoryChangeDebounceSeconds,omitempty"`
-	InventoryMinPushIntervalSeconds int             `json:"inventoryMinPushIntervalSeconds,omitempty"`
-	ProtocolVersion                 string          `json:"protocolVersion,omitempty"`
-	Features                        map[string]bool `json:"features,omitempty"`
+	CacheSettings                   *CacheSettingsCommand `json:"cacheSettings,omitempty"`
+	AckMessageID                    string                `json:"ackMessageId,omitempty"`
+	AckType                         string                `json:"ackType,omitempty"`
+	RequestID                       string                `json:"requestId,omitempty"`
+	TenantID                        string                `json:"tenantId"`
+	ClusterID                       string                `json:"clusterId"`
+	ClusterName                     string                `json:"clusterName"`
+	AgentCredential                 string                `json:"agentCredential"`
+	HeartbeatIntervalSeconds        int                   `json:"heartbeatIntervalSeconds"`
+	InventoryResyncIntervalSeconds  int                   `json:"inventoryResyncIntervalSeconds,omitempty"`
+	InventoryChangeDebounceSeconds  int                   `json:"inventoryChangeDebounceSeconds,omitempty"`
+	InventoryMinPushIntervalSeconds int                   `json:"inventoryMinPushIntervalSeconds,omitempty"`
+	ProtocolVersion                 string                `json:"protocolVersion,omitempty"`
+	Features                        map[string]bool       `json:"features,omitempty"`
 }
 
 type RegisterRejectedPayload struct {
@@ -384,6 +386,8 @@ type VeleroEventPayload struct {
 }
 
 type TaskDispatchPayload struct {
+	PlanCapacity         *PlanCapacityCommand         `json:"planCapacity,omitempty"`
+	CacheSettings        *CacheSettingsCommand        `json:"cacheSettings,omitempty"`
 	RequestMessageID     string                       `json:"-"`
 	TaskID               string                       `json:"taskId"`
 	CommandID            string                       `json:"commandId"`
@@ -400,6 +404,40 @@ type TaskDispatchPayload struct {
 	VeleroUpgrade        *VeleroUpgradeCommand        `json:"veleroUpgrade,omitempty"`
 	Unregister           *UnregisterCommand           `json:"unregister,omitempty"`
 	ControlPlaneHandover *ControlPlaneHandoverCommand `json:"controlPlaneHandover,omitempty"`
+}
+
+type PlanCapacityTarget struct {
+	StorageRepositoryID string   `json:"storageRepositoryId,omitempty"`
+	ErrorMessage        string   `json:"errorMessage,omitempty"`
+	PlanID              string   `json:"planId"`
+	StorageLocation     string   `json:"storageLocation"`
+	Namespaces          []string `json:"namespaces"`
+}
+
+type PlanCapacityCommand struct {
+	Namespace string               `json:"namespace"`
+	Plans     []PlanCapacityTarget `json:"plans"`
+}
+
+type PlanCapacityResult struct {
+	PlanID        string    `json:"planId"`
+	Status        string    `json:"status"`
+	MetadataBytes int64     `json:"metadataBytes"`
+	KopiaBytes    int64     `json:"kopiaBytes"`
+	TotalBytes    int64     `json:"totalBytes"`
+	CollectedAt   time.Time `json:"collectedAt"`
+	ErrorMessage  string    `json:"errorMessage,omitempty"`
+}
+
+type PlanCapacityReport struct {
+	Plans []PlanCapacityResult `json:"plans"`
+}
+
+type CacheSettingsCommand struct {
+	Namespace string `json:"namespace"`
+	Enabled   bool   `json:"enabled"`
+	MaxGiB    int    `json:"maxGiB"`
+	Clean     bool   `json:"clean,omitempty"`
 }
 
 type ControlPlaneHandoverCommand struct {
@@ -637,16 +675,17 @@ type TaskProgressPayload struct {
 }
 
 type TaskCompletedPayload struct {
-	AckRequired   bool           `json:"ackRequired,omitempty"`
-	TaskID        string         `json:"taskId"`
-	CommandID     string         `json:"commandId,omitempty"`
-	Status        string         `json:"status"`
-	Operation     string         `json:"operation,omitempty"`
-	Progress      int            `json:"progress"`
-	Message       string         `json:"message"`
-	Size          map[string]any `json:"size,omitempty"`
-	Velero        map[string]any `json:"velero,omitempty"`
-	SizeMetricsV2 *SizeMetricsV2 `json:"sizeMetricsV2,omitempty"`
+	PlanCapacity  *PlanCapacityReport `json:"planCapacity,omitempty"`
+	AckRequired   bool                `json:"ackRequired,omitempty"`
+	TaskID        string              `json:"taskId"`
+	CommandID     string              `json:"commandId,omitempty"`
+	Status        string              `json:"status"`
+	Operation     string              `json:"operation,omitempty"`
+	Progress      int                 `json:"progress"`
+	Message       string              `json:"message"`
+	Size          map[string]any      `json:"size,omitempty"`
+	Velero        map[string]any      `json:"velero,omitempty"`
+	SizeMetricsV2 *SizeMetricsV2      `json:"sizeMetricsV2,omitempty"`
 }
 
 type SizeProgressV2 struct {

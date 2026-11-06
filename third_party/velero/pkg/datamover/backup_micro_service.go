@@ -179,6 +179,7 @@ func (r *BackupMicroService) RunCancelableDataPath(ctx context.Context) (string,
 
 	if err := fsBackup.Init(ctx, &datapath.FSBRInitParam{
 		BSLName:           du.Spec.BackupStorageLocation,
+		CacheIdentity:     "csi/" + du.Spec.SourceNamespace + "/" + du.Spec.SourcePVC,
 		SourceNamespace:   du.Spec.SourceNamespace,
 		UploaderType:      GetUploaderType(du.Spec.DataMover),
 		RepositoryType:    velerov1api.BackupRepositoryTypeKopia,

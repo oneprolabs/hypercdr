@@ -11,6 +11,10 @@ type clusterSummary struct {
 	ID        string `json:"id"`
 	IsDefault bool   `json:"isDefault"`
 }
+type clusterCacheResponse struct {
+	Settings store.ClusterCacheSettings `json:"settings"`
+	Task     *store.Task                `json:"task"`
+}
 type clusterRemovalResponse struct {
 	Status    string `json:"status"`
 	ClusterID string `json:"clusterId"`
@@ -62,6 +66,15 @@ func clusterPayloadContract(pattern string) (payloadContract, int, bool) {
 	c := payloadContract{}
 	status := 200
 	switch pattern {
+	case "GET /api/v1/clusters/{id}/cache-settings":
+		c.Response = reflect.TypeFor[clusterCacheResponse]()
+	case "PUT /api/v1/clusters/{id}/cache-settings":
+		c.Request = reflect.TypeFor[store.ClusterCacheSettings]()
+		c.Response = reflect.TypeFor[clusterCacheResponse]()
+		status = 202
+	case "POST /api/v1/clusters/{id}/cache-settings/clean":
+		c.Response = reflect.TypeFor[clusterCacheResponse]()
+		status = 202
 	case "GET /api/v1/clusters":
 		c.Response = reflect.TypeFor[listResponse[store.Cluster]]()
 	case "PATCH /api/v1/clusters/{id}":

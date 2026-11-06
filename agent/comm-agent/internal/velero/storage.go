@@ -34,6 +34,7 @@ type BackupStorageLocationManifestSpec struct {
 	Credential          *CredentialRef    `json:"credential,omitempty"`
 	Default             bool              `json:"default,omitempty"`
 	ValidationFrequency string            `json:"validationFrequency,omitempty"`
+	BackupSyncPeriod    string            `json:"backupSyncPeriod,omitempty"`
 	AccessMode          string            `json:"accessMode,omitempty"`
 }
 
@@ -124,7 +125,8 @@ func BuildBackupStorageLocationManifest(input StorageBuildInput) (BackupStorageL
 				Bucket: input.Command.Bucket,
 			},
 			Config:              config,
-			ValidationFrequency: "1m",
+			ValidationFrequency: "3m",
+			BackupSyncPeriod:    "3m",
 			AccessMode:          "ReadWrite",
 		},
 	}

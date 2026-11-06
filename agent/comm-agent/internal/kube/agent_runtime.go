@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -540,10 +541,14 @@ func (r *KubernetesAgentRuntime) UpgradeVelero(ctx context.Context, options Vele
 		return fmt.Errorf("update velero deployment: %w", err)
 	}
 	nodeAgentContainer := map[string]any{"name": "node-agent", "image": options.Image, "imagePullPolicy": "Always"}
+	cacheCapability := ""
+	if strings.HasSuffix(options.Image, "-cache-v1") || strings.Contains(options.Image, "-cache-v1@sha256:") {
+		cacheCapability = "v1"
+	}
 	if options.NodeAgentConcurrency > 0 {
 		nodeAgentContainer["args"] = []string{"node-agent", "server", "--node-agent-configmap=node-agent-config", "--backup-repository-configmap=backup-repository-config"}
 	}
-	daemonSetPatch, _ := json.Marshal(map[string]any{"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"annotations": map[string]string{"hypercdr.io/velero-upgrade-at": time.Now().UTC().Format(time.RFC3339Nano)}}, "spec": map[string]any{"containers": []map[string]any{nodeAgentContainer}}}}})
+	daemonSetPatch, _ := json.Marshal(map[string]any{"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"annotations": map[string]string{"hypercdr.io/velero-upgrade-at": time.Now().UTC().Format(time.RFC3339Nano), "hypercdr.io/cache-persistence-supported": cacheCapability, "hypercdr.io/cache-persistence-image": options.Image}}, "spec": map[string]any{"containers": []map[string]any{nodeAgentContainer}}}}})
 	if _, err := r.client.AppsV1().DaemonSets(namespace).Patch(ctx, daemonSetName, types.StrategicMergePatchType, daemonSetPatch, metav1.PatchOptions{}); err != nil {
 		return fmt.Errorf("update node-agent daemonset: %w", err)
 	}
@@ -561,6 +566,22 @@ func (r *KubernetesAgentRuntime) UpgradeVelero(ctx context.Context, options Vele
 		serverReady := deployment.Status.Replicas > 0 && deployment.Status.UpdatedReplicas == deployment.Status.Replicas && deployment.Status.AvailableReplicas == deployment.Status.Replicas
 		nodesReady := daemonSet.Status.DesiredNumberScheduled > 0 && daemonSet.Status.UpdatedNumberScheduled == daemonSet.Status.DesiredNumberScheduled && daemonSet.Status.NumberReady == daemonSet.Status.DesiredNumberScheduled && daemonSet.Status.NumberUnavailable == 0
 		if serverReady && nodesReady {
+			if cacheCapability == "v1" {
+				enabled, budget := true, 5
+				for _, container := range daemonSet.Spec.Template.Spec.Containers {
+					for _, setting := range container.Env {
+						if setting.Name == "HCDR_CACHE_PERSISTENCE" {
+							enabled = setting.Value == "true"
+						}
+						if setting.Name == "HCDR_CACHE_BUDGET_BYTES" {
+							if bytes, err := strconv.ParseInt(setting.Value, 10, 64); err == nil && bytes >= 1<<30 && bytes <= 1024<<30 {
+								budget = int(bytes >> 30)
+							}
+						}
+					}
+				}
+				return r.ConfigureCache(ctx, namespace, enabled, budget, false)
+			}
 			return nil
 		}
 		select {

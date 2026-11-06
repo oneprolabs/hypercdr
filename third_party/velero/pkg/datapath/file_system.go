@@ -18,6 +18,8 @@ package datapath
 
 import (
 	"context"
+	"os"
+	"strconv"
 	"sync"
 
 	"github.com/pkg/errors"
@@ -25,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/vmware-tanzu/velero/internal/credentials"
+	"github.com/vmware-tanzu/velero/internal/persistentcache"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/repository"
 	repokey "github.com/vmware-tanzu/velero/pkg/repository/keys"
@@ -45,6 +48,7 @@ type FSBRInitParam struct {
 	CredentialGetter  *credentials.CredentialGetter
 	Filesystem        filesystem.Interface
 	CacheDir          string
+	CacheIdentity     string
 }
 
 // FSBRStartParam define the input param for FSBR start
@@ -70,6 +74,7 @@ type fileSystemBR struct {
 	requestorType  string
 	wgDataPath     sync.WaitGroup
 	dataPathLock   sync.Mutex
+	cacheLease     *persistentcache.Lease
 }
 
 func newFileSystemBR(jobName string, requestorType string, client client.Client, namespace string, callbacks Callbacks, log logrus.FieldLogger) AsyncBR {
@@ -113,7 +118,21 @@ func (fs *fileSystemBR) Init(ctx context.Context, param any) error {
 		return errors.Wrapf(err, "error to ensure backup repository %s-%s-%s", initParam.BSLName, initParam.SourceNamespace, initParam.RepositoryType)
 	}
 
-	err = fs.boostRepoConnect(ctx, initParam.RepositoryType, initParam.CredentialGetter, initParam.CacheDir)
+	cacheDir := initParam.CacheDir
+	if cacheDir == "" && initParam.CacheIdentity != "" && os.Getenv("HCDR_CACHE_PERSISTENCE") == "true" {
+		budget, parseErr := strconv.ParseInt(os.Getenv("HCDR_CACHE_BUDGET_BYTES"), 10, 64)
+		if parseErr == nil {
+			lease, cacheErr := persistentcache.Acquire(persistentcache.Root, string(fs.backupLocation.UID)+"/"+string(fs.backupRepo.UID)+"/"+initParam.CacheIdentity, budget)
+			if cacheErr == nil {
+				fs.cacheLease = lease
+				cacheDir = lease.Path
+				fs.log.Info("Using persistent Kopia cache")
+			} else {
+				fs.log.WithError(cacheErr).Warn("Persistent cache unavailable; using temporary cache")
+			}
+		}
+	}
+	err = fs.boostRepoConnect(ctx, initParam.RepositoryType, initParam.CredentialGetter, cacheDir)
 	if err != nil {
 		return errors.Wrapf(err, "error to boost backup repository connection %s-%s-%s", initParam.BSLName, initParam.SourceNamespace, initParam.RepositoryType)
 	}
@@ -139,6 +158,11 @@ func (fs *fileSystemBR) Init(ctx context.Context, param any) error {
 }
 
 func (fs *fileSystemBR) Close(ctx context.Context) {
+	defer func() {
+		if fs.cacheLease != nil {
+			fs.cacheLease.Close()
+		}
+	}()
 	if fs.cancel != nil {
 		fs.cancel()
 	}

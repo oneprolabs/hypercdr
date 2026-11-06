@@ -254,6 +254,7 @@ func (s *PostgresStore) UpdateProtectionPlanStorageSize(id string, size map[stri
 		set plan_storage_size = $2::jsonb,
 		    updated_at = $3
 		where id = $1
+		and not coalesce(plan_storage_size,'{}'::jsonb) ? 'requestedAt'
 	`, id, raw, time.Now().UTC()); err != nil {
 		return ProtectionPlan{}, false, err
 	}
