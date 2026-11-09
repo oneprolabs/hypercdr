@@ -130,6 +130,9 @@ export default function ClusterPage(props: {
   const [forceRemoveConfirmation, setForceRemoveConfirmation] = useState('');
   const [unregisterPrecheck, setUnregisterPrecheck] = useState<ApiUnregisterPrecheck | null>(null);
   const [unregisterPrecheckLoading, setUnregisterPrecheckLoading] = useState(false);
+  const [unregisterPrecheckError, setUnregisterPrecheckError] = useState('');
+  const unregisterPrecheckRequest = useRef(0);
+  useEffect(() => () => { unregisterPrecheckRequest.current++; }, []);
   const [deleteBackupData, setDeleteBackupData] = useState(false);
   const [renameTarget, setRenameTarget] = useState<Cluster | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -510,6 +513,24 @@ export default function ClusterPage(props: {
     setVeleroUpgradeTarget(null);
   };
 
+  const loadUnregisterPrecheck = (clusterId: string) => {
+    const request = ++unregisterPrecheckRequest.current;
+    setUnregisterPrecheck(null);
+    setUnregisterPrecheckError('');
+    setDeleteBackupData(false);
+    setUnregisterPrecheckLoading(true);
+    void apiGet<ApiUnregisterPrecheck>(`/api/v1/clusters/${clusterId}/unregister/precheck`)
+      .then(result => {
+        if (request === unregisterPrecheckRequest.current) setUnregisterPrecheck(result);
+      })
+      .catch(() => {
+        if (request === unregisterPrecheckRequest.current) setUnregisterPrecheckError('Could not check unregister readiness. Please retry.');
+      })
+      .finally(() => {
+        if (request === unregisterPrecheckRequest.current) setUnregisterPrecheckLoading(false);
+      });
+  };
+
   const openUnregister = (cluster: Cluster, event: React.MouseEvent) => {
     event.stopPropagation();
     setClusterMenuId(null);
@@ -517,14 +538,9 @@ export default function ClusterPage(props: {
     setForceRemoveEnabled(false);
     setForceRemoveConfirmation('');
     setDeleteBackupData(false);
-    setUnregisterPrecheck(null);
     setUnregisterSubmitError('');
     setUnregisterTarget(cluster);
-    setUnregisterPrecheckLoading(true);
-    void apiGet<ApiUnregisterPrecheck>(`/api/v1/clusters/${cluster.id}/unregister/precheck`)
-      .then(setUnregisterPrecheck)
-      .catch(error => toast(error instanceof Error ? error.message : 'Failed to check cluster unregister readiness'))
-      .finally(() => setUnregisterPrecheckLoading(false));
+    loadUnregisterPrecheck(cluster.id);
   };
 
   const openRename = (cluster: Cluster, event: React.MouseEvent) => {
@@ -542,6 +558,9 @@ export default function ClusterPage(props: {
 
   const closeUnregister = () => {
     if (unregistering) return;
+    unregisterPrecheckRequest.current++;
+    setUnregisterPrecheckLoading(false);
+    setUnregisterPrecheckError('');
     setUnregisterTarget(null);
     setForceRemoveEnabled(false);
     setForceRemoveConfirmation('');
@@ -1257,10 +1276,13 @@ export default function ClusterPage(props: {
                 </section>
 
                 <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm">
-                  <div className="flex items-center justify-between"><strong className="text-slate-900">Readiness check</strong><span className={`hbdr-unregister-readiness-status ${unregisterPrecheckLoading ? 'is-checking' : unregisterPrecheck?.allowed ? 'is-ready' : 'is-blocked'} rounded-full px-2 py-0.5 text-[10px] font-bold ${unregisterPrecheck?.allowed ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{unregisterPrecheckLoading ? 'Checking' : unregisterPrecheck?.allowed ? 'Ready' : 'Blocked'}</span></div>
+                  <div className="flex items-center justify-between"><strong className="text-slate-900">Readiness check</strong><span className={`hbdr-unregister-readiness-status ${unregisterPrecheckLoading ? 'is-checking' : !unregisterPrecheck ? 'is-error' : unregisterPrecheck.allowed ? 'is-ready' : 'is-blocked'} rounded-full px-2 py-0.5 text-[10px] font-bold ${unregisterPrecheck?.allowed ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{unregisterPrecheckLoading ? 'Checking' : !unregisterPrecheck ? 'Check failed' : unregisterPrecheck.allowed ? 'Ready' : 'Blocked'}</span></div>
+                  {unregisterPrecheckError && <div role="alert" className="mt-3 flex items-center justify-between gap-3 text-xs text-rose-700"><span>{unregisterPrecheckError}</span><button type="button" onClick={() => loadUnregisterPrecheck(unregisterTarget.id)} disabled={unregisterPrecheckLoading || unregistering} className="inline-flex items-center gap-1 rounded border border-slate-200 px-3 py-1.5 font-semibold text-slate-700"><RefreshCw size={13} />Retry</button></div>}
+                  {unregisterPrecheck && <>
                   {unregisterPrecheck && <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-500"><span>Source configurations <strong className="text-slate-800">{unregisterPrecheck.sourcePlanCount}</strong></span><span>Target references <strong className="text-slate-800">{unregisterPrecheck.targetPlanCount}</strong></span><span>Restore points <strong className="text-slate-800">{unregisterPrecheck.restorePointCount}</strong></span><span>Active tasks <strong className="text-slate-800">{unregisterPrecheck.activeTaskCount}</strong></span></div>}
                   {unregisterPrecheck?.blockers.map(blocker => <p key={blocker} className="mt-2 rounded bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">{blocker}</p>)}
                   {(unregisterPrecheck?.restorePointCount || unregisterPrecheck?.sourcePlanCount || unregisterPrecheck?.targetPlanCount) ? <label className="mt-3 flex items-start gap-2 border-t border-slate-100 pt-3 text-xs text-slate-600"><input type="checkbox" checked={deleteBackupData} onChange={event=>setDeleteBackupData(event.target.checked)} disabled={unregistering||forceRemoveEnabled} className="mt-0.5"/><span><strong className="block text-slate-800">Clean up related data</strong>{unregisterPrecheck.sourcePlanCount ? 'This cluster is a DR source. Its DR configurations, restore points, and backup data will be removed. ' : ''}{unregisterPrecheck.targetPlanCount ? 'This cluster is a DR target. Other source configurations and backup data will be preserved; only their default target will be cleared. ' : ''}Business namespaces, workloads, and PVCs will not be deleted.</span></label> : unregisterPrecheck?.objectStorageNeeded ? <p className="mt-3 border-t border-slate-100 pt-3 text-xs leading-5 text-blue-700"><strong className="block text-blue-800">Historical storage data detected</strong>The cluster storage prefix will be checked and cleaned automatically before unregister.</p> : <p className="mt-3 border-t border-slate-100 pt-3 text-xs text-emerald-700">This cluster has never used object storage. Object storage will not be accessed.</p>}
+                  </>}
                 </section>
 
                 <section className={`hbdr-unregister-force rounded-xl border p-4 transition-colors ${forceRemoveEnabled ? 'is-active border-rose-300 bg-rose-50/70' : 'border-slate-200 bg-white'}`}>
