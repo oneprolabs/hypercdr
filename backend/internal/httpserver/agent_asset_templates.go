@@ -174,7 +174,11 @@ BACKUP_BACKEND="velero"
 VELERO_IMAGE="{{VELERO_IMAGE}}"
 CACHE_PERSISTENCE_SUPPORTED=""
 case "$VELERO_IMAGE" in
-  *-cache-v1|*-cache-v1@sha256:*) CACHE_PERSISTENCE_SUPPORTED="v1" ;;
+  *-cache-v1|*-cache-v1@sha256:*|registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.[56]|registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.[56]@sha256:*) CACHE_PERSISTENCE_SUPPORTED="v1" ;;
+esac
+STORAGE_ON_DEMAND_SUPPORTED=""
+case "$VELERO_IMAGE" in
+  *-on-demand-cache-v1|*-on-demand-cache-v1@sha256:*|registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.6|registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.6@sha256:*) STORAGE_ON_DEMAND_SUPPORTED="v1" ;;
 esac
 VELERO_AWS_PLUGIN_IMAGE="{{VELERO_AWS_PLUGIN_IMAGE}}"
 VELERO_AZURE_PLUGIN_IMAGE="{{VELERO_AZURE_PLUGIN_IMAGE}}"
@@ -1340,6 +1344,9 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: velero
+      annotations:
+        hypercdr.io/storage-on-demand-supported: "${STORAGE_ON_DEMAND_SUPPORTED}"
+        hypercdr.io/storage-on-demand-image: "${VELERO_IMAGE}"
     spec:
       serviceAccountName: velero
 ${IMAGE_PULL_SECRETS_BLOCK}

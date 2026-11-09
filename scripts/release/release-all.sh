@@ -179,7 +179,7 @@ Images:
   $(image_ref "${REGISTRY}" "oadp-comm-agent" "${VERSION}")
   $(image_ref "${REGISTRY}" "oadp-catalog" "1.3.10-hcdr.1")
   $(image_ref "${REGISTRY}" "postgres" "16")
-  $(image_ref "${REGISTRY}" "velero" "${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.5}")
+  $(image_ref "${REGISTRY}" "velero" "${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.6}")
   $(image_ref "${REGISTRY}" "velero-plugin-for-aws" "${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}")
   $(image_ref "${REGISTRY}" "velero-plugin-for-microsoft-azure" "${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}")
   $(image_ref "${REGISTRY}" "velero-plugin-for-gcp" "${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}")
@@ -262,7 +262,7 @@ release_images=( \
   "$(image_ref "${REGISTRY}" "comm-agent" "${VERSION}")" \
   "$(image_ref "${REGISTRY}" "oadp-comm-agent" "${VERSION}")" \
   "$(image_ref "${REGISTRY}" "postgres" "16")" \
-  "$(image_ref "${REGISTRY}" "velero" "${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.5}")" \
+  "$(image_ref "${REGISTRY}" "velero" "${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.6}")" \
   "$(image_ref "${REGISTRY}" "velero-plugin-for-aws" "${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}")" \
   "$(image_ref "${REGISTRY}" "velero-plugin-for-microsoft-azure" "${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}")" \
   "$(image_ref "${REGISTRY}" "velero-plugin-for-gcp" "${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}")" )
@@ -308,7 +308,7 @@ OADP_AWS_PLUGIN_IMAGE="$(oadp_image oadp-aws-plugin)"
 OADP_RESTORE_HELPER_IMAGE="$(oadp_image oadp-restore-helper)"
 OADP_BUNDLE_IMAGE="$(jq -er .bundle.image "${OADP_RESOLVED_LOCK}")"
 OADP_CATALOG_IMAGE="$(jq -er .catalog.image "${OADP_RESOLVED_LOCK}")"
-VELERO_VERSION="${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.5}"
+VELERO_VERSION="${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.6}"
 VELERO_IMAGE="$(image_ref "${REGISTRY}" "velero" "${VELERO_VERSION}")"
 PLUGIN_VERSION="${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}"
 AWS_PLUGIN_IMAGE="$(image_ref "${REGISTRY}" "velero-plugin-for-aws" "${PLUGIN_VERSION}")"

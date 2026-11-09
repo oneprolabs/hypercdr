@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -15,7 +16,8 @@ import (
 )
 
 type DynamicManifestApplier struct {
-	client dynamic.Interface
+	client          dynamic.Interface
+	storageRequests sync.Map
 }
 
 func (a *DynamicManifestApplier) RequireRWO(ctx context.Context, namespaces []string) error {
@@ -48,6 +50,26 @@ func (a *DynamicManifestApplier) ApplyManifest(ctx context.Context, manifest Man
 		return AppliedObject{}, err
 	}
 	unstructuredObject := &unstructured.Unstructured{Object: map[string]any(manifest)}
+	if object.Kind == "BackupStorageLocation" {
+		supported, err := a.supportsOnDemandStorage(ctx, object.Namespace)
+		if err != nil {
+			return AppliedObject{}, err
+		}
+		if supported {
+			annotations := unstructuredObject.GetAnnotations()
+			if annotations == nil {
+				annotations = map[string]string{}
+			}
+			annotations[storageAccessPolicy] = "on-demand-v1"
+			unstructuredObject.SetAnnotations(annotations)
+			if err := unstructured.SetNestedField(unstructuredObject.Object, "0s", "spec", "validationFrequency"); err != nil {
+				return AppliedObject{}, err
+			}
+			if err := unstructured.SetNestedField(unstructuredObject.Object, "0s", "spec", "backupSyncPeriod"); err != nil {
+				return AppliedObject{}, err
+			}
+		}
+	}
 
 	var resource dynamic.ResourceInterface
 	if namespaced {

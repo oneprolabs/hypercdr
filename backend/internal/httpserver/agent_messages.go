@@ -41,6 +41,7 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 				return
 			}
 			updated, ok, err := r.store.UpdateHeartbeat(store.HeartbeatInput{
+				CacheState:                 heartbeat.Payload.CacheState,
 				ClusterID:                  clusterID,
 				Status:                     heartbeat.Payload.Status,
 				AgentVersion:               heartbeat.Payload.AgentVersion,

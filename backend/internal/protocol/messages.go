@@ -109,22 +109,23 @@ type RegisterRejectedPayload struct {
 }
 
 type HeartbeatPayload struct {
-	AckRequired                bool   `json:"ackRequired,omitempty"`
-	Status                     string `json:"status"`
-	AgentVersion               string `json:"agentVersion"`
-	AgentImage                 string `json:"agentImage,omitempty"`
-	AgentImageID               string `json:"agentImageId,omitempty"`
-	AgentImageDigest           string `json:"agentImageDigest,omitempty"`
-	VeleroStatus               string `json:"veleroStatus,omitempty"`
-	VeleroVersion              string `json:"veleroVersion,omitempty"`
-	VeleroImage                string `json:"veleroImage,omitempty"`
-	VeleroImageDigest          string `json:"veleroImageDigest,omitempty"`
-	VeleroServerReady          bool   `json:"veleroServerReady,omitempty"`
-	VeleroNodeAgentDesired     int32  `json:"veleroNodeAgentDesired,omitempty"`
-	VeleroNodeAgentReady       int32  `json:"veleroNodeAgentReady,omitempty"`
-	VeleroNodeAgentImageDigest string `json:"veleroNodeAgentImageDigest,omitempty"`
-	ActiveTasks                int    `json:"activeTasks"`
-	LastInventoryAt            string `json:"lastInventoryAt,omitempty"`
+	CacheState                 map[string]any `json:"cacheState,omitempty"`
+	AckRequired                bool           `json:"ackRequired,omitempty"`
+	Status                     string         `json:"status"`
+	AgentVersion               string         `json:"agentVersion"`
+	AgentImage                 string         `json:"agentImage,omitempty"`
+	AgentImageID               string         `json:"agentImageId,omitempty"`
+	AgentImageDigest           string         `json:"agentImageDigest,omitempty"`
+	VeleroStatus               string         `json:"veleroStatus,omitempty"`
+	VeleroVersion              string         `json:"veleroVersion,omitempty"`
+	VeleroImage                string         `json:"veleroImage,omitempty"`
+	VeleroImageDigest          string         `json:"veleroImageDigest,omitempty"`
+	VeleroServerReady          bool           `json:"veleroServerReady,omitempty"`
+	VeleroNodeAgentDesired     int32          `json:"veleroNodeAgentDesired,omitempty"`
+	VeleroNodeAgentReady       int32          `json:"veleroNodeAgentReady,omitempty"`
+	VeleroNodeAgentImageDigest string         `json:"veleroNodeAgentImageDigest,omitempty"`
+	ActiveTasks                int            `json:"activeTasks"`
+	LastInventoryAt            string         `json:"lastInventoryAt,omitempty"`
 }
 
 type InventoryReportPayload struct {

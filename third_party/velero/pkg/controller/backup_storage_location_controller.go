@@ -194,9 +194,6 @@ func (r *backupStorageLocationReconciler) Reconcile(ctx context.Context, req ctr
 		return ctrl.Result{}, nil
 	}
 
-	pluginManager := r.newPluginManager(log)
-	defer pluginManager.CleanupClients()
-
 	// find the BSL that matches the request
 	for _, bsl := range locationList.Items {
 		if bsl.Name == req.Name && bsl.Namespace == req.Namespace {
@@ -208,6 +205,11 @@ func (r *backupStorageLocationReconciler) Reconcile(ctx context.Context, req ctr
 		log.WithError(err).Error("BackupStorageLocation is not found")
 		return ctrl.Result{}, nil
 	}
+	if onDemandStorage(&location) && !storageRequestPending(&location, "validate") {
+		return ctrl.Result{}, nil
+	}
+	pluginManager := r.newPluginManager(log)
+	defer pluginManager.CleanupClients()
 
 	// decide the default BSL
 	defaultFound, err := r.ensureSingleDefaultBSL(locationList)
@@ -258,6 +260,11 @@ func (r *backupStorageLocationReconciler) Reconcile(ctx context.Context, req ctr
 	}()
 
 	r.logReconciledPhase(defaultFound, locationList, unavailableErrors)
+	if onDemandStorage(&location) {
+		if err := completeStorageRequest(ctx, r.client, &location, "validate", location.Status.Phase == velerov1api.BackupStorageLocationPhaseAvailable); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 
 	return ctrl.Result{}, nil
 }
@@ -304,6 +311,9 @@ func (r *backupStorageLocationReconciler) logReconciledPhase(defaultFound bool, 
 func (r *backupStorageLocationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	gp := kube.NewGenericEventPredicate(func(object client.Object) bool {
 		location := object.(*velerov1api.BackupStorageLocation)
+		if onDemandStorage(location) {
+			return storageRequestPending(location, "validate")
+		}
 		return storage.IsReadyToValidate(location.Spec.ValidationFrequency, location.Status.LastValidationTime, r.defaultBackupLocationInfo.ServerValidationFrequency, r.log.WithField("controller", constant.ControllerBackupStorageLocation))
 	})
 	g := kube.NewPeriodicalEnqueueSource(
@@ -318,7 +328,7 @@ func (r *backupStorageLocationReconciler) SetupWithManager(mgr ctrl.Manager) err
 
 	return ctrl.NewControllerManagedBy(mgr).
 		// As the "status.LastValidationTime" field is always updated, this triggers new reconciling process, skip the update event that include no spec change to avoid the reconcile loop
-		For(&velerov1api.BackupStorageLocation{}, builder.WithPredicates(kube.SpecChangePredicate{})).
+		For(&velerov1api.BackupStorageLocation{}, builder.WithPredicates(predicate.Or(kube.SpecChangePredicate{}, predicate.AnnotationChangedPredicate{}))).
 		WatchesRawSource(g).
 		Named(constant.ControllerBackupStorageLocation).
 		Complete(r)

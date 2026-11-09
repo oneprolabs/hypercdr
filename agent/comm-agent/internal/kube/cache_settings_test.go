@@ -45,6 +45,70 @@ func TestConfigureCacheDefaultsDisableAndCapability(t *testing.T) {
 	}
 }
 
+func TestOfficialCacheImageRepairsMissingCapability(t *testing.T) {
+	image := "registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.5"
+	daemon := &appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "node-agent", Namespace: "hypercdr-agent"}, Spec: appsv1.DaemonSetSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "node-agent", Image: image}}}}}, Status: appsv1.DaemonSetStatus{DesiredNumberScheduled: 1, UpdatedNumberScheduled: 1, NumberReady: 1}}
+	client := fake.NewSimpleClientset(daemon)
+	manager := &KubernetesAgentRuntime{client: client}
+	if err := manager.ConfigureCache(context.Background(), "", true, 5, false); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := client.AppsV1().DaemonSets("hypercdr-agent").Get(context.Background(), "node-agent", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Spec.Template.Annotations["hypercdr.io/cache-persistence-supported"] != "v1" || updated.Spec.Template.Annotations["hypercdr.io/cache-persistence-image"] != image || len(updated.Spec.Template.Spec.Volumes) != 1 {
+		t.Fatal("official image capability and cache mount were not repaired")
+	}
+}
+
+func TestSupportsPersistentCache(t *testing.T) {
+	for _, test := range []struct {
+		image string
+		want  bool
+	}{
+		{"registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.5", true},
+		{"registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.6", true},
+		{"registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.5@sha256:abcd", true},
+		{"custom/velero:test-cache-v1", true},
+		{"custom/velero:test-cache-v1@sha256:abcd", true},
+		{"registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.4", false},
+		{"custom/velero:velero-v1.18.2-hcdr.5", false},
+		{"custom/velero:test-cache-v1-other", false},
+	} {
+		if got := supportsPersistentCache(test.image); got != test.want {
+			t.Errorf("supportsPersistentCache(%q) = %v, want %v", test.image, got, test.want)
+		}
+	}
+}
+
+func TestObservedCacheStateRequiresActualRolloutAndMount(t *testing.T) {
+	daemon := &appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "node-agent", Namespace: "hypercdr-agent"}, Spec: appsv1.DaemonSetSpec{Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"hypercdr.io/cache-persistence-supported": "v1", "hypercdr.io/cache-persistence-image": "image"}}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "node-agent", Image: "image", Env: []corev1.EnvVar{{Name: "HCDR_CACHE_PERSISTENCE", Value: "true"}, {Name: "HCDR_CACHE_BUDGET_BYTES", Value: "5368709120"}}, VolumeMounts: []corev1.VolumeMount{{Name: "cache", MountPath: cacheRoot}}}}, Volumes: []corev1.Volume{{Name: "cache", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/var/lib/hypercdr/kopia-cache"}}}}}}}, Status: appsv1.DaemonSetStatus{DesiredNumberScheduled: 2, UpdatedNumberScheduled: 2, NumberReady: 2, NumberAvailable: 2}}
+	state := observedCacheState(daemon)
+	if state["phase"] != "applied" || state["enabled"] != true || state["maxGiB"] != 5 {
+		t.Fatalf("wrong actual settings: %+v", state)
+	}
+	daemon.Status.UpdatedNumberScheduled = 1
+	state = observedCacheState(daemon)
+	if state["phase"] != "applying" || state["enabled"] != nil {
+		t.Fatalf("incomplete rollout reported as applied: %+v", state)
+	}
+	daemon.Status.UpdatedNumberScheduled = 2
+	daemon.Spec.Template.Spec.Containers[0].VolumeMounts = nil
+	if state = observedCacheState(daemon); state["phase"] != "unknown" {
+		t.Fatalf("missing mount reported as applied: %+v", state)
+	}
+	daemon.Spec.Template.Spec.Containers[0].Env[0].Value = "false"
+	state = observedCacheState(daemon)
+	if state["phase"] != "applied" || state["enabled"] != false || state["maxGiB"] != 5 {
+		t.Fatalf("disabled cache not reflected: %+v", state)
+	}
+	daemon.Spec.Template.Spec.Containers[0].Env = nil
+	if state = observedCacheState(daemon); state["phase"] != "unconfigured" || state["enabled"] != nil {
+		t.Fatalf("missing configuration reported as enabled: %+v", state)
+	}
+}
+
 func TestCacheCleanupUsesLocalRootWithoutServiceAccountToken(t *testing.T) {
 	client := fake.NewSimpleClientset(
 		&appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "node-agent", Namespace: "hypercdr-agent"}, Spec: appsv1.DaemonSetSpec{Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"role": "node-agent"}}, Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"hypercdr.io/cache-persistence-supported": "v1", "hypercdr.io/cache-persistence-image": "image"}}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "node-agent", Image: "image"}}}}}},

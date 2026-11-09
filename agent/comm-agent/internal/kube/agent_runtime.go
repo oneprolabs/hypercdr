@@ -61,6 +61,7 @@ type RestoreDataPathFailureReader interface {
 }
 
 type VeleroRuntimeStatus struct {
+	CacheState           map[string]any
 	Version              string
 	Image                string
 	ImageDigest          string
@@ -486,6 +487,7 @@ func (r *KubernetesAgentRuntime) VeleroRuntimeStatus(ctx context.Context, namesp
 		return VeleroRuntimeStatus{}, err
 	}
 	status := VeleroRuntimeStatus{
+		CacheState:       observedCacheState(daemonSet),
 		Image:            workloadContainerImage(deployment.Spec.Template.Spec.Containers, "velero"),
 		ServerReady:      deployment.Status.Replicas > 0 && deployment.Status.AvailableReplicas == deployment.Status.Replicas && deployment.Status.UpdatedReplicas == deployment.Status.Replicas,
 		NodeAgentDesired: daemonSet.Status.DesiredNumberScheduled,
@@ -536,13 +538,17 @@ func (r *KubernetesAgentRuntime) UpgradeVelero(ctx context.Context, options Vele
 	if len(initContainers) > 0 {
 		podSpec["initContainers"] = initContainers
 	}
-	deploymentPatch, _ := json.Marshal(map[string]any{"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"annotations": map[string]string{"hypercdr.io/velero-upgrade-at": time.Now().UTC().Format(time.RFC3339Nano)}}, "spec": podSpec}}})
+	onDemandCapability := ""
+	if supportsOnDemandImage(options.Image) {
+		onDemandCapability = "v1"
+	}
+	deploymentPatch, _ := json.Marshal(map[string]any{"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"annotations": map[string]string{"hypercdr.io/velero-upgrade-at": time.Now().UTC().Format(time.RFC3339Nano), "hypercdr.io/storage-on-demand-supported": onDemandCapability, "hypercdr.io/storage-on-demand-image": options.Image}}, "spec": podSpec}}})
 	if _, err := r.client.AppsV1().Deployments(namespace).Patch(ctx, deploymentName, types.StrategicMergePatchType, deploymentPatch, metav1.PatchOptions{}); err != nil {
 		return fmt.Errorf("update velero deployment: %w", err)
 	}
 	nodeAgentContainer := map[string]any{"name": "node-agent", "image": options.Image, "imagePullPolicy": "Always"}
 	cacheCapability := ""
-	if strings.HasSuffix(options.Image, "-cache-v1") || strings.Contains(options.Image, "-cache-v1@sha256:") {
+	if supportsPersistentCache(options.Image) {
 		cacheCapability = "v1"
 	}
 	if options.NodeAgentConcurrency > 0 {

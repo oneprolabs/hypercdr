@@ -95,6 +95,18 @@ func (b *backupSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		log.Errorf("BackupStorageLocation is in unavailable state, skip syncing backup from it.")
 		return ctrl.Result{}, nil
 	}
+	onDemand := onDemandStorage(location)
+	if onDemand && !storageRequestPending(location, "sync") {
+		return ctrl.Result{}, nil
+	}
+	syncSucceeded := false
+	if onDemand {
+		defer func() {
+			if err := completeStorageRequest(ctx, b.client, location, "sync", syncSucceeded); err != nil {
+				log.WithError(err).Error("Failed to acknowledge requested backup sync")
+			}
+		}()
+	}
 
 	pluginManager := b.newPluginManager(log)
 	defer pluginManager.CleanupClients()
@@ -108,7 +120,16 @@ func (b *backupSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// get a list of all the backups that are stored in the backup storage location
-	res, err := backupStore.ListBackups()
+	var res []string
+	if onDemand {
+		name := location.Annotations["hypercdr.io/sync-backup"]
+		if name == "" {
+			return ctrl.Result{}, errors.New("requested backup name is required")
+		}
+		res = []string{name}
+	} else {
+		res, err = backupStore.ListBackups()
+	}
 	if err != nil {
 		log.WithError(err).Error("Error listing backups in backup store")
 		return ctrl.Result{}, nil
@@ -136,6 +157,9 @@ func (b *backupSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		clusterBackupsSet.Insert(b.Name)
 	}
 	backupsToSync := backupStoreBackups.Difference(clusterBackupsSet)
+	if onDemand {
+		backupsToSync = backupStoreBackups
+	}
 
 	if count := backupsToSync.Len(); count > 0 {
 		log.Infof("Found %v backups in the backup location that do not exist in the cluster and need to be synced", count)
@@ -151,9 +175,15 @@ func (b *backupSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		exist, err := backupStore.BackupExists(location.Spec.ObjectStorage.Bucket, backupName)
 		if err != nil {
 			log.WithError(errors.WithStack(err)).Error("Error checking backup exist from backup store")
+			if onDemand {
+				return ctrl.Result{}, err
+			}
 			continue
 		}
 		if !exist {
+			if onDemand {
+				return ctrl.Result{}, errors.New("requested backup does not exist in storage")
+			}
 			log.Debugf("backup %s doesn't exist in backup store, skip", backupName)
 			continue
 		}
@@ -161,6 +191,9 @@ func (b *backupSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		backup, err := backupStore.GetBackupMetadata(backupName)
 		if err != nil {
 			log.WithError(errors.WithStack(err)).Error("Error getting backup metadata from backup store")
+			if onDemand {
+				return ctrl.Result{}, err
+			}
 			continue
 		}
 
@@ -195,9 +228,17 @@ func (b *backupSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		switch {
 		case err != nil && apierrors.IsAlreadyExists(err):
 			log.Debug("Backup already exists in cluster")
-			continue
+			if !onDemand {
+				continue
+			}
+			if err := b.client.Get(ctx, client.ObjectKeyFromObject(backup), backup); err != nil {
+				return ctrl.Result{}, err
+			}
 		case err != nil && !apierrors.IsAlreadyExists(err):
 			log.WithError(errors.WithStack(err)).Error("Error syncing backup into cluster")
+			if onDemand {
+				return ctrl.Result{}, err
+			}
 			continue
 		default:
 			log.Info("Successfully synced backup into cluster")
@@ -207,6 +248,9 @@ func (b *backupSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		podVolumeBackups, err := backupStore.GetPodVolumeBackups(backupName)
 		if err != nil {
 			log.WithError(errors.WithStack(err)).Error("Error getting pod volume backups for this backup from backup store")
+			if onDemand {
+				return ctrl.Result{}, err
+			}
 			continue
 		}
 
@@ -236,6 +280,9 @@ func (b *backupSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				continue
 			case err != nil && !apierrors.IsAlreadyExists(err):
 				log.WithError(errors.WithStack(err)).Error("Error syncing pod volume backup into cluster")
+				if onDemand {
+					return ctrl.Result{}, err
+				}
 				continue
 			default:
 				log.Debug("Synced pod volume backup into cluster")
@@ -243,7 +290,9 @@ func (b *backupSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 
-	b.deleteOrphanedBackups(ctx, location.Name, backupStoreBackups, log)
+	if !onDemand {
+		b.deleteOrphanedBackups(ctx, location.Name, backupStoreBackups, log)
+	}
 
 	// update the location's last-synced time field
 	statusPatch := client.MergeFrom(location.DeepCopy())
@@ -252,6 +301,7 @@ func (b *backupSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		log.WithError(errors.WithStack(err)).Error("Error patching backup location's last-synced time")
 		return ctrl.Result{}, nil
 	}
+	syncSucceeded = true
 
 	return ctrl.Result{}, nil
 }
@@ -304,7 +354,9 @@ func (b *backupSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		// Filter all BSL events, because this controller is supposed to run periodically, not by event.
-		For(&velerov1api.BackupStorageLocation{}, builder.WithPredicates(kube.FalsePredicate{})).
+		For(&velerov1api.BackupStorageLocation{}, builder.WithPredicates(predicate.NewPredicateFuncs(func(object client.Object) bool {
+			return onDemandStorage(object) && storageRequestPending(object, "sync")
+		}))).
 		WatchesRawSource(backupSyncSource).
 		Named(constant.ControllerBackupSync).
 		Complete(b)
@@ -383,6 +435,9 @@ func backupSyncSourceOrderFunc(objList client.ObjectList) client.ObjectList {
 }
 
 func (b *backupSyncReconciler) locationFilterFunc(location *velerov1api.BackupStorageLocation) bool {
+	if onDemandStorage(location) {
+		return storageRequestPending(location, "sync")
+	}
 	syncPeriod := b.defaultBackupSyncPeriod
 	if location.Spec.BackupSyncPeriod != nil {
 		syncPeriod = location.Spec.BackupSyncPeriod.Duration

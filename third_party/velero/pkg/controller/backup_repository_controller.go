@@ -37,6 +37,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -109,7 +110,7 @@ func (r *BackupRepoReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	)
 
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&velerov1api.BackupRepository{}, builder.WithPredicates(kube.SpecChangePredicate{})).
+		For(&velerov1api.BackupRepository{}, builder.WithPredicates(predicate.Or(kube.SpecChangePredicate{}, predicate.AnnotationChangedPredicate{}))).
 		WatchesRawSource(s).
 		Watches(
 			// mark BackupRepository as invalid when BSL is created, updated or deleted.
@@ -245,12 +246,24 @@ func (r *BackupRepoReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	if backupRepo.Status.Phase == "" || backupRepo.Status.Phase == velerov1api.BackupRepositoryPhaseNew {
+		if onDemandStorage(bsl) && !storageRequestPending(backupRepo, "open") && time.Since(backupRepo.CreationTimestamp.Time) > 5*time.Minute {
+			return ctrl.Result{}, nil
+		}
 		if err := r.initializeRepo(ctx, backupRepo, bsl, log); err != nil {
 			log.WithError(err).Error("error initialize repository")
 			return ctrl.Result{}, errors.WithStack(err)
 		}
 
 		return ctrl.Result{}, nil
+	}
+
+	if onDemandStorage(bsl) {
+		if backupRepo.Status.Phase == velerov1api.BackupRepositoryPhaseReady && !storageRequestPending(backupRepo, "maintain") {
+			return ctrl.Result{}, nil
+		}
+		if backupRepo.Status.Phase != velerov1api.BackupRepositoryPhaseReady && !storageRequestPending(backupRepo, "open") {
+			return ctrl.Result{}, nil
+		}
 	}
 
 	// If the repository is ready or not-ready, check it for stale locks, but if
@@ -271,6 +284,9 @@ func (r *BackupRepoReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 		fallthrough
 	case velerov1api.BackupRepositoryPhaseReady:
+		if onDemandStorage(bsl) && !storageRequestPending(backupRepo, "maintain") {
+			return ctrl.Result{}, nil
+		}
 		if bsl.Spec.AccessMode == velerov1api.BackupStorageLocationAccessModeReadOnly {
 			log.Debugf("Skip running maintenance for BackupRepository, because its BSL is in the ReadOnly mode.")
 			return ctrl.Result{}, nil
@@ -493,7 +509,15 @@ func getLastMaintenanceTimeFromHistory(history []velerov1api.BackupRepositoryMai
 var funcStartMaintenanceJob = maintenance.StartNewJob
 var funcWaitMaintenanceJobComplete = maintenance.WaitJobComplete
 
-func (r *BackupRepoReconciler) runMaintenanceIfDue(ctx context.Context, req *velerov1api.BackupRepository, log logrus.FieldLogger) error {
+func (r *BackupRepoReconciler) runMaintenanceIfDue(ctx context.Context, req *velerov1api.BackupRepository, log logrus.FieldLogger) (resultErr error) {
+	maintenanceSucceeded := !dueForMaintenance(req, r.clock.Now())
+	if storageRequestPending(req, "maintain") {
+		defer func() {
+			if err := completeStorageRequest(ctx, r.Client, req, "maintain", resultErr == nil && maintenanceSucceeded); err != nil {
+				log.WithError(err).Warn("Failed to acknowledge requested repository maintenance")
+			}
+		}()
+	}
 	startTime := r.clock.Now()
 
 	if !dueForMaintenance(req, startTime) {
@@ -550,6 +574,7 @@ func (r *BackupRepoReconciler) runMaintenanceIfDue(ctx context.Context, req *vel
 		}
 	}
 
+	maintenanceSucceeded = true
 	return r.patchBackupRepository(ctx, req, func(rr *velerov1api.BackupRepository) {
 		rr.Status.LastMaintenanceTime = &metav1.Time{Time: status.CompleteTimestamp.Time}
 		updateRepoMaintenanceHistory(rr, velerov1api.BackupRepositoryMaintenanceSucceeded, status.StartTimestamp, status.CompleteTimestamp, status.Message)

@@ -974,6 +974,7 @@ func applyClusterMetadata(cluster *Cluster, metadataRaw []byte) {
 		VeleroNodeAgentDesired     int32                 `json:"veleroNodeAgentDesired"`
 		VeleroNodeAgentReady       int32                 `json:"veleroNodeAgentReady"`
 		VeleroNodeAgentImageDigest string                `json:"veleroNodeAgentImageDigest"`
+		CacheState                 map[string]any        `json:"cacheState"`
 		AgentUpgradeStatus         string                `json:"agentUpgradeStatus"`
 	}
 	if err := json.Unmarshal(metadataRaw, &metadata); err != nil {
@@ -998,6 +999,7 @@ func applyClusterMetadata(cluster *Cluster, metadataRaw []byte) {
 	cluster.VeleroNodeAgentDesired = metadata.VeleroNodeAgentDesired
 	cluster.VeleroNodeAgentReady = metadata.VeleroNodeAgentReady
 	cluster.VeleroNodeAgentImageDigest = metadata.VeleroNodeAgentImageDigest
+	cluster.CacheState = metadata.CacheState
 	cluster.AgentUpgradeStatus = metadata.AgentUpgradeStatus
 }
 
@@ -1300,6 +1302,19 @@ func (s *PostgresStore) ApplyInventory(input InventoryInput) (Cluster, bool, err
 
 func (s *PostgresStore) UpdateHeartbeat(input HeartbeatInput) (Cluster, bool, error) {
 	now := time.Now().UTC()
+	var cacheState any
+	if input.CacheState != nil {
+		observed := make(map[string]any, len(input.CacheState)+1)
+		for key, value := range input.CacheState {
+			observed[key] = value
+		}
+		observed["observedAt"] = now.Format(time.RFC3339Nano)
+		cacheState = observed
+	}
+	cacheJSON, err := json.Marshal(cacheState)
+	if err != nil {
+		return Cluster{}, false, err
+	}
 	result, err := s.db.Exec(`
 		update clusters
 		set status = coalesce(nullif($2, ''), status),
@@ -1323,14 +1338,14 @@ func (s *PostgresStore) UpdateHeartbeat(input HeartbeatInput) (Cluster, bool, er
 		        'veleroNodeAgentDesired', $18::integer,
 		        'veleroNodeAgentReady', $19::integer,
 		        'veleroNodeAgentImageDigest', nullif($20, '')
-		    )),
+		    )) || jsonb_build_object('cacheState', $21::jsonb),
 		    updated_at = $9
 		where id = $1
 	`, input.ClusterID, input.Status, input.KubeVersion, input.AgentVersion, input.VeleroStatus,
 		input.NodeCount, input.NamespaceCount, input.ApplicationCount, now, input.InventoryHash,
 		input.AgentImage, input.AgentImageID, input.AgentImageDigest, input.VeleroVersion,
 		input.VeleroImage, input.VeleroImageDigest, input.VeleroServerReady,
-		input.VeleroNodeAgentDesired, input.VeleroNodeAgentReady, input.VeleroNodeAgentImageDigest)
+		input.VeleroNodeAgentDesired, input.VeleroNodeAgentReady, input.VeleroNodeAgentImageDigest, string(cacheJSON))
 	if err != nil {
 		return Cluster{}, false, err
 	}

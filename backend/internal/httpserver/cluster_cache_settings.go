@@ -3,6 +3,7 @@ package httpserver
 import (
 	"hypercdr-platform/platform/backend/internal/store"
 	"net/http"
+	"time"
 )
 
 func (r *Router) clusterCacheSettings(w http.ResponseWriter, req *http.Request) {
@@ -15,9 +16,13 @@ func (r *Router) clusterCacheSettings(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 	found := false
+	var observed map[string]any
 	for _, cluster := range clusters {
 		if cluster.ID == clusterID && tenantVisible(req, cluster.TenantID) {
 			found = true
+			if cluster.ConnectionStatus == "online" && !cluster.LastSeenAt.IsZero() && time.Since(cluster.LastSeenAt) < 90*time.Second {
+				observed = cluster.CacheState
+			}
 			break
 		}
 	}
@@ -42,7 +47,7 @@ func (r *Router) clusterCacheSettings(w http.ResponseWriter, req *http.Request) 
 		}
 	}
 	if req.Method == http.MethodGet {
-		writeJSON(w, 200, map[string]any{"settings": settings, "task": latest})
+		writeJSON(w, 200, map[string]any{"settings": settings, "observed": observed, "task": latest})
 		return
 	}
 	clean := req.Method == http.MethodPost

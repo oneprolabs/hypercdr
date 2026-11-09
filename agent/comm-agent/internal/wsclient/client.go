@@ -296,6 +296,15 @@ func (c *Client) Register() (protocol.RegisterAcceptedPayload, error) {
 		c.cfg.ClusterID = accepted.Payload.ClusterID
 		c.cfg.AgentCredential = accepted.Payload.AgentCredential
 		c.cfg.InstallToken = ""
+		if preparer, ok := c.applier.(kube.ObjectStoragePreparer); ok {
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				if err := preparer.ConfigureOnDemandStorage(ctx, c.cfg.Namespace); err != nil {
+					c.logger.Warn("on-demand storage configuration failed", "error", err)
+				}
+			}()
+		}
 		if settings := accepted.Payload.CacheSettings; settings != nil {
 			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -305,6 +314,8 @@ func (c *Client) Register() (protocol.RegisterAcceptedPayload, error) {
 				}); ok {
 					if err := runtime.ConfigureCache(ctx, settings.Namespace, settings.Enabled, settings.MaxGiB, false); err != nil {
 						c.logger.Warn("cache settings not applied", "error", err)
+					} else {
+						c.logger.Info("cache settings applied", "enabled", settings.Enabled, "maxGiB", settings.MaxGiB)
 					}
 				}
 			}()
@@ -1173,6 +1184,12 @@ func (c *Client) executeBackupTask(task protocol.TaskDispatchPayload) {
 		return
 	}
 	defer releasePlan()
+	if preparer, ok := c.applier.(kube.ObjectStoragePreparer); ok {
+		if err := preparer.PrepareObjectStorage(context.Background(), c.cfg.Namespace, task.Backup.StorageRepo, ""); err != nil {
+			_ = c.sendTaskFailed(task, "STORAGE_PREFLIGHT_FAILED", err.Error())
+			return
+		}
+	}
 	if err := c.waitForBackupStorageLocation(context.Background(), task.Backup.StorageRepo, storagePreflightWait(task.Deadline)); err != nil {
 		_ = c.sendTaskFailedWithDetails(task, "BSL_NOT_READY", err.Error(), map[string]any{
 			"storageRepo": task.Backup.StorageRepo,
@@ -1481,6 +1498,12 @@ func (c *Client) executeRestoreTask(task protocol.TaskDispatchPayload) {
 	if strings.EqualFold(c.cfg.BackupBackend, "oadp") {
 		if err := validateOADPFullRestore(*task.Restore); err != nil {
 			_ = c.sendTaskFailed(task, "OADP_FULL_RESTORE_REQUIRED", err.Error())
+			return
+		}
+	}
+	if preparer, ok := c.applier.(kube.ObjectStoragePreparer); ok {
+		if err := preparer.PrepareObjectStorage(context.Background(), c.cfg.Namespace, task.Restore.StorageRepo, task.Restore.VeleroBackupName); err != nil {
+			_ = c.sendTaskFailed(task, "STORAGE_PREFLIGHT_FAILED", err.Error())
 			return
 		}
 	}
@@ -2099,6 +2122,17 @@ func (c *Client) pollVeleroStatus(task protocol.TaskDispatchPayload, object kube
 		}
 		if terminal {
 			if success {
+				if object.Kind == "Backup" && task.Backup != nil {
+					if preparer, ok := c.applier.(kube.ObjectStoragePreparer); ok {
+						ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+						_ = c.sendTaskProgress(task, payload, 99, "Checking repository maintenance")
+						if err := preparer.MaintainObjectStorage(ctx, object.Namespace, task.Backup.StorageRepo); err != nil {
+							payload["maintenanceWarning"] = "Repository maintenance failed; backup remains available"
+							c.logger.Warn("post-backup maintenance failed", "task_id", task.TaskID, "error", err)
+						}
+						cancel()
+					}
+				}
 				c.attachBackupSizeStats(context.Background(), object, payload)
 				if err := c.sendTaskCompleted(task, payload, message); err != nil {
 					c.logger.Error("failed to send task completed", "task_id", task.TaskID, "error", err)
@@ -4368,6 +4402,7 @@ func (c *Client) sendHeartbeat(_ bool) error {
 		}
 	}
 	payload := protocol.HeartbeatPayload{
+		CacheState:                 veleroRuntime.CacheState,
 		AckRequired:                false,
 		Status:                     "healthy",
 		AgentVersion:               c.cfg.AgentVersion,

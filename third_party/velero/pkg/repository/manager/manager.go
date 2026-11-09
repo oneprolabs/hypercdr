@@ -19,6 +19,8 @@ package repository
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/pkg/errors"
@@ -26,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/vmware-tanzu/velero/internal/credentials"
+	"github.com/vmware-tanzu/velero/internal/persistentcache"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/repository"
 	"github.com/vmware-tanzu/velero/pkg/repository/provider"
@@ -191,6 +194,19 @@ func (m *manager) PruneRepo(repo *velerov1api.BackupRepository) error {
 	param, err := m.assembleRepoParam(repo)
 	if err != nil {
 		return errors.WithStack(err)
+	}
+	if repo.Spec.RepositoryType == velerov1api.BackupRepositoryTypeKopia && os.Getenv("HCDR_CACHE_PERSISTENCE") == "true" {
+		budget, parseErr := strconv.ParseInt(os.Getenv("HCDR_CACHE_BUDGET_BYTES"), 10, 64)
+		if parseErr == nil {
+			lease, cacheErr := persistentcache.Acquire(persistentcache.Root, string(param.BackupLocation.UID)+"/"+string(repo.UID)+"/maintenance", budget)
+			if cacheErr == nil {
+				defer lease.Close()
+				param.CacheDir = lease.Path
+				m.log.Info("Using persistent Kopia maintenance cache")
+			} else {
+				m.log.WithError(cacheErr).Warn("Persistent maintenance cache unavailable; using temporary cache")
+			}
+		}
 	}
 
 	if err := prd.BoostRepoConnect(context.Background(), param); err != nil {

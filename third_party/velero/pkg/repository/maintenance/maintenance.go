@@ -557,12 +557,57 @@ func buildJob(
 
 	// Get the volumes from the Velero server deployment
 	volumes := veleroutil.GetVolumesFromVeleroServer(deployment)
+	cacheMounted := false
+	daemon := &appsv1api.DaemonSet{}
+	if err := cli.Get(ctx, types.NamespacedName{Name: "node-agent", Namespace: repo.Namespace}, daemon); err == nil && len(daemon.Spec.Template.Spec.Containers) == 1 {
+		container := daemon.Spec.Template.Spec.Containers[0]
+		cacheEnabled := false
+		for _, env := range container.Env {
+			if env.Name == "HCDR_CACHE_PERSISTENCE" && env.ValueFrom == nil && env.Value == "true" {
+				cacheEnabled = true
+			}
+		}
+		if cacheEnabled && daemon.Spec.Template.Annotations["hypercdr.io/cache-persistence-supported"] == "v1" && daemon.Spec.Template.Annotations["hypercdr.io/cache-persistence-image"] == container.Image && container.Image == veleroutil.GetVeleroServerImage(deployment) {
+			filtered := make([]corev1api.EnvVar, 0, len(envVars))
+			for _, env := range envVars {
+				if env.Name != "HCDR_CACHE_PERSISTENCE" && env.Name != "HCDR_CACHE_BUDGET_BYTES" {
+					filtered = append(filtered, env)
+				}
+			}
+			envVars = filtered
+			for _, env := range container.Env {
+				if env.ValueFrom == nil && (env.Name == "HCDR_CACHE_PERSISTENCE" || env.Name == "HCDR_CACHE_BUDGET_BYTES") {
+					envVars = append(envVars, env)
+				}
+			}
+			for _, mount := range container.VolumeMounts {
+				if mount.Name == "hypercdr-kopia-cache" && mount.MountPath == "/var/cache/hypercdr" && !mount.ReadOnly && mount.SubPath == "" && mount.SubPathExpr == "" {
+					for _, volume := range daemon.Spec.Template.Spec.Volumes {
+						if volume.Name == mount.Name && volume.HostPath != nil && volume.HostPath.Path == "/var/lib/hypercdr/kopia-cache" {
+							volumeMounts = append(volumeMounts, mount)
+							volumes = append(volumes, volume)
+							cacheMounted = true
+						}
+					}
+				}
+			}
+		}
+	}
 
 	// Get the service account from the Velero server deployment
 	serviceAccount := veleroutil.GetServiceAccountFromVeleroServer(deployment)
 
 	// Get the security context from the Velero server deployment
 	securityContext := veleroutil.GetContainerSecurityContextsFromVeleroServer(deployment)
+	if cacheMounted {
+		if securityContext == nil {
+			securityContext = &corev1api.SecurityContext{}
+		} else {
+			securityContext = securityContext.DeepCopy()
+		}
+		securityContext.RunAsUser = new(int64)
+		securityContext.RunAsNonRoot = new(bool)
+	}
 
 	// Get the pod security context from the Velero server deployment
 	podSecurityContext := veleroutil.GetPodSecurityContextsFromVeleroServer(deployment)

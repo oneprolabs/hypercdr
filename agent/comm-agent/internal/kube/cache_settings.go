@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -15,6 +17,62 @@ import (
 )
 
 const cacheRoot = "/var/cache/hypercdr"
+
+func observedCacheState(daemon *appsv1.DaemonSet) map[string]any {
+	state := map[string]any{"phase": "unknown"}
+	if len(daemon.Spec.Template.Spec.Containers) != 1 {
+		return state
+	}
+	container := daemon.Spec.Template.Spec.Containers[0]
+	values := map[string]string{}
+	for _, env := range container.Env {
+		if env.ValueFrom == nil {
+			values[env.Name] = env.Value
+		}
+	}
+	enabled, err := strconv.ParseBool(values["HCDR_CACHE_PERSISTENCE"])
+	if err != nil {
+		state["phase"] = "unconfigured"
+		return state
+	}
+	budget, err := strconv.ParseInt(values["HCDR_CACHE_BUDGET_BYTES"], 10, 64)
+	if err != nil || budget < 1<<30 || budget > 1024<<30 || budget%(1<<30) != 0 {
+		return state
+	}
+	if enabled {
+		mounted := false
+		for _, mount := range container.VolumeMounts {
+			if mount.MountPath != cacheRoot || mount.ReadOnly {
+				continue
+			}
+			for _, volume := range daemon.Spec.Template.Spec.Volumes {
+				if volume.Name == mount.Name && volume.HostPath != nil && volume.HostPath.Path == "/var/lib/hypercdr/kopia-cache" {
+					mounted = true
+				}
+			}
+		}
+		if !mounted || daemon.Spec.Template.Annotations["hypercdr.io/cache-persistence-supported"] != "v1" || daemon.Spec.Template.Annotations["hypercdr.io/cache-persistence-image"] != container.Image {
+			return state
+		}
+	}
+	state["phase"] = "applying"
+	if daemon.Status.ObservedGeneration >= daemon.Generation && daemon.Status.DesiredNumberScheduled > 0 && daemon.Status.UpdatedNumberScheduled == daemon.Status.DesiredNumberScheduled && daemon.Status.NumberReady == daemon.Status.DesiredNumberScheduled && daemon.Status.NumberAvailable == daemon.Status.DesiredNumberScheduled {
+		state["phase"] = "applied"
+		state["enabled"] = enabled
+		state["maxGiB"] = int(budget >> 30)
+	}
+	return state
+}
+
+func supportsPersistentCache(image string) bool {
+	image = strings.SplitN(image, "@", 2)[0]
+	return strings.HasSuffix(image, "-cache-v1") || image == "registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.5" || image == "registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.6"
+}
+
+func supportsOnDemandImage(image string) bool {
+	image = strings.SplitN(image, "@", 2)[0]
+	return strings.HasSuffix(image, "-on-demand-cache-v1") || image == "registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.6"
+}
 
 func (r *KubernetesAgentRuntime) ConfigureCache(ctx context.Context, namespace string, enabled bool, maxGiB int, clean bool) error {
 	if maxGiB < 1 || maxGiB > 1024 {
@@ -29,14 +87,21 @@ func (r *KubernetesAgentRuntime) ConfigureCache(ctx context.Context, namespace s
 		if err != nil {
 			return err
 		}
-		if daemon.Spec.Template.Annotations["hypercdr.io/cache-persistence-supported"] != "v1" {
-			return fmt.Errorf("installed Velero does not support cache persistence; upgrade Velero first")
-		}
 		before := daemon.DeepCopy()
 		if len(daemon.Spec.Template.Spec.Containers) != 1 {
 			return fmt.Errorf("unexpected node-agent template")
 		}
 		container := &daemon.Spec.Template.Spec.Containers[0]
+		if daemon.Spec.Template.Annotations["hypercdr.io/cache-persistence-supported"] != "v1" {
+			if !supportsPersistentCache(container.Image) {
+				return fmt.Errorf("installed Velero does not support cache persistence; upgrade Velero first")
+			}
+			if daemon.Spec.Template.Annotations == nil {
+				daemon.Spec.Template.Annotations = map[string]string{}
+			}
+			daemon.Spec.Template.Annotations["hypercdr.io/cache-persistence-supported"] = "v1"
+			daemon.Spec.Template.Annotations["hypercdr.io/cache-persistence-image"] = container.Image
+		}
 		if daemon.Spec.Template.Annotations["hypercdr.io/cache-persistence-image"] != container.Image {
 			return fmt.Errorf("cache capability does not match installed image")
 		}

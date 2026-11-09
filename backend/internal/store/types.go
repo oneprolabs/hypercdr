@@ -512,6 +512,7 @@ type CommunityMigrationSession struct {
 }
 
 type Cluster struct {
+	CacheState                 map[string]any        `json:"cacheState,omitempty"`
 	ID                         string                `json:"id"`
 	TenantID                   string                `json:"tenantId"`
 	Name                       string                `json:"name"`
@@ -710,6 +711,7 @@ func normalizedClusterType(value string) string {
 }
 
 type HeartbeatInput struct {
+	CacheState                 map[string]any
 	ClusterID                  string
 	Status                     string
 	KubeVersion                string

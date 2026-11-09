@@ -91,6 +91,11 @@ func (e KubernetesStorageExecutor) SubmitStorage(ctx context.Context, manifests 
 		return err
 	}
 	_, err = e.applier.ApplyManifest(ctx, unstructured)
+	if err == nil {
+		if preparer, ok := e.applier.(kube.ObjectStoragePreparer); ok {
+			return preparer.PrepareObjectStorage(ctx, manifests.BackupStorageLocation.Metadata.Namespace, manifests.BackupStorageLocation.Metadata.Name, "")
+		}
+	}
 	return err
 }
 
