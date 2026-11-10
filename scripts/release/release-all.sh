@@ -223,7 +223,7 @@ if [[ "${PHASE}" == "all" || "${PHASE}" == "dependencies" ]]; then
   DEPENDENCY_STEP_TIMEOUT="${HCDR_DEPENDENCY_STEP_TIMEOUT_SECONDS:-3600}"
   [[ "${DEPENDENCY_STEP_TIMEOUT}" =~ ^[1-9][0-9]*$ ]] || die "HCDR_DEPENDENCY_STEP_TIMEOUT_SECONDS must be a positive integer"
   log "Publishing required runtime images"
-  timeout "${DEPENDENCY_STEP_TIMEOUT}" "${SCRIPT_DIR}/publish-runtime-images.sh" --registry "${REGISTRY}"
+  timeout "${DEPENDENCY_STEP_TIMEOUT}" "${SCRIPT_DIR}/publish-runtime-images.sh" --registry "${REGISTRY}" --force-velero-build
 
   log "Mirroring Velero object-storage plugins"
   plugin_sync_args=(--registry "${REGISTRY}" --version "${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}")
