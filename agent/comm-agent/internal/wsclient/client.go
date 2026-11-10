@@ -310,12 +310,12 @@ func (c *Client) Register() (protocol.RegisterAcceptedPayload, error) {
 				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 				defer cancel()
 				if runtime, ok := c.agentRuntime.(interface {
-					ConfigureCache(context.Context, string, bool, int, bool) error
+					ConfigureCache(context.Context, string, string, string, string, bool, int, bool, int, bool) error
 				}); ok {
-					if err := runtime.ConfigureCache(ctx, settings.Namespace, settings.Enabled, settings.MaxGiB, false); err != nil {
+					if err := runtime.ConfigureCache(ctx, settings.Namespace, settings.RootPath, settings.IndexPath, settings.DrillPath, settings.IndexEnabled, settings.IndexMaxGiB, settings.DrillEnabled, settings.DrillMaxGiB, false); err != nil {
 						c.logger.Warn("cache settings not applied", "error", err)
 					} else {
-						c.logger.Info("cache settings applied", "enabled", settings.Enabled, "maxGiB", settings.MaxGiB)
+						c.logger.Info("cache settings applied", "indexEnabled", settings.IndexEnabled, "indexMaxGiB", settings.IndexMaxGiB, "drillEnabled", settings.DrillEnabled, "drillMaxGiB", settings.DrillMaxGiB)
 					}
 				}
 			}()

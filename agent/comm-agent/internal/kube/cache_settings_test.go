@@ -14,33 +14,33 @@ import (
 )
 
 func TestConfigureCacheDefaultsDisableAndCapability(t *testing.T) {
-	daemon := &appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "node-agent", Namespace: "hypercdr-agent"}, Spec: appsv1.DaemonSetSpec{Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"hypercdr.io/cache-persistence-supported": "v1", "hypercdr.io/cache-persistence-image": "velero:cache-v1"}}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "node-agent", Image: "velero:cache-v1"}}}}}, Status: appsv1.DaemonSetStatus{DesiredNumberScheduled: 1, UpdatedNumberScheduled: 1, NumberReady: 1}}
+	daemon := &appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "node-agent", Namespace: "hypercdr-agent"}, Spec: appsv1.DaemonSetSpec{Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"hypercdr.io/cache-persistence-supported": "v1", "hypercdr.io/cache-persistence-image": "velero-cache-v1"}}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "node-agent", Image: "velero-cache-v1"}}}}}, Status: appsv1.DaemonSetStatus{DesiredNumberScheduled: 1, UpdatedNumberScheduled: 1, NumberReady: 1}}
 	client := fake.NewSimpleClientset(daemon)
 	runtime := &KubernetesAgentRuntime{client: client}
 	for _, enabled := range []bool{true, false} {
-		if err := runtime.ConfigureCache(context.Background(), "", enabled, 5, false); err != nil {
+		if err := runtime.ConfigureCache(context.Background(), "", "", "", "", enabled, 5, false, 50, false); err != nil {
 			t.Fatal(err)
 		}
 		got, err := client.AppsV1().DaemonSets("hypercdr-agent").Get(context.Background(), "node-agent", metav1.GetOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(got.Spec.Template.Spec.Volumes) != 1 || len(got.Spec.Template.Spec.Containers[0].VolumeMounts) != 1 {
+		if len(got.Spec.Template.Spec.Volumes) != 2 || len(got.Spec.Template.Spec.Containers[0].VolumeMounts) != 2 {
 			t.Fatal("missing cache mount or duplicate mounts")
 		}
 		env := got.Spec.Template.Spec.Containers[0].Env
-		if len(env) != 2 || env[1].Value != "5368709120" || (env[0].Value == "true") != enabled {
+		if len(env) < 7 || env[1].Value != "5368709120" || (env[0].Value == "true") != enabled {
 			t.Fatalf("wrong settings: %+v", env)
 		}
 	}
-	if err := runtime.ConfigureCache(context.Background(), "", true, 0, false); err == nil {
+	if err := runtime.ConfigureCache(context.Background(), "", "", "", "", true, 0, false, 50, false); err == nil {
 		t.Fatal("invalid size accepted")
 	}
 	daemon.Spec.Template.Spec.Containers[0].Image = "old-image"
 	if _, err := client.AppsV1().DaemonSets("hypercdr-agent").Update(context.Background(), daemon, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := runtime.ConfigureCache(context.Background(), "", true, 5, false); err == nil {
+	if err := runtime.ConfigureCache(context.Background(), "", "", "", "", true, 5, false, 50, false); err == nil {
 		t.Fatal("unsupported image accepted")
 	}
 }
@@ -50,14 +50,14 @@ func TestOfficialCacheImageRepairsMissingCapability(t *testing.T) {
 	daemon := &appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "node-agent", Namespace: "hypercdr-agent"}, Spec: appsv1.DaemonSetSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "node-agent", Image: image}}}}}, Status: appsv1.DaemonSetStatus{DesiredNumberScheduled: 1, UpdatedNumberScheduled: 1, NumberReady: 1}}
 	client := fake.NewSimpleClientset(daemon)
 	manager := &KubernetesAgentRuntime{client: client}
-	if err := manager.ConfigureCache(context.Background(), "", true, 5, false); err != nil {
+	if err := manager.ConfigureCache(context.Background(), "", "", "", "", true, 5, false, 50, false); err != nil {
 		t.Fatal(err)
 	}
 	updated, err := client.AppsV1().DaemonSets("hypercdr-agent").Get(context.Background(), "node-agent", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Spec.Template.Annotations["hypercdr.io/cache-persistence-supported"] != "v1" || updated.Spec.Template.Annotations["hypercdr.io/cache-persistence-image"] != image || len(updated.Spec.Template.Spec.Volumes) != 1 {
+	if updated.Spec.Template.Annotations["hypercdr.io/cache-persistence-supported"] != "v1" || updated.Spec.Template.Annotations["hypercdr.io/cache-persistence-image"] != image || len(updated.Spec.Template.Spec.Volumes) != 2 {
 		t.Fatal("official image capability and cache mount were not repaired")
 	}
 }
@@ -72,6 +72,7 @@ func TestSupportsPersistentCache(t *testing.T) {
 		{"registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.5@sha256:abcd", true},
 		{"custom/velero:test-cache-v1", true},
 		{"custom/velero:test-cache-v1@sha256:abcd", true},
+		{"registry.example/hypercdr/velero:v1.18.2-hcdr.6-fix3-drill-cache-20261110", true},
 		{"registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.4", false},
 		{"custom/velero:velero-v1.18.2-hcdr.5", false},
 		{"custom/velero:test-cache-v1-other", false},
@@ -120,7 +121,7 @@ func TestCacheCleanupUsesLocalRootWithoutServiceAccountToken(t *testing.T) {
 		if pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken || pod.SecurityContext == nil || pod.SecurityContext.RunAsUser == nil || *pod.SecurityContext.RunAsUser != 0 {
 			t.Fatal("unexpected cleanup identity")
 		}
-		if pod.Volumes[0].HostPath.Path != "/var/lib/hypercdr/kopia-cache" || pod.NodeName != "node-one" {
+		if pod.Volumes[0].HostPath.Path != "/var/lib/hypercdr/cache/index" || pod.NodeName != "node-one" {
 			t.Fatal("cleanup targets wrong node/path")
 		}
 		job.Name = "cleanup-test"
@@ -128,7 +129,7 @@ func TestCacheCleanupUsesLocalRootWithoutServiceAccountToken(t *testing.T) {
 		return false, nil, nil
 	})
 	runtimeManager := &KubernetesAgentRuntime{client: client}
-	if err := runtimeManager.ConfigureCache(context.Background(), "", true, 5, true); err != nil {
+	if err := runtimeManager.ConfigureCache(context.Background(), "", "", "", "", true, 5, false, 50, true); err != nil {
 		t.Fatal(err)
 	}
 }

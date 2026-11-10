@@ -16,8 +16,9 @@ func TestLeaseReuseIsolationAndIdleCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := testAcquire(root, "repo/pvc-one", 5<<30); err == nil {
-		t.Fatal("active shard acquired twice")
+	shared, err := testAcquire(root, "repo/pvc-one", 5<<30)
+	if err != nil {
+		t.Fatal("active shard was not shareable", err)
 	}
 	second, err := testAcquire(root, "repo/pvc-two", 5<<30)
 	if err != nil {
@@ -45,6 +46,7 @@ func TestLeaseReuseIsolationAndIdleCleanup(t *testing.T) {
 		t.Fatal("active cache removed", err)
 	}
 	reused.Close()
+	shared.Close()
 	if err := Clean(root); err != nil {
 		t.Fatal(err)
 	}

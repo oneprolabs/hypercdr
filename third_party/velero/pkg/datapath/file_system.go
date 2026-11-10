@@ -119,10 +119,15 @@ func (fs *fileSystemBR) Init(ctx context.Context, param any) error {
 	}
 
 	cacheDir := initParam.CacheDir
-	if cacheDir == "" && initParam.CacheIdentity != "" && os.Getenv("HCDR_CACHE_PERSISTENCE") == "true" {
-		budget, parseErr := strconv.ParseInt(os.Getenv("HCDR_CACHE_BUDGET_BYTES"), 10, 64)
+	budgetEnv := "HCDR_CACHE_BUDGET_BYTES"
+	if initParam.CacheIdentity != "" && os.Getenv("HCDR_CACHE_PERSISTENCE") == "true" {
+		if os.Getenv("HCDR_DRILL_DATA_CACHE") == "true" {
+			cacheDir = ""
+			budgetEnv = "HCDR_DRILL_DATA_CACHE_BUDGET_BYTES"
+		}
+		budget, parseErr := strconv.ParseInt(os.Getenv(budgetEnv), 10, 64)
 		if parseErr == nil {
-			lease, cacheErr := persistentcache.Acquire(persistentcache.Root, string(fs.backupLocation.UID)+"/"+string(fs.backupRepo.UID)+"/"+initParam.CacheIdentity, budget)
+			lease, cacheErr := persistentcache.Acquire(persistentcache.DataRoot(), string(fs.backupLocation.UID)+"/"+string(fs.backupRepo.UID)+"/"+initParam.CacheIdentity, budget)
 			if cacheErr == nil {
 				fs.cacheLease = lease
 				cacheDir = lease.Path

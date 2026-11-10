@@ -250,6 +250,10 @@ func (urp *unifiedRepoProvider) BoostRepoConnect(ctx context.Context, param Repo
 		return errors.Wrap(err, "error to get repo options")
 	}
 
+	if param.CacheDir != "" {
+		return urp.ConnectToRepo(ctx, param)
+	}
+
 	bkRepo, err := urp.repoService.Open(ctx, *repoOption)
 	if err == nil {
 		if c := bkRepo.Close(ctx); c != nil {

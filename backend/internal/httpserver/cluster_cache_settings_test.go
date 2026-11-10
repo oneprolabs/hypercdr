@@ -25,9 +25,9 @@ func TestClusterCacheSettingsScopeValidationAndOffline(t *testing.T) {
 		{"GET", own.ID, "", 200},
 		{"GET", foreign.ID, "", 404},
 		{"PUT", foreign.ID, `{"enabled":true,"maxGiB":5}`, 404},
-		{"PUT", own.ID, `{"enabled":true,"maxGiB":0}`, 400},
-		{"PUT", own.ID, `{"enabled":true,"maxGiB":1.5}`, 400},
-		{"PUT", own.ID, `{"enabled":false,"maxGiB":5}`, 409},
+		{"PUT", own.ID, `{"indexEnabled":true,"indexMaxGiB":0,"drillMaxGiB":50}`, 400},
+		{"PUT", own.ID, `{"indexEnabled":true,"indexMaxGiB":1.5,"drillMaxGiB":50}`, 400},
+		{"PUT", own.ID, `{"indexEnabled":false,"indexMaxGiB":5,"drillMaxGiB":50}`, 409},
 		{"POST", own.ID, "{}", 409},
 	} {
 		req := tenantRequest(httptest.NewRequest(scenario.method, "/api/v1/clusters/"+scenario.cluster+"/cache-settings", strings.NewReader(scenario.body)), actor)
@@ -63,7 +63,7 @@ func TestClusterCacheSettingsReportsObservedNotDesired(t *testing.T) {
 		if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &result) != nil {
 			t.Fatalf("unexpected response: %d %s", response.Code, response.Body.String())
 		}
-		if !result.Settings.Enabled || result.Settings.MaxGiB != 5 {
+		if !result.Settings.IndexEnabled || result.Settings.IndexMaxGiB != 5 {
 			t.Fatal("registration defaults changed")
 		}
 		if observed == nil {

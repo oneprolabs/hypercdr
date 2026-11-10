@@ -178,6 +178,7 @@ func (r *RestoreMicroService) RunCancelableDataPath(ctx context.Context) (string
 			RepositoryEnsurer: r.repoEnsurer,
 			CredentialGetter:  r.credentialGetter,
 			CacheDir:          r.cacheDir,
+			CacheIdentity:     "restore/" + pvr.Spec.SourceNamespace,
 		}); err != nil {
 		return "", errors.Wrap(err, "error to initialize data path")
 	}

@@ -29598,6 +29598,13 @@ html[data-theme='dark'] #root .hbdr-dr-task-log-drawer .hbdr-task-final-result.i
 #root .premium-app .hbdr-cache-settings { width: min(480px, 100vw); }
 .hbdr-cache-form { display: grid; gap: 18px; font-size: 13px; color: var(--hc-text); }
 .hbdr-cache-form > p { margin: 0; }
+.hbdr-cache-card { display: grid; gap: 18px; padding: 18px; border: 1px solid var(--hc-border); border-radius: 10px; background: var(--hc-surface); }
+.hbdr-cache-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.hbdr-cache-card-header h3 { margin: 0; font-size: 16px; font-weight: 650; color: var(--hc-text); }
+.hbdr-cache-card-header p { margin: 5px 0 0; color: var(--hc-text-2); font-size: 12px; }
+.hbdr-cache-card-fields { display: grid; gap: 14px; padding-top: 2px; }
+.hbdr-cache-card-fields .hbdr-cache-row { align-items: center; }
+.hbdr-cache-card-fields input:not([type='number']) { min-width: 0; width: 60%; height: 34px; padding: 6px 10px; border: 1px solid var(--hc-border-strong); border-radius: 5px; background: var(--hc-surface); color: var(--hc-text); font-family: var(--hc-font-mono, monospace); }
 .hbdr-cache-row, .hbdr-cache-toggle, .hbdr-cache-size { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .hbdr-cache-toggle { font-size: 12px; color: var(--hc-text-2); }
 #root .premium-app button.hbdr-settings-switch { position: relative; display: inline-flex; align-items: center; flex-shrink: 0; width: 36px; min-width: 36px; height: 20px; min-height: 20px; padding: 1px; border: 1px solid var(--hc-border-strong) !important; border-radius: 999px !important; background: var(--hc-border-strong) !important; box-shadow: none !important; transition: background .2s; }

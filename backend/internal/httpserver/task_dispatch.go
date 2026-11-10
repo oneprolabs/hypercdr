@@ -328,7 +328,7 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 		}
 	case "cache-settings":
 		payload.Deadline = time.Now().UTC().Add(10 * time.Minute)
-		payload.CacheSettings = &protocol.CacheSettingsCommand{Namespace: stringPayload(task.Payload, "namespace"), Enabled: boolPayload(task.Payload, "enabled"), MaxGiB: int(int64FromAny(task.Payload["maxGiB"])), Clean: boolPayload(task.Payload, "clean")}
+		payload.CacheSettings = &protocol.CacheSettingsCommand{Namespace: stringPayload(task.Payload, "namespace"), RootPath: stringPayload(task.Payload, "rootPath"), IndexPath: stringPayload(task.Payload, "indexPath"), DrillPath: stringPayload(task.Payload, "drillPath"), IndexEnabled: boolPayload(task.Payload, "indexEnabled"), IndexMaxGiB: int(int64FromAny(task.Payload["indexMaxGiB"])), DrillEnabled: boolPayload(task.Payload, "drillEnabled"), DrillMaxGiB: int(int64FromAny(task.Payload["drillMaxGiB"])), Clean: boolPayload(task.Payload, "clean")}
 	case "velero-upgrade":
 		payload.Deadline = time.Now().UTC().Add(15 * time.Minute)
 		payload.VeleroUpgrade = &protocol.VeleroUpgradeCommand{

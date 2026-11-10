@@ -435,10 +435,15 @@ type PlanCapacityReport struct {
 }
 
 type CacheSettingsCommand struct {
-	Namespace string `json:"namespace"`
-	Enabled   bool   `json:"enabled"`
-	MaxGiB    int    `json:"maxGiB"`
-	Clean     bool   `json:"clean,omitempty"`
+	Namespace    string `json:"namespace"`
+	RootPath     string `json:"rootPath"`
+	IndexPath    string `json:"indexPath"`
+	DrillPath    string `json:"drillPath"`
+	IndexEnabled bool   `json:"indexEnabled"`
+	IndexMaxGiB  int    `json:"indexMaxGiB"`
+	DrillEnabled bool   `json:"drillEnabled"`
+	DrillMaxGiB  int    `json:"drillMaxGiB"`
+	Clean        bool   `json:"clean,omitempty"`
 }
 
 type ControlPlaneHandoverCommand struct {

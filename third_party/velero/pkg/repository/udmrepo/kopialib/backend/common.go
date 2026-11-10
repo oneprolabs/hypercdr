@@ -18,6 +18,8 @@ package backend
 
 import (
 	"context"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,8 +71,10 @@ func SetupNewRepositoryOptions(ctx context.Context, flags map[string]string) rep
 func SetupConnectOptions(ctx context.Context, repoOptions udmrepo.RepoOptions) repo.ConnectOptions {
 	cacheLimit := optionalHaveIntWithDefault(ctx, udmrepo.StoreOptionCacheLimit, repoOptions.StorageOptions, DefaultCacheLimitMB) << 20
 	cacheDir := optionalHaveString(udmrepo.StoreOptionCacheDir, repoOptions.StorageOptions)
-	if strings.HasPrefix(cacheDir, "/var/cache/hypercdr/") {
-		cacheLimit = 256 << 20
+	if strings.HasPrefix(cacheDir, "/var/cache/hypercdr/") && os.Getenv("HCDR_DRILL_DATA_CACHE") == "true" {
+		if budget, err := strconv.ParseInt(os.Getenv("HCDR_DRILL_DATA_CACHE_BUDGET_BYTES"), 10, 64); err == nil && budget > 0 {
+			cacheLimit = budget
+		}
 	}
 
 	// 80% for data cache and 20% for metadata cache and align to KB

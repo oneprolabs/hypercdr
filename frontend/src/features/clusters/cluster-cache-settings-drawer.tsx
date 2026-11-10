@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { apiGet, apiPut } from '../../api/client';
 import { ResourceCreateDrawer } from '../../components/resource-create-drawer';
 
-type Settings = { enabled: boolean; maxGiB: number };
+type Settings = { rootPath: string; indexPath: string; drillPath: string; indexEnabled: boolean; indexMaxGiB: number; drillEnabled: boolean; drillMaxGiB: number };
 type CacheTask = { id: string; status: string; errorMessage?: string };
 type Observed = Settings & { phase: string; observedAt?: string };
 type Response = { settings: Settings; observed?: Observed | null; task: CacheTask | null };
 const active = (task: CacheTask | null) => !!task && !['succeeded', 'failed', 'cancelled', 'canceled'].includes(task.status);
-const same = (first: Settings, second: Settings) => first.enabled === second.enabled && first.maxGiB === second.maxGiB;
+const same = (first: Settings, second: Settings) => JSON.stringify(first) === JSON.stringify(second);
 
 export function ClusterCacheSettingsDrawer({ clusterId, name, onClose, onSaved }: { clusterId: string; name: string; onClose: () => void; onSaved: () => void }) {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -71,12 +71,12 @@ export function ClusterCacheSettingsDrawer({ clusterId, name, onClose, onSaved }
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [path]);
   const busy = loading || saving || confirming || active(task) || phase !== 'applied';
-  const valid = !!settings && Number.isInteger(settings.maxGiB) && settings.maxGiB >= 1 && settings.maxGiB <= 1024;
+  const valid = !!settings && settings.rootPath.startsWith('/') && (settings.indexPath || `${settings.rootPath}/index`).startsWith('/') && (settings.drillPath || `${settings.rootPath}/drill-data`).startsWith('/') && Number.isInteger(settings.indexMaxGiB) && settings.indexMaxGiB >= 1 && settings.indexMaxGiB <= 1024 && Number.isInteger(settings.drillMaxGiB) && settings.drillMaxGiB >= 1 && settings.drillMaxGiB <= 4096;
   const dirty = !!settings && !!initialSettings && !same(settings, initialSettings);
   const submit = async () => {
     if (busy || !valid || !dirty || !settings) return;
     setSaving(true); setError('');
-    const requested = { enabled: settings.enabled, maxGiB: settings.maxGiB };
+    const requested = { ...settings, indexPath: settings.indexPath || `${settings.rootPath}/index`, drillPath: settings.drillPath || `${settings.rootPath}/drill-data` };
     const startedAt = Date.now();
     try {
       const result = await apiPut<Response>(path, requested);
@@ -93,8 +93,14 @@ export function ClusterCacheSettingsDrawer({ clusterId, name, onClose, onSaved }
     <div className="hbdr-cache-form">
       <p className="text-slate-500">{name}</p>
       {loading ? <p role="status">Loading cache settings…</p> : settings ? <>
-        <div className="hbdr-cache-row"><span>Cache persistence</span><div className="hbdr-cache-toggle"><span>{settings.enabled ? 'Enabled' : 'Disabled'}</span><button type="button" className="hbdr-settings-switch" role="switch" aria-label="Cache persistence" aria-checked={settings.enabled} disabled={busy || phase !== 'applied'} onClick={() => change({ ...settings, enabled: !settings.enabled })}><span /></button></div></div>
-        <label className="hbdr-cache-row"><span>Cache size per node</span><span className="hbdr-cache-size"><input aria-label="Cache size per node" type="number" min={1} max={1024} step={1} value={Number.isNaN(settings.maxGiB) ? '' : settings.maxGiB} disabled={busy || phase !== 'applied' || !settings.enabled} onChange={event => change({ ...settings, maxGiB: event.target.valueAsNumber })} /><span>GiB</span></span></label>
+        <section className="hbdr-cache-card" aria-labelledby="index-cache-title">
+          <div className="hbdr-cache-card-header"><div><h3 id="index-cache-title">Index cache</h3><p>Kopia index data</p></div><div className="hbdr-cache-toggle"><span>{settings.indexEnabled ? 'Enabled' : 'Disabled'}</span><button type="button" className="hbdr-settings-switch" role="switch" aria-label="Index cache" aria-checked={settings.indexEnabled} disabled={busy || phase !== 'applied'} onClick={() => change({ ...settings, indexEnabled: !settings.indexEnabled })}><span /></button></div></div>
+          {settings.indexEnabled && <div className="hbdr-cache-card-fields"><label className="hbdr-cache-row"><span>Cache size per node</span><span className="hbdr-cache-size"><input aria-label="Index cache size per node" type="number" min={1} max={1024} step={1} value={Number.isNaN(settings.indexMaxGiB) ? '' : settings.indexMaxGiB} disabled={busy || phase !== 'applied'} onChange={event => change({ ...settings, indexMaxGiB: event.target.valueAsNumber })} /><span>GiB</span></span></label><label className="hbdr-cache-row"><span>Cache path per node</span><input aria-label="Index cache path per node" value={settings.indexPath || `${settings.rootPath}/index`} disabled={busy || phase !== 'applied'} onChange={event => change({ ...settings, indexPath: event.target.value })} /></label></div>}
+        </section>
+        <section className="hbdr-cache-card" aria-labelledby="drill-cache-title">
+          <div className="hbdr-cache-card-header"><div><h3 id="drill-cache-title">Drill data cache</h3><p>Downloaded application data for Drill</p></div><div className="hbdr-cache-toggle"><span>{settings.drillEnabled ? 'Enabled' : 'Disabled'}</span><button type="button" className="hbdr-settings-switch" role="switch" aria-label="Drill data cache" aria-checked={settings.drillEnabled} disabled={busy || phase !== 'applied'} onClick={() => change({ ...settings, drillEnabled: !settings.drillEnabled })}><span /></button></div></div>
+          {settings.drillEnabled && <div className="hbdr-cache-card-fields"><label className="hbdr-cache-row"><span>Cache size per node</span><span className="hbdr-cache-size"><input aria-label="Drill data cache size per node" type="number" min={1} max={4096} step={1} value={Number.isNaN(settings.drillMaxGiB) ? '' : settings.drillMaxGiB} disabled={busy || phase !== 'applied'} onChange={event => change({ ...settings, drillMaxGiB: event.target.valueAsNumber })} /><span>GiB</span></span></label><label className="hbdr-cache-row"><span>Cache path per node</span><input aria-label="Drill data cache path per node" value={settings.drillPath || `${settings.rootPath}/drill-data`} disabled={busy || phase !== 'applied'} onChange={event => change({ ...settings, drillPath: event.target.value })} /></label></div>}
+        </section>
         {!valid && <p role="alert" className="text-xs text-rose-600">Enter a whole number from 1 to 1024.</p>}
         {phase !== 'applied' && <p role="status">{phase === 'applying' ? 'Applying cache settings…' : 'Cluster configuration is unavailable.'}</p>}
       </> : <p role="status">{phase === 'applying' ? 'Applying cache settings…' : phase === 'unconfigured' ? 'Cache is not configured on this cluster.' : 'Cluster configuration is unavailable.'}</p>}

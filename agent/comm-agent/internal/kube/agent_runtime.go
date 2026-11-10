@@ -573,20 +573,31 @@ func (r *KubernetesAgentRuntime) UpgradeVelero(ctx context.Context, options Vele
 		nodesReady := daemonSet.Status.DesiredNumberScheduled > 0 && daemonSet.Status.UpdatedNumberScheduled == daemonSet.Status.DesiredNumberScheduled && daemonSet.Status.NumberReady == daemonSet.Status.DesiredNumberScheduled && daemonSet.Status.NumberUnavailable == 0
 		if serverReady && nodesReady {
 			if cacheCapability == "v1" {
-				enabled, budget := true, 5
+				rootPath, indexEnabled, indexBudget, drillEnabled, drillBudget := "/var/lib/hypercdr/cache", true, 5, false, 50
 				for _, container := range daemonSet.Spec.Template.Spec.Containers {
 					for _, setting := range container.Env {
 						if setting.Name == "HCDR_CACHE_PERSISTENCE" {
-							enabled = setting.Value == "true"
+							indexEnabled = setting.Value == "true"
 						}
 						if setting.Name == "HCDR_CACHE_BUDGET_BYTES" {
 							if bytes, err := strconv.ParseInt(setting.Value, 10, 64); err == nil && bytes >= 1<<30 && bytes <= 1024<<30 {
-								budget = int(bytes >> 30)
+								indexBudget = int(bytes >> 30)
+							}
+						}
+						if setting.Name == "HCDR_CACHE_HOST_ROOT" && setting.Value != "" {
+							rootPath = setting.Value
+						}
+						if setting.Name == "HCDR_DRILL_DATA_CACHE" {
+							drillEnabled = setting.Value == "true"
+						}
+						if setting.Name == "HCDR_DRILL_DATA_CACHE_BUDGET_BYTES" {
+							if bytes, err := strconv.ParseInt(setting.Value, 10, 64); err == nil && bytes >= 1<<30 {
+								drillBudget = int(bytes >> 30)
 							}
 						}
 					}
 				}
-				return r.ConfigureCache(ctx, namespace, enabled, budget, false)
+				return r.ConfigureCache(ctx, namespace, rootPath, "", "", indexEnabled, indexBudget, drillEnabled, drillBudget, false)
 			}
 			return nil
 		}

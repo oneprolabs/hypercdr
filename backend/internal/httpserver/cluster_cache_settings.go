@@ -52,8 +52,8 @@ func (r *Router) clusterCacheSettings(w http.ResponseWriter, req *http.Request) 
 	}
 	clean := req.Method == http.MethodPost
 	if !clean {
-		if err := decodeJSON(req, &settings); err != nil || settings.MaxGiB < 1 || settings.MaxGiB > 1024 {
-			writeJSON(w, 400, map[string]any{"error": "invalid_cache_settings", "message": "Cache size must be an integer between 1 and 1024 GiB."})
+		if err := decodeJSON(req, &settings); err != nil || settings.RootPath == "" || settings.IndexMaxGiB < 1 || settings.IndexMaxGiB > 1024 || settings.DrillMaxGiB < 1 || settings.DrillMaxGiB > 4096 {
+			writeJSON(w, 400, map[string]any{"error": "invalid_cache_settings", "message": "Enter a cache path and valid cache sizes."})
 			return
 		}
 	}
@@ -68,7 +68,7 @@ func (r *Router) clusterCacheSettings(w http.ResponseWriter, req *http.Request) 
 		writeJSON(w, 409, map[string]any{"error": "agent_offline"})
 		return
 	}
-	task, err := r.store.CreateTask(store.TaskInput{ClusterID: clusterID, Type: "cache-settings", Status: "queued", CommandID: store.NewPublicID(), Payload: map[string]any{"enabled": settings.Enabled, "maxGiB": settings.MaxGiB, "clean": clean, "namespace": r.dataProtectionNamespaceForCluster(clusterID), "requestedBy": requestActor(req)}})
+	task, err := r.store.CreateTask(store.TaskInput{ClusterID: clusterID, Type: "cache-settings", Status: "queued", CommandID: store.NewPublicID(), Payload: map[string]any{"rootPath": settings.RootPath, "indexPath": settings.IndexPath, "drillPath": settings.DrillPath, "indexEnabled": settings.IndexEnabled, "indexMaxGiB": settings.IndexMaxGiB, "drillEnabled": settings.DrillEnabled, "drillMaxGiB": settings.DrillMaxGiB, "clean": clean, "namespace": r.dataProtectionNamespaceForCluster(clusterID), "requestedBy": requestActor(req)}})
 	if err != nil {
 		writeJSON(w, 500, map[string]any{"error": "create_task_failed"})
 		return

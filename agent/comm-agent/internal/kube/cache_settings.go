@@ -17,6 +17,7 @@ import (
 )
 
 const cacheRoot = "/var/cache/hypercdr"
+const defaultCacheHostRoot = "/var/lib/hypercdr/cache"
 
 func observedCacheState(daemon *appsv1.DaemonSet) map[string]any {
 	state := map[string]any{"phase": "unknown"}
@@ -39,6 +40,8 @@ func observedCacheState(daemon *appsv1.DaemonSet) map[string]any {
 	if err != nil || budget < 1<<30 || budget > 1024<<30 || budget%(1<<30) != 0 {
 		return state
 	}
+	drillEnabled, _ := strconv.ParseBool(values["HCDR_DRILL_DATA_CACHE"])
+	drillBudget, _ := strconv.ParseInt(values["HCDR_DRILL_DATA_CACHE_BUDGET_BYTES"], 10, 64)
 	if enabled {
 		mounted := false
 		for _, mount := range container.VolumeMounts {
@@ -46,7 +49,7 @@ func observedCacheState(daemon *appsv1.DaemonSet) map[string]any {
 				continue
 			}
 			for _, volume := range daemon.Spec.Template.Spec.Volumes {
-				if volume.Name == mount.Name && volume.HostPath != nil && volume.HostPath.Path == "/var/lib/hypercdr/kopia-cache" {
+				if volume.Name == mount.Name && volume.HostPath != nil && volume.HostPath.Path != "" {
 					mounted = true
 				}
 			}
@@ -60,23 +63,49 @@ func observedCacheState(daemon *appsv1.DaemonSet) map[string]any {
 		state["phase"] = "applied"
 		state["enabled"] = enabled
 		state["maxGiB"] = int(budget >> 30)
+		state["rootPath"] = values["HCDR_CACHE_HOST_ROOT"]
+		state["indexPath"] = values["HCDR_CACHE_HOST_ROOT"]
+		if values["HCDR_CACHE_INDEX_PATH"] != "" {
+			state["indexPath"] = values["HCDR_CACHE_INDEX_PATH"]
+		}
+		state["indexEnabled"] = enabled
+		state["indexMaxGiB"] = int(budget >> 30)
+		state["drillEnabled"] = drillEnabled
+		if drillBudget > 0 {
+			state["drillMaxGiB"] = int(drillBudget >> 30)
+		}
+		state["drillPath"] = values["HCDR_DRILL_DATA_CACHE_PATH"]
 	}
 	return state
 }
 
 func supportsPersistentCache(image string) bool {
 	image = strings.SplitN(image, "@", 2)[0]
-	return strings.HasSuffix(image, "-cache-v1") || image == "registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.5" || image == "registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.6"
+	return strings.HasSuffix(image, "-cache-v1") || strings.Contains(image, "drill-cache-") || image == "registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.5" || image == "registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.6"
 }
 
 func supportsOnDemandImage(image string) bool {
 	image = strings.SplitN(image, "@", 2)[0]
-	return strings.HasSuffix(image, "-on-demand-cache-v1") || image == "registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.6"
+	return strings.HasSuffix(image, "-on-demand-cache-v1") || strings.Contains(image, "drill-cache-") || image == "registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.6"
 }
 
-func (r *KubernetesAgentRuntime) ConfigureCache(ctx context.Context, namespace string, enabled bool, maxGiB int, clean bool) error {
-	if maxGiB < 1 || maxGiB > 1024 {
+func (r *KubernetesAgentRuntime) ConfigureCache(ctx context.Context, namespace, rootPath, indexPath, drillPath string, indexEnabled bool, indexMaxGiB int, drillEnabled bool, drillMaxGiB int, clean bool) error {
+	if indexMaxGiB < 1 || indexMaxGiB > 1024 || drillMaxGiB < 1 || drillMaxGiB > 4096 {
 		return fmt.Errorf("invalid node cache budget")
+	}
+	rootPath = strings.TrimSpace(rootPath)
+	if rootPath == "" {
+		rootPath = defaultCacheHostRoot
+	}
+	if !strings.HasPrefix(rootPath, "/") || strings.Contains(rootPath, "..") {
+		return fmt.Errorf("cache root path must be an absolute local path")
+	}
+	indexPath = firstNonEmpty(strings.TrimSpace(indexPath), rootPath+"/index")
+	drillPath = firstNonEmpty(strings.TrimSpace(drillPath), rootPath+"/drill-data")
+	for _, path := range []string{indexPath, drillPath} {
+		if !strings.HasPrefix(path, "/") || strings.Contains(path, "..") {
+			return fmt.Errorf("cache paths must be absolute local paths")
+		}
 	}
 	namespace = firstNonEmpty(namespace, "hypercdr-agent")
 	if clean {
@@ -92,20 +121,20 @@ func (r *KubernetesAgentRuntime) ConfigureCache(ctx context.Context, namespace s
 			return fmt.Errorf("unexpected node-agent template")
 		}
 		container := &daemon.Spec.Template.Spec.Containers[0]
-		if daemon.Spec.Template.Annotations["hypercdr.io/cache-persistence-supported"] != "v1" {
-			if !supportsPersistentCache(container.Image) {
-				return fmt.Errorf("installed Velero does not support cache persistence; upgrade Velero first")
-			}
-			if daemon.Spec.Template.Annotations == nil {
-				daemon.Spec.Template.Annotations = map[string]string{}
-			}
+		if !supportsPersistentCache(container.Image) {
+			return fmt.Errorf("installed Velero does not support cache persistence; upgrade Velero first")
+		}
+		if daemon.Spec.Template.Annotations == nil {
+			daemon.Spec.Template.Annotations = map[string]string{}
+		}
+		if daemon.Spec.Template.Annotations["hypercdr.io/cache-persistence-supported"] != "v1" || daemon.Spec.Template.Annotations["hypercdr.io/cache-persistence-image"] != container.Image {
 			daemon.Spec.Template.Annotations["hypercdr.io/cache-persistence-supported"] = "v1"
 			daemon.Spec.Template.Annotations["hypercdr.io/cache-persistence-image"] = container.Image
 		}
 		if daemon.Spec.Template.Annotations["hypercdr.io/cache-persistence-image"] != container.Image {
 			return fmt.Errorf("cache capability does not match installed image")
 		}
-		for _, setting := range []corev1.EnvVar{{Name: "HCDR_CACHE_PERSISTENCE", Value: strconv.FormatBool(enabled)}, {Name: "HCDR_CACHE_BUDGET_BYTES", Value: strconv.FormatInt(int64(maxGiB)<<30, 10)}} {
+		for _, setting := range []corev1.EnvVar{{Name: "HCDR_CACHE_PERSISTENCE", Value: strconv.FormatBool(indexEnabled)}, {Name: "HCDR_CACHE_BUDGET_BYTES", Value: strconv.FormatInt(int64(indexMaxGiB)<<30, 10)}, {Name: "HCDR_CACHE_ROOT", Value: cacheRoot}, {Name: "HCDR_CACHE_HOST_ROOT", Value: rootPath}, {Name: "HCDR_CACHE_INDEX_PATH", Value: cacheRoot}, {Name: "HCDR_DRILL_DATA_CACHE", Value: strconv.FormatBool(drillEnabled)}, {Name: "HCDR_DRILL_DATA_CACHE_BUDGET_BYTES", Value: strconv.FormatInt(int64(drillMaxGiB)<<30, 10)}, {Name: "HCDR_DRILL_DATA_CACHE_PATH", Value: cacheRoot + "/drill-data"}} {
 			found := false
 			for index := range container.Env {
 				if container.Env[index].Name == setting.Name {
@@ -118,29 +147,32 @@ func (r *KubernetesAgentRuntime) ConfigureCache(ctx context.Context, namespace s
 			}
 		}
 		typeDirectory := corev1.HostPathDirectoryOrCreate
-		found := false
-		for _, volume := range daemon.Spec.Template.Spec.Volumes {
-			if volume.Name == "hypercdr-kopia-cache" {
-				if volume.HostPath == nil || volume.HostPath.Path != "/var/lib/hypercdr/kopia-cache" {
-					return fmt.Errorf("unexpected cache volume")
+		for _, volumeSpec := range []struct{ name, path, mount string }{{"hypercdr-kopia-cache", indexPath, cacheRoot}, {"hypercdr-drill-data-cache", drillPath, cacheRoot + "/drill-data"}} {
+			found := false
+			for _, volume := range daemon.Spec.Template.Spec.Volumes {
+				if volume.Name == volumeSpec.name {
+					if volume.HostPath == nil {
+						return fmt.Errorf("unexpected cache volume")
+					}
+					volume.HostPath.Path = volumeSpec.path
+					found = true
 				}
-				found = true
 			}
-		}
-		if !found {
-			daemon.Spec.Template.Spec.Volumes = append(daemon.Spec.Template.Spec.Volumes, corev1.Volume{Name: "hypercdr-kopia-cache", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/var/lib/hypercdr/kopia-cache", Type: &typeDirectory}}})
-		}
-		found = false
-		for _, mount := range container.VolumeMounts {
-			if mount.Name == "hypercdr-kopia-cache" {
-				if mount.MountPath != cacheRoot {
-					return fmt.Errorf("unexpected cache mount")
+			if !found {
+				daemon.Spec.Template.Spec.Volumes = append(daemon.Spec.Template.Spec.Volumes, corev1.Volume{Name: volumeSpec.name, VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: volumeSpec.path, Type: &typeDirectory}}})
+			}
+			found = false
+			for _, mount := range container.VolumeMounts {
+				if mount.Name == volumeSpec.name {
+					if mount.MountPath != volumeSpec.mount {
+						return fmt.Errorf("unexpected cache mount")
+					}
+					found = true
 				}
-				found = true
 			}
-		}
-		if !found {
-			container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{Name: "hypercdr-kopia-cache", MountPath: cacheRoot})
+			if !found {
+				container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{Name: volumeSpec.name, MountPath: volumeSpec.mount})
+			}
 		}
 		if reflect.DeepEqual(before.Spec, daemon.Spec) {
 			return nil
@@ -193,9 +225,15 @@ func (r *KubernetesAgentRuntime) cleanCache(ctx context.Context, namespace strin
 		nodes[pod.Spec.NodeName] = true
 		deadline, ttl, backoff := int64(120), int32(300), int32(0)
 		mountType := corev1.HostPathDirectoryOrCreate
+		indexHostPath := defaultCacheHostRoot + "/index"
+		for _, volume := range daemon.Spec.Template.Spec.Volumes {
+			if volume.Name == "hypercdr-kopia-cache" && volume.HostPath != nil && volume.HostPath.Path != "" {
+				indexHostPath = volume.HostPath.Path
+			}
+		}
 		automount := false
 		runAsUser := int64(0)
-		job, err := r.client.BatchV1().Jobs(namespace).Create(ctx, &batchv1.Job{ObjectMeta: metav1.ObjectMeta{GenerateName: "hypercdr-cache-clean-", Namespace: namespace}, Spec: batchv1.JobSpec{ActiveDeadlineSeconds: &deadline, TTLSecondsAfterFinished: &ttl, BackoffLimit: &backoff, Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{SecurityContext: &corev1.PodSecurityContext{RunAsUser: &runAsUser}, AutomountServiceAccountToken: &automount, NodeName: pod.Spec.NodeName, RestartPolicy: corev1.RestartPolicyNever, ImagePullSecrets: pod.Spec.ImagePullSecrets, Containers: []corev1.Container{{Name: "clean", Image: pod.Spec.Containers[0].Image, Command: []string{"/velero", "cache-clean"}, VolumeMounts: []corev1.VolumeMount{{Name: "cache", MountPath: cacheRoot}}}}, Volumes: []corev1.Volume{{Name: "cache", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/var/lib/hypercdr/kopia-cache", Type: &mountType}}}}}}}}, metav1.CreateOptions{})
+		job, err := r.client.BatchV1().Jobs(namespace).Create(ctx, &batchv1.Job{ObjectMeta: metav1.ObjectMeta{GenerateName: "hypercdr-cache-clean-", Namespace: namespace}, Spec: batchv1.JobSpec{ActiveDeadlineSeconds: &deadline, TTLSecondsAfterFinished: &ttl, BackoffLimit: &backoff, Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{SecurityContext: &corev1.PodSecurityContext{RunAsUser: &runAsUser}, AutomountServiceAccountToken: &automount, NodeName: pod.Spec.NodeName, RestartPolicy: corev1.RestartPolicyNever, ImagePullSecrets: pod.Spec.ImagePullSecrets, Containers: []corev1.Container{{Name: "clean", Image: pod.Spec.Containers[0].Image, Command: []string{"/velero", "cache-clean"}, VolumeMounts: []corev1.VolumeMount{{Name: "cache", MountPath: cacheRoot}}}}, Volumes: []corev1.Volume{{Name: "cache", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: indexHostPath, Type: &mountType}}}}}}}}, metav1.CreateOptions{})
 		if err != nil {
 			return err
 		}

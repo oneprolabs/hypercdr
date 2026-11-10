@@ -147,8 +147,13 @@ type ClusterRepository interface {
 }
 
 type ClusterCacheSettings struct {
-	Enabled bool `json:"enabled"`
-	MaxGiB  int  `json:"maxGiB"`
+	RootPath     string `json:"rootPath"`
+	IndexPath    string `json:"indexPath"`
+	DrillPath    string `json:"drillPath"`
+	IndexEnabled bool   `json:"indexEnabled"`
+	IndexMaxGiB  int    `json:"indexMaxGiB"`
+	DrillEnabled bool   `json:"drillEnabled"`
+	DrillMaxGiB  int    `json:"drillMaxGiB"`
 }
 
 // ApplicationRepository defines the persisted application operations.

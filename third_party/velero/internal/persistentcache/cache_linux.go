@@ -15,17 +15,28 @@ import (
 const Root = "/var/cache/hypercdr"
 const Allocation = int64(256 << 20)
 
+func DataRoot() string {
+	if os.Getenv("HCDR_DRILL_DATA_CACHE") == "true" && os.Getenv("HCDR_DRILL_DATA_CACHE_PATH") != "" {
+		return os.Getenv("HCDR_DRILL_DATA_CACHE_PATH")
+	}
+	return Root
+}
+
 type Lease struct {
 	Path string
 	lock *os.File
 }
 
-func lock(path string) (*os.File, error) {
+func lock(path string, shared bool) (*os.File, error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0600)
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	operation := syscall.LOCK_EX | syscall.LOCK_NB
+	if shared {
+		operation = syscall.LOCK_SH | syscall.LOCK_NB
+	}
+	if err := syscall.Flock(int(file.Fd()), operation); err != nil {
 		file.Close()
 		return nil, err
 	}
@@ -84,13 +95,13 @@ func acquire(root, identity string, budget int64, checkSpace func(string) error)
 	if err := checkSpace(root); err != nil {
 		return nil, err
 	}
-	guard, err := lock(filepath.Join(root, ".guard"))
+	guard, err := lock(filepath.Join(root, ".guard"), true)
 	if err != nil {
 		return nil, err
 	}
 	defer guard.Close()
 	key := fmt.Sprintf("%x", sha256.Sum256([]byte(identity)))
-	leaseLock, err := lock(filepath.Join(root, key+".lock"))
+	leaseLock, err := lock(filepath.Join(root, key+".lock"), true)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +147,7 @@ func acquire(root, identity string, budget int64, checkSpace func(string) error)
 		if total <= budget && time.Since(entry.modified) < 7*24*time.Hour {
 			continue
 		}
-		entryLock, err := lock(filepath.Join(root, entry.key+".lock"))
+		entryLock, err := lock(filepath.Join(root, entry.key+".lock"), false)
 		if err != nil {
 			continue
 		}
@@ -178,7 +189,7 @@ func Clean(root string) error {
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("invalid cache root")
 	}
-	guard, err := lock(filepath.Join(root, ".guard"))
+	guard, err := lock(filepath.Join(root, ".guard"), false)
 	if os.IsNotExist(err) {
 		return nil
 	}
@@ -194,7 +205,7 @@ func Clean(root string) error {
 		if !entry.IsDir() || len(entry.Name()) != 64 || strings.Trim(entry.Name(), "0123456789abcdef") != "" {
 			continue
 		}
-		entryLock, err := lock(filepath.Join(root, entry.Name()+".lock"))
+		entryLock, err := lock(filepath.Join(root, entry.Name()+".lock"), false)
 		if err != nil {
 			continue
 		}

@@ -129,7 +129,7 @@ func (r *Router) agentWebSocket(w http.ResponseWriter, req *http.Request) {
 				if cacheErr != nil {
 					return nil
 				}
-				return &protocol.CacheSettingsCommand{Namespace: r.dataProtectionNamespaceForCluster(cluster.ID), Enabled: cacheSettings.Enabled, MaxGiB: cacheSettings.MaxGiB}
+				return &protocol.CacheSettingsCommand{Namespace: r.dataProtectionNamespaceForCluster(cluster.ID), RootPath: cacheSettings.RootPath, IndexPath: cacheSettings.IndexPath, DrillPath: cacheSettings.DrillPath, IndexEnabled: cacheSettings.IndexEnabled, IndexMaxGiB: cacheSettings.IndexMaxGiB, DrillEnabled: cacheSettings.DrillEnabled, DrillMaxGiB: cacheSettings.DrillMaxGiB}
 			}(),
 			AckMessageID:                    register.MessageID,
 			AckType:                         protocol.MessageAgentRegister,
