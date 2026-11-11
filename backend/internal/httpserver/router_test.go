@@ -893,7 +893,7 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 		"comm-agent":                        {Version: "active", Image: "registry.local:5000/hypercdr/comm-agent:active", ImageDigest: "sha256:agent"},
 		"oadp-comm-agent":                   {Version: "active", Image: "registry.local:5000/hypercdr/oadp-comm-agent:active", ImageDigest: "sha256:oadp-agent"},
 		"oadp-catalog":                      {Version: "stable-1.3", Image: "registry.local:5000/hypercdr/oadp-catalog:stable-1.3", ImageDigest: "sha256:oadp-catalog"},
-		"velero":                            {Version: "v1.17.2", Image: "registry.local:5000/hypercdr/velero:v1.17.2", ImageDigest: "sha256:velero"},
+		"velero":                            {Version: "v1.17.2", Image: "registry.local:5000/hypercdr/velero:v1.17.2", ImageDigest: "sha256:" + strings.Repeat("a", 64)},
 		"velero-plugin-for-aws":             {Version: "v1.13.0", Image: "registry.local:5000/hypercdr/velero-plugin-for-aws:v1.13.0", ImageDigest: "sha256:aws"},
 		"velero-plugin-for-microsoft-azure": {Version: "v1.13.0", Image: "registry.local:5000/hypercdr/velero-plugin-for-microsoft-azure:v1.13.0", ImageDigest: "sha256:azure"},
 		"velero-plugin-for-gcp":             {Version: "v1.13.0", Image: "registry.local:5000/hypercdr/velero-plugin-for-gcp:v1.13.0", ImageDigest: "sha256:gcp"},
@@ -921,6 +921,9 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := body.String()
+	if !strings.Contains(text, `VELERO_IMAGE="registry.local:5000/hypercdr/velero:v1.17.2@sha256:`+strings.Repeat("a", 64)+`"`) {
+		t.Fatal("installer must pin the published Velero digest while preserving the capability tag")
+	}
 	for _, expected := range []string{
 		"registry.local:5000/hypercdr/comm-agent:active",
 		"registry.local:5000/hypercdr/oadp-comm-agent:active",

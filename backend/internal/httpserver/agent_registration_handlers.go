@@ -178,7 +178,11 @@ func (r *Router) installScript(w http.ResponseWriter, req *http.Request) {
 	script = strings.ReplaceAll(script, "{{VELERO_CRDS_URL}}", r.publicBaseURL(req)+veleroCRDsPath)
 	script = strings.ReplaceAll(script, "{{REGISTRY_CA_URL}}", r.publicBaseURL(req)+"/assets/registry/ca.crt")
 	script = strings.ReplaceAll(script, "{{PLATFORM_CA_URL}}", r.publicBaseURL(req)+"/assets/platform/ca.crt")
-	script = strings.ReplaceAll(script, "{{VELERO_IMAGE}}", veleroTarget.Image)
+	veleroInstallImage := veleroTarget.Image
+	if validImageDigest(veleroTarget.ImageDigest) {
+		veleroInstallImage = strings.SplitN(veleroInstallImage, "@", 2)[0] + "@" + veleroTarget.ImageDigest
+	}
+	script = strings.ReplaceAll(script, "{{VELERO_IMAGE}}", veleroInstallImage)
 	script = strings.ReplaceAll(script, "{{VELERO_AWS_PLUGIN_IMAGE}}", awsTarget.Image)
 	script = strings.ReplaceAll(script, "{{VELERO_AZURE_PLUGIN_IMAGE}}", azureTarget.Image)
 	script = strings.ReplaceAll(script, "{{VELERO_GCP_PLUGIN_IMAGE}}", gcpTarget.Image)

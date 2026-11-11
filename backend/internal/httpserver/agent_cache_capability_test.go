@@ -22,6 +22,7 @@ func TestInstallerCacheCapability(t *testing.T) {
 	}{
 		{"registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.5", "v1"},
 		{"registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.6", "v1"},
+		{"registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.6@sha256:abcd", "v1"},
 		{"registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.5@sha256:abcd", "v1"},
 		{"custom/velero:test-cache-v1", "v1"},
 		{"custom/velero:test-cache-v1@sha256:abcd", "v1"},
