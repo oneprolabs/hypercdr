@@ -6,6 +6,7 @@ import { apiDelete, apiPatch, apiPost } from '../../api/client';
 import { EditField } from '../../components/edit-field';
 import { ModalFrame } from '../../components/modal-frame';
 import { HyperTable, type HyperTableColumn } from '../../components/table';
+import { formatLocalDateTime, getUserTimeZone } from '../../lib/date-time';
 
 type TagItem = { id:string; name:string; createdAt:string };
 type TagCluster = { name:string; apps:Array<{name:string; tags?:string[]}> };
@@ -34,6 +35,7 @@ export default function TagManagementPage<T extends TagCluster>({
   const [deleteTags, setDeleteTags] = useState<TagItem[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [tagBulkMenuOpen, setTagBulkMenuOpen] = useState(false);
+  const timeZone = getUserTimeZone();
 
   const tagResources = (tagId: string) => clusters.flatMap(cluster =>
     cluster.apps
@@ -43,7 +45,7 @@ export default function TagManagementPage<T extends TagCluster>({
   const filteredTags = tags.filter(tag => {
     const keyword = query.trim().toLowerCase();
     if (!keyword) return true;
-    return [tag.name, tag.createdAt, tagResources(tag.id).join(' ')].some(value => value.toLowerCase().includes(keyword));
+    return [tag.name, tag.createdAt || '', formatLocalDateTime(tag.createdAt), tagResources(tag.id).join(' ')].some(value => value.toLowerCase().includes(keyword));
   });
   const selectedTags = tags.filter(tag => selectedTagIds.includes(tag.id));
   const singleSelectedTag = selectedTags.length === 1 ? selectedTags[0] : null;
@@ -123,10 +125,10 @@ export default function TagManagementPage<T extends TagCluster>({
       size: 180,
       minSize: 150,
       maxSize: 260,
-      cell: info => info.row.original.createdAt,
-      meta: { title: tag => tag.createdAt },
+      cell: info => formatLocalDateTime(info.row.original.createdAt) || '-',
+      meta: { title: tag => formatLocalDateTime(tag.createdAt) || '-' },
     },
-  ], [allVisibleTagsSelected, selectedTagIds, clusters]);
+  ], [allVisibleTagsSelected, selectedTagIds, clusters, timeZone]);
   const openCreateTag = () => {
     setEditingTag(null);
     setDraftName('');
@@ -250,7 +252,7 @@ export default function TagManagementPage<T extends TagCluster>({
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <Info label="Name" value={deleteTags.map(tag => tag.name).join(', ')} />
                 <Info label="Attach Resources" value={String(deleteTags.reduce((total, tag) => total + tagResources(tag.id).length, 0))} />
-                <Info label="Create Time" value={deleteTags.length === 1 ? deleteTags[0].createdAt : 'Multiple'} />
+                <Info label="Create Time" value={deleteTags.length === 1 ? formatLocalDateTime(deleteTags[0].createdAt) || '-' : 'Multiple'} />
               </div>
               <div className="flex justify-end gap-3">
                 <button type="button" onClick={() => setDeleteTags([])} className="rounded-xl px-5 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50">Cancel</button>

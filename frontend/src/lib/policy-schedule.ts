@@ -1,4 +1,4 @@
-import { getUserTimeZone } from './date-time';
+import { getUserTimeZone } from './date-time.ts';
 
 export type ScheduleParts = { hour: number; minute: number; weekDay: number; monthDay: number };
 type ScheduleInput = ScheduleParts & { type: 'interval' | 'daily' | 'weekly' | 'monthly' };

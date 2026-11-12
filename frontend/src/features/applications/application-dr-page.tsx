@@ -18,6 +18,7 @@ import {
 import type { Props as DrWizardProps } from '../../dr-configuration-modal';
 import type { BackupContentResource, RecoveryWizardConfig } from '../../recovery-wizard-modal';
 import { lazyWithUpgradeRecovery } from '../../app/lazy-page';
+import { DialogModuleFrame, preloadDialog, useDialogPreload } from '../../app/dialog-module';
 import { HyperTable, type HyperTableColumn } from '../../components/table';
 import { SearchBar } from '../../components/search-bar';
 import ListToolbarControls from '../../components/list-toolbar-controls';
@@ -56,6 +57,7 @@ import {
 const DrConfigurationModal = lazyWithUpgradeRecovery(() => import('../../dr-configuration-modal').then(module => ({ default: module.DrConfigurationModal })));
 const ProtectApplicationsWizard = lazyWithUpgradeRecovery(() => import('../../protect-applications-wizard').then(module => ({ default: module.ProtectApplicationsWizard })));
 const RecoveryWizardModal = lazyWithUpgradeRecovery(() => import('../../recovery-wizard-modal').then(module => ({ default: module.RecoveryWizardModal })));
+const drDialogModules = [ProtectApplicationsWizard, DrConfigurationModal, RecoveryWizardModal];
 
 export default function ApplicationDrPage(props: {
   apps: AppItem[];
@@ -83,6 +85,7 @@ export default function ApplicationDrPage(props: {
   platformTasks: ApiTask[];
 }) {
   const { apps, clusters, currentCluster, storage, policies, protectionPlans, setProtectionPlans, tags, stage, setStage, currentClusterId, updateAppTags, openStorage, openClusters, openPolicies, toast, refreshPlatformData, liveAppTasks, setLiveAppTasks, liveRecoveryTasks, setLiveRecoveryTasks, liveRestorePoints, platformTasks } = props;
+  useDialogPreload(drDialogModules);
   const [selectedSelectApps, setSelectedSelectApps] = useState<string[]>([]);
   const [selectedConfigApps, setSelectedConfigApps] = useState<string[]>([]);
   const [selectedRunApps, setSelectedRunApps] = useState<string[]>([]);
@@ -2795,14 +2798,14 @@ export default function ApplicationDrPage(props: {
                 >
                   <ArrowLeft size={15} />Move Back
                 </button>
-                <button onClick={() => { setGuidedProtectWizard(true); void handlePrimaryAction(); }} disabled={primaryDisabled || resourceCatalogLoading} className="hbdr-dr-action-primary"><ShieldCheck size={15} />Protect applications</button>
+                <button onMouseEnter={() => preloadDialog(ProtectApplicationsWizard)} onFocus={() => preloadDialog(ProtectApplicationsWizard)} onClick={() => { setGuidedProtectWizard(true); void handlePrimaryAction(); }} disabled={primaryDisabled || resourceCatalogLoading} className="hbdr-dr-action-primary"><ShieldCheck size={15} />Protect applications</button>
               </>
             )}
             {isRunStage && (
               <>
                 <button onClick={handlePrimaryAction} disabled={!canStartSync} className="hbdr-dr-action-primary"><Play size={14} />{syncSubmitting ? 'Submitting…' : 'Start Sync'}</button>
-                <button disabled={!canRestoreAction} title={hasSelectedRunActiveRecoveryTask ? 'A recovery task is already running' : undefined} onClick={() => openRestoreAction('drill')} className="hbdr-dr-action-primary hbdr-dr-action-ghost"><History size={14} />Drill</button>
-                <button disabled={!canRestoreAction} title={hasSelectedRunActiveRecoveryTask ? 'A recovery task is already running' : undefined} onClick={() => openRestoreAction('takeover')} className="hbdr-dr-action-danger"><AlertTriangle size={14} />Takeover</button>
+                <button onMouseEnter={() => preloadDialog(RecoveryWizardModal)} onFocus={() => preloadDialog(RecoveryWizardModal)} disabled={!canRestoreAction} title={hasSelectedRunActiveRecoveryTask ? 'A recovery task is already running' : undefined} onClick={() => openRestoreAction('drill')} className="hbdr-dr-action-primary hbdr-dr-action-ghost"><History size={14} />Drill</button>
+                <button onMouseEnter={() => preloadDialog(RecoveryWizardModal)} onFocus={() => preloadDialog(RecoveryWizardModal)} disabled={!canRestoreAction} title={hasSelectedRunActiveRecoveryTask ? 'A recovery task is already running' : undefined} onClick={() => openRestoreAction('takeover')} className="hbdr-dr-action-danger"><AlertTriangle size={14} />Takeover</button>
               </>
             )}
             <div className="relative">
@@ -3121,7 +3124,7 @@ export default function ApplicationDrPage(props: {
         )}
       </AnimatePresence>
 
-      <React.Suspense fallback={<div role="status">Loading recovery wizard…</div>}><AnimatePresence>
+      {restoreAction && <DialogModuleFrame module={RecoveryWizardModal} title="Recovery" onClose={() => setRestoreAction(null)}><AnimatePresence>
         {restoreAction && (
           <RecoveryWizardModal
             open
@@ -3163,11 +3166,11 @@ export default function ApplicationDrPage(props: {
             loadContents={restorePointId => getRestorePointContents<{ resources: BackupContentResource[]; truncated?: boolean }>(restorePointId)}
           />
         )}
-      </AnimatePresence></React.Suspense>
+      </AnimatePresence></DialogModuleFrame>}
 
-      {protectWizardOpen && <React.Suspense fallback={<div role="status">Loading configuration wizard…</div>}>{guidedProtectWizard
+      {protectWizardOpen && <DialogModuleFrame module={guidedProtectWizard ? ProtectApplicationsWizard : DrConfigurationModal} title="Protect applications" onClose={() => setProtectWizardOpen(false)}>{guidedProtectWizard
         ? <ProtectApplicationsWizard {...protectWizardProps} onResourcesChanged={refreshPlatformData} />
-        : <DrConfigurationModal {...protectWizardProps} />}</React.Suspense>}
+        : <DrConfigurationModal {...protectWizardProps} />}</DialogModuleFrame>}
 
       <AnimatePresence>
         {selectedDetailApp && <NamespaceDetailDrawer

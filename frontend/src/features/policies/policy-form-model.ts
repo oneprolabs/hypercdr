@@ -1,7 +1,7 @@
-import { scheduleDisplayToUTC } from '../../lib/policy-schedule';
-import { apiPost } from '../../api/client';
-import { getUserTimeZone } from '../../lib/date-time';
-import { validateRetentionRules, type RetentionRule } from './retention-model';
+import { scheduleDisplayToUTC } from '../../lib/policy-schedule.ts';
+import { apiPost } from '../../api/client.ts';
+import { getUserTimeZone } from '../../lib/date-time.ts';
+import { validateRetentionRules, type RetentionRule } from './retention-model.ts';
 
 export type PolicyComposition = 'manual' | 'combined' | 'schedule' | 'retention';
 export type PolicyScheduleType = 'interval' | 'daily' | 'weekly' | 'monthly';

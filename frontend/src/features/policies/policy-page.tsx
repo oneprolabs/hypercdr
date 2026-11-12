@@ -205,12 +205,14 @@ export default function PolicyPage({ policies, setPolicies }: { policies: Policy
   }, [allVisiblePoliciesSelected, selectedPolicyIds, visibleColumns]);
 
   const openCreatePolicy = () => {
+    setPolicyError(null);
     setEditingPolicyId(null);
     setPolicyForm(defaultPolicyForm());
     setPolicyModalOpen(true);
   };
 
   const openEditPolicy = (policy: PolicyItem) => {
+    setPolicyError(null);
     setEditingPolicyId(policy.id);
     setPolicyForm({
       name: policy.name,
@@ -231,6 +233,7 @@ export default function PolicyPage({ policies, setPolicies }: { policies: Policy
   };
 
   const closePolicyModal = () => {
+    setPolicyError(null);
     setPolicyModalOpen(false);
     setEditingPolicyId(null);
     setPolicyForm(defaultPolicyForm());
@@ -238,10 +241,10 @@ export default function PolicyPage({ policies, setPolicies }: { policies: Policy
 
   const savePolicy = async () => {
     if (!policyForm.name.trim()) return;
-    const input = buildPolicyInput(policyForm);
 		setSavingPolicy(true);
 		setPolicyError(null);
     try {
+      const input = buildPolicyInput(policyForm);
       const created = editingPolicyId
 				? await apiPatch<ApiPolicy>(`/api/v1/policies/${editingPolicyId}`, input)
 				: await createPolicy<ApiPolicy>(policyForm);
@@ -414,15 +417,16 @@ export default function PolicyPage({ policies, setPolicies }: { policies: Policy
       )}
 
       <AnimatePresence>
-		{policyError && <div className="rounded border border-rose-100 bg-rose-50 px-4 py-3 text-xs font-bold text-rose-700">{policyError}</div>}
+		{policyError && !policyModalOpen && <div role="alert" className="rounded border border-rose-100 bg-rose-50 px-4 py-3 text-xs font-bold text-rose-700">{policyError}</div>}
 		{detailPolicy && <ModalFrame title="Policy Details" onClose={()=>setDetailPolicy(null)}><div className="grid grid-cols-1 gap-3 md:grid-cols-2"><Info label="Name" value={detailPolicy.name}/><Info label="Status" value={detailPolicy.status}/><Info label="Schedule" value={formatPolicySchedule(detailPolicy)}/><Info label="Retention" value={formatPolicyRetention(detailPolicy)}/><Info label="Composition" value={formatPolicyComposition(detailPolicy.composition)}/><Info label="Bound Apps" value={`${detailPolicy.bound}`}/></div><div className="mt-5 flex justify-end gap-3"><button onClick={()=>setDetailPolicy(null)} className="rounded-xl px-5 py-2 text-sm font-medium text-slate-600">Close</button><button onClick={()=>{openEditPolicy(detailPolicy);setDetailPolicy(null)}} className="rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-bold text-white">Edit</button></div></ModalFrame>}
-        {policyModalOpen && !editingPolicyId && <ResourceCreateDrawer title="New DR Policy" kind="policy" onClose={closePolicyModal} actions={<><button type="button" onClick={() => void savePolicy()} disabled={!policyForm.name.trim() || savingPolicy}>{savingPolicy ? 'Saving...' : 'Save Policy'}</button><button type="button" onClick={closePolicyModal}>Cancel</button></>}><PolicyFormFields policyForm={policyForm} setPolicyForm={setPolicyForm} />{policyError && <p role="alert">{policyError}</p>}</ResourceCreateDrawer>}
+        {policyModalOpen && !editingPolicyId && <ResourceCreateDrawer title="New DR Policy" kind="policy" onClose={closePolicyModal} actions={<><button type="button" onClick={() => void savePolicy()} disabled={!policyForm.name.trim() || savingPolicy}>{savingPolicy ? 'Saving...' : 'Save Policy'}</button><button type="button" onClick={closePolicyModal}>Cancel</button></>}><PolicyFormFields policyForm={policyForm} setPolicyForm={setPolicyForm} />{policyError && <p role="alert" className="rounded border border-rose-100 bg-rose-50 px-4 py-3 text-xs text-rose-700">{policyError}</p>}</ResourceCreateDrawer>}
         {policyModalOpen && editingPolicyId && (
           <>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={closePolicyModal} className="hbdr-filter-drawer-backdrop" />
             <motion.div initial={{ opacity: 0, x: 34 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 34 }} transition={{ duration: 0.18, ease: 'easeOut' }} className="hbdr-filter-drawer hbdr-policy-drawer">
               <div className="hbdr-filter-drawer-head"><div><strong>Edit DR Policy</strong></div><button type="button" onClick={closePolicyModal} aria-label="Close policy drawer"><X size={18} /></button></div>
               <PolicyFormFields policyForm={policyForm} setPolicyForm={setPolicyForm} />
+              {policyError && <p role="alert" className="rounded border border-rose-100 bg-rose-50 px-4 py-3 text-xs text-rose-700">{policyError}</p>}
               <div className="hbdr-filter-drawer-actions hbdr-policy-drawer-actions"><button type="button" onClick={() => void savePolicy()} disabled={!policyForm.name.trim() || savingPolicy}>{savingPolicy ? 'Saving...' : 'Update Policy'}</button><button type="button" onClick={closePolicyModal}>Cancel</button></div>
             </motion.div>
           </>
