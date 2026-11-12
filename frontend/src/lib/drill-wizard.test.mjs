@@ -2,6 +2,39 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {drillNamespaceError,drillScopeError} from './drill-wizard.ts';
 import { readFileSync } from 'node:fs';
 
+test('removed plans never fall back to configuring and cleanup clears activation hints', () => {
+  const page = readFileSync(new URL('../features/applications/application-dr-page.tsx', import.meta.url), 'utf8');
+  assert.match(page, /if \(plan && \['pending_activation', 'configuring', 'activating_storage', 'activating_schedule'\]\.includes/);
+  const cleanup = page.slice(page.indexOf('const deleteDrConfiguration ='), page.indexOf('const cleanupDrillResources ='));
+  assert.match(cleanup, /setConfiguringPlanIds\(previous => previous\.filter/);
+  assert.match(cleanup, /setConfiguringAppNames\(previous => previous\.filter/);
+  assert.match(cleanup, /protectionPlanId: ''/);
+  const taskUi = readFileSync(new URL('../features/recovery/task-ui.tsx', import.meta.url), 'utf8');
+  assert.match(taskUi, /case '':\s*return \{ label: 'Not configured', tone: 'muted'/);
+});
+
+test('cleanup failure is authoritative and force abort targets active tasks', () => {
+  const page = readFileSync(new URL('../features/applications/application-dr-page.tsx', import.meta.url), 'utf8');
+  assert.match(page, /cleaningPlanIds\.includes\(app\.protectionPlanId\) && plan\?\.status !== 'cleanup_failed'/);
+  assert.match(page, /const failedPlans = remainingPlans\.filter\(plan => plan\.status === 'cleanup_failed'\)/);
+  assert.match(page, /Force Abort/);
+  assert.doesNotMatch(page, /Cancel Sync/);
+  assert.match(page, /forceAbortableTasks\(/);
+  const polling = readFileSync(new URL('../features/applications/use-dr-task-events.ts', import.meta.url), 'utf8');
+  assert.match(polling, /\['failed', 'canceled', 'cancelled', 'succeeded'\]\.includes\(task.status\)/);
+});
+
+test('force cleanup is opt-in and never bypasses active task protection', () => {
+  const page = readFileSync(new URL('../features/applications/application-dr-page.tsx', import.meta.url), 'utf8');
+  assert.match(page, /\[forceCleanup, setForceCleanup\] = useState\(false\)/);
+  assert.match(page, /deleteProtectionPlan\(planId, forceCleanup\)/);
+  assert.match(page, /if \(selectedRunHasActiveTasks\)/);
+  assert.match(page, /Remote data may remain/);
+  const api = readFileSync(new URL('../api/protection-plans.ts', import.meta.url), 'utf8');
+  assert.match(api, /force = false/);
+  assert.match(api, /\?force=true/);
+});
+
 test('protection configuration preserves an explicitly empty default target', () => {
   const page = readFileSync(new URL('../features/applications/application-dr-page.tsx', import.meta.url), 'utf8');
   assert.match(page, /targetClusterId: targetCluster\?\.id \|\| ''/);

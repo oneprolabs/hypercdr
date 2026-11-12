@@ -195,6 +195,8 @@ func (r *Router) agentWebSocket(w http.ResponseWriter, req *http.Request) {
 
 	r.hub.set(cluster.ID, conn)
 	r.hub.setCapacitySupport(cluster.ID, conn, slices.Contains(register.Payload.Agent.Capabilities, "plan-capacity-v1"))
+	r.hub.setForceCleanupSupport(cluster.ID, conn, slices.Contains(register.Payload.Agent.Capabilities, "force-protection-cleanup-v1"))
+	r.hub.setTaskAbortSupport(cluster.ID, conn, slices.Contains(register.Payload.Agent.Capabilities, "task-abort-v1"))
 	r.configureAgentConnection(conn, cluster.ID)
 	pingDone := make(chan struct{})
 	pingExited := make(chan struct{})

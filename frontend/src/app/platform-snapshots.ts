@@ -9,7 +9,7 @@ import { listItems, type ApiTask, type ApiProtectionPlan } from '../features/rec
 import type { ApiCluster } from '../features/recovery/platform-types.ts';
 
 type CurrentScope = () => boolean;
-const activityTypes = ['backup', 'restore', 'drill', 'takeover', 'storage-sync', 'schedule-sync', 'protection-cleanup'];
+const activityTypes = ['backup', 'restore', 'drill', 'takeover', 'storage-sync', 'schedule-sync', 'protection-cleanup', 'retention-cleanup', 'task-abort'];
 // Dashboard totals need the complete summary history, not the first 500 global tasks.
 // Other views keep their bounded activity feed. Full payloads are never fetched.
 const readActivityTasks = (completeHistory = false) => listTasks({ view: 'summary', types: activityTypes, ...(completeHistory ? {} : { limit: 500 }) });

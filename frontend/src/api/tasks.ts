@@ -24,4 +24,5 @@ export const listTaskEvents = (id: string) => apiGet<ApiList<ApiTaskEvent>>(`/ap
 export const createBackupTask = (input: Record<string, unknown>) => apiPost<ApiTaskResponse>('/api/v1/tasks/backup', input);
 export const createRecoveryTask = (mode: 'restore' | 'drill' | 'takeover', input: Record<string, unknown>) => apiPost<ApiTask>(`/api/v1/tasks/${mode}`, input);
 export const cancelTask = (id: string) => apiPost<ApiTaskCancelResponse>(`/api/v1/tasks/${encodeURIComponent(id)}/cancel`, {});
+export const abortTask = (id: string) => apiPost<ApiTaskCancelResponse>(`/api/v1/tasks/${encodeURIComponent(id)}/abort`, {});
 export const cleanupDrillTask = (id: string) => apiPost<ApiTaskResponse>(`/api/v1/tasks/${encodeURIComponent(id)}/cleanup-drill`, {});

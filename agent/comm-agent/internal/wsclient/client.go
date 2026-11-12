@@ -41,6 +41,9 @@ const (
 )
 
 type Client struct {
+	taskRunMu            sync.Mutex
+	taskAborts           sync.Map
+	taskRuns             map[string]*abortableTaskRun
 	capacityMu           sync.Mutex
 	cacheCleanupRunning  sync.Map
 	cacheSettingsRunning sync.Map
@@ -259,7 +262,7 @@ func (c *Client) Register() (protocol.RegisterAcceptedPayload, error) {
 		AgentCredential: c.cfg.AgentCredential,
 		Cluster:         clusterSummary,
 		Agent: protocol.AgentSummary{
-			Capabilities: []string{"plan-capacity-v1"},
+			Capabilities: []string{"plan-capacity-v1", "force-protection-cleanup-v1", "task-abort-v1"},
 			Version:      c.cfg.AgentVersion,
 			Namespace:    c.cfg.Namespace,
 			PodName:      c.cfg.PodName,
@@ -796,9 +799,13 @@ func (c *Client) recoverObservedTasks() {
 		switch task.Type {
 		case "backup":
 			c.markBackupContext(task)
-			go c.pollVeleroStatus(task, object, manifestPayload(object.Kind, object.Name, object.Namespace), backupStatusResult)
+			go c.runAbortableTask(task, func() {
+				c.pollVeleroStatus(task, object, manifestPayload(object.Kind, object.Name, object.Namespace), backupStatusResult)
+			})
 		case "restore", "drill", "takeover":
-			go c.pollRestoreStatus(task, object, manifestPayload(object.Kind, object.Name, object.Namespace))
+			go c.runAbortableTask(task, func() { c.pollRestoreStatus(task, object, manifestPayload(object.Kind, object.Name, object.Namespace)) })
+		case "protection-cleanup", "retention-cleanup":
+			go c.executeTask(task)
 		default:
 			c.logger.Info("ledger task type is not recoverable by status polling", "task_id", task.TaskID, "type", task.Type)
 		}
@@ -823,7 +830,7 @@ func (c *Client) recoverObservedTasks() {
 	}
 }
 
-func (c *Client) executeTask(task protocol.TaskDispatchPayload) {
+func (c *Client) executeTaskBody(task protocol.TaskDispatchPayload) {
 	if strings.TrimSpace(task.TaskID) == "" {
 		c.logger.Error("rejected task dispatch without task id", "type", task.Type, "command_id", task.CommandID)
 		_ = c.sendTaskFailed(task, "TASK_ID_REQUIRED", "platform task dispatch is missing task id")
@@ -831,6 +838,8 @@ func (c *Client) executeTask(task protocol.TaskDispatchPayload) {
 	}
 	c.logger.Info("task received", "task_id", task.TaskID, "type", task.Type, "command_id", task.CommandID)
 	switch task.Type {
+	case "task-abort":
+		c.executeTaskAbort(task)
 	case "plan-capacity":
 		c.executePlanCapacityTask(task)
 	case "cache-settings":
@@ -902,7 +911,7 @@ func (c *Client) executeScheduleSyncTask(task protocol.TaskDispatchPayload) {
 		c.logger.Error("failed to send schedule sync accepted", "task_id", task.TaskID, "error", err)
 		return
 	}
-	object, err := c.applier.ApplyManifest(context.Background(), raw)
+	object, err := c.applier.ApplyManifest(c.taskContext(task), raw)
 	if err != nil {
 		_ = c.sendTaskFailed(task, "SCHEDULE_SUBMIT_FAILED", err.Error())
 		return
@@ -1250,7 +1259,7 @@ func (c *Client) executeBackupTask(task protocol.TaskDispatchPayload) {
 		if len(namespaces) == 0 && task.Backup.SourceNamespace != "" {
 			namespaces = []string{task.Backup.SourceNamespace}
 		}
-		if err := c.pvcValidator.RequireRWO(context.Background(), namespaces); err != nil {
+		if err := c.pvcValidator.RequireRWO(c.taskContext(task), namespaces); err != nil {
 			_ = c.sendTaskFailedWithDetails(task, "OADP_UNSUPPORTED_PVC_ACCESS_MODE", err.Error(), map[string]any{"supportedAccessMode": "ReadWriteOnce"})
 			return
 		}
@@ -1261,12 +1270,12 @@ func (c *Client) executeBackupTask(task protocol.TaskDispatchPayload) {
 	}
 	defer releasePlan()
 	if preparer, ok := c.applier.(kube.ObjectStoragePreparer); ok {
-		if err := preparer.PrepareObjectStorage(context.Background(), c.cfg.Namespace, task.Backup.StorageRepo, ""); err != nil {
+		if err := preparer.PrepareObjectStorage(c.taskContext(task), c.cfg.Namespace, task.Backup.StorageRepo, ""); err != nil {
 			_ = c.sendTaskFailed(task, "STORAGE_PREFLIGHT_FAILED", err.Error())
 			return
 		}
 	}
-	if err := c.waitForBackupStorageLocation(context.Background(), task.Backup.StorageRepo, storagePreflightWait(task.Deadline)); err != nil {
+	if err := c.waitForBackupStorageLocation(c.taskContext(task), task.Backup.StorageRepo, storagePreflightWait(task.Deadline)); err != nil {
 		_ = c.sendTaskFailedWithDetails(task, "BSL_NOT_READY", err.Error(), map[string]any{
 			"storageRepo": task.Backup.StorageRepo,
 		})
@@ -1293,7 +1302,7 @@ func (c *Client) executeBackupTask(task protocol.TaskDispatchPayload) {
 		c.logger.Error("failed to send task accepted", "task_id", task.TaskID, "error", err)
 		return
 	}
-	if existing, ok, err := c.findConflictingActiveBackup(context.Background(), task, manifest); err != nil {
+	if existing, ok, err := c.findConflictingActiveBackup(c.taskContext(task), task, manifest); err != nil {
 		_ = c.sendTaskFailedWithDetails(task, "BACKUP_CONFLICT_CHECK_FAILED", err.Error(), map[string]any{
 			"namespace": task.Backup.SourceNamespace,
 			"planId":    task.Backup.PlanID,
@@ -1309,7 +1318,7 @@ func (c *Client) executeBackupTask(task protocol.TaskDispatchPayload) {
 		})
 		return
 	}
-	if err := c.submitBackupWithConfirmation(context.Background(), manifest); err != nil {
+	if err := c.submitBackupWithConfirmation(c.taskContext(task), manifest); err != nil {
 		_ = c.sendTaskFailed(task, "BACKUP_SUBMIT_FAILED", err.Error())
 		return
 	}
@@ -1331,13 +1340,17 @@ func (c *Client) executeBackupTask(task protocol.TaskDispatchPayload) {
 		{75, "backup data transfer running"},
 	}
 	for _, step := range steps {
-		time.Sleep(500 * time.Millisecond)
+		if !c.waitTaskDelay(task, 500*time.Millisecond) {
+			return
+		}
 		if err := c.sendTaskProgress(task, backupVeleroPayload(manifest, step.progress >= 45), step.progress, step.message); err != nil {
 			c.logger.Error("failed to send task progress", "task_id", task.TaskID, "error", err)
 			return
 		}
 	}
-	time.Sleep(500 * time.Millisecond)
+	if !c.waitTaskDelay(task, 500*time.Millisecond) {
+		return
+	}
 	if err := c.sendTaskCompleted(task, backupVeleroPayload(manifest, true), "backup dry-run completed"); err != nil {
 		c.logger.Error("failed to send task completed", "task_id", task.TaskID, "error", err)
 		return
@@ -1578,12 +1591,12 @@ func (c *Client) executeRestoreTask(task protocol.TaskDispatchPayload) {
 		}
 	}
 	if preparer, ok := c.applier.(kube.ObjectStoragePreparer); ok {
-		if err := preparer.PrepareObjectStorage(context.Background(), c.cfg.Namespace, task.Restore.StorageRepo, task.Restore.VeleroBackupName); err != nil {
+		if err := preparer.PrepareObjectStorage(c.taskContext(task), c.cfg.Namespace, task.Restore.StorageRepo, task.Restore.VeleroBackupName); err != nil {
 			_ = c.sendTaskFailed(task, "STORAGE_PREFLIGHT_FAILED", err.Error())
 			return
 		}
 	}
-	if err := c.waitForBackupStorageLocation(context.Background(), task.Restore.StorageRepo, storagePreflightWait(task.Deadline)); err != nil {
+	if err := c.waitForBackupStorageLocation(c.taskContext(task), task.Restore.StorageRepo, storagePreflightWait(task.Deadline)); err != nil {
 		_ = c.sendTaskFailedWithDetails(task, "BSL_NOT_READY", err.Error(), map[string]any{
 			"storageRepo": task.Restore.StorageRepo,
 		})
@@ -1609,7 +1622,7 @@ func (c *Client) executeRestoreTask(task protocol.TaskDispatchPayload) {
 		return
 	}
 	if preflighter, ok := c.agentRuntime.(kube.RestoreCachePreflighter); ok {
-		preflightCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		preflightCtx, cancel := context.WithTimeout(c.taskContext(task), 10*time.Second)
 		cache, preflightErr := preflighter.PreflightRestoreCache(preflightCtx, manifest.Metadata.Namespace)
 		cancel()
 		if preflightErr != nil {
@@ -1625,7 +1638,7 @@ func (c *Client) executeRestoreTask(task protocol.TaskDispatchPayload) {
 			},
 		}, 0, cache.Message)
 	}
-	if err := c.restoreExec.SubmitRestore(context.Background(), manifest); err != nil {
+	if err := c.restoreExec.SubmitRestore(c.taskContext(task), manifest); err != nil {
 		_ = c.sendTaskFailed(task, restoreSubmitErrorCode(err), err.Error())
 		return
 	}
@@ -1649,13 +1662,17 @@ func (c *Client) executeRestoreTask(task protocol.TaskDispatchPayload) {
 		{true, task.Type + " resources running"},
 	}
 	for _, step := range steps {
-		time.Sleep(500 * time.Millisecond)
+		if !c.waitTaskDelay(task, 500*time.Millisecond) {
+			return
+		}
 		if err := c.sendTaskProgress(task, restoreVeleroPayload(manifest, step.prepared), 0, step.message); err != nil {
 			c.logger.Error("failed to send task progress", "task_id", task.TaskID, "error", err)
 			return
 		}
 	}
-	time.Sleep(500 * time.Millisecond)
+	if !c.waitTaskDelay(task, 500*time.Millisecond) {
+		return
+	}
 	if err := c.sendTaskCompleted(task, restoreVeleroPayload(manifest, true), task.Type+" dry-run completed"); err != nil {
 		c.logger.Error("failed to send task completed", "task_id", task.TaskID, "error", err)
 		return
@@ -1697,7 +1714,7 @@ func (c *Client) executeStorageSyncTask(task protocol.TaskDispatchPayload) {
 		c.logger.Error("failed to send task accepted", "task_id", task.TaskID, "error", err)
 		return
 	}
-	if err := c.storageExec.SubmitStorage(context.Background(), manifests); err != nil {
+	if err := c.storageExec.SubmitStorage(c.taskContext(task), manifests); err != nil {
 		_ = c.sendTaskFailed(task, "BSL_SUBMIT_FAILED", err.Error())
 		return
 	}
@@ -1719,13 +1736,17 @@ func (c *Client) executeStorageSyncTask(task protocol.TaskDispatchPayload) {
 		{60, "velero backup storage location manifest generated"},
 	}
 	for _, step := range steps {
-		time.Sleep(500 * time.Millisecond)
+		if !c.waitTaskDelay(task, 500*time.Millisecond) {
+			return
+		}
 		if err := c.sendTaskProgress(task, storageVeleroPayload(manifests.BackupStorageLocation, step.progress >= 60), step.progress, step.message); err != nil {
 			c.logger.Error("failed to send task progress", "task_id", task.TaskID, "error", err)
 			return
 		}
 	}
-	time.Sleep(500 * time.Millisecond)
+	if !c.waitTaskDelay(task, 500*time.Millisecond) {
+		return
+	}
 	if err := c.sendTaskCompleted(task, storageVeleroPayload(manifests.BackupStorageLocation, true), "storage repository sync dry-run completed"); err != nil {
 		c.logger.Error("failed to send task completed", "task_id", task.TaskID, "error", err)
 		return
@@ -1770,7 +1791,7 @@ func (c *Client) executeRetentionCleanupTask(task protocol.TaskDispatchPayload) 
 			_ = c.sendTaskFailed(task, "RETENTION_DELETE_MANIFEST_INVALID", err.Error())
 			return
 		}
-		if _, err := c.applier.ApplyManifest(context.Background(), raw); err != nil {
+		if _, err := c.applier.ApplyManifest(c.taskContext(task), raw); err != nil {
 			_ = c.sendTaskFailedWithDetails(task, "RETENTION_DELETE_SUBMIT_FAILED", err.Error(), map[string]any{
 				"restorePointId": point.ID,
 				"backupName":     point.VeleroBackupName,
@@ -1778,7 +1799,7 @@ func (c *Client) executeRetentionCleanupTask(task protocol.TaskDispatchPayload) 
 			return
 		}
 		if c.deleteWaiter != nil {
-			if err := c.deleteWaiter.WaitForVeleroBackupDeleted(context.Background(), namespace, point.VeleroBackupName, 10*time.Minute); err != nil {
+			if err := c.deleteWaiter.WaitForVeleroBackupDeleted(c.taskContext(task), namespace, point.VeleroBackupName, 10*time.Minute); err != nil {
 				_ = c.sendTaskFailedWithDetails(task, "RETENTION_DELETE_FAILED", err.Error(), map[string]any{
 					"restorePointId": point.ID,
 					"backupName":     point.VeleroBackupName,
@@ -1821,6 +1842,10 @@ func (c *Client) executeProtectionCleanupTask(task protocol.TaskDispatchPayload)
 		return
 	}
 	cleaner, _ := c.applier.(kube.VeleroProtectionCleaner)
+	if task.ProtectionCleanup.Force && cleaner == nil {
+		_ = c.sendTaskFailed(task, "PROTECTION_CLEANUP_CLEANER_UNAVAILABLE", "force cleanup requires the Kubernetes protection resource cleaner")
+		return
+	}
 	if err := c.sendTaskAccepted(task); err != nil {
 		c.logger.Error("failed to send task accepted", "task_id", task.TaskID, "error", err)
 		return
@@ -1832,6 +1857,34 @@ func (c *Client) executeProtectionCleanupTask(task protocol.TaskDispatchPayload)
 	mode := strings.TrimSpace(task.ProtectionCleanup.CleanupMode)
 	if mode == "" {
 		mode = "source"
+	}
+	cleanupWarnings := []string{}
+	skipRemoteCleanup := false
+	ignoreRemoteError := func(operation string, err error) bool {
+		if !task.ProtectionCleanup.Force || !kube.IsObjectStorageCleanupError(err) {
+			return false
+		}
+		cleanupWarnings = append(cleanupWarnings, operation+": "+err.Error())
+		return true
+	}
+	if mode == "source" && task.ProtectionCleanup.StorageRepo != "" && task.ProtectionCleanup.CleanupObjectStorage {
+		if checker, ok := c.applier.(interface {
+			CheckProtectionCleanupStorage(context.Context, string, string) error
+		}); ok {
+			ctx, cancel := context.WithTimeout(c.taskContext(task), 20*time.Second)
+			err := checker.CheckProtectionCleanupStorage(ctx, namespace, task.ProtectionCleanup.StorageRepo)
+			cancel()
+			if err != nil {
+				if !ignoreRemoteError("storage preflight", err) {
+					_ = c.sendTaskFailed(task, "PROTECTION_CLEANUP_STORAGE_UNAVAILABLE", err.Error())
+					return
+				}
+				skipRemoteCleanup = true
+			}
+		} else if task.ProtectionCleanup.Force {
+			_ = c.sendTaskFailed(task, "PROTECTION_CLEANUP_PREFLIGHT_UNAVAILABLE", "storage preflight is required for force cleanup")
+			return
+		}
 	}
 	if mode == "drill" {
 		waiter, ok := c.applier.(interface {
@@ -1847,7 +1900,7 @@ func (c *Client) executeProtectionCleanupTask(task protocol.TaskDispatchPayload)
 		}
 		deletedRestores := []string{}
 		for _, restoreName := range uniqueStrings(task.ProtectionCleanup.RestoreNames) {
-			if err := deleter.DeleteObject(context.Background(), kube.AppliedObject{
+			if err := deleter.DeleteObject(c.taskContext(task), kube.AppliedObject{
 				APIVersion: "velero.io/v1",
 				Kind:       "Restore",
 				Namespace:  namespace,
@@ -1865,7 +1918,7 @@ func (c *Client) executeProtectionCleanupTask(task protocol.TaskDispatchPayload)
 				_ = c.sendTaskFailed(task, "DRILL_CLEANUP_TARGET_UNSAFE", "refusing to delete an empty, agent, or source namespace")
 				return
 			}
-			if err := waiter.DeleteNamespaceAndWait(context.Background(), targetNamespace); err != nil {
+			if err := waiter.DeleteNamespaceAndWait(c.taskContext(task), targetNamespace); err != nil {
 				_ = c.sendTaskFailedWithDetails(task, "DRILL_NAMESPACE_DELETE_FAILED", err.Error(), map[string]any{"targetNamespace": targetNamespace})
 				return
 			}
@@ -1891,6 +1944,25 @@ func (c *Client) executeProtectionCleanupTask(task protocol.TaskDispatchPayload)
 		if pointNamespace == "" {
 			pointNamespace = namespace
 		}
+		if task.ProtectionCleanup.Force {
+			if err := deleter.DeleteObject(c.taskContext(task), kube.AppliedObject{APIVersion: "velero.io/v1", Kind: "Backup", Namespace: pointNamespace, Name: point.VeleroBackupName}); err != nil {
+				_ = c.sendTaskFailed(task, "PROTECTION_CLEANUP_LOCAL_BACKUP_DELETE_FAILED", err.Error())
+				return
+			}
+			waiter, ok := c.applier.(interface {
+				WaitForVeleroBackupRecordDeleted(context.Context, string, string) error
+			})
+			if !ok {
+				_ = c.sendTaskFailed(task, "PROTECTION_CLEANUP_LOCAL_VERIFICATION_UNAVAILABLE", "local backup deletion verification is required for force cleanup")
+				return
+			}
+			if err := waiter.WaitForVeleroBackupRecordDeleted(c.taskContext(task), pointNamespace, point.VeleroBackupName); err != nil {
+				_ = c.sendTaskFailed(task, "PROTECTION_CLEANUP_LOCAL_BACKUP_DELETE_FAILED", err.Error())
+				return
+			}
+			deleted = append(deleted, point.ID)
+			continue
+		}
 		manifest, err := velero.BuildDeleteBackupRequestManifest(pointNamespace, point.VeleroBackupName)
 		if err != nil {
 			_ = c.sendTaskFailed(task, "PROTECTION_CLEANUP_DELETE_MANIFEST_INVALID", err.Error())
@@ -1901,7 +1973,7 @@ func (c *Client) executeProtectionCleanupTask(task protocol.TaskDispatchPayload)
 			_ = c.sendTaskFailed(task, "PROTECTION_CLEANUP_DELETE_MANIFEST_INVALID", err.Error())
 			return
 		}
-		if _, err := c.applier.ApplyManifest(context.Background(), raw); err != nil {
+		if _, err := c.applier.ApplyManifest(c.taskContext(task), raw); err != nil {
 			_ = c.sendTaskFailedWithDetails(task, "PROTECTION_CLEANUP_DELETE_SUBMIT_FAILED", err.Error(), map[string]any{
 				"restorePointId": point.ID,
 				"backupName":     point.VeleroBackupName,
@@ -1909,7 +1981,7 @@ func (c *Client) executeProtectionCleanupTask(task protocol.TaskDispatchPayload)
 			return
 		}
 		if c.deleteWaiter != nil {
-			if err := c.deleteWaiter.WaitForVeleroBackupDeleted(context.Background(), pointNamespace, point.VeleroBackupName, 10*time.Minute); err != nil {
+			if err := c.deleteWaiter.WaitForVeleroBackupDeleted(c.taskContext(task), pointNamespace, point.VeleroBackupName, 10*time.Minute); err != nil {
 				_ = c.sendTaskFailedWithDetails(task, "PROTECTION_CLEANUP_BACKUP_DELETE_FAILED", err.Error(), map[string]any{
 					"restorePointId": point.ID,
 					"backupName":     point.VeleroBackupName,
@@ -1938,21 +2010,21 @@ func (c *Client) executeProtectionCleanupTask(task protocol.TaskDispatchPayload)
 			_ = c.sendTaskFailed(task, "PROTECTION_CLEANUP_CLEANER_UNAVAILABLE", "velero protection cleaner is not configured")
 			return
 		}
-		crDeleted, err := cleaner.DeleteVeleroBackupArtifacts(context.Background(), namespace, backupNames)
+		crDeleted, err := cleaner.DeleteVeleroBackupArtifacts(c.taskContext(task), namespace, backupNames)
 		if err != nil {
 			_ = c.sendTaskFailedWithDetails(task, "PROTECTION_CLEANUP_TARGET_CR_DELETE_FAILED", err.Error(), map[string]any{
 				"backupNames": backupNames,
 			})
 			return
 		}
-		prefixCRDeleted, err := cleaner.DeleteVeleroBackupArtifactsByNamePrefix(context.Background(), namespace, task.ProtectionCleanup.BackupNamePrefix)
+		prefixCRDeleted, err := cleaner.DeleteVeleroBackupArtifactsByNamePrefix(c.taskContext(task), namespace, task.ProtectionCleanup.BackupNamePrefix)
 		if err != nil {
 			_ = c.sendTaskFailedWithDetails(task, "PROTECTION_CLEANUP_TARGET_PREFIX_CR_DELETE_FAILED", err.Error(), map[string]any{
 				"backupNamePrefix": task.ProtectionCleanup.BackupNamePrefix,
 			})
 			return
 		}
-		repoDeleted, err := cleaner.DeleteBackupRepositories(context.Background(), namespace, task.ProtectionCleanup.StorageRepo, task.ProtectionCleanup.SourceNamespaces)
+		repoDeleted, err := cleaner.DeleteBackupRepositories(c.taskContext(task), namespace, task.ProtectionCleanup.StorageRepo, task.ProtectionCleanup.SourceNamespaces)
 		if err != nil {
 			_ = c.sendTaskFailedWithDetails(task, "PROTECTION_CLEANUP_TARGET_REPOSITORY_DELETE_FAILED", err.Error(), map[string]any{
 				"storageRepo":      task.ProtectionCleanup.StorageRepo,
@@ -1974,7 +2046,7 @@ func (c *Client) executeProtectionCleanupTask(task protocol.TaskDispatchPayload)
 		return
 	}
 	if task.ProtectionCleanup.ScheduleName != "" {
-		if err := deleter.DeleteObject(context.Background(), kube.AppliedObject{
+		if err := deleter.DeleteObject(c.taskContext(task), kube.AppliedObject{
 			APIVersion: "velero.io/v1",
 			Kind:       "Schedule",
 			Namespace:  namespace,
@@ -2004,14 +2076,14 @@ func (c *Client) executeProtectionCleanupTask(task protocol.TaskDispatchPayload)
 	deletedRestoreObjects := []string{}
 	if cleaner != nil && task.ProtectionCleanup.StorageRepo != "" && len(task.ProtectionCleanup.SourceNamespaces) > 0 {
 		var err error
-		deletedPrefixCRs, err = cleaner.DeleteVeleroBackupArtifactsByNamePrefix(context.Background(), namespace, task.ProtectionCleanup.BackupNamePrefix)
+		deletedPrefixCRs, err = cleaner.DeleteVeleroBackupArtifactsByNamePrefix(c.taskContext(task), namespace, task.ProtectionCleanup.BackupNamePrefix)
 		if err != nil {
 			_ = c.sendTaskFailedWithDetails(task, "PROTECTION_CLEANUP_PREFIX_CR_DELETE_FAILED", err.Error(), map[string]any{
 				"backupNamePrefix": task.ProtectionCleanup.BackupNamePrefix,
 			})
 			return
 		}
-		deletedRepositories, err = cleaner.DeleteBackupRepositories(context.Background(), namespace, task.ProtectionCleanup.StorageRepo, task.ProtectionCleanup.SourceNamespaces)
+		deletedRepositories, err = cleaner.DeleteBackupRepositories(c.taskContext(task), namespace, task.ProtectionCleanup.StorageRepo, task.ProtectionCleanup.SourceNamespaces)
 		if err != nil {
 			_ = c.sendTaskFailedWithDetails(task, "PROTECTION_CLEANUP_REPOSITORY_DELETE_FAILED", err.Error(), map[string]any{
 				"storageRepo":      task.ProtectionCleanup.StorageRepo,
@@ -2019,9 +2091,15 @@ func (c *Client) executeProtectionCleanupTask(task protocol.TaskDispatchPayload)
 			})
 			return
 		}
-		if task.ProtectionCleanup.CleanupObjectStorage {
-			deletedBackupObjects, err = cleaner.DeleteBackupObjectsByNamePrefix(context.Background(), namespace, task.ProtectionCleanup.StorageRepo, task.ProtectionCleanup.BackupNamePrefix)
-			if err != nil {
+		if task.ProtectionCleanup.CleanupObjectStorage && !skipRemoteCleanup {
+			remoteTimeout := 10 * time.Minute
+			if task.ProtectionCleanup.Force {
+				remoteTimeout = time.Minute
+			}
+			remoteContext, cancelRemote := context.WithTimeout(c.taskContext(task), remoteTimeout)
+			defer cancelRemote()
+			deletedBackupObjects, err = cleaner.DeleteBackupObjectsByNamePrefix(remoteContext, namespace, task.ProtectionCleanup.StorageRepo, task.ProtectionCleanup.BackupNamePrefix)
+			if err != nil && !ignoreRemoteError("backup objects", err) {
 				_ = c.sendTaskFailedWithDetails(task, "PROTECTION_CLEANUP_BACKUP_OBJECT_DELETE_FAILED", err.Error(), map[string]any{
 					"storageRepo":      task.ProtectionCleanup.StorageRepo,
 					"backupNamePrefix": task.ProtectionCleanup.BackupNamePrefix,
@@ -2030,20 +2108,20 @@ func (c *Client) executeProtectionCleanupTask(task protocol.TaskDispatchPayload)
 				return
 			}
 			deletedRestoreObjects, err = retryProtectionCleanup(
-				context.Background(), c.logger, "restore objects", 3, 500*time.Millisecond,
+				remoteContext, c.logger, "restore objects", 3, 500*time.Millisecond,
 				func(ctx context.Context) ([]string, error) {
 					return cleaner.DeleteRestoreObjects(ctx, namespace, task.ProtectionCleanup.StorageRepo, task.ProtectionCleanup.RestoreNames)
 				},
 			)
-			if err != nil {
+			if err != nil && !ignoreRemoteError("restore objects", err) {
 				_ = c.sendTaskFailedWithDetails(task, "PROTECTION_CLEANUP_RESTORE_OBJECT_DELETE_FAILED", err.Error(), map[string]any{
 					"storageRepo":  task.ProtectionCleanup.StorageRepo,
 					"restoreNames": task.ProtectionCleanup.RestoreNames,
 				})
 				return
 			}
-			deletedKopiaRepositories, err = cleaner.DeleteKopiaRepositories(context.Background(), namespace, task.ProtectionCleanup.StorageRepo, task.ProtectionCleanup.SourceNamespaces)
-			if err != nil {
+			deletedKopiaRepositories, err = cleaner.DeleteKopiaRepositories(remoteContext, namespace, task.ProtectionCleanup.StorageRepo, task.ProtectionCleanup.SourceNamespaces)
+			if err != nil && !ignoreRemoteError("Kopia repository objects", err) {
 				_ = c.sendTaskFailedWithDetails(task, "PROTECTION_CLEANUP_KOPIA_DELETE_FAILED", err.Error(), map[string]any{
 					"storageRepo":      task.ProtectionCleanup.StorageRepo,
 					"sourceNamespaces": task.ProtectionCleanup.SourceNamespaces,
@@ -2052,8 +2130,15 @@ func (c *Client) executeProtectionCleanupTask(task protocol.TaskDispatchPayload)
 			}
 		}
 	}
+	cleanupMessage := "protection resources cleaned"
+	if len(cleanupWarnings) > 0 {
+		cleanupMessage = "Force cleanup completed; remote data may remain. " + strings.Join(cleanupWarnings, "; ")
+	}
 	if err := c.sendTaskCompleted(task, map[string]any{
 		"kind":                     "ProtectionCleanup",
+		"force":                    task.ProtectionCleanup.Force,
+		"warnings":                 cleanupWarnings,
+		"remoteDataMayRemain":      len(cleanupWarnings) > 0,
 		"mode":                     mode,
 		"planId":                   task.ProtectionCleanup.PlanID,
 		"scheduleName":             task.ProtectionCleanup.ScheduleName,
@@ -2063,7 +2148,7 @@ func (c *Client) executeProtectionCleanupTask(task protocol.TaskDispatchPayload)
 		"deletedRestoreObjects":    deletedRestoreObjects,
 		"deletedRepositories":      deletedRepositories,
 		"deletedKopiaRepositories": deletedKopiaRepositories,
-	}, "protection resources cleaned"); err != nil {
+	}, cleanupMessage); err != nil {
 		c.logger.Error("failed to send protection cleanup completed", "task_id", task.TaskID, "error", err)
 	}
 }
@@ -2136,7 +2221,10 @@ func (c *Client) pollVeleroStatus(task protocol.TaskDispatchPayload, object kube
 	samples := make([]volumeProgressSample, 0, 12)
 	var statusReadErrorSince time.Time
 	for {
-		status, err := c.statusReader.GetManifestStatus(context.Background(), object)
+		if c.taskContext(task).Err() != nil {
+			return
+		}
+		status, err := c.statusReader.GetManifestStatus(c.taskContext(task), object)
 		if err != nil {
 			now := time.Now().UTC()
 			if isTransientKubernetesReadError(err) && now.Before(deadline) {
@@ -2147,7 +2235,9 @@ func (c *Client) pollVeleroStatus(task protocol.TaskDispatchPayload, object kube
 					if c.logger != nil {
 						c.logger.Warn("temporary Kubernetes API error while reading Velero status; retrying", "kind", object.Kind, "name", object.Name, "error", err)
 					}
-					time.Sleep(interval)
+					if !c.waitTaskDelay(task, interval) {
+						return
+					}
 					continue
 				}
 			}
@@ -2181,7 +2271,7 @@ func (c *Client) pollVeleroStatus(task protocol.TaskDispatchPayload, object kube
 			}
 		}
 		volumeReady := !usesVolumeProgress(object)
-		if volumePayload, volumeProgress, volumeMessage, ready := c.buildVolumeProgressPayload(context.Background(), object, &samples); volumePayload != nil {
+		if volumePayload, volumeProgress, volumeMessage, ready := c.buildVolumeProgressPayload(c.taskContext(task), object, &samples); volumePayload != nil {
 			payload["volumeProgress"] = volumePayload
 			if failedCount := int64FromAny(volumePayload["failedCount"]); object.Kind == "Restore" && failedCount > 0 {
 				failureCode, failureMessage := restoreVolumeFailureDetails(volumePayload)
@@ -2200,7 +2290,7 @@ func (c *Client) pollVeleroStatus(task protocol.TaskDispatchPayload, object kube
 			if success {
 				if object.Kind == "Backup" && task.Backup != nil {
 					if preparer, ok := c.applier.(kube.ObjectStoragePreparer); ok {
-						ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+						ctx, cancel := context.WithTimeout(c.taskContext(task), 30*time.Minute)
 						_ = c.sendTaskProgress(task, payload, 99, "Checking repository maintenance")
 						if err := preparer.MaintainObjectStorage(ctx, object.Namespace, task.Backup.StorageRepo); err != nil {
 							payload["maintenanceWarning"] = "Repository maintenance failed; backup remains available"
@@ -2209,7 +2299,7 @@ func (c *Client) pollVeleroStatus(task protocol.TaskDispatchPayload, object kube
 						cancel()
 					}
 				}
-				c.attachBackupSizeStats(context.Background(), object, payload)
+				c.attachBackupSizeStats(c.taskContext(task), object, payload)
 				if err := c.sendTaskCompleted(task, payload, message); err != nil {
 					c.logger.Error("failed to send task completed", "task_id", task.TaskID, "error", err)
 				}
@@ -2229,13 +2319,17 @@ func (c *Client) pollVeleroStatus(task protocol.TaskDispatchPayload, object kube
 			return
 		}
 		if usesVolumeProgress(object) && !volumeReady && status.ItemsTotal <= 0 {
-			time.Sleep(interval)
+			if !c.waitTaskDelay(task, interval) {
+				return
+			}
 			continue
 		}
 		if err := c.sendTaskProgress(task, payload, progress, message); err != nil {
 			c.logger.Warn("failed to send task progress; continuing observation", "task_id", task.TaskID, "error", err)
 		}
-		time.Sleep(interval)
+		if !c.waitTaskDelay(task, interval) {
+			return
+		}
 	}
 }
 
@@ -2254,7 +2348,7 @@ func (c *Client) pollRestoreStatus(task protocol.TaskDispatchPayload, object kub
 				c.failRestoreTask(task, object, "RESTORE_IMAGE_MAPPING_UNAVAILABLE", "workload image mapping is not supported by this agent", map[string]any{"velero": payload})
 				return
 			}
-			updated, err := c.imageMapper.ApplyWorkloadImageMappings(context.Background(), restoreTargetNamespace(task), task.Restore.ImageMappings)
+			updated, err := c.imageMapper.ApplyWorkloadImageMappings(c.taskContext(task), restoreTargetNamespace(task), task.Restore.ImageMappings)
 			if err != nil {
 				c.failRestoreTask(task, object, "RESTORE_IMAGE_MAPPING_FAILED", err.Error(), map[string]any{"velero": payload})
 				return
@@ -2267,7 +2361,7 @@ func (c *Client) pollRestoreStatus(task protocol.TaskDispatchPayload, object kub
 				c.failRestoreTask(task, object, "RESTORE_SERVICE_MAPPING_UNAVAILABLE", "service NodePort mapping is not supported by this agent", nil)
 				return
 			}
-			updated, err := c.serviceMapper.ApplyServiceNodePortMappings(context.Background(), restoreTargetNamespace(task), task.Restore.ServiceNodePortMappings)
+			updated, err := c.serviceMapper.ApplyServiceNodePortMappings(c.taskContext(task), restoreTargetNamespace(task), task.Restore.ServiceNodePortMappings)
 			if err != nil {
 				c.failRestoreTask(task, object, "RESTORE_SERVICE_MAPPING_FAILED", err.Error(), map[string]any{"velero": payload})
 				return
@@ -2302,7 +2396,10 @@ func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, 
 	lastVolumeProgressAt := started
 	var lastVolumeBytes int64
 	for {
-		status, err := c.statusReader.GetManifestStatus(context.Background(), object)
+		if c.taskContext(task).Err() != nil {
+			return
+		}
+		status, err := c.statusReader.GetManifestStatus(c.taskContext(task), object)
 		if err != nil {
 			now := time.Now().UTC()
 			if isTransientKubernetesReadError(err) && now.Before(deadline) {
@@ -2313,7 +2410,9 @@ func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, 
 					if c.logger != nil {
 						c.logger.Warn("temporary Kubernetes API error while reading Velero status; retrying", "kind", object.Kind, "name", object.Name, "error", err)
 					}
-					time.Sleep(interval)
+					if !c.waitTaskDelay(task, interval) {
+						return
+					}
 					continue
 				}
 			}
@@ -2358,7 +2457,7 @@ func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, 
 			"raw":      status.Raw,
 		}
 		volumeReady := !usesVolumeProgress(object)
-		if volumePayload, volumeProgress, volumeMessage, ready := c.buildVolumeProgressPayload(context.Background(), object, &samples); volumePayload != nil {
+		if volumePayload, volumeProgress, volumeMessage, ready := c.buildVolumeProgressPayload(c.taskContext(task), object, &samples); volumePayload != nil {
 			payload["volumeProgress"] = volumePayload
 			if failedCount := int64FromAny(volumePayload["failedCount"]); object.Kind == "Restore" && failedCount > 0 {
 				failureCode, failureMessage := restoreVolumeFailureDetails(volumePayload)
@@ -2379,11 +2478,11 @@ func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, 
 		}
 		if terminal {
 			if success {
-				c.attachBackupSizeStats(context.Background(), object, payload)
+				c.attachBackupSizeStats(c.taskContext(task), object, payload)
 				onSuccess(payload, message)
 				return
 			}
-			message, payload = c.enrichVeleroFailure(context.Background(), object, payload, status, message)
+			message, payload = c.enrichVeleroFailure(c.taskContext(task), object, payload, status, message)
 			if object.Kind == "Restore" && isTargetClusterAPIUnavailable(status, message) {
 				code = "TARGET_CLUSTER_API_UNAVAILABLE"
 				message = "Target cluster Kubernetes API was unavailable during restoration. Verify target cluster control-plane health and review the last reported volume progress before retrying."
@@ -2417,7 +2516,9 @@ func (c *Client) pollVeleroStatusWithSuccess(task protocol.TaskDispatchPayload, 
 		if err := c.sendTaskProgress(task, payload, progress, message); err != nil {
 			c.logger.Warn("failed to send task progress; continuing observation", "task_id", task.TaskID, "error", err)
 		}
-		time.Sleep(interval)
+		if !c.waitTaskDelay(task, interval) {
+			return
+		}
 	}
 }
 
@@ -2445,6 +2546,9 @@ func isTargetClusterAPIUnavailable(status kube.ManifestStatus, message string) b
 // failed task from leaving a DataDownload writing into a namespace that a
 // subsequent Drill may reuse.
 func (c *Client) failRestoreTask(task protocol.TaskDispatchPayload, object kube.AppliedObject, code, message string, details map[string]any) {
+	if c.ledger.abortRequested(task.TaskID) {
+		return
+	}
 	if details == nil {
 		details = map[string]any{}
 	} else {
@@ -2577,7 +2681,7 @@ func (c *Client) restoreDataPathFailure(task protocol.TaskDispatchPayload, objec
 	if !ok || reader == nil {
 		return kube.RestoreDataPathFailure{}, false
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(c.taskContext(task), 10*time.Second)
 	defer cancel()
 	failure, found, err := reader.FindRestoreDataPathFailure(ctx, object.Namespace, object.Name, since)
 	if err != nil {
@@ -2607,7 +2711,10 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, o
 		c.logger.Warn("failed to send restore readiness start event; continuing readiness checks", "task_id", task.TaskID, "error", err)
 	}
 	for {
-		readContext, cancelRead := context.WithTimeout(context.Background(), 20*time.Second)
+		if c.taskContext(task).Err() != nil {
+			return
+		}
+		readContext, cancelRead := context.WithTimeout(c.taskContext(task), 20*time.Second)
 		readiness, err := c.readiness.GetNamespaceReadiness(readContext, namespace, kube.ReadinessExpectations{
 			Known:                    task.Restore.ReadinessExpectationsKnown,
 			RuntimeWorkloadsExpected: task.Restore.RuntimeWorkloadsExpected,
@@ -3939,6 +4046,9 @@ func isTerminalRestorePhase(phase string) bool {
 }
 
 func (c *Client) sendTaskAccepted(task protocol.TaskDispatchPayload) error {
+	if c.ledger.abortRequested(task.TaskID) {
+		return context.Canceled
+	}
 	if err := c.ledger.remember(task.TaskID, task.CommandID, backupTaskPlanID(task)); err != nil {
 		return err
 	}
@@ -3953,6 +4063,9 @@ func (c *Client) sendTaskAccepted(task protocol.TaskDispatchPayload) error {
 }
 
 func (c *Client) sendTaskProgress(task protocol.TaskDispatchPayload, veleroPayload map[string]any, progress int, text string) error {
+	if c.ledger.abortRequested(task.TaskID) {
+		return context.Canceled
+	}
 	if isRecoveryTask(task.Type) {
 		progress = recoveryTransferPercent(veleroPayload)
 	}
@@ -4055,6 +4168,9 @@ func taskProgressMetrics(veleroPayload map[string]any) taskProgressMetricSet {
 }
 
 func (c *Client) sendTaskCompleted(task protocol.TaskDispatchPayload, veleroPayload map[string]any, text string) error {
+	if c.ledger.abortRequested(task.TaskID) {
+		return context.Canceled
+	}
 	veleroPayload = withRecoveryStages(task, veleroPayload, 100, "succeeded", "", text)
 	message := protocol.NewMessage(protocol.MessageKindEvent, protocol.MessageAgentTaskCompleted, c.cfg.ClusterID, c.cfg.AgentID, protocol.TaskCompletedPayload{
 		AckRequired:   true,
@@ -4128,6 +4244,9 @@ func (c *Client) sendTaskFailed(task protocol.TaskDispatchPayload, code string, 
 }
 
 func (c *Client) sendTaskFailedWithDetails(task protocol.TaskDispatchPayload, code string, text string, details map[string]any) error {
+	if c.ledger.abortRequested(task.TaskID) {
+		return context.Canceled
+	}
 	if isRecoveryTask(task.Type) {
 		if details == nil {
 			details = map[string]any{}

@@ -38,7 +38,7 @@ func TestTaskContractsCoverAllMountedTaskRoutes(t *testing.T) {
 			}
 		}
 	}
-	if count != 12 {
+	if count != 13 {
 		t.Fatalf("task route coverage %d", count)
 	}
 }
@@ -127,7 +127,7 @@ func TestTaskForeignTenantActionsAreInvisibleAndDoNotMutate(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := &Router{store: repo, logger: slog.Default(), hub: newSessionHub()}
-	for _, handler := range []http.HandlerFunc{r.getTask, r.listTaskEvents, r.cancelTask, r.retryRecoveryTask, r.cleanupDrillTask} {
+	for _, handler := range []http.HandlerFunc{r.getTask, r.listTaskEvents, r.cancelTask, r.abortTask, r.retryRecoveryTask, r.cleanupDrillTask} {
 		req := tenantRequest(httptest.NewRequest("POST", "/api/v1/tasks/"+task.ID, nil), actor)
 		req.SetPathValue("id", task.ID)
 		w := httptest.NewRecorder()

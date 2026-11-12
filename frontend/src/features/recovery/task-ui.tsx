@@ -212,7 +212,7 @@ export function taskCurrentActivity(task: ApiTask, events: ApiTaskEvent[] | unde
       && ['progress', 'backup_progress', 'restore_progress'].includes(reason),
   );
 
-  if (status === 'canceling') return { label: recovery ? 'Canceling recovery' : 'Canceling sync', transferring: false };
+  if (status === 'canceling') return { label: task.payload?.abortRequested ? 'Aborting' : recovery ? 'Canceling recovery' : 'Canceling sync', transferring: false };
   if (status === 'finalizing' || reasons.has('finalizing')) return { label: recovery ? 'Finalizing recovery' : 'Creating restore point', transferring: false };
   // Resolve the furthest confirmed phase, rather than trusting whichever
   // event happened to arrive last. This keeps the label monotonic while live
@@ -388,6 +388,20 @@ export const ERROR_MESSAGE_CATALOG: ErrorMessageDefinition[] = [
     title: 'Cancel sync failed',
     description: 'The running sync task could not be canceled.',
     detail: 'The platform could not complete the Velero backup delete request. Check the source cluster agent, Velero DeleteBackupRequest, and Backup CR status.',
+  },
+  {
+    code: 'TASK_ABORTED_BY_USER',
+    aliases: [],
+    title: 'Aborted by user',
+    description: 'The current task was aborted at the user’s request.',
+    detail: 'Task execution was stopped. Completed changes were not rolled back. The DR configuration was not removed by this action.',
+  },
+  {
+    code: 'TASK_ABORT_FAILED',
+    aliases: ['TASK_ABORT_STOP_FAILED', 'TASK_ABORT_STOP_TIMEOUT', 'TASK_ABORT_TIMEOUT'],
+    title: 'Force abort failed',
+    description: 'The agent could not confirm that all task operations stopped.',
+    detail: 'Check the task’s cluster connectivity and background operation status, then retry Force Abort. Do not assume that the task has stopped.',
   },
   {
     code: 'TARGET_CLUSTER_API_UNAVAILABLE',
@@ -790,6 +804,9 @@ export type TaskStatusDisplay = {
 
 /** Stable two-line status model: stage title on line one, event/data on line two. */
 export function taskStatusDisplay(task: ApiTask, events: ApiTaskEvent[]): TaskStatusDisplay {
+  if (task.status === 'canceling' && task.payload?.abortRequested) {
+    return { stage: 'Aborting', detail: task.errorMessage || 'Waiting for the agent to stop task execution.', dataTransfer: false };
+  }
   if (task.type === 'backup' && task.status === 'finalizing' && ['data_ready', 'deleting_old_point'].includes(String(task.payload?.quotaStage || ''))) {
     return { stage: 'Creating Restore Point', detail: task.errorMessage || 'Backup data is ready. Replacing an old restore point to release quota.', dataTransfer: false };
   }
@@ -936,6 +953,7 @@ export function taskDetailLabel(taskType: string): string {
   if (normalized === 'retention-cleanup') return 'Cleanup';
   if (normalized === 'plan-capacity') return 'Capacity collection';
   if (normalized === 'protection-cleanup') return 'DR Cleanup';
+  if (normalized === 'task-abort') return 'Force Abort';
   if (normalized === 'storage-sync') return 'Storage Setup';
   if (normalized === 'backup-cancel') return 'Cancel Sync';
   if (normalized.includes('backup') || normalized.includes('sync')) return 'Sync';
@@ -1238,8 +1256,9 @@ export function drStatusForPlan(status: string | undefined): { label: string; to
     case 'disabled':
       return { label: 'Disabled', tone: 'muted', title: 'Protection plan is disabled' };
     case 'pending_activation':
-    case '':
       return { label: 'Configuring...', tone: 'progress', title: 'DR configuration has been saved and is being applied.' };
+    case '':
+      return { label: 'Not configured', tone: 'muted', title: 'No DR configuration is available.' };
     default:
       return { label: 'Configuring...', tone: 'progress', title: status ? `DR configuration is being applied (${status}).` : 'DR configuration is being applied.' };
   }

@@ -256,7 +256,7 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 				r.logger.Warn("ignored task accepted with invalid task identity", "cluster_id", clusterID, "task_id", accepted.Payload.TaskID, "command_id", accepted.Payload.CommandID)
 				continue
 			}
-			if !existing.CompletedAt.IsZero() || existing.Payload["backupResult"] != nil {
+			if !existing.CompletedAt.IsZero() || existing.Payload["backupResult"] != nil || boolPayload(existing.Payload, "abortRequested") {
 				continue
 			}
 			_, _, err := r.store.UpdateTaskStatus(store.TaskStatusInput{
@@ -281,7 +281,7 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 				r.logger.Warn("ignored progress for unknown task", "cluster_id", clusterID, "task_id", progress.Payload.TaskID, "error", err)
 				continue
 			}
-			if !existing.CompletedAt.IsZero() || !isActiveTaskStatus(existing.Status) {
+			if !existing.CompletedAt.IsZero() || !isActiveTaskStatus(existing.Status) || boolPayload(existing.Payload, "abortRequested") {
 				r.logger.Info("ignored late progress for terminal task", "task_id", existing.ID, "status", existing.Status)
 				continue
 			}
@@ -381,8 +381,20 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 				}
 				return
 			}
-			if (existingTask.Type == "cache-settings" || existingTask.Type == "cache-cleanup") && isTerminalTaskStatus(existingTask.Status) {
+			if boolPayload(existingTask.Payload, "abortRequested") || ((existingTask.Type == "cache-settings" || existingTask.Type == "cache-cleanup") && isTerminalTaskStatus(existingTask.Status)) {
 				if completed.Payload.AckRequired {
+					_ = r.writeEventAck(conn, clusterID, completed.AgentID, completed.MessageID, completed.Type, existingTask.ID, completed.Payload.CommandID)
+				}
+				continue
+			}
+			if existingTask.Type == "task-abort" {
+				if completed.Payload.CommandID != existingTask.CommandID {
+					_ = r.writeEventError(conn, clusterID, completed.AgentID, completed.MessageID, completed.Type, existingTask.ID, completed.Payload.CommandID, "TASK_IDENTITY_MISMATCH", "Abort result does not match its command.", false)
+					continue
+				}
+				if err := r.finishTaskAbort(clusterID, existingTask, completed.Payload); err != nil {
+					_ = r.writeEventError(conn, clusterID, completed.AgentID, completed.MessageID, completed.Type, existingTask.ID, completed.Payload.CommandID, "TASK_ABORT_SAVE_FAILED", err.Error(), true)
+				} else if completed.Payload.AckRequired {
 					_ = r.writeEventAck(conn, clusterID, completed.AgentID, completed.MessageID, completed.Type, existingTask.ID, completed.Payload.CommandID)
 				}
 				continue
@@ -604,6 +616,12 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 				}
 				continue
 			}
+			if boolPayload(existingTask.Payload, "abortRequested") {
+				if failed.Payload.AckRequired {
+					_ = r.writeEventAck(conn, clusterID, failed.AgentID, failed.MessageID, failed.Type, existingTask.ID, failed.Payload.CommandID)
+				}
+				continue
+			}
 			if existingTask.Type == "backup" && existingTask.Payload["backupResult"] != nil {
 				if failed.Payload.AckRequired {
 					_ = r.writeEventError(conn, clusterID, failed.AgentID, failed.MessageID, failed.Type, failed.Payload.TaskID, failed.Payload.CommandID, "BACKUP_RESULT_CONFLICT", "An accepted backup result cannot be replaced by a failure.", false)
@@ -680,6 +698,9 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 			}
 			if task.Type == "backup-cancel" {
 				r.markBackupCancelFailed(task, failed.Payload.Message)
+			}
+			if task.Type == "task-abort" {
+				r.markTaskAbortFailed(task, failed.Payload.Message)
 			}
 			if task.Type == "storage-sync" && task.ProtectionPlanID != "" {
 				r.markClusterStorageBindingFailed(task, failed.Payload.ErrorCode, failed.Payload.Message)

@@ -56,7 +56,7 @@ func (r *Router) handleVeleroBackupEvent(clusterID string, event protocol.Velero
 		r.logger.Error("failed to upsert velero backup task", "backup", event.BackupName, "error", err)
 		return store.Task{}, err
 	}
-	if !task.CompletedAt.IsZero() {
+	if !task.CompletedAt.IsZero() || boolPayload(task.Payload, "abortRequested") {
 		// A late Velero event must not resurrect a canceled/failed operation or
 		// create a restore point after its task reached any terminal outcome.
 		return task, nil
@@ -660,7 +660,7 @@ func (r *Router) markBackupCancelFailed(cancelTask store.Task, message string) {
 
 func isForceStoppedBackupTask(task store.Task) bool {
 	status := strings.ToLower(task.Status)
-	return status == "canceling" || status == "canceled" || strings.EqualFold(task.ErrorCode, "SYNC_FORCE_STOPPED")
+	return status == "canceling" || status == "canceled" || boolPayload(task.Payload, "abortRequested") || strings.EqualFold(task.ErrorCode, "SYNC_FORCE_STOPPED")
 }
 
 func (r *Router) createRestorePointFromBackup(task store.Task, veleroPayload map[string]any) (store.RestorePoint, error) {
@@ -1027,7 +1027,7 @@ func (r *Router) createRestorePointDeleteTask(clusterID string, points []store.R
 	return task, "", nil
 }
 
-func (r *Router) createProtectionCleanupTask(plan store.ProtectionPlan) (store.Task, string, error) {
+func (r *Router) createProtectionCleanupTask(plan store.ProtectionPlan, force bool) (store.Task, string, error) {
 	if plan.ID == "" || plan.SourceClusterID == "" {
 		return store.Task{}, "", errors.New("protection cleanup target required")
 	}
@@ -1088,6 +1088,7 @@ func (r *Router) createProtectionCleanupTask(plan store.ProtectionPlan) (store.T
 		"sourceClusterId":        plan.SourceClusterID,
 		"objectPrefix":           storageDomainPrefix(plan.TenantID, plan.SourceClusterID),
 		"cleanupObjectStorage":   true,
+		"force":                  force,
 		"restorePoints":          restorePoints,
 		"restoreNames":           restoreNames,
 	}

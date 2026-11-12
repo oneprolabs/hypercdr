@@ -169,7 +169,7 @@ func TestEveryMountedCommunityOperationHasConcretePayloadContract(t *testing.T) 
 			t.Fatalf("error contract absent: %s", route.Pattern)
 		}
 	}
-	if count != 125 {
+	if count != 126 {
 		t.Fatalf("route count changed (%d); review new route payload/security coverage", count)
 	}
 }

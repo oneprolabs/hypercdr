@@ -19,6 +19,15 @@ test('valid denominator changes are not hidden behind a monotonic percentage', (
   assert.equal(transferPercent({ knownTotal: true, allTotalsKnown: true, bytesDone: 80, totalBytes: 200 }), 40);
 });
 
+test('persisted cleanup failure wins over a newer local running timestamp', () => {
+  const running = { id: 'cleanup', type: 'protection-cleanup', status: 'running', payload: { lastStatusAt: '2026-11-12T05:00:02Z' } };
+  for (const status of ['failed', 'canceled', 'timeout', 'FAILED']) {
+    const terminal = { ...running, status, completedAt: '2026-11-12T05:00:01Z', payload: { lastStatusAt: '2026-11-12T05:00:01Z' } };
+    assert.equal(preferTaskSnapshot(running, terminal), terminal);
+    assert.equal(preferTaskSnapshot(terminal, running), terminal);
+  }
+});
+
 for (const type of ['backup', 'drill']) {
   test(`${type} rejects delayed snapshots and preserves terminal state`, () => {
     const older = { id: 'task', type, status: 'running', payload: { lastStatusAt: '2026-11-05T01:00:00Z' } };

@@ -46,6 +46,7 @@ func (r *Router) runSchedulerTickLocked(now time.Time) {
 	r.reconcileComponentUpgradeTimeouts(now)
 	r.reconcileAbandonedRecoveryTasks(now)
 	r.reconcileAbandonedMaintenanceTasks(now)
+	r.reconcileTaskAbortTimeouts(now)
 	if frozen, err := r.store.HasCommunityMigrationFreeze(); err != nil {
 		r.logger.Error("failed to check Community migration freeze", "error", err)
 		return
@@ -95,6 +96,12 @@ func (r *Router) reconcileAbandonedMaintenanceTasks(now time.Time) {
 			continue
 		}
 		_ = r.addTaskEventIfChanged(store.TaskEventInput{TaskID: task.ID, Level: "error", Reason: "maintenance_status_timeout", Message: message})
+		if task.Type == "protection-cleanup" {
+			r.markProtectionCleanupFailed(task, message)
+		}
+		if task.Type == "retention-cleanup" {
+			r.markRetentionCleanupFailed(task, message)
+		}
 	}
 }
 
@@ -155,6 +162,10 @@ func recoveryTaskTimedOut(task store.Task, now time.Time) bool {
 }
 
 func (r *Router) reconcileProtectionCleanupPlans(now time.Time) {
+	tasks, err := r.store.ListTasks("")
+	if err != nil {
+		return
+	}
 	plans, err := r.store.ListProtectionPlans("")
 	if err != nil {
 		r.logger.Warn("failed to list protection plans for cleanup reconcile", "error", err)
@@ -162,6 +173,25 @@ func (r *Router) reconcileProtectionCleanupPlans(now time.Time) {
 	}
 	for _, plan := range plans {
 		if plan.Status != "cleanup_running" {
+			continue
+		}
+		latest := map[string]store.Task{}
+		for _, task := range tasks {
+			if task.ProtectionPlanID != plan.ID || task.Type != "protection-cleanup" {
+				continue
+			}
+			mode := firstNonEmptyString(stringPayload(task.Payload, "cleanupMode"), "source")
+			if previous, exists := latest[mode]; !exists || task.CreatedAt.After(previous.CreatedAt) {
+				latest[mode] = task
+			}
+		}
+		failed, active := false, false
+		for _, task := range latest {
+			failed = failed || task.Status == "failed" || task.Status == "canceled" || task.Status == "cancelled"
+			active = active || isActiveTaskStatus(task.Status)
+		}
+		if failed {
+			_, _, _ = r.store.UpdateProtectionPlanStatus(plan.ID, "cleanup_failed")
 			continue
 		}
 		complete, err := r.protectionCleanupTasksComplete(plan, "")
@@ -178,7 +208,7 @@ func (r *Router) reconcileProtectionCleanupPlans(now time.Time) {
 		}
 		// A cleanup that has made no terminal progress for ten minutes must not
 		// remain an unexplained spinner forever.
-		if !plan.UpdatedAt.IsZero() && now.After(plan.UpdatedAt.Add(10*time.Minute)) {
+		if !active && !plan.UpdatedAt.IsZero() && now.After(plan.UpdatedAt.Add(10*time.Minute)) {
 			_, _, _ = r.store.UpdateProtectionPlanStatus(plan.ID, "cleanup_failed")
 			r.logger.Warn("protection cleanup timed out during reconcile", "plan_id", plan.ID)
 		}

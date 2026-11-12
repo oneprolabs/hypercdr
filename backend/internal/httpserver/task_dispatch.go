@@ -280,6 +280,20 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 			ExcludedResources:       stringSlicePayload(task.Payload, "excludedResources"),
 			Hooks:                   protocol.HookSet{},
 		}
+	case "task-abort":
+		if !r.hub.supportsTaskAbort(task.ClusterID) {
+			return protocol.Message[protocol.TaskDispatchPayload]{}, errors.New("upgrade the Comm-agent before force abort")
+		}
+		target, found, err := r.findTaskByID(task.ClusterID, stringPayload(task.Payload, "targetTaskId"))
+		if err != nil || !found || !supportsTaskAbort(target.Type) {
+			return protocol.Message[protocol.TaskDispatchPayload]{}, errors.New("abort target task is unavailable")
+		}
+		targetDispatch, err := r.buildStoredTaskDispatch(target)
+		if err != nil {
+			return protocol.Message[protocol.TaskDispatchPayload]{}, err
+		}
+		payload.TaskAbort = &targetDispatch.Payload
+		payload.Deadline = time.Now().UTC().Add(2 * time.Minute)
 	case "backup-cancel":
 		targetTaskID := stringPayload(task.Payload, "targetTaskId")
 		if targetTaskID == "" {
@@ -301,6 +315,9 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 		payload.RetentionCleanup = command
 	case "protection-cleanup":
 		command := protectionCleanupCommandFromPayload(task.Payload)
+		if command.Force && !r.hub.supportsForceCleanup(task.ClusterID) {
+			return protocol.Message[protocol.TaskDispatchPayload]{}, errors.New("upgrade the source Comm-agent before force cleanup")
+		}
 		if command.PlanID == "" {
 			return protocol.Message[protocol.TaskDispatchPayload]{}, errors.New("protection cleanup plan id is required")
 		}

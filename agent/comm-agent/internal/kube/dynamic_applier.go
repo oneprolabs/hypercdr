@@ -102,6 +102,20 @@ func (a *DynamicManifestApplier) ApplyManifest(ctx context.Context, manifest Man
 	if err != nil {
 		return AppliedObject{}, err
 	}
+	if object.Kind == "DeleteBackupRequest" {
+		phase, _, _ := unstructured.NestedString(existing.Object, "status", "phase")
+		requestErrors, _, _ := unstructured.NestedStringSlice(existing.Object, "status", "errors")
+		if phase == "Processed" && len(requestErrors) > 0 {
+			uid := existing.GetUID()
+			if err := resource.Delete(ctx, object.Name, v1.DeleteOptions{Preconditions: &v1.Preconditions{UID: &uid}}); err != nil && !apierrors.IsNotFound(err) {
+				return AppliedObject{}, err
+			}
+			if _, err := resource.Create(ctx, unstructuredObject, v1.CreateOptions{}); err != nil {
+				return AppliedObject{}, err
+			}
+			return object, nil
+		}
+	}
 	unstructuredObject.SetResourceVersion(existing.GetResourceVersion())
 	if _, err := resource.Update(ctx, unstructuredObject, v1.UpdateOptions{}); err != nil {
 		return AppliedObject{}, err
@@ -338,18 +352,35 @@ func (a *DynamicManifestApplier) WaitForVeleroBackupDeleted(ctx context.Context,
 	if timeoutDuration <= 0 {
 		timeoutDuration = 10 * time.Minute
 	}
+	ctx, cancel := context.WithTimeout(ctx, timeoutDuration)
+	defer cancel()
 	resource := a.client.Resource(schema.GroupVersionResource{Group: "velero.io", Version: "v1", Resource: "backups"}).Namespace(namespace)
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	timeout := time.NewTimer(timeoutDuration)
 	defer timeout.Stop()
 	for {
-		_, err := resource.Get(ctx, name, v1.GetOptions{})
+		backup, err := resource.Get(ctx, name, v1.GetOptions{})
 		if apierrors.IsNotFound(err) {
 			return nil
 		}
 		if err != nil {
 			return err
+		}
+		requests, err := a.client.Resource(schema.GroupVersionResource{Group: "velero.io", Version: "v1", Resource: "deletebackuprequests"}).Namespace(namespace).List(ctx, v1.ListOptions{})
+		if err != nil {
+			return err
+		}
+		for _, request := range requests.Items {
+			backupName, _, _ := unstructured.NestedString(request.Object, "spec", "backupName")
+			backupUID, _, _ := unstructured.NestedString(request.Object, "spec", "backupUID")
+			if backupName != name || (backupUID != "" && backupUID != string(backup.GetUID())) {
+				continue
+			}
+			errors, _, _ := unstructured.NestedStringSlice(request.Object, "status", "errors")
+			if len(errors) > 0 {
+				return fmt.Errorf("Velero cannot delete backup %q: %s", name, strings.Join(errors, "; "))
+			}
 		}
 		select {
 		case <-ctx.Done():

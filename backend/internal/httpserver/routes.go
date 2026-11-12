@@ -92,6 +92,7 @@ func (r *Router) routes() {
 	r.handleRoute("GET /api/v1/tasks/{id}", r.getTask)
 	r.handleRoute("GET /api/v1/tasks/{id}/events", r.listTaskEvents)
 	r.handleRoute("POST /api/v1/tasks/{id}/cancel", r.cancelTask)
+	r.handleRoute("POST /api/v1/tasks/{id}/abort", r.abortTask)
 	r.handleRoute("POST /api/v1/tasks/{id}/retry", r.retryRecoveryTask)
 	r.handleRoute("POST /api/v1/tasks/{id}/cleanup-drill", r.cleanupDrillTask)
 	r.handleRoute("POST /api/v1/tasks/backup", r.createBackupTask)

@@ -2,8 +2,9 @@ import type { ApiTask } from './types';
 
 export function preferTaskSnapshot(current: ApiTask | undefined, incoming: ApiTask): ApiTask {
   if (!current || current.id !== incoming.id) return incoming;
-  const terminal = (task: ApiTask) => ['succeeded', 'failed', 'canceled', 'cancelled'].includes(task.status);
+  const terminal = (task: ApiTask) => ['succeeded', 'completed', 'success', 'failed', 'canceled', 'cancelled', 'error', 'timeout', 'timed_out'].includes(task.status.toLowerCase());
   if (terminal(current) && !terminal(incoming)) return current;
+  if (terminal(incoming) && !terminal(current)) return incoming;
   const timestamp = (task: ApiTask) => Date.parse(String(task.payload?.lastStatusAt || task.completedAt || task.startedAt || task.createdAt)) || 0;
   return timestamp(current) > timestamp(incoming) ? current : incoming;
 }

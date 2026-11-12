@@ -27,6 +27,7 @@ type taskLedger struct {
 }
 
 type taskLedgerRecord struct {
+	AbortRequested  bool                 `json:"abortRequested,omitempty"`
 	CacheTransition cacheTransitionState `json:"cacheTransition,omitempty"`
 	TaskID          string               `json:"taskId"`
 	CommandID       string               `json:"commandId,omitempty"`
@@ -278,7 +279,7 @@ func (l *taskLedger) cleanupPendingRecords() []taskLedgerRecord {
 	l.ensureMaps()
 	records := make([]taskLedgerRecord, 0)
 	for _, record := range l.Records {
-		if record.CleanupPending && len(record.Task) > 0 && record.Object.Kind == "Restore" && record.Object.Name != "" {
+		if !record.AbortRequested && record.CleanupPending && len(record.Task) > 0 && record.Object.Kind == "Restore" && record.Object.Name != "" {
 			records = append(records, record)
 		}
 	}
@@ -294,7 +295,7 @@ func (l *taskLedger) recoverableRecords() []taskLedgerRecord {
 	l.ensureMaps()
 	records := make([]taskLedgerRecord, 0, len(l.Records))
 	for _, record := range l.Records {
-		if record.TerminalAcked || record.CleanupPending || len(record.Task) == 0 || record.Object.Kind == "" || record.Object.Name == "" {
+		if record.AbortRequested || record.TerminalAcked || record.CleanupPending || len(record.Task) == 0 || record.Object.Kind == "" || record.Object.Name == "" {
 			continue
 		}
 		records = append(records, record)

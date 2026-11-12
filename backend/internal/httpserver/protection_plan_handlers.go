@@ -460,6 +460,7 @@ func protectionPlanActivationResponse(item store.ProtectionPlan, activationTask 
 }
 
 func (r *Router) deleteProtectionPlan(w http.ResponseWriter, req *http.Request) {
+	force := req.URL.Query().Get("force") == "true"
 	id := req.PathValue("id")
 	if id == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "missing_id"})
@@ -473,6 +474,10 @@ func (r *Router) deleteProtectionPlan(w http.ResponseWriter, req *http.Request) 
 	}
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "protection_plan_not_found"})
+		return
+	}
+	if force && !r.hub.supportsForceCleanup(plan.SourceClusterID) {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "force_cleanup_agent_upgrade_required", "message": "Connect and upgrade the source cluster Comm-agent before using force cleanup."})
 		return
 	}
 	err = r.store.BeginProtectionPlanCleanup(id)
@@ -501,7 +506,7 @@ func (r *Router) deleteProtectionPlan(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 	plan.Status = "cleanup_running"
-	cleanupTask, cleanupWarning, err := r.createProtectionCleanupTask(plan)
+	cleanupTask, cleanupWarning, err := r.createProtectionCleanupTask(plan, force)
 	if err != nil {
 		r.logger.Error("failed to create protection cleanup task", "error", err, "id", id)
 		_, _, _ = r.store.UpdateProtectionPlanStatus(id, "cleanup_failed")

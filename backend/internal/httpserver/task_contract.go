@@ -30,6 +30,7 @@ func taskPayloadContract(pattern string) (payloadContract, int, bool) {
 		"GET /api/v1/protection-plans/{id}/latest-sync":     {Response: reflect.TypeFor[latestTaskResponse]()},
 		"GET /api/v1/protection-plans/{id}/latest-recovery": {Response: reflect.TypeFor[latestTaskResponse]()},
 		"POST /api/v1/tasks/{id}/cancel":                    {Response: reflect.TypeFor[taskActionResponse]()},
+		"POST /api/v1/tasks/{id}/abort":                     {Response: reflect.TypeFor[taskActionResponse]()},
 		"POST /api/v1/tasks/{id}/cleanup-drill":             {Response: reflect.TypeFor[taskActionResponse]()},
 		"POST /api/v1/tasks/{id}/retry":                     {Response: reflect.TypeFor[store.Task]()},
 		"POST /api/v1/tasks/backup":                         {Request: reflect.TypeFor[backupTaskRequest](), Response: reflect.TypeFor[backupTaskResponse](), Required: []string{"clusterId"}},
@@ -40,7 +41,7 @@ func taskPayloadContract(pattern string) (payloadContract, int, bool) {
 	c, ok := contracts[pattern]
 	status := 200
 	switch pattern {
-	case "POST /api/v1/tasks/{id}/cancel", "POST /api/v1/tasks/{id}/cleanup-drill":
+	case "POST /api/v1/tasks/{id}/cancel", "POST /api/v1/tasks/{id}/abort", "POST /api/v1/tasks/{id}/cleanup-drill":
 		status = 202
 	case "POST /api/v1/tasks/{id}/retry", "POST /api/v1/tasks/backup", "POST /api/v1/tasks/restore", "POST /api/v1/tasks/drill", "POST /api/v1/tasks/takeover":
 		status = 201
@@ -55,7 +56,7 @@ func applyTaskPayloadContract(pattern string, operation map[string]any) bool {
 	}
 	applyPayloadShape(operation, c, status)
 	responses := operation["responses"].(map[string]any)
-	if pattern == "POST /api/v1/tasks/{id}/cancel" || pattern == "POST /api/v1/tasks/{id}/cleanup-drill" {
+	if pattern == "POST /api/v1/tasks/{id}/cancel" || pattern == "POST /api/v1/tasks/{id}/abort" || pattern == "POST /api/v1/tasks/{id}/cleanup-drill" {
 		responses["200"] = map[string]any{"description": "Existing operation reused", "content": map[string]any{"application/json": map[string]any{"schema": wireSchema(c.Response)}}}
 	}
 	if pattern == "POST /api/v1/tasks/backup" {

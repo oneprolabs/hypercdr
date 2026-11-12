@@ -396,6 +396,7 @@ type TaskDispatchPayload struct {
 	Deadline             time.Time                    `json:"deadline"`
 	Backup               *BackupCommand               `json:"backup,omitempty"`
 	BackupCancel         *BackupCancelCommand         `json:"backupCancel,omitempty"`
+	TaskAbort            *TaskDispatchPayload         `json:"taskAbort,omitempty"`
 	Restore              *RestoreCommand              `json:"restore,omitempty"`
 	StorageSync          *StorageSyncCommand          `json:"storageSync,omitempty"`
 	ScheduleSync         *ScheduleSyncCommand         `json:"scheduleSync,omitempty"`
@@ -598,6 +599,7 @@ type ProtectionCleanupCommand struct {
 	SourceNamespaces     []string                `json:"sourceNamespaces,omitempty"`
 	StorageRepo          string                  `json:"storageRepo,omitempty"`
 	CleanupObjectStorage bool                    `json:"cleanupObjectStorage,omitempty"`
+	Force                bool                    `json:"force,omitempty"`
 	RestorePoints        []RetentionRestorePoint `json:"restorePoints,omitempty"`
 	RestoreNames         []string                `json:"restoreNames,omitempty"`
 	DrillNamespaces      []string                `json:"drillNamespaces,omitempty"`

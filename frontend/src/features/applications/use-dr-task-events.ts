@@ -63,7 +63,14 @@ export function useDrTaskEvents({ displayedDrTaskKey, hasActiveDisplayedTask, re
         return changed ? next : prev;
       });
       let observedNewTerminalEvent = false;
-      for (const [, events] of entries) {
+      for (const [taskId, events, task] of entries) {
+        if (task && ['failed', 'canceled', 'cancelled', 'succeeded'].includes(task.status)) {
+          const terminalKey = `${taskId}:${task.status}`;
+          if (!refreshedTerminalEventIdsRef.current.has(terminalKey)) {
+            refreshedTerminalEventIdsRef.current.add(terminalKey);
+            observedNewTerminalEvent = true;
+          }
+        }
         for (const event of events || []) {
           if (!['completed', 'backup_completed', 'velero-schedule'].includes(event.reason)) continue;
           if (refreshedTerminalEventIdsRef.current.has(event.id)) continue;

@@ -1,7 +1,32 @@
 import { useEffect, useRef, useState } from 'react';
+import { Info } from 'lucide-react';
 import { apiGet, apiPut } from '../../api/client';
 import { ResourceCreateDrawer } from '../../components/resource-create-drawer';
 import { confirmedCacheObservation } from './cache-settings-state';
+
+function CacheHelp({ cache }: { cache: 'index' | 'drill' }) {
+  const label = cache === 'index' ? 'Index cache' : 'Drill data cache';
+  return <details className="hbdr-cache-help" onKeyDown={event => {
+    if (event.key === 'Escape') {
+      event.currentTarget.open = false;
+      event.currentTarget.querySelector('summary')?.focus();
+    }
+  }} onBlur={event => {
+    if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
+  }}>
+    <summary aria-label={`About ${label}`}><Info size={14} /></summary>
+    <div className="hbdr-cache-help-content">
+      {cache === 'index' ? <>
+        <p>Caches Kopia repository indexes to reduce repeated downloads.</p>
+        <p><strong>Suggested size:</strong> Start with 5 GiB per node.</p>
+      </> : <>
+        <p>Caches application data downloaded during Drill for reuse in later Drills.</p>
+        <p><strong>Suggested size:</strong> Set the cache size larger than the total backed-up volume data size of all applications you plan to drill, not their PVC capacity.</p>
+      </>}
+      <p>The configured size applies to each node, not the entire cluster.</p>
+    </div>
+  </details>;
+}
 
 type Settings = { rootPath: string; indexPath: string; drillPath: string; indexEnabled: boolean; indexMaxGiB: number; drillEnabled: boolean; drillMaxGiB: number };
 type CacheTask = { id: string; status: string; errorCode?: string; errorMessage?: string; completedAt?: string; payload?: Record<string, unknown> };
@@ -143,12 +168,12 @@ export function ClusterCacheSettingsDrawer({ clusterId, name, onClose, onSaved }
       <p className="text-slate-500">{name}</p>
       {loading ? <p role="status">Loading cache settings…</p> : settings ? <>
         <section className="hbdr-cache-card" aria-labelledby="index-cache-title">
-          <div className="hbdr-cache-card-header"><div><h3 id="index-cache-title">Index cache</h3><p>Kopia index data</p></div><div className="hbdr-cache-toggle"><span>{settings.indexEnabled ? 'Enabled' : 'Disabled'}</span><button type="button" className="hbdr-settings-switch" role="switch" aria-label="Index cache" aria-checked={settings.indexEnabled} disabled={busy || phase !== 'applied'} onClick={() => requestToggle('index')}><span /></button></div></div>
-          {settings.indexEnabled && <div className="hbdr-cache-card-fields"><label className="hbdr-cache-row"><span>Cache size per node</span><span className="hbdr-cache-size"><input aria-label="Index cache size per node" type="number" min={1} max={1024} step={1} value={Number.isNaN(settings.indexMaxGiB) ? '' : settings.indexMaxGiB} disabled={busy || phase !== 'applied'} onChange={event => change({ ...settings, indexMaxGiB: event.target.valueAsNumber })} /><span>GiB</span></span></label><div className="hbdr-cache-row"><span>Cache path per node</span>{pathEditing === 'index' ? <span className="hbdr-cache-path-editor"><input aria-label="Index cache path per node" defaultValue={settings.indexPath || `${settings.rootPath}/index`} /><button type="button" onClick={event => { const input = event.currentTarget.parentElement?.querySelector('input'); if (input) requestPath('index', input.value); }}>Change</button><button type="button" onClick={() => setPathEditing(null)}>Cancel</button></span> : <span className="hbdr-cache-path-value"><code>{settings.indexPath || `${settings.rootPath}/index`}</code><button type="button" onClick={() => setPathEditing('index')} disabled={busy || phase !== 'applied'}>Change directory</button></span>}</div></div>}
+          <div className="hbdr-cache-card-header"><div><div className="hbdr-cache-title"><h3 id="index-cache-title">Index cache</h3><CacheHelp cache="index" /></div><p>Per node</p></div><div className="hbdr-cache-toggle"><span>{settings.indexEnabled ? 'Enabled' : 'Disabled'}</span><button type="button" className="hbdr-settings-switch" role="switch" aria-label="Index cache" aria-checked={settings.indexEnabled} disabled={busy || phase !== 'applied'} onClick={() => requestToggle('index')}><span /></button></div></div>
+          {settings.indexEnabled && <div className="hbdr-cache-card-fields"><label className="hbdr-cache-row"><span>Cache size</span><span className="hbdr-cache-size"><input aria-label="Index cache size per node" type="number" min={1} max={1024} step={1} value={Number.isNaN(settings.indexMaxGiB) ? '' : settings.indexMaxGiB} disabled={busy || phase !== 'applied'} onChange={event => change({ ...settings, indexMaxGiB: event.target.valueAsNumber })} /><span>GiB</span></span></label><div className="hbdr-cache-row hbdr-cache-path-row"><span>Cache path</span>{pathEditing === 'index' ? <span className="hbdr-cache-path-editor"><input aria-label="Index cache path per node" defaultValue={settings.indexPath || `${settings.rootPath}/index`} /><button type="button" onClick={event => { const input = event.currentTarget.parentElement?.querySelector('input'); if (input) requestPath('index', input.value); }}>Change</button><button type="button" onClick={() => setPathEditing(null)}>Cancel</button></span> : <span className="hbdr-cache-path-value"><code title={settings.indexPath || `${settings.rootPath}/index`}>{settings.indexPath || `${settings.rootPath}/index`}</code><button type="button" aria-label="Change index cache directory" onClick={() => setPathEditing('index')} disabled={busy || phase !== 'applied'}>Change</button></span>}</div></div>}
         </section>
         <section className="hbdr-cache-card" aria-labelledby="drill-cache-title">
-          <div className="hbdr-cache-card-header"><div><h3 id="drill-cache-title">Drill data cache</h3><p>Downloaded application data for Drill</p></div><div className="hbdr-cache-toggle"><span>{settings.drillEnabled ? 'Enabled' : 'Disabled'}</span><button type="button" className="hbdr-settings-switch" role="switch" aria-label="Drill data cache" aria-checked={settings.drillEnabled} disabled={busy || phase !== 'applied'} onClick={() => requestToggle('drill')}><span /></button></div></div>
-          {settings.drillEnabled && <div className="hbdr-cache-card-fields"><label className="hbdr-cache-row"><span>Cache size per node</span><span className="hbdr-cache-size"><input aria-label="Drill data cache size per node" type="number" min={1} max={4096} step={1} value={Number.isNaN(settings.drillMaxGiB) ? '' : settings.drillMaxGiB} disabled={busy || phase !== 'applied'} onChange={event => change({ ...settings, drillMaxGiB: event.target.valueAsNumber })} /><span>GiB</span></span></label><div className="hbdr-cache-row"><span>Cache path per node</span>{pathEditing === 'drill' ? <span className="hbdr-cache-path-editor"><input aria-label="Drill data cache path per node" defaultValue={settings.drillPath || `${settings.rootPath}/drill-data`} /><button type="button" onClick={event => { const input = event.currentTarget.parentElement?.querySelector('input'); if (input) requestPath('drill', input.value); }}>Change</button><button type="button" onClick={() => setPathEditing(null)}>Cancel</button></span> : <span className="hbdr-cache-path-value"><code>{settings.drillPath || `${settings.rootPath}/drill-data`}</code><button type="button" onClick={() => setPathEditing('drill')} disabled={busy || phase !== 'applied'}>Change directory</button></span>}</div></div>}
+          <div className="hbdr-cache-card-header"><div><div className="hbdr-cache-title"><h3 id="drill-cache-title">Drill data cache</h3><CacheHelp cache="drill" /></div><p>Per node</p></div><div className="hbdr-cache-toggle"><span>{settings.drillEnabled ? 'Enabled' : 'Disabled'}</span><button type="button" className="hbdr-settings-switch" role="switch" aria-label="Drill data cache" aria-checked={settings.drillEnabled} disabled={busy || phase !== 'applied'} onClick={() => requestToggle('drill')}><span /></button></div></div>
+          {settings.drillEnabled && <div className="hbdr-cache-card-fields"><label className="hbdr-cache-row"><span>Cache size</span><span className="hbdr-cache-size"><input aria-label="Drill data cache size per node" type="number" min={1} max={4096} step={1} value={Number.isNaN(settings.drillMaxGiB) ? '' : settings.drillMaxGiB} disabled={busy || phase !== 'applied'} onChange={event => change({ ...settings, drillMaxGiB: event.target.valueAsNumber })} /><span>GiB</span></span></label><div className="hbdr-cache-row hbdr-cache-path-row"><span>Cache path</span>{pathEditing === 'drill' ? <span className="hbdr-cache-path-editor"><input aria-label="Drill data cache path per node" defaultValue={settings.drillPath || `${settings.rootPath}/drill-data`} /><button type="button" onClick={event => { const input = event.currentTarget.parentElement?.querySelector('input'); if (input) requestPath('drill', input.value); }}>Change</button><button type="button" onClick={() => setPathEditing(null)}>Cancel</button></span> : <span className="hbdr-cache-path-value"><code title={settings.drillPath || `${settings.rootPath}/drill-data`}>{settings.drillPath || `${settings.rootPath}/drill-data`}</code><button type="button" aria-label="Change drill data cache directory" onClick={() => setPathEditing('drill')} disabled={busy || phase !== 'applied'}>Change</button></span>}</div></div>}
         </section>
         {!valid && <p role="alert" className="text-xs text-rose-600">Enter a whole number from 1 to 1024.</p>}
         {phase !== 'applied' && <p role="status">{phase === 'applying' ? 'Applying cache settings…' : 'Cluster configuration is unavailable.'}</p>}

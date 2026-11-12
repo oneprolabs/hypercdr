@@ -1,6 +1,6 @@
 import { useDrTaskEvents } from './use-dr-task-events';
 import { getRestorePointContents } from '../../api/restore-points';
-import { getTask, listTasks, createBackupTask, createRecoveryTask, cancelTask, cleanupDrillTask } from '../../api/tasks';
+import { getTask, listTasks, createBackupTask, createRecoveryTask, abortTask, cleanupDrillTask } from '../../api/tasks';
 import { listProtectionPlans, createProtectionPlan, updateProtectionPlan, activateProtectionPlan, reconfigureProtectionPlanStorage, deleteProtectionPlan } from '../../api/protection-plans';
 import { listApplications, updateApplicationProtection } from '../../api/applications';
 import { requestClusterInventory, getInventoryRequestStatus } from '../../api/inventory';
@@ -34,7 +34,7 @@ import {
 import { isActiveTaskStatus, isCompletedTaskStatus, isFailedStatus, isSucceededStatus, taskHasWarning } from '../recovery/task-status';
 import { selectPointedPlanTask } from '../recovery/plan-task-selection';
 import { preferTaskSnapshot } from '../recovery/progress-snapshot';
-import { protectionCleanupBlockingTasks } from '../recovery/protection-cleanup-guard';
+import { protectionCleanupBlockingTasks, forceAbortableTasks } from '../recovery/protection-cleanup-guard';
 import {
   TaskErrorDetailBlock, TaskErrorStatus, TaskFinalResult, TaskOriginLabel, TaskProcessTimeline,
   canRetryDrActivation, drStatusForPlan, formatAge, formatBytes, formatBytesPerSecond,
@@ -216,7 +216,10 @@ export default function ApplicationDrPage(props: {
   const drSupportAutoRequestedRef = useRef<Set<string>>(new Set());
   const [appBulkMenuOpen, setAppBulkMenuOpen] = useState(false);
   const [drSupportErrorDetail, setDrSupportErrorDetail] = useState<AppItem | null>(null);
-  const [operationConfirm, setOperationConfirm] = useState<'cancel-sync' | 'cleanup-drill' | 'remove-config' | null>(null);
+  const [operationConfirm, setOperationConfirm] = useState<'force-abort' | 'cleanup-drill' | 'remove-config' | null>(null);
+  const [abortSubmitting, setAbortSubmitting] = useState(false);
+  const [forceCleanup, setForceCleanup] = useState(false);
+  useEffect(() => { setForceCleanup(false); }, [operationConfirm]);
   const namespaceDetail = useNamespaceDetail(protectionPlans);
   const { selectedDetailApp, setSelectedDetailApp, namespaceDetailTab, setNamespaceDetailTab, namespaceDetailTaskId, setNamespaceDetailTaskId, namespaceRestorePointPage, setNamespaceRestorePointPage, restorePointMenuId, setRestorePointMenuId, namespaceTaskPage, setNamespaceTaskPage, namespaceDetailRestorePoints, setNamespaceDetailRestorePoints, namespaceDetailTasks, setNamespaceDetailTasks, namespaceDetailLoading, namespaceDetailLoadError, openNamespaceDetail, selectedDetailPlanId } = namespaceDetail;
   const currentClusterIdRef = useRef(currentClusterId);
@@ -373,16 +376,17 @@ export default function ApplicationDrPage(props: {
   const displayedDrTasks = [
     ...Object.values(syncTasks),
     ...Object.values(recoveryTasks),
+    ...platformTasks.filter(task => ['protection-cleanup', 'retention-cleanup', 'task-abort'].includes(task.type)),
   ].filter(task => task?.id);
   const displayedDrTaskKey = Array.from(new Set(displayedDrTasks.map(task => task.id))).sort().join('|');
   const hasActiveDisplayedTask = displayedDrTasks.some(task => isActiveTaskStatus(task.status));
   const protectionPlanForApp = (app: AppItem) => {
     if (!app.protectionPlanId) return undefined;
 	const plan = protectionPlans.find(plan => plan.id === app.protectionPlanId);
-	if (cleaningPlanIds.includes(app.protectionPlanId)) {
+	if (cleaningPlanIds.includes(app.protectionPlanId) && plan?.status !== 'cleanup_failed') {
 		return { ...(plan || { id: app.protectionPlanId }), status: 'cleaning' } as ApiProtectionPlan;
 	}
-	if (configuringPlanIds.includes(app.protectionPlanId) || unitMembers(app).some(member => configuringAppNames.includes(member.name))) {
+	if (plan && ['pending_activation', 'configuring', 'activating_storage', 'activating_schedule'].includes(plan.status || '') && (configuringPlanIds.includes(app.protectionPlanId) || unitMembers(app).some(member => configuringAppNames.includes(member.name)))) {
 		return { ...(plan || { id: app.protectionPlanId }), status: 'configuring' } as ApiProtectionPlan;
 	}
 	return plan;
@@ -1591,14 +1595,13 @@ export default function ApplicationDrPage(props: {
   const selectedRunActiveSyncTasks = selectedRunRows
     .map(row => taskForUnit(syncTasks, row))
     .filter((task): task is ApiTask => Boolean(task?.id && isActiveTaskStatus(task.status)));
-  const selectedRunCancelableSyncTasks = Array.from(new Map(
-    selectedRunActiveSyncTasks
-      .filter(task => (task.status || '').toLowerCase() !== 'canceling')
-      .map(task => [task.id, task] as const),
-  ).values());
+  const selectedAbortableTasks = forceAbortableTasks(
+    selectedRunRows.map(app => app.protectionPlanId || '').filter(Boolean),
+    [...platformTasks, ...Object.values(syncTasks), ...Object.values(recoveryTasks), ...Object.values(submittingSyncTasks), ...Object.values(refreshedDrTasks)],
+  );
   const selectedRunHasRunningSync = selectedRunActiveSyncTasks.length > 0;
   const canStartSync = selectedRunApps.length > 0 && !syncSubmitting && !selectedRunHasRunningSync && !selectedRunHasCleanupRunning && selectedRunNotReadyRows.length === 0;
-  const canStopSync = selectedRunCancelableSyncTasks.length > 0;
+  const canForceAbort = selectedAbortableTasks.length > 0 && !abortSubmitting;
   const restorePointsForApp = (app: AppItem) => {
     if (!app.protectionPlanId) return [];
     const realPoints = liveRestorePoints
@@ -2162,32 +2165,29 @@ export default function ApplicationDrPage(props: {
     setSelectedRunApps(selectedRunApps);
     toast(syncWarning || 'Sync job started');
   };
-  const stopSync = async () => {
-    if (!canStopSync) {
-      toast(selectedRunApps.length === 0 ? 'Select applications to cancel sync' : 'Selected applications have no running sync job');
+  const forceAbort = async () => {
+    if (!canForceAbort) {
+      toast('Select an application with an active task');
       return;
     }
+    setAbortSubmitting(true);
     try {
-      const responses = await Promise.all(selectedRunCancelableSyncTasks.map(task => cancelTask(task.id)));
-      setSyncTasks(prev => {
-        const next = { ...prev };
-        selectedRunRows.forEach(row => {
-          const current = taskForUnit(next, row);
-          const response = responses.find(item => item.task?.id === current?.id);
-          if (response?.task) {
-            next[row.name] = response.task;
-            unitMembers(row).forEach(member => {
-              next[member.name] = response.task;
-            });
-          }
-        });
+      const responses = await Promise.allSettled(selectedAbortableTasks.map(task => abortTask(task.id)));
+      setRefreshedDrTasks(previous => {
+        const next = { ...previous };
+        for (const response of responses) {
+          if (response.status === 'fulfilled' && response.value.task) next[response.value.task.id] = response.value.task;
+        }
         return next;
       });
       await refreshPlatformData();
-      const warning = responses.map(response => response.warning).find(Boolean);
-      toast(warning ? warning.replace(/force stop/gi, 'cancel sync') : 'Cancel sync requested');
+      const failed = responses.find(response => response.status === 'rejected');
+      const warning = responses.flatMap(response => response.status === 'fulfilled' && response.value.warning ? [response.value.warning] : [])[0];
+      toast(failed?.status === 'rejected' ? 'Some tasks could not be aborted: ' + String(failed.reason) : warning || 'Force abort requested');
     } catch (error) {
-      toast('Failed to cancel sync: ' + (error instanceof Error ? error.message : 'unknown error'));
+      toast('Failed to refresh task status: ' + (error instanceof Error ? error.message : 'unknown error'));
+    } finally {
+      setAbortSubmitting(false);
     }
   };
   const modifyProtection = async () => {
@@ -2245,13 +2245,20 @@ export default function ApplicationDrPage(props: {
       return;
     }
 	cleanupSubmittingRef.current = true;
+	setConfiguringPlanIds(previous => previous.filter(id => !planIds.includes(id)));
+	setConfiguringAppNames(previous => previous.filter(name => !targetApps.some(app => app.name === name)));
 	setCleaningPlanIds(prev => Array.from(new Set([...prev, ...planIds])));
 	// Persist the cleanup state in the local plan model before dispatch. An
 	// inventory refresh must never briefly render an active plan as Ready while
 	// the DELETE request and the persisted cleanup state are converging.
 	setProtectionPlans(prev => prev.map(plan => planIds.includes(plan.id) ? { ...plan, status: 'cleaning' } : plan));
     try {
-      await Promise.all(planIds.map(planId => deleteProtectionPlan(planId)));
+      const responses = await Promise.all(planIds.map(planId => deleteProtectionPlan(planId, forceCleanup)));
+      setProtectionPlans(previous => previous.map(plan => {
+        const response = responses.find(item => item.id === plan.id);
+        return response ? { ...plan, ...response } : plan;
+      }));
+      setCleaningPlanIds(previous => previous.filter(id => !planIds.includes(id)));
       const appsWithoutPlan = targetApps.filter(app => !app.protectionPlanId && app.apiId);
       if (appsWithoutPlan.length > 0) {
         await Promise.all(appsWithoutPlan.map(app =>
@@ -2286,7 +2293,14 @@ export default function ApplicationDrPage(props: {
         try {
           const response = await listProtectionPlans();
           const remainingPlans = listItems(response).filter(plan => planIds.includes(plan.id));
-          if (remainingPlans.length > 0 && remaining > 0) {
+          setProtectionPlans(previous => previous.map(plan => remainingPlans.find(item => item.id === plan.id) || plan));
+          const failedPlans = remainingPlans.filter(plan => plan.status === 'cleanup_failed');
+          if (failedPlans.length > 0) {
+            setCleaningPlanIds(previous => previous.filter(id => !planIds.includes(id)));
+            cleanupSubmittingRef.current = false;
+            await refreshPlatformData();
+            toast('Cleanup failed. Open the task details to review the cause, then retry or select Force cleanup.');
+          } else if (remainingPlans.length > 0 && remaining > 0) {
             pollCleanup(remaining - 1);
           } else if (remainingPlans.length === 0) {
             setProtectionPlans(prev => prev.filter(plan => !planIds.includes(plan.id)));
@@ -2313,15 +2327,14 @@ export default function ApplicationDrPage(props: {
 			await refreshPlatformData();
             toast('Cleanup completed. Application returned to Setup DR.');
 		  } else {
-			// Polling exhausted while the persisted cleanup task still owns the
-			// operation. Release the click guard, but retain the Cleaning display;
-			// the server-side plan status remains the source of truth.
+			setCleaningPlanIds(previous => previous.filter(id => !planIds.includes(id)));
 			cleanupSubmittingRef.current = false;
           }
         } catch {
 		  if (remaining > 0) {
 			pollCleanup(remaining - 1);
 		  } else {
+			setCleaningPlanIds(previous => previous.filter(id => !planIds.includes(id)));
 			cleanupSubmittingRef.current = false;
 		  }
         }
@@ -2829,14 +2842,14 @@ export default function ApplicationDrPage(props: {
                             {selectedRunApps.length !== 1 && <em className="rounded bg-slate-100 px-1 py-0.5 text-[9px] not-italic text-slate-400">Single</em>}
                           </button>
                           <button
-                            disabled={!canStopSync}
+                            disabled={!canForceAbort}
                             onClick={() => {
                               setAppBulkMenuOpen(false);
-                              setOperationConfirm('cancel-sync');
+                              setOperationConfirm('force-abort');
                             }}
                             className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-rose-600 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"
                           >
-                            <AlertCircle size={14} />Cancel Sync
+                            <AlertCircle size={14} />Force Abort
                           </button>
                           <button
                             disabled={!canCleanupDrill}
@@ -2961,15 +2974,15 @@ export default function ApplicationDrPage(props: {
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-[0.16em] text-rose-500">Confirm operation</p>
                   <h3 id="dr-operation-confirm-title" className="mt-1 text-lg font-black text-slate-950">
-                    {operationConfirm === 'cancel-sync' ? 'Cancel Sync' : operationConfirm === 'cleanup-drill' ? 'Cleanup Drill' : 'Remove DR Configuration'}
+                    {operationConfirm === 'force-abort' ? 'Force Abort Task?' : operationConfirm === 'cleanup-drill' ? 'Cleanup Drill' : 'Remove DR Configuration'}
                   </h3>
                 </div>
                 <button type="button" onClick={() => setOperationConfirm(null)} aria-label="Close confirmation"><X size={18} /></button>
               </div>
               <div className="hbdr-filter-drawer-body">
                 <div className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-900">
-                  {operationConfirm === 'cancel-sync' && (
-                    <p>The source cluster agent will stop {selectedRunCancelableSyncTasks.length === 1 ? 'this sync' : `${selectedRunCancelableSyncTasks.length} sync tasks`} and delete the running Velero backup. No restore point will be created.</p>
+                  {operationConfirm === 'force-abort' && (
+                    <p>{selectedAbortableTasks.length === 1 ? 'The current task will' : `The ${selectedAbortableTasks.length} active tasks will`} be aborted and marked as failed. Completed changes will not be rolled back.</p>
                   )}
                   {operationConfirm === 'cleanup-drill' && (
                     <p>Delete drill namespace <strong>{String(selectedRunDrillTask?.payload?.targetNamespace || '-')}</strong> from target cluster <strong>{selectedRunDrillTask?.payload?.targetClusterName || selectedRunRows[0]?.targetCluster || 'configured target'}</strong>. The DR configuration, policy, restore points, source namespace, and object-storage data are retained.</p>
@@ -2979,6 +2992,7 @@ export default function ApplicationDrPage(props: {
                   )}
                 </div>
                 {operationConfirm === 'remove-config' && <p className="mt-4 text-xs font-semibold leading-5 text-slate-500">Clean up drill resources first if they are no longer required.</p>}
+                {operationConfirm === 'remove-config' && <label className="mt-4 flex items-start gap-2 text-sm"><input type="checkbox" checked={forceCleanup} onChange={event => setForceCleanup(event.target.checked)} /><span>Force cleanup<span className="mt-1 block text-xs text-slate-500">Remove configuration even if backup storage cannot be cleaned. Remote data may remain.</span></span></label>}
               </div>
               <div className="hbdr-filter-drawer-actions">
                 <button type="button" onClick={() => setOperationConfirm(null)}>Cancel</button>
@@ -2989,12 +3003,12 @@ export default function ApplicationDrPage(props: {
                   onClick={() => {
                     const action = operationConfirm;
                     setOperationConfirm(null);
-                    if (action === 'cancel-sync') void stopSync();
+                    if (action === 'force-abort') void forceAbort();
                     if (action === 'cleanup-drill') void cleanupDrillResources();
                     if (action === 'remove-config') void deleteDrConfiguration();
                   }}
                 >
-                  {operationConfirm === 'cancel-sync' ? 'Cancel Sync' : operationConfirm === 'cleanup-drill' ? 'Delete Drill Namespace' : 'Remove Configuration'}
+                  {operationConfirm === 'force-abort' ? 'Force Abort' : operationConfirm === 'cleanup-drill' ? 'Delete Drill Namespace' : forceCleanup ? 'Force Cleanup' : 'Remove Configuration'}
                 </button>
               </div>
             </motion.aside>

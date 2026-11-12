@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -47,7 +48,7 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 		if err := tx.QueryRow(`select status from protection_plans where id=$1`, input.ProtectionPlanID).Scan(&planStatus); err != nil {
 			return Task{}, err
 		}
-		if (planStatus == "cleanup_running" || planStatus == "cleaning" || planStatus == "cleanup_failed") && input.Type != "protection-cleanup" {
+		if (planStatus == "cleanup_running" || planStatus == "cleaning" || planStatus == "cleanup_failed") && input.Type != "protection-cleanup" && input.Type != "task-abort" {
 			return Task{}, ErrProtectionPlanBusy
 		}
 	} else if input.ClusterID != "" {
@@ -58,6 +59,29 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 	}
 	if err := validateTaskReferences(tx, input, tenantID); err != nil {
 		return Task{}, err
+	}
+	if input.Type == "task-abort" {
+		targetID, _ := input.Payload["targetTaskId"].(string)
+		var status string
+		var completed sql.NullTime
+		if err := tx.QueryRow(`select status,completed_at from tasks where id=nullif($1,'')::uuid and tenant_id=$2 and cluster_id=nullif($3,'')::uuid and protection_plan_id is not distinct from nullif($4,'')::uuid and type in ('backup','restore','drill','takeover','protection-cleanup','retention-cleanup','storage-sync','schedule-sync') for update`, targetID, tenantID, input.ClusterID, input.ProtectionPlanID).Scan(&status, &completed); err != nil {
+			return Task{}, fmt.Errorf("abort target is unavailable: %w", err)
+		}
+		if completed.Valid || !slices.Contains([]string{"queued", "dispatched", "accepted", "running", "syncing", "finalizing", "canceling"}, status) {
+			return Task{}, ErrProtectionPlanBusy
+		}
+		var existingID string
+		err := tx.QueryRow(`select id::text from tasks where tenant_id=$1 and cluster_id=$2 and type='task-abort' and payload->>'targetTaskId'=$3 and completed_at is null and status not in ('succeeded','failed','canceled','cancelled') order by created_at desc limit 1`, tenantID, input.ClusterID, targetID).Scan(&existingID)
+		if err == nil {
+			if err := tx.Commit(); err != nil {
+				return Task{}, err
+			}
+			existing, _, err := s.GetTask(existingID)
+			return existing, err
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return Task{}, err
+		}
 	}
 	if parentID, _ := input.Payload["cacheSettingsTaskId"].(string); input.Type == "cache-cleanup" && parentID != "" {
 		if _, err := tx.Exec(`select pg_advisory_xact_lock(hashtextextended($1,0))`, "cache-cleanup-parent:"+parentID); err != nil {
@@ -101,7 +125,7 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 			return Task{}, ErrProtectionPlanBusy
 		}
 	}
-	if input.Type == "backup-cancel" {
+	if input.Type == "backup-cancel" || input.Type == "task-abort" {
 		target, _ := input.Payload["targetTaskId"].(string)
 		var irreversible bool
 		if err := tx.QueryRow(`select exists(select 1 from restore_point_reservations where task_id=nullif($1,'')::uuid and state in ('data_ready','deleting','published'))`, target).Scan(&irreversible); err != nil {
@@ -170,6 +194,15 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 		task.Type, task.Status, task.CommandID, payloadRaw, now)
 	if err != nil {
 		return Task{}, err
+	}
+	if task.Type == "task-abort" {
+		patch, err := json.Marshal(map[string]any{"abortTaskId": task.ID, "abortRequested": true, "lastStatusAt": now.Format(time.RFC3339Nano)})
+		if err != nil {
+			return Task{}, err
+		}
+		if _, err := tx.Exec(`update tasks set status='canceling',error_code='TASK_ABORT_REQUESTED',error_message='Force abort requested; waiting for the agent to stop execution.',payload=coalesce(payload,'{}'::jsonb)||$2::jsonb where id=$1`, input.Payload["targetTaskId"], patch); err != nil {
+			return Task{}, err
+		}
 	}
 	if task.ProtectionPlanID != "" && !input.SuppressLatestPointer {
 		if err := reserveBackupQuota(tx, task); err != nil {

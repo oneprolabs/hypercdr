@@ -13,13 +13,15 @@ func agentRequestKey(clusterID, requestID string) string {
 }
 
 type sessionHub struct {
-	mu       sync.RWMutex
-	sessions map[string]*websocket.Conn
-	capacity map[string]bool
+	mu           sync.RWMutex
+	sessions     map[string]*websocket.Conn
+	capacity     map[string]bool
+	forceCleanup map[string]bool
+	taskAbort    map[string]bool
 }
 
 func newSessionHub() *sessionHub {
-	return &sessionHub{sessions: map[string]*websocket.Conn{}, capacity: map[string]bool{}}
+	return &sessionHub{sessions: map[string]*websocket.Conn{}, capacity: map[string]bool{}, forceCleanup: map[string]bool{}, taskAbort: map[string]bool{}}
 }
 
 func (h *sessionHub) set(clusterID string, conn *websocket.Conn) {
@@ -27,6 +29,36 @@ func (h *sessionHub) set(clusterID string, conn *websocket.Conn) {
 	defer h.mu.Unlock()
 	h.sessions[clusterID] = conn
 	delete(h.capacity, clusterID)
+	delete(h.forceCleanup, clusterID)
+	delete(h.taskAbort, clusterID)
+}
+
+func (h *sessionHub) setTaskAbortSupport(clusterID string, conn *websocket.Conn, supported bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.sessions[clusterID] == conn {
+		h.taskAbort[clusterID] = supported
+	}
+}
+
+func (h *sessionHub) supportsTaskAbort(clusterID string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.sessions[clusterID] != nil && h.taskAbort[clusterID]
+}
+
+func (h *sessionHub) setForceCleanupSupport(clusterID string, conn *websocket.Conn, supported bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.sessions[clusterID] == conn {
+		h.forceCleanup[clusterID] = supported
+	}
+}
+
+func (h *sessionHub) supportsForceCleanup(clusterID string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.sessions[clusterID] != nil && h.forceCleanup[clusterID]
 }
 
 func (h *sessionHub) setCapacitySupport(clusterID string, conn *websocket.Conn, supported bool) {
@@ -49,6 +81,8 @@ func (h *sessionHub) remove(clusterID string, conn *websocket.Conn) {
 	if h.sessions[clusterID] == conn {
 		delete(h.sessions, clusterID)
 		delete(h.capacity, clusterID)
+		delete(h.forceCleanup, clusterID)
+		delete(h.taskAbort, clusterID)
 	}
 }
 
@@ -73,5 +107,7 @@ func (h *sessionHub) close(clusterID string) {
 		_ = conn.Close()
 		delete(h.sessions, clusterID)
 		delete(h.capacity, clusterID)
+		delete(h.forceCleanup, clusterID)
+		delete(h.taskAbort, clusterID)
 	}
 }

@@ -29595,18 +29595,29 @@ html[data-theme='dark'] #root .hbdr-dr-task-log-drawer .hbdr-task-final-result.i
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
-#root .premium-app .hbdr-cache-settings { width: min(480px, 100vw); }
+#root .premium-app .hbdr-cache-settings { width: min(540px, 100vw); }
 .hbdr-cache-form { display: grid; gap: 18px; font-size: 13px; color: var(--hc-text); }
 .hbdr-cache-form > p { margin: 0; }
 .hbdr-cache-card { display: grid; gap: 18px; padding: 18px; border: 1px solid var(--hc-border); border-radius: 10px; background: var(--hc-surface); }
 .hbdr-cache-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.hbdr-cache-card-header h3 { margin: 0; font-size: 16px; font-weight: 650; color: var(--hc-text); }
+.hbdr-cache-card-header h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--hc-text); white-space: nowrap; }
 .hbdr-cache-card-header p { margin: 5px 0 0; color: var(--hc-text-2); font-size: 12px; }
+.hbdr-cache-title { display: flex; align-items: center; gap: 6px; }
+.hbdr-cache-card-header > div:first-child { min-width: 0; position: relative; }
+.hbdr-cache-help summary { display: flex; align-items: center; justify-content: center; padding: 3px; color: var(--hc-text-2); cursor: pointer; list-style: none; border-radius: 4px; }
+.hbdr-cache-help summary::-webkit-details-marker { display: none; }
+.hbdr-cache-help summary:hover, .hbdr-cache-help[open] summary { color: var(--hc-accent); background: var(--hc-sunken); }
+.hbdr-cache-help summary:focus-visible { outline: 2px solid var(--hc-accent); outline-offset: 2px; }
+.hbdr-cache-help-content { position: absolute; top: 27px; left: 0; z-index: 10; width: min(340px, calc(100vw - 90px)); padding: 12px; border: 1px solid var(--hc-border); border-radius: 6px; background: var(--hc-surface); box-shadow: 0 4px 16px #0002; font-size: 12px; line-height: 1.5; }
+.hbdr-cache-card-header .hbdr-cache-help-content p { margin: 0; color: var(--hc-text); }
+.hbdr-cache-card-header .hbdr-cache-help-content p + p { margin-top: 8px; }
 .hbdr-cache-card-fields { display: grid; gap: 14px; padding-top: 2px; }
 .hbdr-cache-card-fields .hbdr-cache-row { align-items: center; }
 .hbdr-cache-card-fields input:not([type='number']) { min-width: 0; width: 60%; height: 34px; padding: 6px 10px; border: 1px solid var(--hc-border-strong); border-radius: 5px; background: var(--hc-surface); color: var(--hc-text); font-family: var(--hc-font-mono, monospace); }
 .hbdr-cache-row, .hbdr-cache-toggle, .hbdr-cache-size { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.hbdr-cache-toggle { font-size: 12px; color: var(--hc-text-2); }
+.hbdr-cache-toggle { flex-shrink: 0; font-size: 12px; color: var(--hc-text-2); white-space: nowrap; }
+.hbdr-cache-card-fields .hbdr-cache-row > span:first-child { white-space: nowrap; }
+#root .premium-app .hbdr-cache-path-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 #root .premium-app button.hbdr-settings-switch { position: relative; display: inline-flex; align-items: center; flex-shrink: 0; width: 36px; min-width: 36px; height: 20px; min-height: 20px; padding: 1px; border: 1px solid var(--hc-border-strong) !important; border-radius: 999px !important; background: var(--hc-border-strong) !important; box-shadow: none !important; transition: background .2s; }
 #root .premium-app button.hbdr-settings-switch[aria-checked='true'] { background: #10b981 !important; border-color: #10b981 !important; }
 #root .premium-app button.hbdr-settings-switch > span { display: block; width: 16px; height: 16px; border-radius: 50%; background: #fff !important; box-shadow: 0 1px 2px #0002; transform: translateX(0); transition: transform .2s; }
@@ -29857,10 +29868,10 @@ html[data-theme='dark'] #root .hbdr-dr-task-log-drawer .hbdr-task-final-result.i
 }
 #root .premium-app .hbdr-cache-path-value,
 #root .premium-app .hbdr-cache-path-editor { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
-#root .premium-app .hbdr-cache-path-value code { overflow: hidden; color: var(--hc-text-2); text-overflow: ellipsis; white-space: nowrap; }
+#root .premium-app .hbdr-cache-path-value code { flex: 1; min-width: 0; color: var(--hc-text-2); white-space: normal; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; user-select: text; }
 #root .premium-app .hbdr-cache-path-value button,
 #root .premium-app .hbdr-cache-path-editor button { flex: 0 0 auto; padding: 3px 8px; border: 1px solid var(--hc-border); border-radius: 6px; background: var(--hc-surface); color: var(--hc-text); font-size: 11px; }
-#root .premium-app .hbdr-cache-path-editor input { min-width: 0; width: min(280px, 100%); }
+#root .premium-app .hbdr-cache-path-editor input { flex: 1; min-width: 0; width: 100%; }
 #root .premium-app .hbdr-cache-confirm { margin-top: 14px; padding: 12px; border: 1px solid #f0d49a; border-radius: 8px; background: #fffaf0; color: var(--hc-text); font-size: 12px; line-height: 1.5; }
 #root .premium-app .hbdr-cache-confirm p { margin: 6px 0 0; color: var(--hc-text-2); }
 #root .premium-app .hbdr-cache-confirm > div { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }

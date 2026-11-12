@@ -153,6 +153,7 @@ func protectionCleanupCommandFromPayload(payload map[string]any) *protocol.Prote
 		SourceNamespaces:     stringSlicePayload(payload, "sourceNamespaces"),
 		StorageRepo:          stringPayload(payload, "storageRepo"),
 		CleanupObjectStorage: boolPayload(payload, "cleanupObjectStorage"),
+		Force:                boolPayload(payload, "force"),
 		RestorePoints:        retentionRestorePointsFromAny(payload["restorePoints"]),
 		RestoreNames:         stringSlicePayload(payload, "restoreNames"),
 		DrillNamespaces:      stringSlicePayload(payload, "drillNamespaces"),
