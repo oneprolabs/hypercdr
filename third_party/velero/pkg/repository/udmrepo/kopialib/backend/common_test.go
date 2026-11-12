@@ -17,6 +17,8 @@ limitations under the License.
 package backend
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -30,6 +32,48 @@ import (
 
 	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
 )
+
+func TestPersistentCacheContentIsolation(t *testing.T) {
+	for _, scenario := range []struct {
+		name        string
+		path        string
+		drill       string
+		wantContent bool
+	}{
+		{"index only", "/var/cache/hypercdr/repository", "false", false},
+		{"index with Drill enabled", "/var/cache/hypercdr/repository", "true", false},
+		{"Drill enabled", "/var/cache/hypercdr/drill-data/repository", "true", true},
+		{"Drill disabled", "/var/cache/hypercdr/drill-data/repository", "false", false},
+		{"similar directory", "/var/cache/hypercdr/drill-data-other/repository", "true", false},
+		{"temporary cache", "/tmp/kopia-cache", "false", true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			t.Setenv("HCDR_DRILL_DATA_CACHE", scenario.drill)
+			t.Setenv("HCDR_DRILL_DATA_CACHE_PATH", "/var/cache/hypercdr/drill-data")
+			t.Setenv("HCDR_DRILL_DATA_CACHE_BUDGET_BYTES", "64424509440")
+			options := SetupConnectOptions(t.Context(), udmrepo.RepoOptions{StorageOptions: map[string]string{udmrepo.StoreOptionCacheDir: scenario.path}}).CachingOptions
+			assert.Equal(t, scenario.wantContent, options.ContentCacheSizeBytes > 0)
+			assert.Equal(t, scenario.wantContent, options.ContentCacheSizeLimitBytes > 0)
+			assert.Positive(t, options.MetadataCacheSizeBytes)
+			assert.Positive(t, options.MetadataCacheSizeLimitBytes)
+			assert.Equal(t, scenario.path, options.CacheDirectory)
+			configPath := filepath.Join(t.TempDir(), "repository.config")
+			if err := os.WriteFile(configPath, []byte("{}"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.SetCachingOptions(t.Context(), configPath, &options); err != nil {
+				t.Fatal(err)
+			}
+			saved, err := repo.GetCachingOptions(t.Context(), configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Equal(t, options.ContentCacheSizeBytes, saved.ContentCacheSizeBytes)
+			assert.Equal(t, options.MetadataCacheSizeBytes, saved.MetadataCacheSizeBytes)
+			assert.Equal(t, scenario.path, saved.CacheDirectory)
+		})
+	}
+}
 
 func TestSetupNewRepositoryOptions(t *testing.T) {
 	testCases := []struct {

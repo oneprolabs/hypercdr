@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -40,32 +41,35 @@ const (
 )
 
 type Client struct {
-	capacityMu     sync.Mutex
-	cfg            config.Config
-	logger         *slog.Logger
-	conn           *websocket.Conn
-	writeMu        sync.Mutex
-	collector      inventory.Collector
-	outbox         *eventOutbox
-	ledger         *taskLedger
-	backupExec     executor.BackupExecutor
-	restoreExec    executor.RestoreExecutor
-	storageExec    executor.StorageExecutor
-	statusReader   kube.ManifestStatusReader
-	volumeReader   kube.VolumeProgressReader
-	statsReader    kube.BackupObjectStatsReader
-	backupReader   kube.VeleroBackupReader
-	scheduleReader kube.VeleroScheduleReader
-	readiness      kube.RestoreReadinessReader
-	imageMapper    kube.WorkloadImageMapper
-	serviceMapper  kube.ServiceNodePortMapper
-	applier        kube.ManifestApplier
-	deleteWaiter   kube.VeleroBackupDeletionWaiter
-	contentReader  kube.BackupContentReader
-	pvcValidator   kube.PVCAccessValidator
-	uninstaller    kube.Uninstaller
-	handover       kube.ControlPlaneHandoverManager
-	agentRuntime   interface {
+	capacityMu           sync.Mutex
+	cacheCleanupRunning  sync.Map
+	cacheSettingsRunning sync.Map
+	cacheConfigurationMu sync.Mutex
+	cfg                  config.Config
+	logger               *slog.Logger
+	conn                 *websocket.Conn
+	writeMu              sync.Mutex
+	collector            inventory.Collector
+	outbox               *eventOutbox
+	ledger               *taskLedger
+	backupExec           executor.BackupExecutor
+	restoreExec          executor.RestoreExecutor
+	storageExec          executor.StorageExecutor
+	statusReader         kube.ManifestStatusReader
+	volumeReader         kube.VolumeProgressReader
+	statsReader          kube.BackupObjectStatsReader
+	backupReader         kube.VeleroBackupReader
+	scheduleReader       kube.VeleroScheduleReader
+	readiness            kube.RestoreReadinessReader
+	imageMapper          kube.WorkloadImageMapper
+	serviceMapper        kube.ServiceNodePortMapper
+	applier              kube.ManifestApplier
+	deleteWaiter         kube.VeleroBackupDeletionWaiter
+	contentReader        kube.BackupContentReader
+	pvcValidator         kube.PVCAccessValidator
+	uninstaller          kube.Uninstaller
+	handover             kube.ControlPlaneHandoverManager
+	agentRuntime         interface {
 		kube.AgentRuntimeReader
 		kube.AgentUpgrader
 		kube.VeleroRuntimeManager
@@ -81,6 +85,8 @@ type Client struct {
 	backupCommandIDs  map[string]struct{}
 	activeBackupMu    sync.Mutex
 	activeBackupPlans map[string]string
+	activeDrills      atomic.Int64
+	drillCacheMu      sync.RWMutex
 	progressMu        sync.Mutex
 	progressSequence  map[string]int64
 }
@@ -307,6 +313,12 @@ func (c *Client) Register() (protocol.RegisterAcceptedPayload, error) {
 		}
 		if settings := accepted.Payload.CacheSettings; settings != nil {
 			go func() {
+				c.cacheConfigurationMu.Lock()
+				defer c.cacheConfigurationMu.Unlock()
+				if c.cacheTransitionPending() {
+					c.logger.Info("registration cache configuration deferred to transaction recovery")
+					return
+				}
 				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 				defer cancel()
 				if runtime, ok := c.agentRuntime.(interface {
@@ -471,6 +483,7 @@ func (c *Client) RunHeartbeat() error {
 	}
 	c.resendPendingEvents()
 	go c.recoverLedgerTasks()
+	go c.reconcileCacheTasks(workerCtx)
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- c.readMessages()
@@ -723,9 +736,47 @@ func (c *Client) resendPendingEvents() {
 }
 
 func (c *Client) recoverLedgerTasks() {
+	c.recoverCacheTasks()
 	if c.statusReader == nil {
 		return
 	}
+	c.recoverObservedTasks()
+}
+
+func (c *Client) reconcileCacheTasks(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			c.recoverCacheTasks()
+		}
+	}
+}
+
+func (c *Client) recoverCacheTasks() {
+	for _, record := range c.ledger.recoverableRecords() {
+		if (record.Type != "cache-cleanup" && record.Type != "cache-settings") || c.outbox.hasTask(record.TaskID) {
+			continue
+		}
+		var task protocol.TaskDispatchPayload
+		if err := json.Unmarshal(record.Task, &task); err != nil {
+			c.logger.Warn("failed to decode cleanup ledger task", "task_id", record.TaskID, "error", err)
+			continue
+		}
+		if task.Type == "cache-settings" {
+			if task.CacheSettings != nil && task.CacheSettings.Transition != nil {
+				go c.executeCacheSettingsTask(task)
+			}
+		} else {
+			go c.executeCacheCleanupTask(task)
+		}
+	}
+}
+
+func (c *Client) recoverObservedTasks() {
 	for _, record := range c.ledger.recoverableRecords() {
 		if c.outbox.hasTask(record.TaskID) {
 			continue
@@ -784,11 +835,19 @@ func (c *Client) executeTask(task protocol.TaskDispatchPayload) {
 		c.executePlanCapacityTask(task)
 	case "cache-settings":
 		c.executeCacheSettingsTask(task)
+	case "cache-cleanup":
+		c.executeCacheCleanupTask(task)
 	case "backup":
 		c.executeBackupTask(task)
 	case "backup-cancel":
 		c.executeBackupCancelTask(task)
 	case "restore", "drill", "takeover":
+		if task.Type == "drill" {
+			c.drillCacheMu.RLock()
+			defer c.drillCacheMu.RUnlock()
+			c.activeDrills.Add(1)
+			defer c.activeDrills.Add(-1)
+		}
 		c.executeRestoreTask(task)
 	case "storage-sync":
 		c.executeStorageSyncTask(task)

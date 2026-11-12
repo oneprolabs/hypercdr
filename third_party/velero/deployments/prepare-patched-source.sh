@@ -43,6 +43,9 @@ git -C "${KOPIA_TARGET}" init -q
 KOPIA_PATCH="${PATCH_ROOT}/kopia/0001-support-s3-bucket-lookup.patch"
 git -C "${KOPIA_TARGET}" apply --check "${KOPIA_PATCH}"
 git -C "${KOPIA_TARGET}" apply "${KOPIA_PATCH}"
+KOPIA_CACHE_PATCH="${PATCH_ROOT}/kopia/0002-handle-disabled-content-cache.patch"
+git -C "${KOPIA_TARGET}" apply --check "${KOPIA_CACHE_PATCH}"
+git -C "${KOPIA_TARGET}" apply "${KOPIA_CACHE_PATCH}"
 
 (
   cd "${OUTPUT_ROOT}"

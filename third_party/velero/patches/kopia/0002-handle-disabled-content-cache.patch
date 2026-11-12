@@ -1,0 +1,14 @@
+diff --git a/internal/cache/content_cache.go b/internal/cache/content_cache.go
+--- a/internal/cache/content_cache.go
++++ b/internal/cache/content_cache.go
+@@ -187,6 +187,10 @@ func NewContentCache(ctx context.Context, st blob.Storage, opt Options, mr *metrics.
+ 		}
+ 	}
+ 
++	if cacheStorage == nil {
++		return passthroughContentCache{st}, nil
++	}
++
+ 	pc, err := NewPersistentCache(ctx, opt.CacheSubDir, cacheStorage, cacheprot.ChecksumProtection(opt.HMACSecret), opt.Sweep, mr, opt.TimeNow)
+ 	if err != nil {
+ 		return nil, errors.Wrap(err, "unable to create base cache")

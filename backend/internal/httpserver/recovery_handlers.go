@@ -32,6 +32,13 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "cluster_id_required"})
 		return
 	}
+	if task, ok, err := r.cacheSettingsTaskActive(body.ClusterID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "cache_settings_check_failed"})
+		return
+	} else if ok {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "cache_settings_active", "message": "Cache settings are being applied. Wait until the configuration task finishes before starting recovery.", "taskId": task.ID})
+		return
+	}
 	if _, authenticated := requestUser(req); authenticated {
 		if !r.clusterVisible(req, body.ClusterID) {
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "cluster_not_found"})

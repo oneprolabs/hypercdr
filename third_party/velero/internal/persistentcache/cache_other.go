@@ -15,3 +15,12 @@ func Acquire(root, identity string, budget int64) (*Lease, error) {
 }
 func (lease *Lease) Close()   {}
 func Clean(root string) error { return fmt.Errorf("persistent cache requires Linux") }
+func Isolate(root, isolationID string) error {
+	return fmt.Errorf("persistent cache requires Linux")
+}
+func RestoreIsolated(root, isolationID string) error {
+	return fmt.Errorf("persistent cache requires Linux")
+}
+func DeleteIsolated(root, isolationID string) error {
+	return fmt.Errorf("persistent cache requires Linux")
+}

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { HyperTable, type HyperTableColumn } from '../../components/table';
 import { formatDateTime } from '../../lib/date-time';
+import { apiPost } from '../../api/client';
 
 type ApiTask={id:string;clusterId:string;type:string;status:string;progress:number;errorCode?:string;errorMessage?:string;payload?:Record<string,any>;createdAt?:string;completedAt?:string};
 type ApiTaskEvent={id:string;taskId:string;level:string;reason:string;message:string;payload?:Record<string,any>;createdAt?:string};
@@ -31,6 +32,8 @@ export default function ClusterActivityPanel({ logs, clusters, highlightedTaskId
     if (payloadClusterId && payloadClusterName) clusterNamesById.set(payloadClusterId, payloadClusterName);
   }
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [retryingCleanupId, setRetryingCleanupId] = useState<string | null>(null);
+  const [cleanupRetryError, setCleanupRetryError] = useState<{ taskId: string; message: string } | null>(null);
   const [dockExpanded, setDockExpanded] = useState(() => {
     const saved = window.localStorage.getItem('hypercdr:clusters:recent-tasks-expanded');
     if (saved !== null) return saved === 'true';
@@ -51,10 +54,10 @@ export default function ClusterActivityPanel({ logs, clusters, highlightedTaskId
     const timer = window.setTimeout(() => onHighlightComplete?.(), 5000);
     return () => window.clearTimeout(timer);
   }, [highlightedTaskId]);
-  const taskTypeLabel = (type: string) => type === 'plan-capacity' ? 'Capacity collection' : type === 'register' ? 'Register cluster' : type === 'unregister' ? 'Unregister cluster' : type === 'agent-upgrade' ? 'Upgrade Comm Agent' : type === 'velero-upgrade' ? 'Upgrade Velero' : type;
-  const taskInitials = (entry: { log: ClusterTaskLog }) => entry.log.task.type === 'register' ? 'R' : entry.log.task.type === 'unregister' ? 'U' : entry.log.task.type === 'agent-upgrade' ? 'CA' : entry.log.task.type === 'velero-upgrade' ? 'V' : (entry.log.task.type || '?').charAt(0).toUpperCase();
-  const taskAccent = (type: string) => type === 'register' ? 'bg-blue-500' : type === 'unregister' ? 'bg-rose-500' : type === 'agent-upgrade' ? 'bg-indigo-500' : type === 'velero-upgrade' ? 'bg-cyan-600' : 'bg-slate-500';
-  const componentLabel = (task: ApiTask) => task.type === 'agent-upgrade' ? 'Comm Agent' : task.type === 'velero-upgrade' ? 'Velero' : 'Cluster lifecycle';
+  const taskTypeLabel = (type: string) => type === 'plan-capacity' ? 'Capacity collection' : type === 'cache-cleanup' ? 'Cache cleanup' : type === 'cache-settings' ? 'Cache settings' : type === 'register' ? 'Register cluster' : type === 'unregister' ? 'Unregister cluster' : type === 'agent-upgrade' ? 'Upgrade Comm Agent' : type === 'velero-upgrade' ? 'Upgrade Velero' : type;
+  const taskInitials = (entry: { log: ClusterTaskLog }) => entry.log.task.type === 'cache-cleanup' ? 'CC' : entry.log.task.type === 'register' ? 'R' : entry.log.task.type === 'unregister' ? 'U' : entry.log.task.type === 'agent-upgrade' ? 'CA' : entry.log.task.type === 'velero-upgrade' ? 'V' : (entry.log.task.type || '?').charAt(0).toUpperCase();
+  const taskAccent = (type: string) => type === 'cache-cleanup' ? 'bg-amber-500' : type === 'register' ? 'bg-blue-500' : type === 'unregister' ? 'bg-rose-500' : type === 'agent-upgrade' ? 'bg-indigo-500' : type === 'velero-upgrade' ? 'bg-cyan-600' : 'bg-slate-500';
+  const componentLabel = (task: ApiTask) => task.type === 'cache-cleanup' ? 'Cache management' : task.type === 'cache-settings' ? 'Cache management' : task.type === 'agent-upgrade' ? 'Comm Agent' : task.type === 'velero-upgrade' ? 'Velero' : 'Cluster lifecycle';
   const componentDetail = (task: ApiTask) => {
     if (task.type === 'agent-upgrade' || task.type === 'velero-upgrade') return String(task.payload?.version || task.payload?.image || '-');
     return task.type === 'register' ? String(task.payload?.agentVersion || 'New cluster') : task.type === 'unregister' ? 'Remove managed cluster' : '-';
@@ -215,6 +218,16 @@ export default function ClusterActivityPanel({ logs, clusters, highlightedTaskId
             <p className="mt-1">{entry.log.task.errorMessage || 'Cluster task failed. Check agent logs and RBAC permissions.'}</p>
           </div>
         )}
+        {entry.log.task.type === 'cache-cleanup' && entry.log.task.status === 'failed' && (
+          <button type="button" className="mb-3 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50" disabled={retryingCleanupId === entry.log.task.id} onClick={async () => {
+            setRetryingCleanupId(entry.log.task.id);
+            setCleanupRetryError(null);
+            try { await apiPost(`/api/v1/clusters/${encodeURIComponent(entry.clusterId)}/cache-settings/clean`, { taskId: entry.log.task.id }); }
+            catch (error) { setCleanupRetryError({ taskId: entry.log.task.id, message: error instanceof Error ? error.message : 'Unable to retry cache cleanup.' }); }
+            finally { setRetryingCleanupId(null); }
+          }}>{retryingCleanupId === entry.log.task.id ? 'Retrying…' : 'Retry cleanup'}</button>
+        )}
+        {cleanupRetryError?.taskId === entry.log.task.id && <p role="alert" className="mb-3 text-xs text-rose-600">{cleanupRetryError.message}</p>}
         <div className="mb-1.5 flex items-center justify-between">
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Event Log</p>
           <p className="text-[10px] text-slate-400">{entry.log.events.length} event{entry.log.events.length === 1 ? '' : 's'}</p>

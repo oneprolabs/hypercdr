@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+var ErrCacheConfigurationBusy = errors.New("cluster cache configuration conflicts with an active task")
+
 func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 	if input.Type == "" {
 		input.Type = "backup"
@@ -56,6 +58,39 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 	}
 	if err := validateTaskReferences(tx, input, tenantID); err != nil {
 		return Task{}, err
+	}
+	if parentID, _ := input.Payload["cacheSettingsTaskId"].(string); input.Type == "cache-cleanup" && parentID != "" {
+		if _, err := tx.Exec(`select pg_advisory_xact_lock(hashtextextended($1,0))`, "cache-cleanup-parent:"+parentID); err != nil {
+			return Task{}, err
+		}
+		var existingID string
+		err := tx.QueryRow(`select id::text from tasks where tenant_id=$1 and cluster_id=$2 and type='cache-cleanup' and payload->>'cacheSettingsTaskId'=$3 order by created_at limit 1`, tenantID, input.ClusterID, parentID).Scan(&existingID)
+		if err == nil {
+			if err := tx.Commit(); err != nil {
+				return Task{}, err
+			}
+			existing, found, err := s.GetTask(existingID)
+			if err == nil && !found {
+				return Task{}, fmt.Errorf("cache cleanup task disappeared")
+			}
+			return existing, err
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return Task{}, err
+		}
+	}
+	cacheUser := input.Type == "backup" || input.Type == "restore" || input.Type == "drill" || input.Type == "takeover" || input.Type == "failback" || input.Type == "storage-sync" || input.Type == "schedule-sync"
+	if input.ClusterID != "" && (cacheUser || input.Type == "cache-settings") {
+		if _, err := tx.Exec(`select pg_advisory_xact_lock(hashtextextended($1,0))`, "cache-configuration:"+input.ClusterID); err != nil {
+			return Task{}, err
+		}
+		var busy bool
+		if err := tx.QueryRow(`select exists(select 1 from tasks where cluster_id=$1 and status not in ('succeeded','failed','canceled','cancelled') and (type='cache-settings' or ($2 and type in ('backup','restore','drill','takeover','failback','storage-sync','schedule-sync'))))`, input.ClusterID, input.Type == "cache-settings").Scan(&busy); err != nil {
+			return Task{}, err
+		}
+		if busy {
+			return Task{}, ErrCacheConfigurationBusy
+		}
 	}
 	if input.Type == "backup" && input.ProtectionPlanID != "" && !input.SuppressLatestPointer {
 		var busy bool

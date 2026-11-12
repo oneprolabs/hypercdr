@@ -381,6 +381,12 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 				}
 				return
 			}
+			if (existingTask.Type == "cache-settings" || existingTask.Type == "cache-cleanup") && isTerminalTaskStatus(existingTask.Status) {
+				if completed.Payload.AckRequired {
+					_ = r.writeEventAck(conn, clusterID, completed.AgentID, completed.MessageID, completed.Type, existingTask.ID, completed.Payload.CommandID)
+				}
+				continue
+			}
 			if existingTask.Type == "plan-capacity" {
 				if existingTask.CommandID != completed.Payload.CommandID {
 					_ = r.writeEventError(conn, clusterID, completed.AgentID, completed.MessageID, completed.Type, completed.Payload.TaskID, completed.Payload.CommandID, "CAPACITY_COMMAND_MISMATCH", "Capacity command does not match", false)
@@ -471,6 +477,21 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 				}
 				continue
 			}
+			var pendingCacheCleanup *store.Task
+			if existingTask.Type == "cache-settings" {
+				cleanupPaths := stringSlicePayload(existingTask.Payload, "cleanupPaths")
+				if len(cleanupPaths) > 0 {
+					cleanupTask, createErr := r.store.CreateTask(store.TaskInput{ClusterID: clusterID, Type: "cache-cleanup", Status: "queued", CommandID: store.NewPublicID(), Payload: map[string]any{"cacheSettingsTaskId": existingTask.ID, "cleanupPaths": cleanupPaths, "transition": existingTask.Payload["transition"], "namespace": stringPayload(existingTask.Payload, "namespace"), "requestedBy": existingTask.Payload["requestedBy"]}})
+					if createErr != nil {
+						r.logger.Error("failed to persist cache cleanup continuation", "task_id", existingTask.ID, "error", createErr)
+						if completed.Payload.AckRequired {
+							_ = r.writeEventError(conn, clusterID, completed.AgentID, completed.MessageID, completed.Type, existingTask.ID, completed.Payload.CommandID, "CACHE_CLEANUP_CREATE_FAILED", createErr.Error(), true)
+						}
+						continue
+					}
+					pendingCacheCleanup = &cleanupTask
+				}
+			}
 			existingTask, _, err = r.store.UpdateTaskStatus(store.TaskStatusInput{
 				TaskID:      completed.Payload.TaskID,
 				Status:      "finalizing",
@@ -485,11 +506,15 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 				}
 				return
 			}
+			finalizingMessage := "finalizing restore point"
+			if existingTask.Type == "cache-settings" || existingTask.Type == "cache-cleanup" {
+				finalizingMessage = "Recording cache task result"
+			}
 			_ = r.addTaskEventIfChanged(store.TaskEventInput{
 				TaskID:  completed.Payload.TaskID,
 				Level:   "info",
 				Reason:  "finalizing",
-				Message: "finalizing restore point",
+				Message: finalizingMessage,
 				Payload: map[string]any{"velero": completed.Payload.Velero},
 			})
 			if existingTask.Type == "unregister" {
@@ -551,6 +576,12 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 			if task.Type == "protection-cleanup" {
 				r.finishProtectionCleanupTask(task, completed.Payload.Velero)
 			}
+			if pendingCacheCleanup != nil && pendingCacheCleanup.Status == "queued" {
+				cleanupTask := *pendingCacheCleanup
+				r.startWorker(func() {
+					r.dispatchComponentUpgrade(conn, cleanupTask, "Cache cleanup task dispatched to cluster agent")
+				})
+			}
 			if completed.Payload.AckRequired {
 				_ = r.writeEventAck(conn, clusterID, completed.AgentID, completed.MessageID, completed.Type, completed.Payload.TaskID, completed.Payload.CommandID)
 			}
@@ -591,6 +622,32 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 					_ = r.writeEventAck(conn, clusterID, failed.AgentID, failed.MessageID, failed.Type, failed.Payload.TaskID, failed.Payload.CommandID)
 				}
 				continue
+			}
+			if (existingTask.Type == "cache-settings" || existingTask.Type == "cache-cleanup") && isTerminalTaskStatus(existingTask.Status) {
+				if failed.Payload.AckRequired {
+					_ = r.writeEventAck(conn, clusterID, failed.AgentID, failed.MessageID, failed.Type, existingTask.ID, failed.Payload.CommandID)
+				}
+				continue
+			}
+			if existingTask.Type == "cache-settings" && existingTask.Payload["transition"] != nil {
+				transition, restoreErr := cacheTaskTransition(existingTask)
+				if restoreErr == nil {
+					previousRaw, marshalErr := json.Marshal(transition.Previous)
+					var previous store.ClusterCacheSettings
+					restoreErr = marshalErr
+					if restoreErr == nil {
+						restoreErr = json.Unmarshal(previousRaw, &previous)
+					}
+					if restoreErr == nil {
+						restoreErr = r.store.SaveClusterCacheSettings(clusterID, previous)
+					}
+				}
+				if restoreErr != nil {
+					if failed.Payload.AckRequired {
+						_ = r.writeEventError(conn, clusterID, failed.AgentID, failed.MessageID, failed.Type, existingTask.ID, failed.Payload.CommandID, "CACHE_SETTINGS_ROLLBACK_SAVE_FAILED", restoreErr.Error(), true)
+					}
+					continue
+				}
 			}
 			task, _, err := r.store.UpdateTaskStatus(store.TaskStatusInput{
 				TaskID:       failed.Payload.TaskID,

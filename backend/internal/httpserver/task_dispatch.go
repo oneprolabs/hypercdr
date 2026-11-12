@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"github.com/gorilla/websocket"
 	"hypercdr-platform/platform/backend/internal/protocol"
@@ -328,7 +329,23 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 		}
 	case "cache-settings":
 		payload.Deadline = time.Now().UTC().Add(10 * time.Minute)
-		payload.CacheSettings = &protocol.CacheSettingsCommand{Namespace: stringPayload(task.Payload, "namespace"), RootPath: stringPayload(task.Payload, "rootPath"), IndexPath: stringPayload(task.Payload, "indexPath"), DrillPath: stringPayload(task.Payload, "drillPath"), IndexEnabled: boolPayload(task.Payload, "indexEnabled"), IndexMaxGiB: int(int64FromAny(task.Payload["indexMaxGiB"])), DrillEnabled: boolPayload(task.Payload, "drillEnabled"), DrillMaxGiB: int(int64FromAny(task.Payload["drillMaxGiB"])), Clean: boolPayload(task.Payload, "clean")}
+		payload.CacheSettings = cacheSettingsCommandFromTask(task)
+		transition, err := cacheTaskTransition(task)
+		if err != nil {
+			return protocol.Message[protocol.TaskDispatchPayload]{}, err
+		}
+		payload.CacheSettings.Transition = transition
+	case "cache-cleanup":
+		payload.Deadline = time.Now().UTC().Add(24 * time.Hour)
+		payload.CacheSettings = &protocol.CacheSettingsCommand{Namespace: stringPayload(task.Payload, "namespace"), CleanupPaths: stringSlicePayload(task.Payload, "cleanupPaths")}
+		transition, err := cacheTaskTransition(task)
+		if err != nil {
+			return protocol.Message[protocol.TaskDispatchPayload]{}, err
+		}
+		payload.CacheSettings.Transition = transition
+		if len(payload.CacheSettings.CleanupPaths) == 0 {
+			return protocol.Message[protocol.TaskDispatchPayload]{}, errors.New("cache cleanup paths are required")
+		}
 	case "velero-upgrade":
 		payload.Deadline = time.Now().UTC().Add(15 * time.Minute)
 		payload.VeleroUpgrade = &protocol.VeleroUpgradeCommand{
@@ -437,4 +454,29 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 		Timestamp:   time.Now().UTC(),
 		Payload:     payload,
 	}, nil
+}
+
+func cacheSettingsCommandFromTask(task store.Task) *protocol.CacheSettingsCommand {
+	return &protocol.CacheSettingsCommand{Namespace: stringPayload(task.Payload, "namespace"), RootPath: stringPayload(task.Payload, "rootPath"), IndexPath: stringPayload(task.Payload, "indexPath"), DrillPath: stringPayload(task.Payload, "drillPath"), IndexEnabled: boolPayload(task.Payload, "indexEnabled"), IndexMaxGiB: int(int64FromAny(task.Payload["indexMaxGiB"])), DrillEnabled: boolPayload(task.Payload, "drillEnabled"), DrillMaxGiB: int(int64FromAny(task.Payload["drillMaxGiB"])), Clean: boolPayload(task.Payload, "clean")}
+}
+
+func cacheTaskTransition(task store.Task) (*protocol.CacheSettingsTransition, error) {
+	if task.Payload["transition"] == nil {
+		return nil, nil
+	}
+	raw, err := json.Marshal(task.Payload["transition"])
+	if err != nil {
+		return nil, err
+	}
+	var transition *protocol.CacheSettingsTransition
+	if err := json.Unmarshal(raw, &transition); err != nil {
+		return nil, err
+	}
+	if transition == nil {
+		return nil, nil
+	}
+	if transition.IsolationID == "" || len(transition.Nodes) == 0 || len(transition.Paths) == 0 {
+		return nil, errors.New("invalid cache transition snapshot")
+	}
+	return transition, nil
 }

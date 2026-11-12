@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/pkg/errors"
@@ -57,6 +58,16 @@ type FSBRStartParam struct {
 	ParentSnapshot string
 	ForceFull      bool
 	Tags           map[string]string
+}
+
+func persistentCacheOptions(identity string) (string, string, bool) {
+	if identity == "" {
+		return "", "", false
+	}
+	if strings.HasPrefix(identity, "restore/") && os.Getenv("HCDR_DRILL_DATA_CACHE") == "true" {
+		return persistentcache.DataRoot(), "HCDR_DRILL_DATA_CACHE_BUDGET_BYTES", true
+	}
+	return persistentcache.Root, "HCDR_CACHE_BUDGET_BYTES", os.Getenv("HCDR_CACHE_PERSISTENCE") == "true"
 }
 
 type fileSystemBR struct {
@@ -119,15 +130,11 @@ func (fs *fileSystemBR) Init(ctx context.Context, param any) error {
 	}
 
 	cacheDir := initParam.CacheDir
-	budgetEnv := "HCDR_CACHE_BUDGET_BYTES"
-	if initParam.CacheIdentity != "" && os.Getenv("HCDR_CACHE_PERSISTENCE") == "true" {
-		if os.Getenv("HCDR_DRILL_DATA_CACHE") == "true" {
-			cacheDir = ""
-			budgetEnv = "HCDR_DRILL_DATA_CACHE_BUDGET_BYTES"
-		}
+	cacheRoot, budgetEnv, cacheEnabled := persistentCacheOptions(initParam.CacheIdentity)
+	if cacheEnabled {
 		budget, parseErr := strconv.ParseInt(os.Getenv(budgetEnv), 10, 64)
 		if parseErr == nil {
-			lease, cacheErr := persistentcache.Acquire(persistentcache.DataRoot(), string(fs.backupLocation.UID)+"/"+string(fs.backupRepo.UID)+"/"+initParam.CacheIdentity, budget)
+			lease, cacheErr := persistentcache.Acquire(cacheRoot, string(fs.backupLocation.UID)+"/"+string(fs.backupRepo.UID)+"/"+initParam.CacheIdentity, budget)
 			if cacheErr == nil {
 				fs.cacheLease = lease
 				cacheDir = lease.Path

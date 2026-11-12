@@ -435,7 +435,27 @@ type PlanCapacityReport struct {
 }
 
 type CacheSettingsCommand struct {
-	Namespace    string `json:"namespace"`
+	Transition   *CacheSettingsTransition `json:"transition,omitempty"`
+	Namespace    string                   `json:"namespace"`
+	RootPath     string                   `json:"rootPath"`
+	IndexPath    string                   `json:"indexPath"`
+	DrillPath    string                   `json:"drillPath"`
+	IndexEnabled bool                     `json:"indexEnabled"`
+	IndexMaxGiB  int                      `json:"indexMaxGiB"`
+	DrillEnabled bool                     `json:"drillEnabled"`
+	DrillMaxGiB  int                      `json:"drillMaxGiB"`
+	Clean        bool                     `json:"clean,omitempty"`
+	CleanupPaths []string                 `json:"cleanupPaths,omitempty"`
+}
+
+type CacheSettingsTransition struct {
+	IsolationID string                     `json:"isolationId"`
+	Nodes       []string                   `json:"nodes"`
+	Paths       []string                   `json:"paths"`
+	Previous    CacheConfigurationSnapshot `json:"previous"`
+}
+
+type CacheConfigurationSnapshot struct {
 	RootPath     string `json:"rootPath"`
 	IndexPath    string `json:"indexPath"`
 	DrillPath    string `json:"drillPath"`
@@ -443,7 +463,6 @@ type CacheSettingsCommand struct {
 	IndexMaxGiB  int    `json:"indexMaxGiB"`
 	DrillEnabled bool   `json:"drillEnabled"`
 	DrillMaxGiB  int    `json:"drillMaxGiB"`
-	Clean        bool   `json:"clean,omitempty"`
 }
 
 type ControlPlaneHandoverCommand struct {

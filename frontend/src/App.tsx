@@ -1406,10 +1406,10 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
     const loadTasks = async () => {
       if (document.visibilityState === 'hidden') return;
       try {
-        const res = await listTasks({ view: 'summary', types: ['register', 'unregister', 'agent-upgrade', 'velero-upgrade'], limit: 100 });
+        const res = await listTasks({ view: 'summary', types: ['register', 'unregister', 'agent-upgrade', 'velero-upgrade', 'cache-settings', 'cache-cleanup'], limit: 100 });
         const tasks = listItems(res);
         const clusterTasks = tasks
-          .filter(task => ['register', 'unregister', 'agent-upgrade', 'velero-upgrade'].includes(task.type))
+          .filter(task => ['register', 'unregister', 'agent-upgrade', 'velero-upgrade', 'cache-settings', 'cache-cleanup'].includes(task.type))
           .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
         if (cancelled) return;
         setClusterTaskLogs(prev => {

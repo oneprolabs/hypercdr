@@ -349,7 +349,7 @@ run_k8s() {
   local public_host
   public_host="$(extract_host_from_url "$base_url")"
   if [[ -z "${velero_image}" ]]; then
-    velero_image="$(image_ref "${registry}" "velero" "v1.18.2-hcdr.6")"
+    velero_image="$(image_ref "${registry}" "velero" "v1.18.2-hcdr.7")"
   fi
   if [[ -z "${velero_aws_plugin_image}" ]]; then
     velero_aws_plugin_image="$(image_ref "${registry}" "velero-plugin-for-aws" "v1.13.0")"
@@ -545,7 +545,7 @@ run_docker() {
   local public_host
   public_host="$(extract_host_from_url "$base_url")"
   if [[ -z "${velero_image}" ]]; then
-    velero_image="$(image_ref "${registry}" "velero" "v1.18.2-hcdr.6")"
+    velero_image="$(image_ref "${registry}" "velero" "v1.18.2-hcdr.7")"
   fi
   if [[ -z "${velero_aws_plugin_image}" ]]; then
     velero_aws_plugin_image="$(image_ref "${registry}" "velero-plugin-for-aws" "v1.13.0")"

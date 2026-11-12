@@ -9,8 +9,17 @@ saving desired settings alone does not imply successful cluster application.
 
 ## Storage and consistency
 
-- Cache lives at `/var/lib/hypercdr/kopia-cache` on each node, mounted at
-  `/var/cache/hypercdr` in new task pods. No StorageClass or PVC is required.
+- Index cache defaults to `/var/lib/hypercdr/cache/index` on each node; Drill
+  data cache defaults to `/var/lib/hypercdr/cache/drill-data`. The two host paths
+  are independently configurable and must not overlap. Container mount paths
+  are `/var/cache/hypercdr` and `/var/cache/hypercdr/drill-data`, respectively;
+  their nesting does not imply nested host directories. No StorageClass or PVC
+  is required.
+- Index persistence defaults to enabled; Drill data persistence defaults to
+  disabled. Index persistence stores metadata and indexes, not business-data
+  contents. Restores use persistent business-data contents only when Drill data
+  persistence is enabled, independently of the index switch. Backups do not use
+  the Drill data cache.
 - This uses Kopia's native content, metadata, and index caches. Kopia still
   discovers remote repository changes; persistence does not turn remote
   repository discovery off. It does not cache credentials or repository config.
@@ -33,12 +42,31 @@ saving desired settings alone does not imply successful cluster application.
 
 ## Applying and clearing
 
-Changes update the node-agent template and wait for rollout readiness; existing
-task pods retain their own settings and mounts. Disabling persistence does not
-delete existing files. Cleanup starts a short-lived job on each currently
-represented node-agent node and removes only idle cache directories under the
-dedicated root. Active shards remain leased and are skipped. Backup objects,
-restore points, and volume data are never deleted by cache cleanup.
+Configuration changes are rejected while a sync or Drill is active. A persisted
+configuration task gates new cache users while the node-agent template updates
+and reaches rollout readiness. Disabling a cache or changing its directory
+requires confirmation and records the old paths for a separate `cache-cleanup`
+task after configuration succeeds. New tasks use the new settings and do not
+wait for old-directory cleanup.
+
+The settings drawer reports configuration application only. Cleanup progress and
+results appear in the cluster's Recent Tasks list. The Agent creates one Job per
+node and old directory, with five retries using Kubernetes Job backoff and a
+24-hour deadline. Failed attempts are progress, not terminal task failures;
+the task fails when a Job reaches its failure condition. Agent restart recovery
+reuses task-bound Job names so it does not reset retry limits. Failed cleanup
+can be retried from its task row; the request includes `taskId`, is scoped to the
+selected cluster, and creates a new task with `retryOfTaskId` for traceability.
+Enabled cache paths and overlapping directories are rejected as isolation targets.
+Old directories are renamed into fixed isolation directories before settings
+success; cleanup deletes only the isolated data, never a reused original path.
+An isolation failure rolls back directories and configuration without scheduling
+deletion. Uncertain recovery retains task-start protection. The Agent persists
+transition phases and checks unfinished cache tasks every 30 seconds.
+Observed paths and cleanup safety checks resolve the node-agent's HostPath
+volumes through its volume mounts. Container mount paths are not node paths;
+the fixed `/var/cache/hypercdr` mount must not be reported as a custom host path.
+Backup objects, restore points, and volume data are never deleted by cleanup.
 
 Cleanup requires namespace-scoped batch job create/get/delete permissions. An
 older installation must receive the corresponding RBAC update as part of rollout.
@@ -53,6 +81,10 @@ image convention is a tag ending in `-cache-v1`; installation and upgrade paths
 set these annotations for this convention. Unsupported images reject explicit
 settings changes rather than reporting persistence as successfully applied.
 Existing agents ignore optional protocol fields during rolling upgrades.
+
+Changing cache size alone preserves existing data and does not create a cleanup
+task. A smaller size takes effect through normal cache eviction during later use;
+disk usage need not decrease immediately when settings are saved.
 
 ## Verification
 

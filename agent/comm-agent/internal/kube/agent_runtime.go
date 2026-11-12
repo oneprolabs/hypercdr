@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -493,6 +494,9 @@ func (r *KubernetesAgentRuntime) VeleroRuntimeStatus(ctx context.Context, namesp
 		NodeAgentDesired: daemonSet.Status.DesiredNumberScheduled,
 		NodeAgentReady:   daemonSet.Status.NumberReady,
 	}
+	if status.CacheState != nil {
+		status.CacheState["cleanup"] = r.cacheCleanupStatus(ctx, namespace)
+	}
 	status.Version = imageTag(status.Image)
 	serverPods, err := r.client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: metav1.FormatLabelSelector(deployment.Spec.Selector)})
 	if err != nil {
@@ -504,7 +508,68 @@ func (r *KubernetesAgentRuntime) VeleroRuntimeStatus(ctx context.Context, namesp
 		return VeleroRuntimeStatus{}, err
 	}
 	status.NodeAgentImageDigest = commonReadyPodDigest(nodePods.Items, "node-agent", int(status.NodeAgentDesired))
+	if status.CacheState != nil {
+		nodes := []string{}
+		seen := map[string]bool{}
+		for _, pod := range nodePods.Items {
+			if pod.Spec.NodeName != "" && !seen[pod.Spec.NodeName] {
+				seen[pod.Spec.NodeName] = true
+				nodes = append(nodes, pod.Spec.NodeName)
+			}
+		}
+		status.CacheState["nodes"] = nodes
+		status.CacheState["isolationSupported"] = daemonSet.Spec.Template.Annotations["hypercdr.io/cache-isolation-supported"] == "v1" && daemonSet.Spec.Template.Annotations["hypercdr.io/cache-persistence-image"] == workloadContainerImage(daemonSet.Spec.Template.Spec.Containers, "node-agent")
+	}
 	return status, nil
+}
+
+func (r *KubernetesAgentRuntime) cacheCleanupStatus(ctx context.Context, namespace string) map[string]any {
+	jobs, err := r.client.BatchV1().Jobs(namespace).List(ctx, metav1.ListOptions{LabelSelector: "hypercdr.io/cache-cleanup=true"})
+	if err != nil {
+		return map[string]any{"status": "unknown"}
+	}
+	latestBatch := ""
+	latestCreated := time.Time{}
+	for _, job := range jobs.Items {
+		batch := job.Labels["hypercdr.io/cache-cleanup-batch"]
+		if batch != "" && batch > latestBatch {
+			latestBatch = batch
+		}
+		if batch == "" && job.CreationTimestamp.Time.After(latestCreated) {
+			latestCreated = job.CreationTimestamp.Time
+		}
+	}
+	active, failed, succeeded := 0, 0, 0
+	permanentFailure := false
+	for _, job := range jobs.Items {
+		batch := job.Labels["hypercdr.io/cache-cleanup-batch"]
+		include := (latestBatch != "" && batch == latestBatch)
+		if latestBatch == "" {
+			include = !latestCreated.IsZero() && !job.CreationTimestamp.Time.Before(latestCreated.Add(-time.Minute))
+		}
+		if !include {
+			continue
+		}
+		active += int(job.Status.Active)
+		failed += int(job.Status.Failed)
+		succeeded += int(job.Status.Succeeded)
+		for _, condition := range job.Status.Conditions {
+			if condition.Type == batchv1.JobFailed && condition.Reason == "BackoffLimitExceeded" {
+				permanentFailure = true
+			}
+		}
+	}
+	state := "idle"
+	if permanentFailure {
+		state = "failed"
+	} else if active > 0 || failed > 0 {
+		state = "retrying"
+	} else if succeeded > 0 {
+		state = "completed"
+	} else if failed > 0 {
+		state = "failed"
+	}
+	return map[string]any{"status": state, "active": active, "failed": failed, "succeeded": succeeded}
 }
 
 func (r *KubernetesAgentRuntime) UpgradeVelero(ctx context.Context, options VeleroUpgradeOptions) error {
@@ -548,13 +613,17 @@ func (r *KubernetesAgentRuntime) UpgradeVelero(ctx context.Context, options Vele
 	}
 	nodeAgentContainer := map[string]any{"name": "node-agent", "image": options.Image, "imagePullPolicy": "Always"}
 	cacheCapability := ""
+	isolationCapability := ""
+	if supportsCacheIsolationImage(options.Image) {
+		isolationCapability = "v1"
+	}
 	if supportsPersistentCache(options.Image) {
 		cacheCapability = "v1"
 	}
 	if options.NodeAgentConcurrency > 0 {
 		nodeAgentContainer["args"] = []string{"node-agent", "server", "--node-agent-configmap=node-agent-config", "--backup-repository-configmap=backup-repository-config"}
 	}
-	daemonSetPatch, _ := json.Marshal(map[string]any{"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"annotations": map[string]string{"hypercdr.io/velero-upgrade-at": time.Now().UTC().Format(time.RFC3339Nano), "hypercdr.io/cache-persistence-supported": cacheCapability, "hypercdr.io/cache-persistence-image": options.Image}}, "spec": map[string]any{"containers": []map[string]any{nodeAgentContainer}}}}})
+	daemonSetPatch, _ := json.Marshal(map[string]any{"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"annotations": map[string]string{"hypercdr.io/velero-upgrade-at": time.Now().UTC().Format(time.RFC3339Nano), "hypercdr.io/cache-persistence-supported": cacheCapability, "hypercdr.io/cache-isolation-supported": isolationCapability, "hypercdr.io/cache-persistence-image": options.Image}}, "spec": map[string]any{"containers": []map[string]any{nodeAgentContainer}}}}})
 	if _, err := r.client.AppsV1().DaemonSets(namespace).Patch(ctx, daemonSetName, types.StrategicMergePatchType, daemonSetPatch, metav1.PatchOptions{}); err != nil {
 		return fmt.Errorf("update node-agent daemonset: %w", err)
 	}

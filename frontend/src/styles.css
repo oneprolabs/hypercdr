@@ -29647,3 +29647,222 @@ html[data-theme='dark'] #root .hbdr-dr-task-log-drawer .hbdr-task-final-result.i
 .hbdr-sync-volume-row .hbdr-sync-volume-heading > span { flex: none; }
  html[data-theme='dark'] #root .premium-app .hbdr-policy-drawer .hbdr-policy-composition-card{background:var(--hc-sunken)!important;border-color:var(--hc-border)!important;color:var(--hc-text-2)!important}
  html[data-theme='dark'] #root .premium-app .hbdr-policy-drawer .hbdr-policy-composition-card[aria-pressed='true']{background:color-mix(in srgb,var(--hc-accent) 15%,var(--hc-surface))!important;border-color:var(--hc-accent)!important;color:var(--hc-text)!important}
+
+#root .premium-app .hbdr-recovery-cluster-cache { margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--hc-border); border-radius: 10px; background: var(--hc-surface-subtle, #fafcff); }
+#root .premium-app .hbdr-recovery-cluster-cache-content { display: flex; align-items: center; gap: 10px; min-height: 54px; }
+#root .premium-app .hbdr-recovery-cluster-cache-content > span:nth-child(2) { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px; }
+#root .premium-app .hbdr-recovery-cluster-cache-content strong { color: var(--hc-text); font-size: 13px; }
+#root .premium-app .hbdr-recovery-cluster-cache-content small { overflow: hidden; color: var(--hc-text-2); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+#root .premium-app .hbdr-recovery-cluster-cache-icon { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; color: #fff; font-weight: 700; }
+#root .premium-app .hbdr-recovery-cluster-cache-icon.is-enabled { background: #238b55; }
+#root .premium-app .hbdr-recovery-cluster-cache-icon.is-disabled { background: #c87823; }
+#root .premium-app .hbdr-recovery-cluster-cache-action { flex: 0 0 auto; padding: 7px 12px; border: 1px solid var(--hc-border-strong); border-radius: 4px; background: var(--hc-surface); color: var(--hc-text); font-size: 12px; font-weight: 700; cursor: pointer; }
+#root .premium-app .hbdr-recovery-cluster-cache-action.is-primary { border-color: var(--hc-accent); background: var(--hc-accent); color: #fff; }
+#root .premium-app .hbdr-recovery-cluster-cache-loading { color: var(--hc-text-2); font-size: 12px; }
+
+#root .premium-app .hbdr-recovery-cluster-field {
+  gap: 0;
+  overflow: hidden;
+  padding: 0 12px 12px;
+  background: #f6f7f9;
+}
+#root .premium-app .hbdr-recovery-cluster-field > .hbdr-recovery-target-section {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+#root .premium-app .hbdr-recovery-cluster-field > .hbdr-recovery-target-section .hbdr-recovery-plain-field {
+  margin: 0;
+  padding-top: 12px;
+}
+#root .premium-app .hbdr-recovery-cluster-field > .hbdr-recovery-cluster-cache {
+  margin: 10px 0 0;
+}
+
+/* Target cluster is one compound field; its inner wrapper must not draw a second frame. */
+#root .premium-app .hbdr-recovery-cluster-field {
+  margin-top: 12px;
+  border: 1px solid #dbe5f2;
+  border-radius: 12px;
+  padding: 0 12px 12px;
+}
+#root .premium-app .hbdr-recovery-cluster-field > .hbdr-recovery-target-section {
+  margin: 0;
+  border: 0 !important;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+#root .premium-app .hbdr-recovery-cluster-field > .hbdr-recovery-target-section .hbdr-recovery-plain-field {
+  padding-top: 12px;
+}
+
+#root .premium-app .hbdr-recovery-cluster-cache-status {
+  display: inline-flex;
+  flex: 0 0 82px;
+  align-items: center;
+  gap: 6px;
+  color: var(--hc-text-2);
+  font-size: 11px;
+  font-weight: 700;
+}
+#root .premium-app .hbdr-recovery-cluster-cache-status i {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+#root .premium-app .hbdr-recovery-cluster-cache-status i.is-enabled { background: #238b55; }
+#root .premium-app .hbdr-recovery-cluster-cache-status i.is-disabled { background: #9aa6b5; }
+
+#root .premium-app .hbdr-recovery-cluster-cache-content { position: relative; align-items: flex-start; min-height: 58px; padding-right: 92px; }
+#root .premium-app .hbdr-recovery-cluster-cache-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 4px; }
+#root .premium-app .hbdr-recovery-cluster-cache-copy strong { font-size: 13px; }
+#root .premium-app .hbdr-recovery-cluster-cache-status { position: absolute; top: 0; right: 0; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; }
+#root .premium-app .hbdr-recovery-cluster-cache-status.is-enabled { color: #197044; }
+#root .premium-app .hbdr-recovery-cluster-cache-status.is-disabled { color: #687789; }
+#root .premium-app .hbdr-recovery-cluster-cache-status i { width: 7px; height: 7px; border-radius: 50%; }
+#root .premium-app .hbdr-recovery-cluster-cache-status.is-enabled i { background: #238b55; }
+#root .premium-app .hbdr-recovery-cluster-cache-status.is-disabled i { background: #9aa6b5; }
+#root .premium-app .hbdr-recovery-cluster-cache-action { align-self: center; }
+#root .premium-app .hbdr-recovery-cluster-cache-content > .hbdr-recovery-cluster-cache-status { display: inline-flex; flex: 0 0 auto; flex-direction: row; min-width: auto; gap: 5px; }
+#root .premium-app .hbdr-recovery-cluster-cache-status { right: 104px; top: 2px; }
+#root .premium-app .hbdr-recovery-cluster-cache-content { padding-right: 0; }
+#root .premium-app .hbdr-recovery-cluster-cache-copy strong em { font-style: normal; font-weight: 700; }
+#root .premium-app .hbdr-recovery-cluster-cache-copy strong em.is-enabled { color: #197044; }
+#root .premium-app .hbdr-recovery-cluster-cache-copy strong em.is-disabled { color: #687789; }
+#root .premium-app .hbdr-recovery-cluster-cache-status { display: none !important; }
+#root .premium-app .hbdr-recovery-cluster-cache {
+  margin: 8px 0 0 218px;
+  padding: 7px 0 0;
+  border: 0;
+  border-top: 1px solid #e6e9ee;
+  border-radius: 0;
+  background: transparent;
+}
+#root .premium-app .hbdr-recovery-cluster-cache-content { min-height: 42px; }
+#root .premium-app .hbdr-recovery-cluster-cache-copy { gap: 2px; }
+#root .premium-app .hbdr-recovery-cluster-cache-copy { display: block; overflow: hidden; padding-top: 5px; text-overflow: ellipsis; white-space: nowrap; }
+#root .premium-app .hbdr-recovery-cluster-cache-copy strong { overflow: hidden; display: block; text-overflow: ellipsis; white-space: nowrap; }
+#root .premium-app .hbdr-recovery-cluster-field > .hbdr-recovery-target-section {
+  padding-bottom: 10px;
+}
+#root .premium-app .hbdr-recovery-cluster-field > .hbdr-recovery-target-section > .hbdr-recovery-cluster-cache {
+  margin: 8px 0 0 218px;
+  padding: 7px 0 0;
+  border: 0;
+  border-top: 1px solid #e6e9ee;
+  border-radius: 0;
+  background: transparent;
+}
+#root .premium-app .hbdr-recovery-cluster-cache-copy strong {
+  font-weight: 700;
+}
+#root .premium-app .hbdr-recovery-cluster-cache-copy strong em.is-enabled,
+#root .premium-app .hbdr-recovery-cluster-cache-copy strong em.is-disabled {
+  font-weight: 700;
+}
+#root .premium-app .hbdr-recovery-cluster-field > .hbdr-recovery-target-section > .hbdr-recovery-cluster-cache { margin-left: 109px; }
+#root .premium-app .hbdr-recovery-cluster-cache-copy { font-weight: 400; }
+#root .premium-app .hbdr-recovery-cluster-cache-copy strong { display: inline; font-weight: 700; }
+#root .premium-app .hbdr-recovery-cluster-cache-details { color: var(--hc-text-2); font-size: 12px; font-weight: 400; }
+/* Final compound Target cluster layout: one frame only. */
+#root .premium-app .hbdr-recovery-cluster-field {
+  margin: 0;
+  border: 0 !important;
+  border-radius: 0;
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+}
+#root .premium-app .hbdr-recovery-cluster-field > .hbdr-recovery-target-section {
+  margin: 0;
+  border: 1px solid #dbe5f2 !important;
+  border-radius: 12px;
+  padding: 0 12px 10px;
+  background: #fafcff;
+  overflow: visible;
+}
+#root .premium-app .hbdr-recovery-cluster-field > .hbdr-recovery-target-section > .hbdr-recovery-plain-field {
+  padding-top: 12px;
+}
+#root .premium-app .hbdr-recovery-cluster-field > .hbdr-recovery-target-section > .hbdr-recovery-cluster-cache {
+  margin: 8px 0 0 218px;
+  padding: 7px 0 0;
+  border: 0;
+  border-top: 1px solid #e6e9ee;
+  background: transparent;
+}
+#root .premium-app .hbdr-recovery-cluster-cache-copy {
+  display: block;
+  padding-top: 0;
+  color: var(--hc-text-2);
+  font-size: 12px;
+  font-weight: 400;
+}
+#root .premium-app .hbdr-recovery-cluster-cache-copy strong {
+  display: inline;
+  color: var(--hc-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+#root .premium-app .hbdr-recovery-cluster-cache-copy strong em {
+  font-style: normal;
+  font-weight: 700;
+}
+#root .premium-app .hbdr-recovery-cluster-cache-details {
+  color: var(--hc-text-2);
+  font-size: 12px;
+  font-weight: 400;
+}
+#root .premium-app .hbdr-recovery-cluster-cache-content { display: flex; align-items: center; gap: 14px; }
+#root .premium-app .hbdr-recovery-cluster-cache-copy { display: flex; min-width: 0; flex: 1; align-items: center; gap: 18px; padding: 0; }
+#root .premium-app .hbdr-recovery-cluster-cache-copy strong { flex: 0 0 auto; }
+#root .premium-app .hbdr-recovery-cluster-cache-details { min-width: 0; margin-left: auto; overflow: hidden; color: var(--hc-text-2); font-size: 12px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+#root .premium-app .hbdr-recovery-cluster-field > .hbdr-recovery-target-section > .hbdr-recovery-cluster-cache { margin-left: 145px; }
+#root .premium-app .hbdr-recovery-cluster-cache-content { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 14px; }
+#root .premium-app .hbdr-recovery-cluster-cache-copy { display: flex; min-width: 0; flex-direction: row; align-items: center; gap: 18px; white-space: nowrap; }
+#root .premium-app .hbdr-recovery-cluster-cache-copy strong { display: inline-block; flex: 0 0 auto; white-space: nowrap; }
+#root .premium-app .hbdr-recovery-cluster-cache-details { display: inline-block; min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The Target cluster compound field owns the single frame; remove the generic field frame. */
+#root .premium-app .hbdr-recovery-cluster-field > .hbdr-recovery-target-section > .hbdr-recovery-plain-field {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 8px 10px !important;
+}
+#root .premium-app .hbdr-recovery-cluster-field > .hbdr-recovery-target-section > .hbdr-recovery-cluster-cache {
+  margin-left: 144px;
+}
+/* Match the existing Target wizard typography. */
+#root .premium-app .hbdr-recovery-cluster-cache-copy strong {
+  color: #26313f;
+  font-size: 12px;
+  font-weight: 700;
+}
+#root .premium-app .hbdr-recovery-cluster-cache-copy strong em.is-enabled {
+  color: #28784f;
+  font-size: 12px;
+}
+#root .premium-app .hbdr-recovery-cluster-cache-copy strong em.is-disabled {
+  color: #7a8796;
+  font-size: 12px;
+}
+#root .premium-app .hbdr-recovery-cluster-cache-details {
+  color: #7a8796;
+  font-size: 11px;
+  font-weight: 400;
+}
+#root .premium-app .hbdr-cache-path-value,
+#root .premium-app .hbdr-cache-path-editor { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
+#root .premium-app .hbdr-cache-path-value code { overflow: hidden; color: var(--hc-text-2); text-overflow: ellipsis; white-space: nowrap; }
+#root .premium-app .hbdr-cache-path-value button,
+#root .premium-app .hbdr-cache-path-editor button { flex: 0 0 auto; padding: 3px 8px; border: 1px solid var(--hc-border); border-radius: 6px; background: var(--hc-surface); color: var(--hc-text); font-size: 11px; }
+#root .premium-app .hbdr-cache-path-editor input { min-width: 0; width: min(280px, 100%); }
+#root .premium-app .hbdr-cache-confirm { margin-top: 14px; padding: 12px; border: 1px solid #f0d49a; border-radius: 8px; background: #fffaf0; color: var(--hc-text); font-size: 12px; line-height: 1.5; }
+#root .premium-app .hbdr-cache-confirm p { margin: 6px 0 0; color: var(--hc-text-2); }
+#root .premium-app .hbdr-cache-confirm > div { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+#root .premium-app .hbdr-cache-confirm button { padding: 5px 10px; border: 1px solid var(--hc-border); border-radius: 6px; background: var(--hc-surface); color: var(--hc-text); font-size: 12px; }
+#root .premium-app .hbdr-cache-confirm button.is-primary { border-color: var(--hc-accent); background: var(--hc-accent); color: #fff; }

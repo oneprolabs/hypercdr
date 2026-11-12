@@ -16,7 +16,9 @@ import {
 } from 'lucide-react';
 import { ScopedResourceSelector, type ScopedResourceSelection } from './components/scoped-resource-selector';
 import { ApiRequestError } from './api/client';
+import { apiGet } from './api/client';
 import { clusterCompatibilityMessage } from './lib/cluster-compatibility';
+import { ClusterCacheSettingsDrawer } from './features/clusters/cluster-cache-settings-drawer';
 
 export type RecoveryWizardMode = 'drill' | 'takeover';
 
@@ -71,6 +73,20 @@ type ClusterOption = {
   compatible: boolean;
   storageClasses?: Array<{ name: string }>;
   apiResources?: Array<{ group?: string; version: string; resource: string; kind: string; namespaced: boolean }>;
+};
+
+type ClusterCacheSettingsPreview = {
+  settings?: {
+    drillEnabled: boolean;
+    drillMaxGiB: number;
+    drillPath: string;
+  } | null;
+  observed?: {
+    phase: string;
+    drillEnabled: boolean;
+    drillMaxGiB: number;
+    drillPath: string;
+  } | null;
 };
 
 export type BackupContentResource = {
@@ -267,6 +283,10 @@ export function RecoveryWizardModal(props: Props) {
   const [contentsError, setContentsError] = React.useState('');
   const [imageMappingHistory, setImageMappingHistory] = React.useState<Record<string, string[]>>({});
   const [submitError, setSubmitError] = React.useState('');
+  const [cachePreview, setCachePreview] = React.useState<ClusterCacheSettingsPreview | null>(null);
+  const [cachePreviewLoading, setCachePreviewLoading] = React.useState(false);
+  const [cacheSettingsOpen, setCacheSettingsOpen] = React.useState(false);
+  const [cacheRefreshKey, setCacheRefreshKey] = React.useState(0);
   const submitErrorRef = React.useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -290,6 +310,21 @@ export function RecoveryWizardModal(props: Props) {
   const targetNamespace = namespaceValue(config, sourceNamespace);
   const restoresToOriginalNamespace = config.namespaceMode === 'original' || targetNamespace === sourceNamespace;
   const targetClusterOption = clusterOptions.find(item => item.name === config.targetCluster);
+  const targetCacheSettings = cachePreview?.observed?.phase === 'applied' ? cachePreview.observed : cachePreview?.settings;
+
+  useEffect(() => {
+    if (!open || mode !== 'drill' || drillStep !== 1 || !targetClusterOption?.id) {
+      setCachePreview(null);
+      return;
+    }
+    let cancelled = false;
+    setCachePreviewLoading(true);
+    void apiGet<ClusterCacheSettingsPreview>(`/api/v1/clusters/${encodeURIComponent(targetClusterOption.id)}/cache-settings`)
+      .then(result => { if (!cancelled) setCachePreview(result); })
+      .catch(() => { if (!cancelled) setCachePreview(null); })
+      .finally(() => { if (!cancelled) setCachePreviewLoading(false); });
+    return () => { cancelled = true; };
+  }, [open, mode, drillStep, targetClusterOption?.id, cacheRefreshKey]);
   const backupStorageClasses = Array.from(new Set(contents.flatMap(item => item.storageClasses || []))).sort();
   const backupImages = recoveryApplicationImages(contents);
   const backupServicePorts = contents.filter(item => item.kind === 'Service').flatMap(item => (item.servicePorts || []).map(port => ({ service: item.name, ...port, key: `${item.name}|${port.port}|${port.protocol || 'TCP'}` }))).sort((a,b) => a.service.localeCompare(b.service) || a.port-b.port);
@@ -611,7 +646,7 @@ export function RecoveryWizardModal(props: Props) {
 
                   <div className="hbdr-recovery-target-layout">
                     <div className="hbdr-recovery-target-main">
-                      <div className="hbdr-recovery-cluster-field">
+                      <div className="hbdr-recovery-target-section hbdr-recovery-cluster-field">
                         <div className="hbdr-recovery-target-section">
                           <label className="hbdr-recovery-plain-field">
                             <span>Target cluster</span>
@@ -628,6 +663,17 @@ export function RecoveryWizardModal(props: Props) {
                               ))}
                             </RecoverySelect>
                           </label>
+                        <div className="hbdr-recovery-cluster-cache" aria-live="polite">
+                          <div className="hbdr-recovery-cluster-cache-content">
+                            {cachePreviewLoading ? <span className="hbdr-recovery-cluster-cache-loading">Loading Drill data cache status…</span> : targetCacheSettings?.drillEnabled ? <>
+                              <span className="hbdr-recovery-cluster-cache-copy"><strong>Drill data cache <em className="is-enabled">· Enabled</em></strong><span className="hbdr-recovery-cluster-cache-details">{targetCacheSettings.drillMaxGiB} GB per node · {targetCacheSettings.drillPath}</span></span>
+                              <button type="button" className="hbdr-recovery-cluster-cache-action" onClick={() => setCacheSettingsOpen(true)}>Manage</button>
+                            </> : <>
+                              <span className="hbdr-recovery-cluster-cache-copy"><strong>Drill data cache <em className="is-disabled">· Disabled</em></strong><span className="hbdr-recovery-cluster-cache-details">Repeated Drill data cannot be reused</span></span>
+                              <button type="button" className="hbdr-recovery-cluster-cache-action is-primary" onClick={() => setCacheSettingsOpen(true)}>Enable cache</button>
+                            </>}
+                          </div>
+                        </div>
                         </div>
                         {clusterOptions.some(cluster => !cluster.compatible) && <p id="hbdr-recovery-target-compatibility" className="hbdr-config-compatibility-note"><span aria-hidden="true">!</span><span><strong>Some targets are unavailable.</strong> {clusterCompatibilityMessage(currentClusterOption?.clusterType)}</span></p>}
                       </div>
@@ -780,6 +826,8 @@ export function RecoveryWizardModal(props: Props) {
                     </div>
                   )}
                 </div>
+
+                {cacheSettingsOpen && targetClusterOption && <ClusterCacheSettingsDrawer clusterId={targetClusterOption.id} name={targetClusterOption.name} onClose={() => setCacheSettingsOpen(false)} onSaved={() => { setCacheSettingsOpen(false); setCacheRefreshKey(value => value + 1); }} />}
 
                 {mode === 'drill' && drillStep === 3 && <div className="hbdr-protect-review-groups hbdr-drill-review">
                   <section><h4><span>1</span>Restore Point</h4><dl><div><dt>Source application</dt><dd>{currentClusterName} / {sourceNamespace}</dd></div><div><dt>Restore point</dt><dd>{selectedPoint?.time || config.pointId}</dd></div></dl></section>

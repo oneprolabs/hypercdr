@@ -299,3 +299,35 @@ Normal unregister flow:
 7. Platform removes the cluster record only after `agent.task.completed`.
 
 `DELETE /api/v1/clusters/{id}?force=true` is platform-only cleanup and must be treated as an operational fallback, not the default UI path.
+
+## Cache configuration transitions
+
+`CacheSettingsCommand` accepts an optional `transition` object containing
+`isolationId`, `nodes`, `paths`, and `previous`. `previous` is a complete cache
+configuration snapshot, including the independent index and Drill host paths,
+enable flags, sizes, and root path. The node list and isolation identity must
+remain fixed across retries and Agent restart recovery. Legacy commands omit
+this object and remain decodable; isolation dispatch requires a qualified Agent
+and node-agent image and must not silently fall back to deleting the original
+directory.
+
+The transition contract requires configuration application and all-node directory
+isolation before configuration success. Isolation failure starts rollback and
+must not create a deletion task. Successful rollback permits configuration
+failure and lock release; incomplete rollback requires continued task-start
+protection. After isolation succeeds, independent cleanup tasks delete only the
+recorded isolation identity, including during manual retry. The isolation ID
+must not change when a cleanup task is retried.
+
+The Agent persists the transition phase before each side effect and resumes
+unfinished cache tasks every 30 seconds while connected, as well as on restart.
+Unknown isolation state retains task-start protection until all node Jobs settle;
+only confirmed terminal isolation failure starts directory and configuration
+rollback. Presence of the schema alone is not a runtime capability advertisement.
+The node-agent image must advertise image-bound
+`hypercdr.io/cache-isolation-supported: v1`.
+
+Automatic retries and restart recovery reuse the cleanup task's Job identity.
+Manual retry creates new Jobs under a new task identity, while retaining the
+original isolation ID, node list and paths. This gives the manual attempt a fresh
+bounded retry allowance without ever targeting a newly created original path.

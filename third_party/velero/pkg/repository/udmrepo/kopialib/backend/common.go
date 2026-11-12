@@ -19,6 +19,7 @@ package backend
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -71,7 +72,9 @@ func SetupNewRepositoryOptions(ctx context.Context, flags map[string]string) rep
 func SetupConnectOptions(ctx context.Context, repoOptions udmrepo.RepoOptions) repo.ConnectOptions {
 	cacheLimit := optionalHaveIntWithDefault(ctx, udmrepo.StoreOptionCacheLimit, repoOptions.StorageOptions, DefaultCacheLimitMB) << 20
 	cacheDir := optionalHaveString(udmrepo.StoreOptionCacheDir, repoOptions.StorageOptions)
-	if strings.HasPrefix(cacheDir, "/var/cache/hypercdr/") && os.Getenv("HCDR_DRILL_DATA_CACHE") == "true" {
+	drillRoot := os.Getenv("HCDR_DRILL_DATA_CACHE_PATH")
+	drillCache := os.Getenv("HCDR_DRILL_DATA_CACHE") == "true" && drillRoot != "" && strings.HasPrefix(filepath.Clean(cacheDir), filepath.Clean(drillRoot)+"/")
+	if drillCache {
 		if budget, err := strconv.ParseInt(os.Getenv("HCDR_DRILL_DATA_CACHE_BUDGET_BYTES"), 10, 64); err == nil && budget > 0 {
 			cacheLimit = budget
 		}
@@ -80,15 +83,21 @@ func SetupConnectOptions(ctx context.Context, repoOptions udmrepo.RepoOptions) r
 	// 80% for data cache and 20% for metadata cache and align to KB
 	dataCacheLimit := (cacheLimit / 5 * 4) >> 10
 	metadataCacheLimit := (cacheLimit / 5) >> 10
+	contentCacheSize := (dataCacheLimit / 5 * 4) << 10
+	contentCacheLimit := dataCacheLimit << 10
+	if strings.HasPrefix(filepath.Clean(cacheDir), "/var/cache/hypercdr/") && !drillCache {
+		contentCacheSize = -1
+		contentCacheLimit = -1
+	}
 
 	return repo.ConnectOptions{
 		CachingOptions: content.CachingOptions{
 			CacheDirectory: cacheDir,
 			// softLimit 80%
-			ContentCacheSizeBytes:  (dataCacheLimit / 5 * 4) << 10,
+			ContentCacheSizeBytes:  contentCacheSize,
 			MetadataCacheSizeBytes: (metadataCacheLimit / 5 * 4) << 10,
 			// hardLimit 100%
-			ContentCacheSizeLimitBytes:  dataCacheLimit << 10,
+			ContentCacheSizeLimitBytes:  contentCacheLimit,
 			MetadataCacheSizeLimitBytes: metadataCacheLimit << 10,
 			MaxListCacheDuration:        content.DurationSeconds(time.Duration(maxCacheDurationSecond) * time.Second),
 		},

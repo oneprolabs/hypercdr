@@ -2,6 +2,7 @@ package wsclient
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -26,16 +27,17 @@ type taskLedger struct {
 }
 
 type taskLedgerRecord struct {
-	TaskID         string           `json:"taskId"`
-	CommandID      string           `json:"commandId,omitempty"`
-	Type           string           `json:"type"`
-	PlanID         string           `json:"planId,omitempty"`
-	Task           json.RawMessage  `json:"task,omitempty"`
-	Object         taskLedgerObject `json:"object"`
-	TerminalAcked  bool             `json:"terminalAcked,omitempty"`
-	CleanupPending bool             `json:"cleanupPending,omitempty"`
-	CreatedAt      string           `json:"createdAt,omitempty"`
-	UpdatedAt      string           `json:"updatedAt,omitempty"`
+	CacheTransition cacheTransitionState `json:"cacheTransition,omitempty"`
+	TaskID          string               `json:"taskId"`
+	CommandID       string               `json:"commandId,omitempty"`
+	Type            string               `json:"type"`
+	PlanID          string               `json:"planId,omitempty"`
+	Task            json.RawMessage      `json:"task,omitempty"`
+	Object          taskLedgerObject     `json:"object"`
+	TerminalAcked   bool                 `json:"terminalAcked,omitempty"`
+	CleanupPending  bool                 `json:"cleanupPending,omitempty"`
+	CreatedAt       string               `json:"createdAt,omitempty"`
+	UpdatedAt       string               `json:"updatedAt,omitempty"`
 }
 
 type taskLedgerObject struct {
@@ -205,6 +207,40 @@ func (l *taskLedger) markTerminalAcked(taskID string) error {
 	return l.flushLocked()
 }
 
+func (l *taskLedger) cacheTransition(taskID string) (cacheTransitionState, error) {
+	if l == nil {
+		return cacheTransitionState{}, fmt.Errorf("task ledger unavailable")
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	record, ok := l.Records[taskID]
+	if !ok {
+		return cacheTransitionState{}, fmt.Errorf("cache transition task is not persisted")
+	}
+	return record.CacheTransition, nil
+}
+
+func (l *taskLedger) saveCacheTransition(taskID string, state cacheTransitionState) error {
+	if l == nil {
+		return fmt.Errorf("task ledger unavailable")
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	record, ok := l.Records[taskID]
+	if !ok {
+		return fmt.Errorf("cache transition task is not persisted")
+	}
+	previous := record
+	record.CacheTransition = state
+	record.UpdatedAt = nowRFC3339()
+	l.Records[taskID] = record
+	if err := l.flushLocked(); err != nil {
+		l.Records[taskID] = previous
+		return err
+	}
+	return nil
+}
+
 func (l *taskLedger) isTerminalAcked(taskID string) bool {
 	if l == nil || taskID == "" {
 		return false
@@ -276,10 +312,30 @@ func (l *taskLedger) flushLocked() error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	file, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, l.path)
+	if _, err := file.Write(data); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, l.path); err != nil {
+		return err
+	}
+	directory, err := os.Open(filepath.Dir(l.path))
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
 }
 
 func (o *eventOutbox) add(message any) error {

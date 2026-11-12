@@ -106,6 +106,9 @@ operations can also be performed as 'velero backup get' and 'velero schedule cre
 
 	c.AddCommand(
 		&cobra.Command{Use: "cache-clean", Hidden: true, RunE: func(cmd *cobra.Command, args []string) error { return persistentcache.Clean(persistentcache.Root) }},
+		newCacheLifecycleCommand("cache-isolate", persistentcache.Isolate),
+		newCacheLifecycleCommand("cache-rollback", persistentcache.RestoreIsolated),
+		newCacheLifecycleCommand("cache-delete-isolated", persistentcache.DeleteIsolated),
 		backup.NewCommand(f),
 		schedule.NewCommand(f),
 		restore.NewCommand(f),

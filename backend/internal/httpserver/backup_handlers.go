@@ -17,6 +17,13 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "cluster_id_and_target_required"})
 		return
 	}
+	if task, ok, err := r.cacheSettingsTaskActive(body.ClusterID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "cache_settings_check_failed"})
+		return
+	} else if ok {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "cache_settings_active", "message": "Cache settings are being applied. Wait until the configuration task finishes before starting sync.", "taskId": task.ID})
+		return
+	}
 	if body.Scope == "" {
 		body.Scope = "all"
 	}

@@ -174,11 +174,19 @@ BACKUP_BACKEND="velero"
 VELERO_IMAGE="{{VELERO_IMAGE}}"
 CACHE_PERSISTENCE_SUPPORTED=""
 case "$VELERO_IMAGE" in
+  registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.7|registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.7@sha256:*) CACHE_PERSISTENCE_SUPPORTED="v1" ;;
   *-cache-v1|*-cache-v1@sha256:*|registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.[56]|registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.[56]@sha256:*) CACHE_PERSISTENCE_SUPPORTED="v1" ;;
 esac
 STORAGE_ON_DEMAND_SUPPORTED=""
 case "$VELERO_IMAGE" in
+  registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.7|registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.7@sha256:*) STORAGE_ON_DEMAND_SUPPORTED="v1" ;;
+  *-isolation-cache-v1|*-isolation-cache-v1@sha256:*) STORAGE_ON_DEMAND_SUPPORTED="v1" ;;
   *-on-demand-cache-v1|*-on-demand-cache-v1@sha256:*|registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.6|registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.6@sha256:*) STORAGE_ON_DEMAND_SUPPORTED="v1" ;;
+esac
+CACHE_ISOLATION_SUPPORTED=""
+case "$VELERO_IMAGE" in
+  registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.7|registry.cn-beijing.aliyuncs.com/oneprolabs/hypercdr:velero-v1.18.2-hcdr.7@sha256:*) CACHE_ISOLATION_SUPPORTED="v1" ;;
+  *-isolation-cache-v1|*-isolation-cache-v1@sha256:*) CACHE_ISOLATION_SUPPORTED="v1" ;;
 esac
 VELERO_AWS_PLUGIN_IMAGE="{{VELERO_AWS_PLUGIN_IMAGE}}"
 VELERO_AZURE_PLUGIN_IMAGE="{{VELERO_AZURE_PLUGIN_IMAGE}}"
@@ -1434,6 +1442,7 @@ spec:
         role: node-agent
       annotations:
         hypercdr.io/cache-persistence-supported: "${CACHE_PERSISTENCE_SUPPORTED}"
+        hypercdr.io/cache-isolation-supported: "${CACHE_ISOLATION_SUPPORTED}"
         hypercdr.io/cache-persistence-image: "${VELERO_IMAGE}"
     spec:
       serviceAccountName: velero

@@ -2,6 +2,21 @@ package httpserver
 
 import "testing"
 
+func TestCacheCleanupRetryChangesAreNotDeduplicated(t *testing.T) {
+	previous := map[string]any{"kind": "CacheCleanup", "completed": 0, "total": 2, "failedAttempts": 0}
+	unchanged := map[string]any{"kind": "CacheCleanup", "completed": float64(0), "total": float64(2), "failedAttempts": float64(0)}
+	if !sameVeleroEventPayload(previous, unchanged) {
+		t.Fatal("unchanged cleanup progress should be deduplicated")
+	}
+	for _, key := range []string{"completed", "total", "failedAttempts"} {
+		changed := map[string]any{"kind": "CacheCleanup", "completed": 0, "total": 2, "failedAttempts": 0}
+		changed[key] = 3
+		if sameVeleroEventPayload(previous, changed) {
+			t.Fatalf("cleanup change in %s was lost", key)
+		}
+	}
+}
+
 func TestVolumeStateChangesAreNotDeduplicatedByBackupResourceVersion(t *testing.T) {
 	observation := func(phase string, elapsed int) map[string]any {
 		return map[string]any{

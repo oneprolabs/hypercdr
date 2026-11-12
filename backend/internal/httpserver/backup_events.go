@@ -425,6 +425,17 @@ func sameVeleroEventPayload(existing map[string]any, incoming map[string]any) bo
 	if len(existing) == 0 || len(incoming) == 0 {
 		return false
 	}
+	if incoming["kind"] == "CacheCleanup" {
+		if existing["kind"] != "CacheCleanup" {
+			return false
+		}
+		for _, key := range []string{"completed", "total", "failedAttempts"} {
+			if fmt.Sprint(existing[key]) != fmt.Sprint(incoming[key]) {
+				return false
+			}
+		}
+		return true
+	}
 	existingName := fmt.Sprint(existing["name"])
 	incomingName := fmt.Sprint(incoming["name"])
 	if existingName == "" || existingName != incomingName {

@@ -15,4 +15,8 @@ It tracks Kopia issue #3902 and pull request #4462. Remove it after the pinned
 Velero/Kopia versions provide equivalent upstream support.
 
 Run `deployments/prepare-patched-source.sh` to create a patched source tree.
-The script verifies both patches with `git apply --check` and stops on drift.
+The script verifies each patch with `git apply --check` and stops on drift.
+
+The metadata-only caching patch returns a passthrough content cache when
+business-data caching is disabled. This preserves the separate metadata cache
+without constructing a content cache backed by nil storage.
