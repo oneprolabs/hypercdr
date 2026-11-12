@@ -798,7 +798,7 @@ export function DrConfigurationModal(props: Props) {
                       <span>Backup policy</span>
                       <div className="hbdr-config-select-action">
                         <select value={protectConfig.policy} onChange={event => setProtectConfig(prev => ({ ...prev, policy: event.target.value }))}>
-                          <option value="">Select policy</option>
+                          <option value="manual">No policy (manual only)</option>
                           {policyOptions.map(policy => <option key={policy.id} value={policy.id}>{policy.name} - {policy.schedule} / {policy.retention}</option>)}
                         </select>
                         <button type="button" aria-label="Create new backup policy" onClick={() => navigateFromConfig(onCreatePolicy)}>+ New</button>

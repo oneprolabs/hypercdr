@@ -251,6 +251,16 @@ func (r *Router) reconcilePlatformSchedules(now time.Time) {
 			continue
 		}
 		if !shouldSchedule {
+			schedule, found, err := r.store.GetProtectionPlanSchedule(plan.ID)
+			if err != nil {
+				r.logger.Error("failed to get protection plan schedule", "plan_id", plan.ID, "error", err)
+				continue
+			}
+			if found && schedule.Enabled {
+				if err := r.store.DisableProtectionPlanSchedule(plan.ID); err != nil {
+					r.logger.Error("failed to disable protection plan schedule without an active scheduling policy", "plan_id", plan.ID, "error", err)
+				}
+			}
 			continue
 		}
 		schedule, ok, err := r.store.GetProtectionPlanSchedule(plan.ID)

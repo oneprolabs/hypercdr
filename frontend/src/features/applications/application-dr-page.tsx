@@ -1464,8 +1464,8 @@ export default function ApplicationDrPage(props: {
         size: 122,
         minSize: 104,
         maxSize: 260,
-        cell: info => <span className="hbdr-dr-policy"><Clock size={15} />{info.row.original.policy || 'Daily Incremental'}</span>,
-        meta: { title: app => app.policy || 'Daily Incremental' },
+        cell: info => <span className="hbdr-dr-policy"><Clock size={15} />{info.row.original.policy || 'Manual only'}</span>,
+        meta: { title: app => app.policy || 'Manual only' },
       });
     }
     if (visibleRunColumns.includes('repository')) {
@@ -2541,7 +2541,7 @@ export default function ApplicationDrPage(props: {
             protectionStatus: 'protected',
             protectionPlanId: planIdByAppName[meta.name],
             protectionPlanCreatedAt: createdPlan?.createdAt,
-            policy: selectedPolicy?.name,
+            policy: selectedPolicy?.name || '',
             storage: selectedStorage?.name,
             targetCluster: selectedTarget?.name || '',
             isProtected: true,

@@ -16,6 +16,17 @@ test('protection configuration preserves an explicitly empty default target', ()
   assert.doesNotMatch(settings, /protectConfig\.targetCluster \|\| targetClusterOptions\.length === 0/);
 });
 
+test('protection configuration can skip or clear a policy without showing a default schedule', () => {
+  const wizard = readFileSync(new URL('../protect-applications-wizard.tsx', import.meta.url), 'utf8');
+  assert.match(wizard, /props\.step === 4 && \(!props\.protectConfig\.policy \|\| props\.protectConfig\.policy === 'manual'/);
+  assert.match(wizard, /No policy \(manual only\)/);
+  assert.match(wizard, /policy: 'manual'/);
+  const page = readFileSync(new URL('../features/applications/application-dr-page.tsx', import.meta.url), 'utf8');
+  assert.match(page, /policyId = policies\.some/);
+  assert.match(page, /policy: selectedPolicy\?\.name \|\| ''/);
+  assert.doesNotMatch(page, /Daily Incremental/);
+});
+
 test('restore points do not invent a recovery target and require an explicit execution target', () => {
   const page = readFileSync(new URL('../features/restore-points/restore-point-page.tsx', import.meta.url), 'utf8');
   assert.match(page, /targetCluster: targetCluster\?\.name \|\| ''/);

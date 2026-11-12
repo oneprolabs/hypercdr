@@ -312,14 +312,14 @@ chmod 600 hypercdr-native-kubeconfig.yaml
 
 - 源集群 Agent online。
 - 对象存储测试成功。
-- 已创建策略，并准备好目标集群或隔离目标。
+- 策略和默认目标集群均可选；执行 Drill 或接管前必须选择实际目标集群。
 
 ### 操作步骤
 
 1. 进入 **DR → Application DR**，选择源集群。
 2. 在 **Select application** 中核对需要保护的业务 Namespace，选择后按页面提示进入下一阶段。
-3. 在 **Set up DR** 中完成保护向导：先检查资源范围及排除项，再选择默认目标集群。
-4. 选择存储方式、仓库和策略。Local CSI Snapshot 与 Remote Repository 的依赖不同，不要认为本地快照天然具备跨集群、跨存储恢复能力。
+3. 在 **Set up DR** 中完成保护向导：先检查资源范围及排除项，再按需选择默认目标集群；选择 **No default target** 可不设置或取消默认目标。
+4. 选择存储方式和仓库，策略可选。选择 **No policy (manual only)** 后仅手动触发同步，不创建定时执行计划，也不按策略自动淘汰恢复点，需要自行管理恢复点数量及存储空间。Local CSI Snapshot 与 Remote Repository 的依赖不同，不要认为本地快照天然具备跨集群、跨存储恢复能力。
 5. 业务需要备份前后处理时配置 Hooks；不需要则保持未配置，不为完成向导而添加空脚本。
 6. 在 **Configuration Review** 核对 Scope、Target、Storage、Policy 和 Hooks，确认后提交。
 7. 返回 **Run DR** 检查配置状态。恢复时的目标 Namespace、存储类和镜像映射在恢复向导中另行核对，不应当成保护向导已经执行过的恢复操作。
@@ -332,7 +332,7 @@ chmod 600 hypercdr-native-kubeconfig.yaml
 | Default target | 默认恢复目标集群，不代表提交保护后立即在目标端创建业务资源 |
 | Remote Repository | 使用对象存储仓库，核对仓库及集群访问条件 |
 | Local CSI Snapshot | 依赖本地 CSI 快照能力，应核对驱动和恢复边界 |
-| Policy | 可复用调度和保留配置；手动触发策略不产生定时执行计划 |
+| Policy | 可选的调度和保留配置；不选策略时仅手动同步，不按策略自动清理恢复点。取消已有策略会停用后续定时调度，保留已有恢复点；已下发的清理任务不会因此自动撤销 |
 | Pre-backup Hook | 备份前执行，可用于应用静默、刷新或检查；需自行验证脚本正确性 |
 | Post-backup Hook | 备份后处理，可用于恢复应用状态、清理或通知 |
 | Entry script / Dependencies | Hook 入口与依赖文件；核对入口选择和依赖完整性 |
