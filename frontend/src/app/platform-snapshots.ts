@@ -5,7 +5,7 @@ import { listStorageRepositories } from '../api/storage.ts';
 import { listProtectionPlans } from '../api/protection-plans.ts';
 import { listRestorePoints } from '../api/restore-points.ts';
 import { getTask, listTasks } from '../api/tasks.ts';
-import { listItems, type ApiTask, type ApiProtectionPlan } from '../features/recovery/types.ts';
+import { listItems, type ApiTask, type ApiProtectionPlan, type ApiApplication } from '../features/recovery/types.ts';
 import type { ApiCluster } from '../features/recovery/platform-types.ts';
 
 type CurrentScope = () => boolean;
@@ -25,13 +25,20 @@ async function completePlanTasks(tasks: ApiTask[], plans: ApiProtectionPlan[], i
 
 // These loaders own dependency ordering and session checks. They return domain
 // data; mapping and React state commits belong to usePlatformResources.
-export async function loadPlatformSnapshot(isCurrent: CurrentScope, onClusters?: (clusters: ApiCluster[]) => void, completeHistory = false) {
+export async function loadPlatformSnapshot(isCurrent: CurrentScope, onClusters?: (clusters: ApiCluster[]) => void, completeHistory = false, onInventory?: (inventory: { clusters: ApiCluster[]; applications: ApiApplication[]; plans: ApiProtectionPlan[] }) => void) {
   if (!isCurrent()) return null;
   const clusterRequest = listClusters();
   void clusterRequest.then(response => { if (isCurrent()) onClusters?.(listItems(response)); }).catch(() => undefined);
+  const appRequest = listApplications();
+  const planRequest = listProtectionPlans();
+  const inventoryRequest = Promise.all([clusterRequest, appRequest, planRequest]).then(([clusters, applications, plans]) => {
+    if (isCurrent()) onInventory?.({ clusters: listItems(clusters), applications: listItems(applications), plans: listItems(plans) });
+  });
+  void inventoryRequest.catch(() => undefined);
   const [clusterRes, appRes, storageRes, policyRes, planRes, taskRes, tagRes, pointRes] = await Promise.all([
-    clusterRequest, listApplications(), listStorageRepositories(), listPolicies(), listProtectionPlans(), readActivityTasks(completeHistory), listTags(), listRestorePoints(true, completeHistory ? 0 : 500),
+    clusterRequest, appRequest, listStorageRepositories(), listPolicies(), planRequest, readActivityTasks(completeHistory), listTags(), listRestorePoints(true, completeHistory ? 0 : 500),
   ]);
+  await inventoryRequest;
   if (!isCurrent()) return null;
   const plans = listItems(planRes);
   const tasks = await completePlanTasks(listItems(taskRes), plans, isCurrent);

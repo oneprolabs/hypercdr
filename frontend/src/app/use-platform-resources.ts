@@ -10,6 +10,20 @@ import { listItems, type ApiApplication, type ApiList, type ApiPolicy, type ApiP
 import type { ApiCluster, ApiStorageRepo } from '../features/recovery/platform-types';
 import { mapRestorePoint, buildAppTaskMap, mergeTaskMapKeepingActive, mapApps, mapCluster, mapStorageRepo } from './platform-data';
 const SELECTED_CLUSTER_KEY = 'hypercdr.selectedClusterId';
+function selectWorkspaceCluster(previous: Cluster | null, clusters: Cluster[]): Cluster | null {
+  const selected = previous && clusters.find(cluster => cluster.id === previous.id);
+  if (selected) return selected;
+  let storedId = '';
+  try {
+    storedId = localStorage.getItem(SELECTED_CLUSTER_KEY) || '';
+  } catch {
+    storedId = '';
+  }
+  return clusters.find(cluster => cluster.id === storedId)
+    || clusters.find(cluster => cluster.isDefault)
+    || clusters[0]
+    || null;
+}
 const PLATFORM_DATA_VIEWS = new Set<string>([
   'dashboard',
   'applications',
@@ -149,7 +163,30 @@ export function usePlatformResources({ sessionToken, view, resourceSessionOwnerR
       const snapshot = await loadPlatformSnapshot(() => resourceSessionOwnerRef.current === owner, apiClusters => {
         setLiveApiClusters(apiClusters);
         setLiveClusters(previous => apiClusters.map(cluster => mapCluster(cluster, previous?.find(item => item.id === cluster.id)?.apps || [])));
-      }, targetView === 'dashboard');
+      }, targetView === 'dashboard', inventory => {
+        const apiClusters = inventory.clusters;
+        setLiveApiApps(inventory.applications);
+        liveApiAppsRef.current = inventory.applications;
+        setLiveApiPlans(inventory.plans);
+        const nextClusters = apiClusters.map(cluster => mapCluster(cluster, mapApps(
+          inventory.applications.filter(app => app.clusterId === cluster.id), inventory.plans, [], [], apiClusters,
+        )));
+        setSelectedCluster(previous => selectWorkspaceCluster(previous, nextClusters));
+        setClusters(previous => nextClusters.map(cluster => ({
+          ...cluster,
+          apps: cluster.apps.map(app => {
+            const existing = previous.find(item => item.id === cluster.id)?.apps.find(item => item.apiId === app.apiId);
+            return existing ? { ...existing, ...app, policy: existing.policy, storage: existing.storage, targetCluster: existing.targetCluster } : app;
+          }),
+        })));
+        setLiveClusters(previous => nextClusters.map(cluster => ({
+          ...cluster,
+          apps: cluster.apps.map(app => {
+            const existing = previous?.find(item => item.id === cluster.id)?.apps.find(item => item.apiId === app.apiId);
+            return existing ? { ...existing, ...app, policy: existing.policy, storage: existing.storage, targetCluster: existing.targetCluster } : app;
+          }),
+        })));
+      });
       if (!snapshot || resourceSessionOwnerRef.current !== owner) return [];
       const { clusters: apiClusters, applications: apiApps, storage: apiStorage, policies: apiPolicies, plans: apiPlans, tasks: apiTasks } = snapshot;
       const apiRestorePoints = snapshot.restorePoints.map(mapRestorePoint);
@@ -188,22 +225,7 @@ export function usePlatformResources({ sessionToken, view, resourceSessionOwnerR
       setLiveApiApps(apiApps);
       setLiveAppTasks(previous => mergeTaskMapKeepingActive(previous, nextAppTasks));
       setLiveRecoveryTasks(previous => mergeTaskMapKeepingActive(previous, nextRecoveryTasks));
-      setSelectedCluster(prev => {
-        if (prev && nextClusters.some(cluster => cluster.id === prev.id)) {
-          return nextClusters.find(cluster => cluster.id === prev.id) || nextClusters[0] || null;
-        }
-        let storedSelectedId = '';
-        try {
-          storedSelectedId = localStorage.getItem(SELECTED_CLUSTER_KEY) || '';
-        } catch {
-          // localStorage may be unavailable in private contexts.
-        }
-        const apiDefault = nextClusters.find(cluster => cluster.isDefault);
-        return nextClusters.find(cluster => cluster.id === storedSelectedId)
-          || apiDefault
-          || nextClusters[0]
-          || null;
-      });
+      setSelectedCluster(previous => selectWorkspaceCluster(previous, nextClusters));
       setDefaultClusterId(() => {
         const apiDefault = nextClusters.find(cluster => cluster.isDefault);
         return apiDefault?.id || null;

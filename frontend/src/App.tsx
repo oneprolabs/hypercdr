@@ -169,13 +169,19 @@ const LazyApplicationDrPage = lazyWithUpgradeRecovery(() => import('./features/a
 const LazyRestorePointPage = lazyWithUpgradeRecovery(() => import('./features/restore-points/restore-point-page'));
 const LazyBackupRecoveryTaskPage = lazyWithUpgradeRecovery(() => import('./features/tasks/backup-recovery-task-page'));
 
+const pageModules: Record<string, { preload: () => Promise<unknown> }> = {
+  applications: LazyApplicationDrPage, clusters: LazyClusterPage,
+  activity: LazyActivityLogPage, users: LazyCommunityUserManagementPage,
+  dashboard: LazyOverviewPage, operations: LazyOperationsCenterPage,
+  storage: LazyStoragePage, policies: LazyPolicyPage,
+  restore_points: LazyRestorePointPage, dr_tasks: LazyBackupRecoveryTaskPage,
+  logs: LazyDiagnosticLogsPage, support_bundle: LazySupportBundlePage,
+  tags: LazyTagManagementPage, email_settings: LazyEmailSettingsPage,
+  upgrades: LazyUpgradeManagementPage, profile: LazyProfilePage, failback: FailbackPage,
+};
+
 function prefetchView(view: string) {
-  const pages: Record<string, { preload: () => Promise<unknown> }> = {
-    clusters: LazyClusterPage, applications: LazyApplicationDrPage,
-    storage: LazyStoragePage, policies: LazyPolicyPage,
-    restore_points: LazyRestorePointPage, dr_tasks: LazyBackupRecoveryTaskPage,
-  };
-  void pages[view]?.preload().catch(() => undefined);
+  void pageModules[view]?.preload().catch(() => undefined);
 }
 
 type View =
@@ -677,7 +683,7 @@ const topNav: Array<{ key: TopModule; view: View }> = [
   { key: 'overview', view: 'dashboard' },
   { key: 'dr', view: 'applications' },
   { key: 'config', view: 'clusters' },
-  { key: 'ops', view: 'operations' },
+  { key: 'ops', view: 'activity' },
   { key: 'settings', view: 'profile' },
 ];
 
@@ -920,10 +926,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
     const owner = authSession.session.token;
     let idle: number | undefined;
     const timer = window.setTimeout(() => {
-      const warm = () => void warmPageModules([
-        LazyClusterPage.preload, LazyApplicationDrPage.preload,
-        LazyStoragePage.preload, LazyPolicyPage.preload,
-      ], () => !cancelled && resourceSessionOwnerRef.current === owner);
+      const warm = () => void warmPageModules(Object.values(pageModules).map(module => module.preload), () => !cancelled && resourceSessionOwnerRef.current === owner);
       if (window.requestIdleCallback) idle = window.requestIdleCallback(warm, { timeout: 1500 });
       else warm();
     }, 750);
@@ -1556,9 +1559,9 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
       return {
         title: 'Operations',
         items: [
-          { label: 'Operations Center', desc: 'Platform health, active operations, and current issues', view: 'operations' as View, icon: Activity },
           ...(!hasEnterpriseAuditModule && !productCapabilities.advancedAudit?.enabled ? [{ label: 'Activity Log', desc: 'Review administrator actions and results', view: 'activity' as View, icon: ClipboardList }] : []),
           ...visibleExtensionModules.filter(module => module.navigation.group === 'operations').map(module => ({ label: module.navigation.label, desc: module.navigation.description, view: module.view as View, icon: module.navigation.icon })),
+          { label: 'Operations Center', desc: 'Platform health, active operations, and current issues', view: 'operations' as View, icon: Activity },
           { label: 'Diagnostic Logs', desc: 'Search platform and managed-cluster logs', view: 'logs' as View, icon: Terminal },
           ...(authSession?.user.systemAdmin ? [{ label: 'Support Bundle', desc: 'Collect a comprehensive troubleshooting package', view: 'support_bundle' as View, icon: FileArchive }] : []),
         ],
@@ -1852,6 +1855,9 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
           </div>
           <nav>
             {topNav.filter(item => item.key !== 'settings' || authSession?.user.role === 'admin' || visibleExtensionModules.some(module => module.navigation.group === 'settings')).map(item => {
+              const targetView = item.key === 'ops' && (hasEnterpriseAuditModule || productCapabilities.advancedAudit?.enabled)
+                ? (visibleExtensionModules.find(module => module.navigation.group === 'operations')?.view as View | undefined) || 'operations'
+                : item.view;
               const requiresOnboarding = ['dr', 'ops', 'config'].includes(item.key) && onboarding !== 'ready';
               const isConfig = item.key === 'config';
               const showBadge = isConfig && onboarding === 'register';
@@ -1859,15 +1865,15 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
               return (
                 <button
                   key={item.key}
-                  onMouseEnter={() => prefetchView(item.view)}
-                  onFocus={() => prefetchView(item.view)}
+                  onMouseEnter={() => prefetchView(targetView)}
+                  onFocus={() => prefetchView(targetView)}
                   onClick={() => openView(item.key === 'settings'
                     ? (authSession?.user.systemAdmin
                       ? (productCapabilities.advancedIdentity?.enabled
                         ? (visibleExtensionModules.find(module => module.navigation.group === 'settings')?.view as View | undefined) || 'users'
                         : 'users')
                       : (visibleExtensionModules.find(module => module.navigation.group === 'settings')?.view as View | undefined) || 'profile')
-                    : item.view)}
+                    : targetView)}
                   disabled={false}
                   className={activeModule === item.key ? 'bg-blue-50 text-blue-700' : ''}
                 >

@@ -9,6 +9,41 @@ import { updateApplicationProtection } from '../api/applications.ts';
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 const response = body => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
 
+test('namespace inventory is published before slow activity and restore-point history', async t => {
+  setup(t);
+  const pending = deferred();
+  const published = deferred();
+  const paths = [];
+  globalThis.fetch.mock.mockImplementation(async path => {
+    paths.push(path);
+    if (path.startsWith('/api/v1/tasks?') || path.startsWith('/api/v1/restore-points?')) { await pending.promise; return response({ items: [] }); }
+    if (path === '/api/v1/applications') return response({ items: [{ id: 'app', clusterId: 'cluster', namespace: 'demo' }] });
+    if (path === '/api/v1/clusters') return response({ items: [{ id: 'cluster' }] });
+    if (path === '/api/v1/protection-plans') return response({ items: [{ id: 'plan', appIds: ['app'] }] });
+    return response({ items: [] });
+  });
+  const snapshot = loadPlatformSnapshot(() => true, undefined, false, inventory => published.resolve(inventory));
+  const inventory = await published.promise;
+  assert.equal(inventory.applications[0].namespace, 'demo');
+  assert.equal(inventory.plans[0].id, 'plan');
+  assert.equal(paths.filter(path => path === '/api/v1/applications').length, 1);
+  pending.resolve();
+  assert.equal((await snapshot).applications[0].id, 'app');
+});
+
+test('late namespace inventory is not published after the session changes', async t => {
+  setup(t);
+  const pending = deferred();
+  let current = true;
+  const published = [];
+  globalThis.fetch.mock.mockImplementation(async path => path === '/api/v1/applications' ? pending.promise : response({ items: [] }));
+  const snapshot = loadPlatformSnapshot(() => current, undefined, false, inventory => published.push(inventory));
+  current = false;
+  pending.resolve(response({ items: [{ id: 'old' }] }));
+  assert.equal(await snapshot, null);
+  assert.deepEqual(published, []);
+});
+
 function setup(t) {
   const storage = new Map();
   const oldStorage = globalThis.localStorage;

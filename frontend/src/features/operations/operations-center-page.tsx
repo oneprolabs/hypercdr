@@ -48,17 +48,16 @@ export default function OperationsCenterPage({ toast, openLogs, openClusters }: 
     setLoading(true); setLoadError('');
     setSectionLoading({ clusters: true, storage: true, tasks: true });
     const requests = [
-      apiGet<ApiList<ApiCluster>>('/api/v1/clusters'),
-      apiGet<ApiList<ApiStorage>>('/api/v1/storage-repositories'),
-      apiGet<ApiList<ApiTask>>('/api/v1/tasks?view=summary&types=backup,restore,drill,takeover,failback,agent-upgrade,velero-upgrade&statuses=queued,dispatched,accepted,running,syncing,finalizing,canceling,failed&limit=30'),
+      apiGet<ApiList<ApiCluster>>('/api/v1/clusters').then(response => setClusters(listItems(response))).finally(() => setSectionLoading(previous => ({ ...previous, clusters: false }))),
+      apiGet<ApiList<ApiStorage>>('/api/v1/storage-repositories').then(response => setStorage(listItems(response))).finally(() => setSectionLoading(previous => ({ ...previous, storage: false }))),
+      apiGet<ApiList<ApiTask>>('/api/v1/tasks?view=summary&types=backup,restore,drill,takeover,failback,agent-upgrade,velero-upgrade&statuses=queued,dispatched,accepted,running,syncing,finalizing,canceling,failed&limit=30').then(response => setTasks(listItems(response))).finally(() => setSectionLoading(previous => ({ ...previous, tasks: false }))),
     ] as const;
     const results = await Promise.allSettled(requests);
     const errors: string[] = [];
     const [clusterResult, storageResult, taskResult] = results;
-    if (clusterResult.status === 'fulfilled') setClusters(listItems(clusterResult.value)); else errors.push('clusters');
-    if (storageResult.status === 'fulfilled') setStorage(listItems(storageResult.value)); else errors.push('storage');
-    if (taskResult.status === 'fulfilled') setTasks(listItems(taskResult.value)); else errors.push('operations');
-    setSectionLoading({ clusters: false, storage: false, tasks: false });
+    if (clusterResult.status === 'rejected') errors.push('clusters');
+    if (storageResult.status === 'rejected') errors.push('storage');
+    if (taskResult.status === 'rejected') errors.push('operations');
     if (errors.length) { const message = `Could not load ${errors.join(', ')}. Existing data is preserved.`; setLoadError(message); toast(message); }
     setLoading(false);
   }, [toast]);
