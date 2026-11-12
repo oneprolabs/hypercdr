@@ -1101,7 +1101,16 @@ func (c *Client) applyVeleroCRDs(ctx context.Context, rawURL string) error {
 		return fmt.Errorf("invalid Velero CRD URL %q", rawURL)
 	}
 	platform, err := url.Parse(c.cfg.PlatformEndpoint)
-	if err != nil || !strings.EqualFold(target.Host, platform.Host) {
+	if err != nil || platform.Host == "" || (platform.Scheme != "ws" && platform.Scheme != "wss") {
+		return errors.New("invalid platform endpoint for Velero CRD download")
+	}
+	if target.Path == "/assets/velero/v1.18.2/crds.yaml" && target.RawQuery == "" && target.Fragment == "" && target.User == nil {
+		target.Host = platform.Host
+		target.Scheme = "https"
+		if platform.Scheme == "ws" {
+			target.Scheme = "http"
+		}
+	} else if !strings.EqualFold(target.Host, platform.Host) {
 		return fmt.Errorf("Velero CRD URL host %q does not match platform host %q", target.Host, platform.Host)
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
@@ -1112,7 +1121,15 @@ func (c *Client) applyVeleroCRDs(ctx context.Context, rawURL string) error {
 	if err != nil {
 		return err
 	}
-	response, err := (&http.Client{Timeout: 30 * time.Second, Transport: transport}).Do(request)
+	response, err := (&http.Client{Timeout: 30 * time.Second, Transport: transport, CheckRedirect: func(next *http.Request, previous []*http.Request) error {
+		if !strings.EqualFold(next.URL.Host, target.Host) || next.URL.Scheme != target.Scheme {
+			return errors.New("Velero CRD redirect must remain on the connected platform origin")
+		}
+		if len(previous) >= 10 {
+			return errors.New("too many Velero CRD redirects")
+		}
+		return nil
+	}}).Do(request)
 	if err != nil {
 		return err
 	}

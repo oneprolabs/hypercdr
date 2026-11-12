@@ -642,7 +642,7 @@ NodePort 映射按 Service 和服务端口配置。页面显示的有效范围�
 
 1. 进入 **Configuration → Clusters**，找到目标集群。
 2. 在相应组件的 **Update** 入口检查更新。通信组件打开 **Upgrade Agent**；Velero 组件打开 **Upgrade Velero**。没有更新入口时不要将其他组件的升级当作替代。
-3. 核对当前版本、目标版本和镜像标识；Velero 升级还应核对服务端与 Node Agent 范围。
+3. 核对当前版本、目标版本和镜像标识；Velero 升级覆盖 HyperCDR 管理的数据保护组件，包括服务端、Node Agent、AWS/Azure/GCP 存储插件及配套 CRD 和配置，不包含 Comm-agent、Kubernetes 或存储系统本身。
 4. 确认维护条件后提交。只打开升级窗口不会创建升级任务；不准备执行时选择取消。
 5. 在集群任务记录中跟踪升级，等待通信恢复和组件就绪。
 
@@ -653,8 +653,10 @@ NodePort 映射按 Service 和服务端口配置。页面显示的有效范围�
 | Current Version / Current | 当前组件版本；Unknown 表示未获得版本信息，不代表需要强制升级 |
 | Target Version / Target | 本次目标版本，提交前核对与平台发行版的兼容性 |
 | 镜像摘要 | 辅助确认实际镜像身份，不应仅凭相同标签判断内容相同 |
-| Upgrade Scope | Velero 升级窗口中的 Server Deployment 和 Node Agent DaemonSet 范围 |
+| Upgrade Scope | 数据保护组件的升级范围；插件随 Server Deployment 更新，CRD 和配套配置按需应用 |
 | Node Agent ready | 已就绪节点代理与期望数量；升级后应检查是否达到期望值 |
+
+CRD 文件从 Comm-agent 当前连接的平台地址获取，保留该地址的协议及端口；平台同时提供域名和 IP 访问时，不要求重新注册集群。文件下载不允许跳转至其他来源。此行为需要包含该修复的 Comm-agent 版本，旧版本须先升级通信组件。
 
 #### 结果确认
 
