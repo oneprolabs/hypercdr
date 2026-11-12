@@ -213,7 +213,7 @@ export default function RealRestorePointPage({
   const rows: Row[] = points.filter(point => !workspaceCluster?.id || point.sourceClusterId === workspaceCluster.id).map(point => {
     const sourceCluster = clusters.find(item => item.id === point.sourceClusterId);
     const plan = plans.find(item => item.id === point.protectionPlanId || item.appId === point.appId || Boolean(point.appId && item.appIds?.includes(point.appId)));
-    const targetCluster = clusters.find(item => item.id === plan?.targetClusterId) || clusters.find(item => item.id !== point.sourceClusterId);
+    const targetCluster = clusters.find(item => item.id === plan?.targetClusterId);
     const repo = storageRepos.find(item => item.id === point.storageRepoId);
     const originalSize = restorePointOriginalSize(point);
     const storageSize = restorePointStorageSize(point);
@@ -239,8 +239,8 @@ export default function RealRestorePointPage({
       storageSizeTitle: storageSize.title,
       storageSizeBytes: storageSize.bytes,
       sourceCluster: sourceCluster?.name || 'Unknown cluster',
-      targetCluster: targetCluster?.name || sourceCluster?.name || 'Target Cluster',
-      targetClusterId: targetCluster?.id || sourceCluster?.id || point.sourceClusterId,
+      targetCluster: targetCluster?.name || '',
+      targetClusterId: targetCluster?.id || '',
       sourceClusterId: point.sourceClusterId,
       protectionPlanId: point.protectionPlanId,
       status: restorePointListStatus(point),
@@ -439,7 +439,7 @@ export default function RealRestorePointPage({
   ];
   const buildConfig = (mode: 'drill' | 'takeover', row: Row): RecoveryWizardConfig => {
     const currentClusterName = clusters.find(cluster => cluster.id === row.sourceClusterId)?.name || 'Source Cluster';
-    const targetCluster = row.targetCluster || currentClusterName;
+    const targetCluster = row.targetCluster;
     const targetMode = targetCluster === currentClusterName
       ? mode === 'drill' ? 'sandbox' : 'inPlace'
       : 'crossCluster';
@@ -968,10 +968,14 @@ export default function RealRestorePointPage({
             const action = restoreAction;
             const targetNamespace = action.config.namespaceMode === 'original' ? action.row.namespace : action.config.targetNamespace;
             const targetCluster = clusters.find(cluster => cluster.name === action.config.targetCluster);
+            if (!targetCluster) {
+              toast('Select a target cluster before starting recovery');
+              return;
+            }
             setRecoverySubmitting(true);
             try {
               const createdTask = await apiPost<ApiTask>(`/api/v1/tasks/${action.mode}`, {
-                clusterId: targetCluster?.id || action.row.targetClusterId,
+                clusterId: targetCluster.id,
                 protectionPlanId: action.row.protectionPlanId,
                 restorePointId: action.row.id,
                 veleroBackupName: action.row.veleroBackupName,

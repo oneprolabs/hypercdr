@@ -2206,7 +2206,7 @@ export default function ApplicationDrPage(props: {
         ...prev,
         storageId: plan.storageRepoId || '',
         policy: plan.policyId || 'manual',
-        targetCluster: clusters.find(cluster => cluster.id === (plan.targetClusterId || plan.sourceClusterId))?.name || '',
+        targetCluster: clusters.find(cluster => cluster.id === plan.targetClusterId)?.name || '',
         mergeNamespaces: unitMembers(selectedApp).length > 1,
         resourceSelection: {
           mode: plan.resourceSelection?.mode || 'all',
@@ -2475,7 +2475,7 @@ export default function ApplicationDrPage(props: {
           includeClusterScoped: false,
           storageRepoId: protectConfig.storageId,
           policyId,
-          targetClusterId: targetCluster?.id || currentClusterId,
+          targetClusterId: targetCluster?.id || '',
           preHooks: existingPlanId ? protectionPlans.find(plan => plan.id === existingPlanId)?.preHooks || [] : protectConfig.preScripts.map(scriptPayload),
           postHooks: existingPlanId ? protectionPlans.find(plan => plan.id === existingPlanId)?.postHooks || [] : protectConfig.postScripts.map(scriptPayload),
         });
@@ -2521,7 +2521,7 @@ export default function ApplicationDrPage(props: {
 	  }));
       const selectedPolicy = policies.find(policy => policy.id === policyId);
       const selectedStorage = storage.find(repo => repo.id === protectConfig.storageId);
-      const selectedTarget = targetCluster || clusters.find(cluster => cluster.id === currentClusterId);
+      const selectedTarget = targetCluster;
       setProtectionPlans(prev => {
         const byId = new Map(prev.map(plan => [plan.id, plan]));
         createdPlans.forEach(plan => {
@@ -2543,7 +2543,7 @@ export default function ApplicationDrPage(props: {
             protectionPlanCreatedAt: createdPlan?.createdAt,
             policy: selectedPolicy?.name,
             storage: selectedStorage?.name,
-            targetCluster: selectedTarget?.name,
+            targetCluster: selectedTarget?.name || '',
             isProtected: true,
             status: 'Protected',
             lastBackup: 'synced recently',

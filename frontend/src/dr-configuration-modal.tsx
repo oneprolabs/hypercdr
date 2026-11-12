@@ -369,7 +369,7 @@ export function DrConfigurationModal(props: Props) {
   const resourceSelectionValid = multiNamespaceFilterDisabled || isResourceSelectionValid(protectConfig.resourceSelection);
   const selectedTargetCluster = targetClusterOptions.find(cluster => cluster.name === protectConfig.targetCluster);
   const targetCompatible = !selectedTargetCluster || selectedTargetCluster.compatible;
-  const canSave = Boolean(resourceSelectionValid && protectConfig.storageId && targetCompatible && (protectConfig.targetCluster || targetClusterOptions.length === 0));
+  const canSave = Boolean(resourceSelectionValid && protectConfig.storageId && targetCompatible);
   void filteredPolicyOptions;
   void paginatedPolicyOptions;
   void wizardPolicySearchQuery;
@@ -786,7 +786,7 @@ export function DrConfigurationModal(props: Props) {
                         <span>Target cluster</span>
                         <div className="hbdr-config-select-action">
                           <select aria-describedby="hbdr-target-cluster-compatibility" value={protectConfig.targetCluster} onChange={event => setProtectConfig(prev => ({ ...prev, targetCluster: event.target.value }))}>
-                            <option value="">Select target cluster</option>
+                            <option value="">No default target</option>
                             {targetClusterOptions.map(cluster => <option key={cluster.id} value={cluster.name} disabled={!cluster.compatible}>{!cluster.compatible ? 'Unavailable — ' : ''}{cluster.name}{cluster.isCurrent ? ' (source)' : ''}{!cluster.compatible ? ' · incompatible type' : ''}</option>)}
                           </select>
                           <button type="button" aria-label="Register new cluster" onClick={() => navigateFromConfig(onRegisterCluster)}>+ New</button>
@@ -819,7 +819,7 @@ export function DrConfigurationModal(props: Props) {
 
             <footer className="hbdr-filter-drawer-actions hbdr-config-footer">
               <div className="hbdr-config-footer-status">
-                <span className={canSave ? 'is-ready' : ''}>{canSave ? 'Ready' : !resourceSelectionValid ? 'Select at least one included resource' : 'Repository and target cluster required'}</span>
+                <span className={canSave ? 'is-ready' : ''}>{canSave ? 'Ready' : !resourceSelectionValid ? 'Select at least one included resource' : !protectConfig.storageId ? 'Repository required' : 'Select a compatible target cluster'}</span>
               </div>
               <button type="button" onClick={onClose}>Cancel</button>
               <button type="button" className="hbdr-config-save" disabled={!canSave || submitting} onClick={onFinish}>
