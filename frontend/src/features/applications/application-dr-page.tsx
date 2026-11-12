@@ -15,9 +15,9 @@ import {
   History, Layers, ListChecks, MoreVertical, Play, Plus, RefreshCw, Search, Server,
   ShieldCheck, ShieldOff, Trash2, Upload, X, Zap,
 } from 'lucide-react';
-import { DrConfigurationModal, type Props as DrWizardProps } from '../../dr-configuration-modal';
-import { ProtectApplicationsWizard } from '../../protect-applications-wizard';
-import { RecoveryWizardModal, type BackupContentResource, type RecoveryWizardConfig } from '../../recovery-wizard-modal';
+import type { Props as DrWizardProps } from '../../dr-configuration-modal';
+import type { BackupContentResource, RecoveryWizardConfig } from '../../recovery-wizard-modal';
+import { lazyWithUpgradeRecovery } from '../../app/lazy-page';
 import { HyperTable, type HyperTableColumn } from '../../components/table';
 import { SearchBar } from '../../components/search-bar';
 import ListToolbarControls from '../../components/list-toolbar-controls';
@@ -52,6 +52,10 @@ import {
   normalizeResourceCategories, parseColumnFilterToken, recoveryCompletedTargetLabel,
   recoveryCompletedTargetTitle, restorePointDisplayLabel, scriptPayload, taskRestorePointId,
 } from './application-support';
+
+const DrConfigurationModal = lazyWithUpgradeRecovery(() => import('../../dr-configuration-modal').then(module => ({ default: module.DrConfigurationModal })));
+const ProtectApplicationsWizard = lazyWithUpgradeRecovery(() => import('../../protect-applications-wizard').then(module => ({ default: module.ProtectApplicationsWizard })));
+const RecoveryWizardModal = lazyWithUpgradeRecovery(() => import('../../recovery-wizard-modal').then(module => ({ default: module.RecoveryWizardModal })));
 
 export default function ApplicationDrPage(props: {
   apps: AppItem[];
@@ -3117,7 +3121,7 @@ export default function ApplicationDrPage(props: {
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
+      <React.Suspense fallback={<div role="status">Loading recovery wizard…</div>}><AnimatePresence>
         {restoreAction && (
           <RecoveryWizardModal
             open
@@ -3159,11 +3163,11 @@ export default function ApplicationDrPage(props: {
             loadContents={restorePointId => getRestorePointContents<{ resources: BackupContentResource[]; truncated?: boolean }>(restorePointId)}
           />
         )}
-      </AnimatePresence>
+      </AnimatePresence></React.Suspense>
 
-      {guidedProtectWizard
+      {protectWizardOpen && <React.Suspense fallback={<div role="status">Loading configuration wizard…</div>}>{guidedProtectWizard
         ? <ProtectApplicationsWizard {...protectWizardProps} onResourcesChanged={refreshPlatformData} />
-        : <DrConfigurationModal {...protectWizardProps} />}
+        : <DrConfigurationModal {...protectWizardProps} />}</React.Suspense>}
 
       <AnimatePresence>
         {selectedDetailApp && <NamespaceDetailDrawer

@@ -39,7 +39,7 @@ func TestRegistrationUsesConfiguredPort(t *testing.T) {
 				if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 					t.Fatal(err)
 				}
-				for _, want := range []string{base + "/install.sh", "wss://platform.example:" + port + "/ws/agent", "--cluster-type " + clusterType} {
+				for _, want := range []string{base + "/install.sh", "--cluster-type " + clusterType} {
 					if !strings.Contains(result.InstallCommand, want) {
 						t.Fatalf("command missing %q: %s", want, result.InstallCommand)
 					}
@@ -52,6 +52,12 @@ func TestRegistrationUsesConfiguredPort(t *testing.T) {
 				body, err := io.ReadAll(resp.Body)
 				if err != nil {
 					t.Fatal(err)
+				}
+				if !strings.Contains(string(body), `ENDPOINT="wss://platform.example:`+port+`/ws/agent"`) {
+					t.Fatal("script must embed the configured connection address and port")
+				}
+				if strings.Contains(result.InstallCommand, "--endpoint ") {
+					t.Fatal("command must use the embedded endpoint by default")
 				}
 				for _, path := range []string{"/api/v1/agent-tokens/validate", "/uninstall-agent.sh", "/assets/registry/ca.crt", "/assets/platform/ca.crt", veleroCRDsPath} {
 					if !strings.Contains(string(body), base+path) {

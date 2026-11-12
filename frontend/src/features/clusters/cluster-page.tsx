@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ClusterRegistrationChoices } from './cluster-registration-choices';
-import { ClusterCacheSettingsDrawer } from './cluster-cache-settings-drawer';
+import { lazyWithUpgradeRecovery } from '../../app/lazy-page';
 import { ResourceCreateDrawer } from '../../components/resource-create-drawer';
 import { ClusterPlatformRegistrationFields } from './cluster-platform-registration-fields';
 import { ClusterCommandRegistrationFields } from './cluster-command-registration-fields';
@@ -15,7 +15,8 @@ import { Metric, getProtectedAppCount, isClusterProtected } from './cluster-pres
 import type { Cluster, ClusterNamespaceRow, ClusterNodeRow, ClusterStorageClassRow } from './types';
 import type { ApiProtectionPlan } from '../recovery/types';
 import { buildDRTopology, type DRRelationship } from './dr-topology';
-import DRTopologyView from './dr-topology-view';
+const ClusterCacheSettingsDrawer = lazyWithUpgradeRecovery(() => import('./cluster-cache-settings-drawer').then(module => ({ default: module.ClusterCacheSettingsDrawer })));
+const DRTopologyView = lazyWithUpgradeRecovery(() => import('./dr-topology-view'));
 
 type ApiList<T>={items:T[]};
 type ClusterRegistrationType='native-kubernetes'|'huaweicloud-cce'|'openshift';
@@ -778,7 +779,7 @@ export default function ClusterPage(props: {
 
   return (
     <motion.div key="clusters" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="hbdr-clusters-page">
-      {cacheCluster && <ClusterCacheSettingsDrawer clusterId={cacheCluster.id} name={cacheCluster.name} onClose={() => setCacheCluster(null)} onSaved={() => toast('Cache settings saved')} />}
+      {cacheCluster && <React.Suspense fallback={<ResourceCreateDrawer title="Cache settings" kind="cluster" className="hbdr-cache-settings" onClose={() => setCacheCluster(null)} actions={<button type="button" onClick={() => setCacheCluster(null)}>Cancel</button>}><p role="status">Loading cache settings…</p></ResourceCreateDrawer>}><ClusterCacheSettingsDrawer clusterId={cacheCluster.id} name={cacheCluster.name} onClose={() => setCacheCluster(null)} onSaved={() => toast('Cache settings saved')} /></React.Suspense>}
       <div className="hbdr-clusters-workspace">
       <SearchBar title="Clusters" desc="Register clusters and maintain the default cluster." />
 
@@ -1006,7 +1007,7 @@ export default function ClusterPage(props: {
                 ) : topologyLoadError ? (
                   <div className="hbdr-section-card flex min-h-48 flex-col items-center justify-center gap-3 text-xs text-rose-700" role="alert"><span>{topologyLoadError}</span><button type="button" className="hbdr-cluster-topology-trigger" onClick={() => void openTopology()}><RefreshCw size={14} />Retry</button></div>
                 ) : (
-                  <DRTopologyView clusters={clusters} model={topology} selectedRelationshipId={selectedRelationshipId} selectedClusterId={selectedTopologyClusterId} onSelectRelationship={selectRelationship} onSelectCluster={(clusterId) => { setSelectedTopologyClusterId(clusterId); setSelectedRelationshipId(null); }} />
+                  <React.Suspense fallback={<div role="status">Loading DR topology…</div>}><DRTopologyView clusters={clusters} model={topology} selectedRelationshipId={selectedRelationshipId} selectedClusterId={selectedTopologyClusterId} onSelectRelationship={selectRelationship} onSelectCluster={(clusterId) => { setSelectedTopologyClusterId(clusterId); setSelectedRelationshipId(null); }} /></React.Suspense>
                 )}
               </div>
             </motion.aside>

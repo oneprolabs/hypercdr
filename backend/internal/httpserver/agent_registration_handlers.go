@@ -43,12 +43,9 @@ func (r *Router) createAgentToken(w http.ResponseWriter, req *http.Request) {
 		curlCommand = "curl -k -sSL "
 	}
 
-	primaryEndpoint := strings.TrimSpace(r.cfg.AgentPrivateWSEndpoint)
-	if primaryEndpoint == "" {
-		primaryEndpoint = r.agentWSEndpoint(req)
-	}
+	primaryEndpoint := r.installerAgentWSEndpoint(req)
 	installCommand := curlCommand + baseURL + "/install.sh | bash -s -- --token " +
-		token.Token + " --endpoint " + primaryEndpoint
+		token.Token
 	if publicEndpoint := strings.TrimSpace(r.cfg.AgentPublicWSEndpoint); publicEndpoint != "" && publicEndpoint != primaryEndpoint {
 		installCommand += " --endpoint-public " + publicEndpoint
 	}
@@ -57,7 +54,7 @@ func (r *Router) createAgentToken(w http.ResponseWriter, req *http.Request) {
 	// more cluster providers are added.
 	installCommand += " --cluster-type " + clusterType
 	installCommand += " --namespace " + r.agentNamespaceForType(clusterType) +
-		" --executor-mode kubernetes --install-registry-ca false"
+		" --executor-mode kubernetes"
 	response := map[string]any{
 		"id":             token.ID,
 		"token":          token.Token,
@@ -172,7 +169,7 @@ func (r *Router) installScript(w http.ResponseWriter, req *http.Request) {
 	script = strings.ReplaceAll(script, "{{OADP_RUNTIME_IMAGES}}", strings.Join(oadpRuntimeImages, " "))
 	script = strings.ReplaceAll(script, "{{INSTALLER_PROVIDER_MODULES}}", modules)
 	script = strings.ReplaceAll(script, "{{AGENT_NAMESPACE}}", r.cfg.AgentNamespace)
-	script = strings.ReplaceAll(script, "{{AGENT_WS_ENDPOINT}}", r.agentWSEndpoint(req))
+	script = strings.ReplaceAll(script, "{{AGENT_WS_ENDPOINT}}", r.installerAgentWSEndpoint(req))
 	script = strings.ReplaceAll(script, "{{TOKEN_VALIDATE_URL}}", r.publicBaseURL(req)+"/api/v1/agent-tokens/validate")
 	script = strings.ReplaceAll(script, "{{AGENT_UNINSTALL_URL}}", r.publicBaseURL(req)+"/uninstall-agent.sh")
 	script = strings.ReplaceAll(script, "{{VELERO_CRDS_URL}}", r.publicBaseURL(req)+veleroCRDsPath)

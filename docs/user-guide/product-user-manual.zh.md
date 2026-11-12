@@ -202,6 +202,7 @@ chmod 600 hypercdr-native-kubeconfig.yaml
 ### 注意事项与常见问题
 
 - 不要把注册命令、Token 或 kubeconfig 粘贴到公开工单。
+- 注册命令默认使用安装脚本内置的平台连接地址，可用 `--endpoint wss://<地址>/ws/agent` 显式覆盖。镜像仓库 CA 默认不额外安装；使用自签名或内部 CA 镜像仓库时，可显式指定 `--install-registry-ca true`。
 - Agent 采用出站 WSS，中控不需要访问 Agent 入站端口。
 - 注册执行器卡住时检查 kubeconfig context、RBAC、网络和执行器日志。
 - 临时上传会话失效、取消或平台重启后，按提示重新上传和检查，不要复用已经失效的检查结果。

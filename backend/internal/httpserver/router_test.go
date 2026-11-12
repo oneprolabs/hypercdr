@@ -902,12 +902,13 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	server := httptest.NewServer(NewRouter(config.Config{
-		AgentImage:        "registry.local:5000/hypercdr/comm-agent:test",
-		AgentNamespace:    "hypercdr-agent",
-		VeleroImage:       "registry.local:5000/hypercdr/velero:v1.17.1",
-		VeleroAWSPlugin:   "registry.local:5000/hypercdr/velero-plugin-for-aws:v1.13.0",
-		VeleroAzurePlugin: "registry.local:5000/hypercdr/velero-plugin-for-microsoft-azure:v1.13.0",
-		VeleroGCPPlugin:   "registry.local:5000/hypercdr/velero-plugin-for-gcp:v1.13.0",
+		AgentImage:             "registry.local:5000/hypercdr/comm-agent:test",
+		AgentNamespace:         "hypercdr-agent",
+		VeleroImage:            "registry.local:5000/hypercdr/velero:v1.17.1",
+		VeleroAWSPlugin:        "registry.local:5000/hypercdr/velero-plugin-for-aws:v1.13.0",
+		VeleroAzurePlugin:      "registry.local:5000/hypercdr/velero-plugin-for-microsoft-azure:v1.13.0",
+		VeleroGCPPlugin:        "registry.local:5000/hypercdr/velero-plugin-for-gcp:v1.13.0",
+		AgentPrivateWSEndpoint: "wss://10.0.0.10:12443/ws/agent",
 	}, logger, repo))
 	defer server.Close()
 
@@ -921,6 +922,9 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := body.String()
+	if !strings.Contains(text, `ENDPOINT="wss://10.0.0.10:12443/ws/agent"`) || !strings.Contains(text, `INSTALL_REGISTRY_CA="false"`) {
+		t.Fatal("installer must embed the private endpoint and skip registry CA installation by default")
+	}
 	if !strings.Contains(text, `VELERO_IMAGE="registry.local:5000/hypercdr/velero:v1.17.2@sha256:`+strings.Repeat("a", 64)+`"`) {
 		t.Fatal("installer must pin the published Velero digest while preserving the capability tag")
 	}
@@ -1168,8 +1172,8 @@ func TestAgentTokenInstallCommandUsesKubernetesMode(t *testing.T) {
 	if !strings.Contains(body.InstallCommand, "--namespace hypercdr-agent") {
 		t.Fatalf("expected namespace in install command, got %q", body.InstallCommand)
 	}
-	if !strings.Contains(body.InstallCommand, "--install-registry-ca false") {
-		t.Fatalf("expected install command to skip registry CA after prepare-node step, got %q", body.InstallCommand)
+	if strings.Contains(body.InstallCommand, "--install-registry-ca") || strings.Contains(body.InstallCommand, "--endpoint ") {
+		t.Fatalf("expected install command to use installer defaults, got %q", body.InstallCommand)
 	}
 }
 
@@ -1188,13 +1192,13 @@ func TestCCEAgentTokenInstallCommandUsesDualEndpoints(t *testing.T) {
 	if err = json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"--cluster-type huaweicloud-cce", "--endpoint wss://10.0.0.10:3102/ws/agent", "--endpoint-public wss://203.0.113.10:3102/ws/agent"} {
+	for _, expected := range []string{"--cluster-type huaweicloud-cce", "--endpoint-public wss://203.0.113.10:3102/ws/agent"} {
 		if !strings.Contains(body.InstallCommand, expected) {
 			t.Fatalf("CCE install command %q does not contain %q", body.InstallCommand, expected)
 		}
 	}
-	if strings.Contains(body.InstallCommand, "--endpoint-private") {
-		t.Fatalf("CCE install command must expose the primary address as --endpoint: %q", body.InstallCommand)
+	if strings.Contains(body.InstallCommand, "--endpoint-private") || strings.Contains(body.InstallCommand, "--endpoint ") {
+		t.Fatalf("CCE install command must use the embedded primary address: %q", body.InstallCommand)
 	}
 	if body.ClusterType != "huaweicloud-cce" {
 		t.Fatalf("cluster type = %q", body.ClusterType)
@@ -1216,12 +1220,12 @@ func TestNativeAgentTokenInstallCommandUsesDualEndpoints(t *testing.T) {
 	if err = json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"--cluster-type native-kubernetes", "--endpoint wss://10.0.0.10:3002/ws/agent", "--endpoint-public wss://203.0.113.10:3002/ws/agent"} {
+	for _, expected := range []string{"--cluster-type native-kubernetes", "--endpoint-public wss://203.0.113.10:3002/ws/agent"} {
 		if !strings.Contains(body.InstallCommand, expected) {
 			t.Fatalf("native install command %q does not contain %q", body.InstallCommand, expected)
 		}
 	}
-	if strings.Contains(body.InstallCommand, "--endpoint-private") {
+	if strings.Contains(body.InstallCommand, "--endpoint-private") || strings.Contains(body.InstallCommand, "--endpoint ") {
 		t.Fatalf("native install command contains a legacy endpoint argument: %q", body.InstallCommand)
 	}
 }

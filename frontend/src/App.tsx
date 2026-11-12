@@ -4,6 +4,8 @@ import { replaceApplicationTags } from './api/applications';
 import { listTasks, listTaskEvents } from './api/tasks';
 import { listClusterIdentities, setClusterDefault, requestClusterUnregister, upgradeClusterAgent, upgradeClusterVelero } from './api/clusters';
 import { usePlatformResources } from './app/use-platform-resources';
+import { lazyWithUpgradeRecovery } from './app/lazy-page';
+import { warmPageModules } from './app/module-loader';
 
 import ClusterContextCard from './components/cluster-context-card';
 import { RequiredPasswordChange, PasswordChangeSuccess, PasswordRecoveryPage } from './auth/password-pages';
@@ -16,6 +18,7 @@ import { SearchBar } from './components/search-bar';
 import { EditField } from './components/edit-field';
 import ListToolbarControls from './components/list-toolbar-controls';
 import { ReleaseNotesModal } from './components/release-notes-modal';
+import { validateAuthChallenge } from './auth/challenge';
 import {
   Activity,
   AlertCircle,
@@ -148,25 +151,6 @@ import {
 } from './features/restore-points/restore-point-support';
 import { type FrontendModuleContext, validateFrontendModules, type ExtensionViewId, type HyperCDRFrontendModule } from './app/extensions';
 
-const lazyWithUpgradeRecovery = <T extends React.ComponentType<any>>(loader: () => Promise<{ default: T }>) => React.lazy(async () => {
-  const reloadKey = 'hypercdr.lazy-module-reload';
-  try {
-    const loaded = await loader();
-    window.sessionStorage.removeItem(reloadKey);
-    return loaded;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const isStaleBuild = /dynamically imported module|importing a module script failed|failed to fetch/i.test(message);
-    if (isStaleBuild && window.sessionStorage.getItem(reloadKey) !== '1') {
-      window.sessionStorage.setItem(reloadKey, '1');
-      window.location.reload();
-      return new Promise<never>(() => undefined);
-    }
-    window.sessionStorage.removeItem(reloadKey);
-    throw error;
-  }
-});
-
 const FailbackPage = lazyWithUpgradeRecovery(() => import('./features/failback/failback-page'));
 const LazyEmailSettingsPage = lazyWithUpgradeRecovery(() => import('./features/settings/email-settings-page'));
 const LazyUpgradeManagementPage = lazyWithUpgradeRecovery(() => import('./features/upgrades/upgrade-management-page'));
@@ -184,6 +168,15 @@ const LazyOverviewPage = lazyWithUpgradeRecovery(() => import('./features/dashbo
 const LazyApplicationDrPage = lazyWithUpgradeRecovery(() => import('./features/applications/application-dr-page'));
 const LazyRestorePointPage = lazyWithUpgradeRecovery(() => import('./features/restore-points/restore-point-page'));
 const LazyBackupRecoveryTaskPage = lazyWithUpgradeRecovery(() => import('./features/tasks/backup-recovery-task-page'));
+
+function prefetchView(view: string) {
+  const pages: Record<string, { preload: () => Promise<unknown> }> = {
+    clusters: LazyClusterPage, applications: LazyApplicationDrPage,
+    storage: LazyStoragePage, policies: LazyPolicyPage,
+    restore_points: LazyRestorePointPage, dr_tasks: LazyBackupRecoveryTaskPage,
+  };
+  void pages[view]?.preload().catch(() => undefined);
+}
 
 type View =
   | 'login'
@@ -808,7 +801,9 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
   const [loginPasswordVisible, setLoginPasswordVisible] = useState(false);
   const [loginCaptchaCode, setLoginCaptchaCode] = useState('');
   const [loginCaptcha, setLoginCaptcha] = useState<ApiCaptcha | null>(null);
-  const [authConfig, setAuthConfig] = useState<ApiAuthConfig>({ challengeMode: 'image' });
+  const [authConfig, setAuthConfig] = useState<ApiAuthConfig>({});
+  const [authConfigError, setAuthConfigError] = useState('');
+  const [authConfigAttempt, setAuthConfigAttempt] = useState(0);
   const [turnstileToken, setTurnstileToken] = useState('');
   const [turnstileRendered, setTurnstileRendered] = useState(false);
   const turnstileRef = useRef<HTMLDivElement | null>(null);
@@ -900,16 +895,15 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([
-      apiGet<ApiAuthConfig>('/api/v1/auth/config'),
-      apiGet<{ data?: { enabled?: boolean; configured?: boolean; site_key?: string } }>('/api/v1/auth/turnstile/config'),
-    ]).then(([config, turnstile]) => {
+    setAuthConfigError('');
+    void apiGet<ApiAuthConfig>('/api/v1/auth/config').then(validateAuthChallenge).then(config => {
       if (cancelled) return;
-      const t = turnstile.data;
-      setAuthConfig({ ...config, challengeMode: t?.enabled && t?.configured ? 'turnstile' : 'image', turnstileSiteKey: t?.site_key || '' });
-    }).catch(() => undefined);
+      setAuthConfig(config);
+    }).catch(() => {
+      if (!cancelled) setAuthConfigError('Verification settings could not be loaded. Please retry.');
+    });
     return () => { cancelled = true; };
-  }, []);
+  }, [authConfigAttempt]);
 
   useEffect(() => {
     if (!authSession) {
@@ -920,6 +914,25 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
   }, [authSession, releaseNotesAdminAudience]);
   const [clusterRegistrationState, setClusterRegistrationState] = useState<'loading' | 'register' | 'default' | 'ready' | 'error'>('loading');
   const resourceSessionOwnerRef = useRef(authSession?.session.token || '');
+  useEffect(() => {
+    if (!authSession) return;
+    let cancelled = false;
+    const owner = authSession.session.token;
+    let idle: number | undefined;
+    const timer = window.setTimeout(() => {
+      const warm = () => void warmPageModules([
+        LazyClusterPage.preload, LazyApplicationDrPage.preload,
+        LazyStoragePage.preload, LazyPolicyPage.preload,
+      ], () => !cancelled && resourceSessionOwnerRef.current === owner);
+      if (window.requestIdleCallback) idle = window.requestIdleCallback(warm, { timeout: 1500 });
+      else warm();
+    }, 750);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      if (idle !== undefined) window.cancelIdleCallback(idle);
+    };
+  }, [authSession?.session.token]);
   const {
     clusters,
     setClusters,
@@ -1167,6 +1180,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
   }, [authSession, clusterRegistrationAllowed, prefetchAgentToken, view]);
 
   const refreshLoginCaptcha = useCallback(async (clearError = true) => {
+    if (authConfig.challengeMode !== 'image') return;
     try {
       const captcha = await apiGet<ApiCaptcha>('/api/v1/auth/captcha');
       setLoginCaptcha(captcha);
@@ -1176,14 +1190,14 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
       setLoginCaptcha(null);
       setLoginError('Verification code failed to load');
     }
-  }, []);
+  }, [authConfig.challengeMode]);
 
   useEffect(() => {
-    if (view !== 'login' || authSession) return;
+    if (view !== 'login' || authSession || authFlow !== 'login' || authConfig.challengeMode !== 'image') return;
     // Preserve high-value messages such as session expiry while refreshing the
     // one-time captcha. Explicit user actions still clear stale login errors.
     void refreshLoginCaptcha(false);
-  }, [authSession, refreshLoginCaptcha, view]);
+  }, [authSession, authFlow, authConfig.challengeMode, refreshLoginCaptcha, view]);
 
   useEffect(() => {
     if (!authSession) return;
@@ -1206,7 +1220,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
   }, [authSession]);
 
   const submitLogin = useCallback(async () => {
-    if (loginSubmitting) return;
+    if (loginSubmitting || !authConfig.challengeMode) return;
     const turnstile = authConfig.challengeMode === 'turnstile';
     if (!loginEmail.trim() || !loginPassword || (turnstile ? !turnstileToken : !loginCaptchaCode.trim())) {
       setLoginError(turnstile
@@ -1255,8 +1269,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
 
   const applyAuthFlow = useCallback((next: AuthFlow) => {
     setAuthFlow(next); setLoginError(''); setAuthMessage(''); setPasswordResetCompleted(false); setLoginPassword(''); setConfirmPassword(''); setLoginCaptchaCode('');
-    if (next === 'login') void refreshLoginCaptcha(false);
-  }, [refreshLoginCaptcha]);
+  }, []);
 
   const switchAuthFlow = useCallback((next: AuthFlow) => {
     const url = next === 'login' ? window.location.pathname : `${window.location.pathname}?auth=${next}`;
@@ -1568,6 +1581,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
   }, [activeModule, authSession?.user.systemAdmin, hasEnterpriseAuditModule, productCapabilities.advancedAudit?.enabled, productCapabilities.advancedIdentity?.enabled, visibleExtensionModules, view, modules]);
 
   const openView = (nextView: View, options: { preserveSelectedCluster?: boolean; diagnosticTaskId?: string } = {}) => {
+    prefetchView(nextView);
     if (!options.preserveSelectedCluster && (nextView === 'dashboard' || nextView === 'applications' || nextView === 'failback')) {
       const target = defaultWorkspaceCluster;
       if (target) setSelectedCluster(target);
@@ -1576,7 +1590,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
       window.history.pushState({ ...window.history.state, view: nextView }, '', window.location.href);
     }
     writeStoredView(nextView);
-    setView(nextView);
+    React.startTransition(() => setView(nextView));
     setDiagnosticTaskId(nextView === 'logs' ? options.diagnosticTaskId || '' : '');
     if (nextView === 'applications') {
       setAppStage('select');
@@ -1744,7 +1758,8 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
               {authFlow === 'login' && authConfig.challengeMode === 'turnstile' && <div className="hbdr-login-turnstile" aria-label="Cloudflare human verification">
                 <div ref={turnstileRef} />
               </div>}
-              {authFlow === 'login' && authConfig.challengeMode !== 'turnstile' && <div className="hbdr-login-captcha-code" aria-label="Verification code">
+              {authFlow === 'login' && !authConfig.challengeMode && <div role={authConfigError ? 'alert' : 'status'} className="text-xs text-slate-500">{authConfigError || 'Loading verification…'}{authConfigError && <button type="button" onClick={() => setAuthConfigAttempt(attempt => attempt + 1)}>Retry</button>}</div>}
+              {authFlow === 'login' && authConfig.challengeMode === 'image' && <div className="hbdr-login-captcha-code" aria-label="Verification code">
                 <label className="hbdr-login-field">
                   <CheckCircle2 size={15} />
                   <input
@@ -1770,7 +1785,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
               {authMessage && <div className="hbdr-auth-success">{authMessage}</div>}
               <button
                 className="w-full bg-blue-600 text-white"
-                disabled={loginSubmitting}
+                disabled={loginSubmitting || (authFlow === 'login' && !authConfig.challengeMode)}
                 onClick={() => void (authFlow === 'login' ? submitLogin() : authFlow === 'forgot' ? submitForgotPassword() : submitPasswordReset())}
               >
                 {loginSubmitting ? 'Please wait...' : authFlow === 'login' ? 'Sign In' : authFlow === 'forgot' ? 'Send Reset Instructions' : 'Update Password'}
@@ -1844,6 +1859,8 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
               return (
                 <button
                   key={item.key}
+                  onMouseEnter={() => prefetchView(item.view)}
+                  onFocus={() => prefetchView(item.view)}
                   onClick={() => openView(item.key === 'settings'
                     ? (authSession?.user.systemAdmin
                       ? (productCapabilities.advancedIdentity?.enabled
@@ -1952,6 +1969,8 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
                 return (
                   <React.Fragment key={item.view}>{showSection&&<div className="hc-settings-nav-group">{section}</div>}<button
                     data-view={item.view}
+                    onMouseEnter={() => prefetchView(item.view)}
+                    onFocus={() => prefetchView(item.view)}
                     onClick={() => { if (disabled) { setToast(onboardingMessage); openView('clusters'); return; } openView(item.view); }}
                     disabled={disabled}
                     title={disabled ? onboardingMessage : item.label}

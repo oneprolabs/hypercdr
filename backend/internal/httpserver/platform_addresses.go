@@ -28,6 +28,13 @@ func (r *Router) publicBaseURL(req *http.Request) string {
 	return strings.TrimRight(proto+"://"+host, "/")
 }
 
+func (r *Router) installerAgentWSEndpoint(req *http.Request) string {
+	if endpoint := strings.TrimSpace(r.cfg.AgentPrivateWSEndpoint); endpoint != "" {
+		return endpoint
+	}
+	return r.agentWSEndpoint(req)
+}
+
 func (r *Router) agentWSEndpoint(req *http.Request) string {
 	if r.cfg.AgentWSEndpoint != "" {
 		return r.cfg.AgentWSEndpoint
