@@ -159,6 +159,9 @@ TOKEN=""
 ENDPOINT="{{AGENT_WS_ENDPOINT}}"
 ENDPOINT_PRIVATE=""
 ENDPOINT_PUBLIC=""
+PLATFORM_IP=""
+PLATFORM_IP_SET="false"
+ENDPOINT_OVERRIDDEN="false"
 CLUSTER_TYPE="native-kubernetes"
 KUBECONFIG_PATH=""
 KUBECTL_CONTEXT=""
@@ -298,14 +301,25 @@ while [[ $# -gt 0 ]]; do
       ;;
     --endpoint)
       ENDPOINT="${2:-}"
+      ENDPOINT_OVERRIDDEN="true"
       shift 2
       ;;
     --endpoint-private)
       ENDPOINT_PRIVATE="${2:-}"
+      ENDPOINT_OVERRIDDEN="true"
       shift 2
       ;;
     --endpoint-public)
       ENDPOINT_PUBLIC="${2:-}"
+      ENDPOINT_OVERRIDDEN="true"
+      shift 2
+      ;;
+    --platform-ip)
+      if [[ $# -lt 2 || "$2" == --* ]]; then
+        fail "Missing value for --platform-ip" 2
+      fi
+      PLATFORM_IP="$2"
+      PLATFORM_IP_SET="true"
       shift 2
       ;;
     --cluster-type)
@@ -417,6 +431,36 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+replace_platform_host() {
+  local address="$1"
+  local pattern='^((https?|wss?)://)(\[[^]]+\]|[^/:?#]+)(:[0-9]+)?([/?#].*)?$'
+  if [[ ! "$address" =~ $pattern ]]; then
+    fail "Cannot apply --platform-ip to an invalid platform address" 2
+  fi
+  printf '%s%s%s%s' "${BASH_REMATCH[1]}" "$PLATFORM_IP" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"
+}
+
+if [[ "$PLATFORM_IP_SET" == "true" ]]; then
+  if [[ "$ENDPOINT_OVERRIDDEN" == "true" ]]; then
+    fail "--platform-ip cannot be combined with --endpoint, --endpoint-private or --endpoint-public" 2
+  fi
+  if [[ ! "$PLATFORM_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    fail "--platform-ip must be a valid IPv4 address" 2
+  fi
+  IFS=. read -r -a platform_ip_parts <<< "$PLATFORM_IP"
+  for octet in "${platform_ip_parts[@]}"; do
+    if [[ ! "$octet" =~ ^(0|[1-9][0-9]{0,2})$ ]] || (( 10#$octet > 255 )); then
+      fail "--platform-ip must be a valid IPv4 address" 2
+    fi
+  done
+  ENDPOINT="$(replace_platform_host "$ENDPOINT")"
+  TOKEN_VALIDATE_URL="$(replace_platform_host "$TOKEN_VALIDATE_URL")"
+  AGENT_UNINSTALL_URL="$(replace_platform_host "$AGENT_UNINSTALL_URL")"
+  VELERO_CRDS_URL="$(replace_platform_host "$VELERO_CRDS_URL")"
+  REGISTRY_CA_URL="$(replace_platform_host "$REGISTRY_CA_URL")"
+  PLATFORM_CA_URL="$(replace_platform_host "$PLATFORM_CA_URL")"
+fi
 
 if [[ -z "$TOKEN" ]]; then
   fail "Missing required argument: --token" 2

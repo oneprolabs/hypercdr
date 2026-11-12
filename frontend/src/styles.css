@@ -27633,7 +27633,14 @@ html[data-theme='dark'] #root .tags-page .hbdr-page-hero p { color:var(--hc-text
 .hbdr-resource-create-cluster .hbdr-register-command-tools .hbdr-register-regenerate { display:inline-flex; align-items:center; gap:5px; min-height:28px; padding:0 5px; border:0; background:transparent; color:var(--hc-text-3); font-size:11px; font-weight:500; cursor:pointer; }
 .hbdr-resource-create-cluster .hbdr-register-command-tools .hbdr-register-regenerate:hover { background:transparent; color:var(--hc-accent); }
 .hbdr-resource-create-cluster .hbdr-register-command-tools .hbdr-register-regenerate:disabled { opacity:.5; cursor:wait; }
-.hbdr-resource-create-layer .hbdr-resource-create-cluster .hbdr-register-command-compact pre { max-height:170px; margin:0; padding:13px; background:#0f172a; color:#bfdbfe; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.55 'IBM Plex Mono',monospace; }
+.hbdr-resource-create-layer .hbdr-resource-create-cluster .hbdr-register-command-compact pre { max-height:300px; margin:0; padding:13px; background:#0f172a; color:#bfdbfe; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.55 'IBM Plex Mono',monospace; }
+.hbdr-register-platform-ip { display:grid; gap:10px; color:var(--hc-text-2); font:400 12px/1.5 'IBM Plex Sans',sans-serif; }
+.hbdr-register-platform-ip-option { display:flex; align-items:center; gap:8px; width:fit-content; cursor:pointer; }
+.hbdr-register-platform-ip-option input { width:14px; height:14px; margin:0; accent-color:var(--hc-accent); }
+.hbdr-register-platform-ip-field { display:flex; align-items:center; flex-wrap:wrap; gap:10px; padding-left:22px; }
+.hbdr-register-platform-ip-field input { width:210px; max-width:100%; min-height:34px; padding:6px 10px; border:1px solid var(--hc-border-strong); border-radius:5px; background:var(--hc-surface); color:var(--hc-text); font:400 12px 'IBM Plex Mono',monospace; }
+.hbdr-register-platform-ip-field input[aria-invalid="true"] { border-color:var(--hc-danger); }
+.hbdr-register-platform-ip > p[role="alert"] { margin:0; padding-left:22px; color:var(--hc-danger); }
 .hbdr-kubeconfig-guide { position:fixed; inset:0; z-index:510; }
 .hbdr-kubeconfig-guide .hbdr-filter-drawer-backdrop { z-index:0; }
 .hbdr-kubeconfig-guide .hbdr-filter-drawer { z-index:1; width:min(760px,100vw); }

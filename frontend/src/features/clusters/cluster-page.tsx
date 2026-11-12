@@ -577,8 +577,8 @@ export default function ClusterPage(props: {
     setActionCopied(false);
   };
 
-  const copyInstallCommand = async () => {
-    if (await copyTextToClipboard(installCommand, installCommandRef.current)) {
+  const copyInstallCommand = async (command: string) => {
+    if (await copyTextToClipboard(command, installCommandRef.current)) {
       setCopied(true);
       setRegisterStep(3);
       toast('Install command copied');
@@ -1169,7 +1169,7 @@ export default function ClusterPage(props: {
       {registerOpen && <ResourceCreateDrawer title="Register New Cluster" kind="cluster" onClose={closeRegister} actions={cceRegistrationMode === 'command' ? <><button type="button" className="is-primary" onClick={finishRegisterCluster}>Continue in Background</button><button type="button" onClick={closeRegister}>Cancel</button></> : <button type="button" onClick={closeRegister}>{cceRegistrationTask && ['succeeded', 'failed', 'canceled'].includes(cceRegistrationTask.status) ? 'Done' : 'Cancel'}</button>}>
         <ClusterRegistrationChoices registrationType={registrationType} registrationMode={cceRegistrationMode} installLoading={installLoading} onTypeChange={value => { resetDirectRegistration(); void loadRegistrationCommand(value); }} onModeChange={value => { setRegisterStep(1); setCopied(false); setCCERegistrationMode(value); }} />
         {cceRegistrationMode === 'platform-direct' && <ClusterPlatformRegistrationFields registrationType={registrationType} cceUpload={cceUpload} cceContext={cceContext} cceUploadLoading={cceUploadLoading} cceUploadError={cceUploadError} cceInspection={cceInspection} cceInspectionLoading={cceInspectionLoading} cceStorageClass={cceStorageClass} cceRegistrationTask={cceRegistrationTask} onUpload={file => void uploadCCEKubeconfig(file)} onContextChange={setCCEContext} onInspect={() => void inspectCCECluster()} onStorageClassChange={setCCEStorageClass} onRegister={() => void startCCEDirectRegistration()} onCancel={() => void cancelCCEDirectRegistration()} />}
-        {cceRegistrationMode === 'command' && <ClusterCommandRegistrationFields registrationType={registrationType} prepareNodeCommand={prepareNodeCommand} installCommand={installCommand} installLoading={installLoading} installError={installError} copied={copied} caCopied={caCopied} registryCACommandRef={registryCACommandRef} installCommandRef={installCommandRef} onCopyCA={() => void copyRegistryCACommand()} onCopyInstall={() => void copyInstallCommand()} onRegenerate={() => void loadRegistrationCommand(registrationType)} />}
+        {cceRegistrationMode === 'command' && <ClusterCommandRegistrationFields registrationType={registrationType} prepareNodeCommand={prepareNodeCommand} installCommand={installCommand} installLoading={installLoading} installError={installError} copied={copied} caCopied={caCopied} registryCACommandRef={registryCACommandRef} installCommandRef={installCommandRef} onCopyCA={() => void copyRegistryCACommand()} onCopyInstall={command => void copyInstallCommand(command)} onRegenerate={() => void loadRegistrationCommand(registrationType)} />}
       </ResourceCreateDrawer>}
 
       <AnimatePresence>
