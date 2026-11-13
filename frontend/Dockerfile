@@ -11,9 +11,7 @@ ARG RELEASE_DATE
 ARG GIT_COMMIT
 RUN VITE_HCDR_RELEASE_VERSION="${VERSION}" VITE_HCDR_RELEASE_DATE="${RELEASE_DATE}" VITE_HCDR_GIT_COMMIT="${GIT_COMMIT}" \
     npm run build -- --outDir /app/dist --emptyOutDir \
-    && css="$(find /app/dist/assets -maxdepth 1 -name '*.css' -print -quit)" \
-    && test -s "${css}" \
-    && for utility in '.grid{' '.flex{' '.items-center{' '.px-5{' '.py-4{'; do grep -Fq "${utility}" "${css}" || exit 1; done
+    && node scripts/verify-build-css.mjs /app/dist
 
 FROM nginx:1.27-alpine
 COPY docker/nginx/default.conf /etc/nginx/conf.d/default.conf

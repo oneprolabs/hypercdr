@@ -20,5 +20,6 @@ npm ci --cache="${NPM_CACHE}"
 npm run lint
 npm test
 HCDR_FRONTEND_OUT_DIR="${OUT_DIR}" npm run build
+node scripts/verify-build-css.mjs "${OUT_DIR}"
 python3 "${ROOT_DIR}/scripts/dev/provenance.py" record --capture "${WORK_DIR}/.source-build.json" --artifact "${OUT_DIR}" --output "${OUT_DIR}.provenance.json"
 printf '%s\n' "${OUT_DIR}"
