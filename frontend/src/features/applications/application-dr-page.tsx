@@ -98,9 +98,10 @@ export default function ApplicationDrPage(props: {
   const [selectedSelectApps, setSelectedSelectApps] = useState<string[]>([]);
   const [selectedConfigApps, setSelectedConfigApps] = useState<string[]>([]);
   const [selectedRunApps, setSelectedRunApps] = useState<string[]>([]);
-  const [submittingSyncTasks, setSubmittingSyncTasks] = useState<Record<string, ApiTask>>({});
-  const [submittingRecoveryTasks, setSubmittingRecoveryTasks] = useState<Record<string, ApiTask>>({});
+  const [submittedSyncTasks, setSubmittedSyncTasks] = useState<Record<string, ApiTask>>({});
+  const [submittedRecoveryTasks, setSubmittedRecoveryTasks] = useState<Record<string, ApiTask>>({});
   const [syncSubmitting, setSyncSubmitting] = useState(false);
+  const syncSubmittingRef = useRef(false);
   const [recoverySubmitting, setRecoverySubmitting] = useState(false);
   const [protectSubmitting, setProtectSubmitting] = useState(false);
   const protectSubmittingRef = useRef(false);
@@ -129,8 +130,8 @@ export default function ApplicationDrPage(props: {
     labelSelector: { matchLabels: {} as Record<string, string>, matchExpressions: [] as Array<{ key: string; operator: string; values: string[] }> },
     excludedResources: [] as string[],
     storageType: 'local',
-    storageId: storage[0]?.id || '',
-    policy: 'manual',
+    storageId: '',
+    policy: '',
     targetCluster: '',
     mergeNamespaces: false,
     excludeRules: [] as Array<{ group: string; resource: string; name: string; version: string; labels: string }>,
@@ -194,8 +195,8 @@ export default function ApplicationDrPage(props: {
   }, [apps, configAppNames, currentCluster?.apiResources, currentCluster?.namespaceApis, protectWizardMode, selectedConfigApps, selectedRunApps]);
   const [newExcludeRule, setNewExcludeRule] = useState({ group: '', resource: '', name: '', version: '', labels: '' });
   const [editingRuleIndex, setEditingRuleIndex] = useState<number | null>(null);
-  const syncTasks: Record<string, ApiTask> = { ...liveAppTasks, ...submittingSyncTasks };
-  const recoveryTasks: Record<string, ApiTask> = { ...liveRecoveryTasks, ...submittingRecoveryTasks };
+  const syncTasks: Record<string, ApiTask> = { ...liveAppTasks, ...submittedSyncTasks };
+  const recoveryTasks: Record<string, ApiTask> = { ...liveRecoveryTasks, ...submittedRecoveryTasks };
   const setSyncTasks = (updater: any) => {
     if (typeof updater === 'function') {
       setLiveAppTasks(prev => updater(prev));
@@ -277,7 +278,7 @@ export default function ApplicationDrPage(props: {
     setNamespaceTaskPage(1);
     setDrSupportErrorDetail(null);
     setSyncTaskDetail(null);
-    setSubmittingSyncTasks({});
+    setSubmittedSyncTasks({});
     setSyncSubmitting(false);
     setRecoverySubmitting(false);
 	setCleaningPlanIds([]);
@@ -572,11 +573,11 @@ export default function ApplicationDrPage(props: {
   const recoveryTaskForUnit = (app: AppItem) => taskForUnit(recoveryTasks, app, ['restore', 'drill', 'takeover']);
   useEffect(() => {
     const confirmedTaskIds = new Set(platformTasks.map(task => task.id));
-    setSubmittingSyncTasks(prev => {
+    setSubmittedSyncTasks(prev => {
       const next = Object.fromEntries(Object.entries(prev).filter(([, task]) => !confirmedTaskIds.has(task.id)));
       return Object.keys(next).length === Object.keys(prev).length ? prev : next;
     });
-    setSubmittingRecoveryTasks(prev => {
+    setSubmittedRecoveryTasks(prev => {
       const next = Object.fromEntries(Object.entries(prev).filter(([, task]) => !confirmedTaskIds.has(task.id)));
       return Object.keys(next).length === Object.keys(prev).length ? prev : next;
     });
@@ -610,7 +611,7 @@ export default function ApplicationDrPage(props: {
     const profile = profileOf(app);
     // Keep the optimistic submit state visible while the refreshed row is
     // temporarily missing its protectionPlanId.
-    const task = taskForUnit(syncTasks, app) || submittingSyncTasks[app.name];
+    const task = taskForUnit(syncTasks, app) || submittedSyncTasks[app.name];
     const recoveryTask = recoveryTaskForUnit(app);
     if (filter === 'active') return unitMembers(app).some(member => member.status === 'Active' || member.status === 'Running');
     if (filter === 'protected') return stageOf(app) === 'run';
@@ -1571,7 +1572,7 @@ export default function ApplicationDrPage(props: {
         size: 300,
         minSize: 280,
         maxSize: 520,
-        cell: info => <div className="hbdr-task-status-cell" onMouseEnter={() => { const task = submittingSyncTasks[info.row.original.name] || taskForUnit(syncTasks, info.row.original); if (task) taskDetailLoader.prefetch(task.id); }} onFocus={() => { const task = submittingSyncTasks[info.row.original.name] || taskForUnit(syncTasks, info.row.original); if (task) taskDetailLoader.prefetch(task.id); }}>{renderSyncTaskStatus(info.row.original)}</div>,
+        cell: info => <div className="hbdr-task-status-cell" onMouseEnter={() => { const task = submittedSyncTasks[info.row.original.name] || taskForUnit(syncTasks, info.row.original); if (task) taskDetailLoader.prefetch(task.id); }} onFocus={() => { const task = submittedSyncTasks[info.row.original.name] || taskForUnit(syncTasks, info.row.original); if (task) taskDetailLoader.prefetch(task.id); }}>{renderSyncTaskStatus(info.row.original)}</div>,
       });
     }
     if (visibleRunColumns.includes('recoveryTask')) {
@@ -1634,7 +1635,7 @@ export default function ApplicationDrPage(props: {
   const selectedRunHasCleanupRunning = selectedRunRows.some(app => isProtectionPlanCleaning(protectionPlanForApp(app)?.status));
   const selectedCleanupBlockingTasks = protectionCleanupBlockingTasks(
     selectedRunRows.map(app => app.protectionPlanId || '').filter(Boolean),
-    [...platformTasks, ...Object.values(syncTasks), ...Object.values(recoveryTasks), ...Object.values(submittingSyncTasks), ...Object.values(refreshedDrTasks)],
+    [...platformTasks, ...Object.values(syncTasks), ...Object.values(recoveryTasks), ...Object.values(submittedSyncTasks), ...Object.values(refreshedDrTasks)],
   );
   const selectedRunHasActiveTasks = selectedCleanupBlockingTasks.length > 0;
   const cleanupBlockedReason = 'Protection plan has tasks in progress. Wait for them to finish before cleanup.';
@@ -1643,7 +1644,7 @@ export default function ApplicationDrPage(props: {
     .filter((task): task is ApiTask => Boolean(task?.id && isActiveTaskStatus(task.status)));
   const selectedAbortCandidates = forceAbortCandidates(
     selectedRunRows.map(app => app.protectionPlanId || '').filter(Boolean),
-    [...platformTasks, ...Object.values(syncTasks), ...Object.values(recoveryTasks), ...Object.values(submittingSyncTasks), ...Object.values(refreshedDrTasks)],
+    [...platformTasks, ...Object.values(syncTasks), ...Object.values(recoveryTasks), ...Object.values(submittedSyncTasks), ...Object.values(refreshedDrTasks)],
   );
   const selectedRunHasRunningSync = selectedRunActiveSyncTasks.length > 0;
   const canStartSync = selectedRunApps.length > 0 && !syncSubmitting && !selectedRunHasRunningSync && !selectedRunHasCleanupRunning && selectedRunNotReadyRows.length === 0;
@@ -1832,7 +1833,7 @@ export default function ApplicationDrPage(props: {
         unitMembers(action.app).forEach(member => { next[member.name] = immediateTask; });
         return next;
       });
-      setSubmittingRecoveryTasks(prev => {
+      setSubmittedRecoveryTasks(prev => {
         const next = { ...prev };
         unitMembers(action.app).forEach(member => { next[member.name] = immediateTask; });
         return next;
@@ -1874,7 +1875,7 @@ export default function ApplicationDrPage(props: {
     // snapshot is being refreshed.  During that short window the refreshed
     // row can temporarily omit protectionPlanId, so taskForUnit cannot match
     // it even though the sync request has already been accepted by the API.
-    const task = submittingSyncTasks[app.name] || taskForUnit(syncTasks, app);
+    const task = submittedSyncTasks[app.name] || taskForUnit(syncTasks, app);
     const sourceClusterId = unitMembers(app).map(member => member.clusterId).find(Boolean) || app.clusterId || currentClusterId;
     const sourceCluster = clusters.find(cluster => cluster.id === sourceClusterId) || currentCluster || clusters[0] || null;
     const sourceClusterOffline = Boolean(sourceCluster && sourceCluster.connectionStatus !== 'online');
@@ -2094,6 +2095,9 @@ export default function ApplicationDrPage(props: {
       setProtectConfig(prev => ({
         ...prev,
         scope: 'all',
+        targetCluster: '',
+        storageId: '',
+        policy: '',
         includeAllResources: true,
         includedResources: [],
         excludedResources: [],
@@ -2134,28 +2138,8 @@ export default function ApplicationDrPage(props: {
       return;
     }
     let syncWarning = '';
-    const submissionStartedAt = new Date().toISOString();
-    setSubmittingSyncTasks(prev => {
-      const next = { ...prev };
-      selectedRunRows.forEach(app => {
-        const plan = protectionPlanForApp(app);
-        const placeholder: ApiTask = {
-          id: `submitting-sync:${app.protectionPlanId || app.name}`,
-          clusterId: plan?.sourceClusterId || app.clusterId || currentClusterId,
-          appId: app.isMergedPlan ? '' : app.apiId || '',
-          protectionPlanId: app.protectionPlanId || '',
-          type: 'backup',
-          status: 'queued',
-          progress: 0,
-          createdAt: submissionStartedAt,
-          payload: { submissionPending: true },
-        };
-        [app.name, ...unitMembers(app).map(member => member.name)].forEach(key => {
-          next[key] = placeholder;
-        });
-      });
-      return next;
-    });
+    if (syncSubmittingRef.current) return;
+    syncSubmittingRef.current = true;
     setSyncSubmitting(true);
     try {
       const responses = await Promise.all(selectedRunRows.map(app => {
@@ -2184,7 +2168,7 @@ export default function ApplicationDrPage(props: {
         });
         return next;
       });
-      setSubmittingSyncTasks(prev => {
+      setSubmittedSyncTasks(prev => {
         const next = { ...prev };
         selectedRunRows.forEach((app, index) => {
           const response = responses[index];
@@ -2197,18 +2181,10 @@ export default function ApplicationDrPage(props: {
         return next;
       });
     } catch (error) {
-      setSubmittingSyncTasks(prev => {
-        const next = { ...prev };
-        selectedRunRows.forEach(app => {
-          [app.name, ...unitMembers(app).map(member => member.name)].forEach(key => {
-            if (next[key]?.payload?.submissionPending) delete next[key];
-          });
-        });
-        return next;
-      });
       toast('Failed to submit sync job: ' + (error instanceof Error ? error.message : 'unknown error'));
       return;
     } finally {
+      syncSubmittingRef.current = false;
       setSyncSubmitting(false);
     }
     void refreshPlatformData();

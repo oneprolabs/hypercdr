@@ -246,6 +246,11 @@ func (s *PostgresStore) createRestorePoint(input RestorePointInput, finalizeBack
 		}
 	}
 	if finalizeBackup {
+		if _, err := tx.Exec(`update tasks set payload=payload||jsonb_build_object('restorePointChanges',jsonb_build_object(
+			'created',(select jsonb_build_object('id',id,'taskCreatedAt',coalesce(task_created_at,created_at)) from restore_points where source_cluster_id=$2 and velero_backup_name=$3),
+			'deleted',coalesce((select jsonb_agg(jsonb_build_object('id',rp.id,'taskCreatedAt',coalesce(rp.task_created_at,rp.created_at))) from restore_point_reservations rr join restore_points rp on rp.id=rr.replacement_point_id where rr.task_id=$1 and rp.status='deleted'),'[]'::jsonb))) where id=$1`, input.BackupTaskID, input.SourceClusterID, input.VeleroBackupName); err != nil {
+			return RestorePoint{}, err
+		}
 		if _, err := tx.Exec(`update tasks set status='succeeded',progress=100,error_code=null,error_message=null,completed_at=coalesce(completed_at,$2),restore_point_id=(select id from restore_points where source_cluster_id=$3 and velero_backup_name=$4),payload=payload||jsonb_build_object('quotaStage','published','restorePointId',(select id::text from restore_points where source_cluster_id=$3 and velero_backup_name=$4)) where id=$1`, input.BackupTaskID, now, input.SourceClusterID, input.VeleroBackupName); err != nil {
 			return RestorePoint{}, err
 		}

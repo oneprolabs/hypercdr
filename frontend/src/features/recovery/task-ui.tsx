@@ -7,6 +7,7 @@ import { isActiveTaskStatus, isFailedStatus, taskHasWarning } from './task-statu
 import { transferPercent } from './progress-snapshot';
 import { SyncVolumeProgress } from './sync-volume-progress';
 import { TransferProgress } from './transfer-progress';
+import { backupRestorePointChanges } from './recovery-detail-model';
 import { TimelineItem } from './timeline-item';
 import { workloadReadinessEvents, workloadReadinessSnapshot, type WorkloadTimelineEvent } from './workload-readiness';
 import { groupTaskEventsByStage, keyTaskEvents, latestVisibleTaskEvent, reachedTaskStages } from './task-stage-model';
@@ -810,9 +811,6 @@ export function taskStatusDisplay(task: ApiTask, events: ApiTaskEvent[]): TaskSt
   if (task.type === 'backup' && task.status === 'finalizing' && ['data_ready', 'deleting_old_point'].includes(String(task.payload?.quotaStage || ''))) {
     return { stage: 'Creating Restore Point', detail: task.errorMessage || 'Backup data is ready. Replacing an old restore point to release quota.', dataTransfer: false };
   }
-  if (task.payload?.submissionPending) {
-    return { stage: 'Preparing Backup', detail: 'Submitting sync request…', dataTransfer: false };
-  }
   const visible = keyTaskEvents(events.filter(event => !event.taskId || event.taskId === task.id));
   const groups = groupTaskEventsByStage(task, visible);
   // Persisted recoveryStages are authoritative. Event reasons such as
@@ -907,6 +905,7 @@ export function TaskFinalResult({ task, events }: { task: ApiTask; events: ApiTa
       <small>Final result</small>
       <strong>{title}</strong>
       <span>{message}</span>
+      {backupRestorePointChanges(task).map(point => <span key={`${point.label}:${point.value}`}>{point.label}: {point.value}</span>)}
     </div>
   );
 }

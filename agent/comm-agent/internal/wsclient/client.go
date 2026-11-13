@@ -41,6 +41,11 @@ const (
 )
 
 type Client struct {
+	cacheUsage           cacheUsageObservation
+	runtimeObservationMu sync.RWMutex
+	runtimeObservation   runtimeObservation
+	runtimeRefresh       chan struct{}
+	observedActiveBackup atomic.Bool
 	taskRunMu            sync.Mutex
 	taskAborts           sync.Map
 	taskRuns             map[string]*abortableTaskRun
@@ -78,20 +83,21 @@ type Client struct {
 		kube.VeleroRuntimeManager
 		kube.ComponentLogCollector
 	}
-	inventoryMu       sync.RWMutex
-	lastInventory     inventory.Snapshot
-	backupSamples     map[string][]volumeProgressSample
-	backupEvents      map[string]string
-	backupContextMu   sync.RWMutex
-	backupPlanIDs     map[string]struct{}
-	backupTaskIDs     map[string]struct{}
-	backupCommandIDs  map[string]struct{}
-	activeBackupMu    sync.Mutex
-	activeBackupPlans map[string]string
-	activeDrills      atomic.Int64
-	drillCacheMu      sync.RWMutex
-	progressMu        sync.Mutex
-	progressSequence  map[string]int64
+	inventoryMu           sync.RWMutex
+	inventoryCollectionMu sync.Mutex
+	lastInventory         inventory.Snapshot
+	backupSamples         map[string][]volumeProgressSample
+	backupEvents          map[string]string
+	backupContextMu       sync.RWMutex
+	backupPlanIDs         map[string]struct{}
+	backupTaskIDs         map[string]struct{}
+	backupCommandIDs      map[string]struct{}
+	activeBackupMu        sync.Mutex
+	activeBackupPlans     map[string]string
+	activeDrills          atomic.Int64
+	drillCacheMu          sync.RWMutex
+	progressMu            sync.Mutex
+	progressSequence      map[string]int64
 }
 
 type volumeProgressSample struct {
@@ -149,6 +155,7 @@ func NewWithRuntimeDependencies(cfg config.Config, logger *slog.Logger, applier 
 		handover = manager
 	}
 	return &Client{
+		runtimeRefresh:    make(chan struct{}, 1),
 		cfg:               cfg,
 		logger:            logger,
 		collector:         collector,
@@ -443,6 +450,17 @@ func (c *Client) RunHeartbeat() error {
 	defer signal.Stop(stopCh)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	inventoryInterval := c.cfg.InventoryInterval
+	if inventoryInterval <= 0 {
+		inventoryInterval = 5 * time.Minute
+	}
+	if _, supported := c.collector.(interface {
+		CollectPeriodic() (inventory.Snapshot, error)
+	}); supported && inventoryInterval > time.Minute {
+		inventoryInterval = time.Minute
+	}
+	inventoryTicker := time.NewTicker(inventoryInterval)
+	defer inventoryTicker.Stop()
 	veleroTicker := time.NewTicker(5 * time.Second)
 	defer veleroTicker.Stop()
 	outboxTicker := time.NewTicker(30 * time.Second)
@@ -451,6 +469,11 @@ func (c *Client) RunHeartbeat() error {
 	inventoryRequests := make(chan struct{}, 1)
 	workerCtx, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
+	c.cacheUsage.mu.Lock()
+	c.cacheUsage.ctx = workerCtx
+	c.cacheUsage.mu.Unlock()
+	go c.observeRuntime(workerCtx)
+	go c.observeCacheUsage(workerCtx)
 	go func() {
 		initial := true
 		for {
@@ -468,12 +491,18 @@ func (c *Client) RunHeartbeat() error {
 	}()
 	inventoryRequests <- struct{}{}
 	veleroRequests := make(chan struct{}, 1)
+	veleroRequests <- struct{}{}
 	go func() {
+		lastObservation := time.Time{}
 		for {
 			select {
 			case <-workerCtx.Done():
 				return
 			case <-veleroRequests:
+				if !c.veleroObservationDue(lastObservation, time.Now()) {
+					continue
+				}
+				lastObservation = time.Now()
 				if err := c.sendVeleroBackupEvents(workerCtx); err != nil {
 					c.logger.Warn("velero observation unavailable; heartbeat remains independent", "error", err)
 				}
@@ -495,12 +524,13 @@ func (c *Client) RunHeartbeat() error {
 	for {
 		select {
 		case <-ticker.C:
+			if err := c.sendHeartbeat(false); err != nil {
+				return err
+			}
+		case <-inventoryTicker.C:
 			select {
 			case inventoryRequests <- struct{}{}:
 			default:
-			}
-			if err := c.sendHeartbeat(false); err != nil {
-				return err
 			}
 		case <-veleroTicker.C:
 			select {
@@ -670,6 +700,12 @@ func inferLogLevel(message string) string {
 }
 
 func (c *Client) handleInventoryRequest(request protocol.Message[protocol.InventoryRequestPayload]) {
+	if request.Payload.Scope == "cache-usage" {
+		c.handleCacheUsageRequest(request)
+		return
+	}
+	c.inventoryCollectionMu.Lock()
+	defer c.inventoryCollectionMu.Unlock()
 	var snapshot inventory.Snapshot
 	var err error
 	if request.Payload.Scope == "capabilities" {
@@ -3685,6 +3721,13 @@ func (c *Client) sendVeleroBackupEvents(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	active := false
+	for _, backup := range backups {
+		if isHyperCDRBackup(backup.Labels) && c.labelsBelongToSourceCluster(backup.Labels) && isActiveBackupPhase(backup.Phase) {
+			active = true
+		}
+	}
+	c.observedActiveBackup.Store(active)
 	for _, backup := range backups {
 		if !isHyperCDRBackup(backup.Labels) {
 			continue
@@ -4213,6 +4256,10 @@ func (c *Client) sendTaskCompleted(task protocol.TaskDispatchPayload, veleroPayl
 	if c.ledger.abortRequested(task.TaskID) {
 		return context.Canceled
 	}
+	switch task.Type {
+	case "cache-settings", "cache-cleanup", "agent-upgrade", "velero-upgrade", "oadp-upgrade":
+		c.requestRuntimeRefresh()
+	}
 	veleroPayload = withRecoveryStages(task, veleroPayload, 100, "succeeded", "", text)
 	message := protocol.NewMessage(protocol.MessageKindEvent, protocol.MessageAgentTaskCompleted, c.cfg.ClusterID, c.cfg.AgentID, protocol.TaskCompletedPayload{
 		AckRequired:   true,
@@ -4547,18 +4594,28 @@ func (c *Client) sendInventory(full bool) error {
 }
 
 func (c *Client) collectAndSendInventory(full bool, onlyChanged bool) error {
-	snapshot, err := c.collector.Collect()
+	c.inventoryCollectionMu.Lock()
+	defer c.inventoryCollectionMu.Unlock()
+	var snapshot inventory.Snapshot
+	var err error
+	if collector, ok := c.collector.(interface {
+		CollectPeriodic() (inventory.Snapshot, error)
+	}); onlyChanged && ok {
+		snapshot, err = collector.CollectPeriodic()
+	} else {
+		snapshot, err = c.collector.Collect()
+	}
 	if err != nil {
 		return err
 	}
 	snapshot.Report.Full = full
 	c.inventoryMu.Lock()
-	if onlyChanged && snapshot.Hash == c.lastInventory.Hash {
-		c.inventoryMu.Unlock()
-		return nil
-	}
+	unchanged := onlyChanged && snapshot.Hash == c.lastInventory.Hash
 	c.lastInventory = snapshot
 	c.inventoryMu.Unlock()
+	if unchanged {
+		return nil
+	}
 	return c.writeInventory(snapshot.Report)
 }
 
@@ -4614,38 +4671,24 @@ func (c *Client) sendHeartbeat(_ bool) error {
 	if veleroStatus == "" {
 		veleroStatus = "unknown"
 	}
-	agentImage := c.cfg.AgentImage
-	agentImageID := ""
-	agentImageDigest := ""
-	veleroRuntime := kube.VeleroRuntimeStatus{}
-	if c.agentRuntime != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		image, imageID, digest, err := c.agentRuntime.PodImageStatus(ctx, c.cfg.Namespace, c.cfg.PodName, "comm-agent")
-		cancel()
-		if err != nil {
-			c.logger.Warn("failed to read agent pod image status", "error", err)
-		} else {
-			if image != "" {
-				agentImage = image
-			}
-			agentImageID = imageID
-			agentImageDigest = digest
-		}
-		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
-		veleroRuntime, err = c.agentRuntime.VeleroRuntimeStatus(ctx, c.cfg.Namespace)
-		cancel()
-		if err != nil {
-			c.logger.Warn("failed to read velero runtime status", "error", err)
-		}
+	c.runtimeObservationMu.RLock()
+	observed := c.runtimeObservation
+	c.runtimeObservationMu.RUnlock()
+	agentImage := observed.agentImage
+	if agentImage == "" {
+		agentImage = c.cfg.AgentImage
 	}
+	veleroRuntime := observed.velero
 	payload := protocol.HeartbeatPayload{
+		NodeCacheUsageSupported:    c.nodeCacheUsageSupported(),
+		CacheObservationPending:    c.agentRuntime != nil && veleroRuntime.CacheState == nil,
 		CacheState:                 veleroRuntime.CacheState,
 		AckRequired:                false,
 		Status:                     "healthy",
 		AgentVersion:               c.cfg.AgentVersion,
 		AgentImage:                 agentImage,
-		AgentImageID:               agentImageID,
-		AgentImageDigest:           agentImageDigest,
+		AgentImageID:               observed.agentImageID,
+		AgentImageDigest:           observed.agentDigest,
 		VeleroStatus:               veleroStatus,
 		VeleroVersion:              veleroRuntime.Version,
 		VeleroImage:                veleroRuntime.Image,
@@ -4654,7 +4697,7 @@ func (c *Client) sendHeartbeat(_ bool) error {
 		VeleroNodeAgentDesired:     veleroRuntime.NodeAgentDesired,
 		VeleroNodeAgentReady:       veleroRuntime.NodeAgentReady,
 		VeleroNodeAgentImageDigest: veleroRuntime.NodeAgentImageDigest,
-		ActiveTasks:                0,
+		ActiveTasks:                c.activeTaskCount(),
 		LastInventoryAt:            snapshot.Report.CollectedAt.Format(time.RFC3339),
 	}
 	message := protocol.NewMessage(protocol.MessageKindEvent, protocol.MessageAgentHeartbeat, c.cfg.ClusterID, c.cfg.AgentID, payload)

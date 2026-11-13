@@ -628,14 +628,20 @@ func (r *Router) requestClusterInventory(w http.ResponseWriter, req *http.Reques
 		return
 	}
 	found := false
+	cacheUsageSupported := false
 	for _, cluster := range clusters {
 		if cluster.ID == clusterID {
 			found = true
+			cacheUsageSupported = cluster.NodeCacheUsageSupported
 			break
 		}
 	}
 	if !found {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "cluster_not_found"})
+		return
+	}
+	if body.Scope == "cache-usage" && !cacheUsageSupported {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "cache_usage_unsupported", "message": "Upgrade the communication agent to collect node cache usage."})
 		return
 	}
 	if body.RequestID == "" {
@@ -675,7 +681,7 @@ func (r *Router) requestClusterInventory(w http.ResponseWriter, req *http.Reques
 		return
 	}
 	messageID := store.NewPublicID()
-	r.setInventoryRequestStatus(inventoryRequestStatus{
+	pending := inventoryRequestStatus{
 		RequestID: body.RequestID,
 		MessageID: messageID,
 		ClusterID: clusterID,
@@ -683,7 +689,21 @@ func (r *Router) requestClusterInventory(w http.ResponseWriter, req *http.Reques
 		Namespace: body.Namespace,
 		Status:    "pending",
 		CreatedAt: now,
-	})
+	}
+	if body.Scope == "cache-usage" {
+		r.inventoryMu.Lock()
+		for _, existing := range r.inventory {
+			if existing.ClusterID == clusterID && existing.Scope == "cache-usage" && existing.Status == "pending" && now.Sub(existing.CreatedAt) < 7*time.Minute {
+				r.inventoryMu.Unlock()
+				writeJSON(w, http.StatusAccepted, map[string]any{"status": "pending", "requestId": existing.RequestID, "messageId": existing.MessageID, "scope": existing.Scope})
+				return
+			}
+		}
+		r.inventory[agentRequestKey(clusterID, body.RequestID)] = pending
+		r.inventoryMu.Unlock()
+	} else {
+		r.setInventoryRequestStatus(pending)
+	}
 	message := protocol.Message[protocol.InventoryRequestPayload]{
 		Version:     protocol.Version,
 		MessageID:   messageID,
@@ -744,7 +764,11 @@ func (r *Router) getClusterInventoryRequest(w http.ResponseWriter, req *http.Req
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "inventory_request_not_found", "message": "This request is no longer available; the platform may have restarted. Refresh the inventory again."})
 		return
 	}
-	if status.Status == "pending" && time.Since(status.CreatedAt) > 60*time.Second {
+	timeout := time.Minute
+	if status.Scope == "cache-usage" {
+		timeout = 7 * time.Minute
+	}
+	if status.Status == "pending" && time.Since(status.CreatedAt) > timeout {
 		status.Status = "timeout"
 		status.ErrorCode = "INVENTORY_REQUEST_TIMEOUT"
 		status.Message = "agent did not respond before timeout"

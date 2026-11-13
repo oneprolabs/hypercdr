@@ -35,6 +35,10 @@ func TestBackupResultAtomicPublicationAndConflict(t *testing.T) {
 	if err != nil || finished.Status != "succeeded" || finished.RestorePointID != points[0].ID || finished.CompletedAt.IsZero() {
 		t.Fatalf("non-atomic task: %v %v", finished, err)
 	}
+	changes := finished.Payload["restorePointChanges"].(map[string]any)
+	if changes["created"].(map[string]any)["id"] != points[0].ID || len(changes["deleted"].([]any)) != 0 {
+		t.Fatalf("unexpected restore point changes: %#v", changes)
+	}
 	var completions int
 	if err := repo.db.QueryRow(`select count(*) from task_events where task_id=$1 and reason='completed'`, task.ID).Scan(&completions); err != nil || completions != 1 {
 		t.Fatalf("duplicate completion events: %d %v", completions, err)
@@ -81,6 +85,22 @@ func TestBackupResultValidationPrecedesQuotaDeletion(t *testing.T) {
 	point, err := repo.PublishBackupResult(input)
 	if err != nil || point.SizeMetricsV2["newData"] == nil {
 		t.Fatalf("immutable pending result lost: %v %v", point, err)
+	}
+	finished, _, err := repo.GetTask(task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes := finished.Payload["restorePointChanges"].(map[string]any)
+	deleted := changes["deleted"].([]any)
+	if changes["created"].(map[string]any)["id"] != point.ID || len(deleted) != 1 || deleted[0].(map[string]any)["id"] != old.ID || deleted[0].(map[string]any)["taskCreatedAt"] == nil {
+		t.Fatalf("missing replacement snapshot: %#v", changes)
+	}
+	if _, err := repo.PublishBackupResult(input); err != nil {
+		t.Fatal(err)
+	}
+	replayed, _, _ := repo.GetTask(task.ID)
+	if !backupMetricsEqual(changes, replayed.Payload["restorePointChanges"].(map[string]any)) {
+		t.Fatal("restore point changes overwritten by replay")
 	}
 }
 

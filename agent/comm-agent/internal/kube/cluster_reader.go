@@ -26,10 +26,13 @@ import (
 )
 
 type KubernetesClusterReader struct {
-	clientset kubernetes.Interface
-	dynamic   dynamic.Interface
-	discovery discovery.DiscoveryInterface
-	namespace string
+	clientset         kubernetes.Interface
+	dynamic           dynamic.Interface
+	discovery         discovery.DiscoveryInterface
+	namespace         string
+	inventoryMu       sync.Mutex
+	inventoryState    ClusterState
+	staticInventoryAt time.Time
 }
 
 type ControlPlaneIdentity struct {
@@ -123,30 +126,58 @@ func NewKubernetesClusterReaderWithClients(clientset kubernetes.Interface, dynam
 }
 
 func (r *KubernetesClusterReader) ReadCluster(ctx context.Context) (ClusterState, error) {
-	state := ClusterState{CollectedAt: time.Now().UTC()}
+	return r.readClusterInventory(ctx, true, 5*time.Minute)
+}
 
-	version, err := r.discovery.ServerVersion()
-	if err != nil {
-		return ClusterState{}, err
+func (r *KubernetesClusterReader) ReadClusterPeriodic(ctx context.Context, resourceInterval time.Duration) (ClusterState, error) {
+	if resourceInterval <= 0 {
+		resourceInterval = 5 * time.Minute
 	}
-	state.KubeVersion = version.GitVersion
-	state.APIResources = r.readAPIResources()
-	state.Capabilities, state.CapabilitiesComplete = r.readNamedCapabilities(ctx)
+	return r.readClusterInventory(ctx, false, resourceInterval)
+}
+
+func (r *KubernetesClusterReader) readClusterInventory(ctx context.Context, force bool, resourceInterval time.Duration) (ClusterState, error) {
+	r.inventoryMu.Lock()
+	defer r.inventoryMu.Unlock()
+	now := time.Now().UTC()
+	state := r.inventoryState
+	staticDue := force || r.staticInventoryAt.IsZero() || now.Sub(r.staticInventoryAt) >= time.Hour
 
 	nodes, err := r.clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return ClusterState{}, err
 	}
+	state.Nodes = nil
 	for _, node := range nodes.Items {
 		state.Nodes = append(state.Nodes, nodeState(node))
 	}
-
-	storageClasses, err := r.clientset.StorageV1().StorageClasses().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return ClusterState{}, err
+	if !force && !staticDue && !state.CollectedAt.IsZero() && now.Sub(state.CollectedAt) < resourceInterval {
+		r.inventoryState = state
+		return state, nil
 	}
-	for _, item := range storageClasses.Items {
-		state.StorageClasses = append(state.StorageClasses, storageClassState(item))
+	state = ClusterState{
+		CollectedAt: now, Nodes: state.Nodes, KubeVersion: state.KubeVersion,
+		StorageClasses: state.StorageClasses, APIResources: state.APIResources,
+		Capabilities: state.Capabilities, CapabilitiesComplete: state.CapabilitiesComplete,
+	}
+	if staticDue {
+		version, err := r.discovery.ServerVersion()
+		if err != nil {
+			return ClusterState{}, err
+		}
+		state.KubeVersion = version.GitVersion
+		storageClasses, err := r.clientset.StorageV1().StorageClasses().List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return ClusterState{}, err
+		}
+		state.StorageClasses = nil
+		for _, item := range storageClasses.Items {
+			state.StorageClasses = append(state.StorageClasses, storageClassState(item))
+		}
+	}
+	if force {
+		state.APIResources = r.readAPIResources()
+		state.Capabilities, state.CapabilitiesComplete = r.readNamedCapabilities(ctx)
 	}
 
 	namespaces, err := r.clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
@@ -166,6 +197,10 @@ func (r *KubernetesClusterReader) ReadCluster(ctx context.Context) (ClusterState
 		return ClusterState{}, err
 	}
 	state.Velero = r.readVeleroState(ctx)
+	r.inventoryState = state
+	if staticDue {
+		r.staticInventoryAt = now
+	}
 	return state, nil
 }
 

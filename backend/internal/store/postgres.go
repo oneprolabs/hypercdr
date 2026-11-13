@@ -955,6 +955,8 @@ func applyClusterMetadata(cluster *Cluster, metadataRaw []byte) {
 		return
 	}
 	var metadata struct {
+		NodeCacheUsageSupported    bool                  `json:"nodeCacheUsageSupported"`
+		CacheUsage                 map[string]any        `json:"cacheUsage"`
 		Nodes                      []ClusterNode         `json:"nodes"`
 		StorageClasses             []ClusterStorageClass `json:"storageClasses"`
 		APIResources               []ClusterAPIResource  `json:"apiResources"`
@@ -1000,6 +1002,8 @@ func applyClusterMetadata(cluster *Cluster, metadataRaw []byte) {
 	cluster.VeleroNodeAgentReady = metadata.VeleroNodeAgentReady
 	cluster.VeleroNodeAgentImageDigest = metadata.VeleroNodeAgentImageDigest
 	cluster.CacheState = metadata.CacheState
+	cluster.CacheUsage = metadata.CacheUsage
+	cluster.NodeCacheUsageSupported = metadata.NodeCacheUsageSupported
 	cluster.AgentUpgradeStatus = metadata.AgentUpgradeStatus
 }
 
@@ -1343,15 +1347,16 @@ func (s *PostgresStore) UpdateHeartbeat(input HeartbeatInput) (Cluster, bool, er
 		        'veleroServerReady', $17::boolean,
 		        'veleroNodeAgentDesired', $18::integer,
 		        'veleroNodeAgentReady', $19::integer,
-		        'veleroNodeAgentImageDigest', nullif($20, '')
-		    )) || jsonb_build_object('cacheState', $21::jsonb),
+		        'veleroNodeAgentImageDigest', nullif($20, ''),
+		        'nodeCacheUsageSupported', $23::boolean
+		    )) || jsonb_build_object('cacheState', case when $22::boolean then coalesce(nullif($21::jsonb, 'null'::jsonb), metadata->'cacheState', 'null'::jsonb) else $21::jsonb end),
 		    updated_at = $9
 		where id = $1
 	`, input.ClusterID, input.Status, input.KubeVersion, input.AgentVersion, input.VeleroStatus,
 		input.NodeCount, input.NamespaceCount, input.ApplicationCount, now, input.InventoryHash,
 		input.AgentImage, input.AgentImageID, input.AgentImageDigest, input.VeleroVersion,
 		input.VeleroImage, input.VeleroImageDigest, input.VeleroServerReady,
-		input.VeleroNodeAgentDesired, input.VeleroNodeAgentReady, input.VeleroNodeAgentImageDigest, string(cacheJSON))
+		input.VeleroNodeAgentDesired, input.VeleroNodeAgentReady, input.VeleroNodeAgentImageDigest, string(cacheJSON), input.CacheObservationPending, input.NodeCacheUsageSupported)
 	if err != nil {
 		return Cluster{}, false, err
 	}

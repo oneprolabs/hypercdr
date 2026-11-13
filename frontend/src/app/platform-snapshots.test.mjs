@@ -4,10 +4,25 @@ import { loadPlatformSnapshot, loadApplicationActivitySnapshot, loadTopologySnap
 import { buildDRTopology } from '../features/clusters/dr-topology.ts';
 import { writeStoredAuthSession } from '../auth/session.ts';
 import { scopedResourceSetter } from './resource-scope.ts';
-import { updateApplicationProtection } from '../api/applications.ts';
+import { listApplications, updateApplicationProtection } from '../api/applications.ts';
 
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 const response = body => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
+
+test('cluster namespace details read persisted inventory without requesting an agent scan', async t => {
+  setup(t);
+  const paths = [];
+  globalThis.fetch.mock.mockImplementation(async path => {
+    paths.push(path);
+    return response({ items: [{ id: 'namespace', clusterId: 'target-cluster', namespace: 'demo' }] });
+  });
+  const result = await listApplications(false, 'target-cluster');
+  assert.equal(result.items[0].namespace, 'demo');
+  assert.deepEqual(paths, ['/api/v1/applications?clusterId=target-cluster']);
+  paths.length = 0;
+  await listApplications();
+  assert.deepEqual(paths, ['/api/v1/applications']);
+});
 
 test('namespace inventory is published before slow activity and restore-point history', async t => {
   setup(t);

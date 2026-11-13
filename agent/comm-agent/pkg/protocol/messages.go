@@ -109,6 +109,8 @@ type RegisterRejectedPayload struct {
 }
 
 type HeartbeatPayload struct {
+	NodeCacheUsageSupported    bool           `json:"nodeCacheUsageSupported,omitempty"`
+	CacheObservationPending    bool           `json:"cacheObservationPending,omitempty"`
 	CacheState                 map[string]any `json:"cacheState,omitempty"`
 	AckRequired                bool           `json:"ackRequired,omitempty"`
 	Status                     string         `json:"status"`
@@ -129,6 +131,7 @@ type HeartbeatPayload struct {
 }
 
 type InventoryReportPayload struct {
+	CacheUsage           map[string]any             `json:"cacheUsage,omitempty"`
 	AckRequired          bool                       `json:"ackRequired,omitempty"`
 	AckMessageID         string                     `json:"ackMessageId,omitempty"`
 	AckType              string                     `json:"ackType,omitempty"`

@@ -9,6 +9,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -115,8 +116,19 @@ type AgentUpgradeOptions struct {
 }
 
 type KubernetesAgentRuntime struct {
-	client  kubernetes.Interface
-	dynamic dynamic.Interface
+	client               kubernetes.Interface
+	dynamic              dynamic.Interface
+	observationMu        sync.Mutex
+	observationNamespace string
+	observationSpec      string
+	observationAt        time.Time
+	observation          VeleroRuntimeStatus
+}
+
+func (r *KubernetesAgentRuntime) InvalidateRuntimeObservations() {
+	r.observationMu.Lock()
+	defer r.observationMu.Unlock()
+	r.observationAt = time.Time{}
 }
 
 func (r *KubernetesAgentRuntime) PreflightRestoreCache(ctx context.Context, namespace string) (RestoreCachePreflightResult, error) {
@@ -478,6 +490,8 @@ func (r *KubernetesAgentRuntime) UpgradeAgent(ctx context.Context, options Agent
 }
 
 func (r *KubernetesAgentRuntime) VeleroRuntimeStatus(ctx context.Context, namespace string) (VeleroRuntimeStatus, error) {
+	r.observationMu.Lock()
+	defer r.observationMu.Unlock()
 	collectedAt := time.Now().UTC()
 	namespace = firstNonEmpty(namespace, "hypercdr-agent")
 	deployment, err := r.client.AppsV1().Deployments(namespace).Get(ctx, "velero", metav1.GetOptions{})
@@ -487,6 +501,22 @@ func (r *KubernetesAgentRuntime) VeleroRuntimeStatus(ctx context.Context, namesp
 	daemonSet, err := r.client.AppsV1().DaemonSets(namespace).Get(ctx, "node-agent", metav1.GetOptions{})
 	if err != nil {
 		return VeleroRuntimeStatus{}, err
+	}
+	deploymentSpec, err := json.Marshal(deployment.Spec.Template)
+	if err != nil {
+		return VeleroRuntimeStatus{}, err
+	}
+	daemonSpec, err := json.Marshal(daemonSet.Spec.Template)
+	if err != nil {
+		return VeleroRuntimeStatus{}, err
+	}
+	spec := string(deploymentSpec) + string(daemonSpec)
+	if namespace == r.observationNamespace && spec == r.observationSpec && !r.observationAt.IsZero() && time.Since(r.observationAt) < 5*time.Minute {
+		status := r.observation
+		status.ServerReady = deployment.Status.Replicas > 0 && deployment.Status.AvailableReplicas == deployment.Status.Replicas && deployment.Status.UpdatedReplicas == deployment.Status.Replicas
+		status.NodeAgentDesired = daemonSet.Status.DesiredNumberScheduled
+		status.NodeAgentReady = daemonSet.Status.NumberReady
+		return status, nil
 	}
 	status := VeleroRuntimeStatus{
 		CacheState:       observedCacheState(daemonSet),
@@ -522,6 +552,7 @@ func (r *KubernetesAgentRuntime) VeleroRuntimeStatus(ctx context.Context, namesp
 		status.CacheState["nodes"] = nodes
 		status.CacheState["isolationSupported"] = daemonSet.Spec.Template.Annotations["hypercdr.io/cache-isolation-supported"] == "v1" && daemonSet.Spec.Template.Annotations["hypercdr.io/cache-persistence-image"] == workloadContainerImage(daemonSet.Spec.Template.Spec.Containers, "node-agent")
 	}
+	r.observationNamespace, r.observationSpec, r.observationAt, r.observation = namespace, spec, collectedAt, status
 	return status, nil
 }
 

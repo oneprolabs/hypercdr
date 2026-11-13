@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ClusterRegistrationChoices } from './cluster-registration-choices';
+import { NodeCacheCell, NodeCacheRefresh, type NodeCacheReport } from './node-cache-usage';
+import { listApplications } from '../../api/applications';
 import { lazyWithUpgradeRecovery } from '../../app/lazy-page';
 import { DialogModuleFrame, preloadDialog, useDialogPreload } from '../../app/dialog-module';
 import { ResourceCreateDrawer } from '../../components/resource-create-drawer';
@@ -150,6 +152,25 @@ export default function ClusterPage(props: {
   const [unregisterTask, setUnregisterTask] = useState<ApiTask | null>(null);
   const [unregisterEvents, setUnregisterEvents] = useState<ApiTaskEvent[]>([]);
   const [clusterResourceDetail, setClusterResourceDetail] = useState<{ cluster: Cluster; type: 'overview' | 'namespaces' | 'nodes' | 'storageClasses' } | null>(null);
+  const [nodeCacheReport, setNodeCacheReport] = useState<NodeCacheReport>();
+  const [nodeCacheOffline, setNodeCacheOffline] = useState(false);
+  const [namespaceDetails, setNamespaceDetails] = useState<{ clusterId: string; rows: ClusterNamespaceRow[]; loading: boolean; error: string }>();
+  const detailClusterId = clusterResourceDetail?.cluster.id;
+  useEffect(() => {
+    if (!detailClusterId) return;
+    let cancelled = false;
+    setNamespaceDetails({ clusterId: detailClusterId, rows: [], loading: true, error: '' });
+    void listApplications(false, detailClusterId).then(response => {
+      if (cancelled) return;
+      const rows = listItems(response).filter(app => app.clusterId === detailClusterId)
+        .sort((first, second) => first.namespace.localeCompare(second.namespace))
+        .map(app => ({ name: app.namespace, status: app.status || 'Unknown', age: formatAge(app.resourceSummary?.ageSeconds) }));
+      setNamespaceDetails({ clusterId: detailClusterId, rows, loading: false, error: '' });
+    }).catch(() => {
+      if (!cancelled) setNamespaceDetails({ clusterId: detailClusterId, rows: [], loading: false, error: 'Unable to load namespace details. Reopen this panel to retry.' });
+    });
+    return () => { cancelled = true; };
+  }, [detailClusterId]);
   const [actionCopied, setActionCopied] = useState(false);
   const [topologyOpen, setTopologyOpen] = useState(false);
   const [topologyLoading, setTopologyLoading] = useState(false);
@@ -240,9 +261,9 @@ export default function ClusterPage(props: {
     {
       accessorKey: 'name',
       header: 'NAME',
-      size: 240,
-      minSize: 150,
-      maxSize: 520,
+      size: 160,
+      minSize: 120,
+      maxSize: 320,
       cell: info => <span className="hbdr-hyper-table-text">{String(info.getValue() || '-')}</span>,
       meta: { kind: 'primary', title: row => row.name },
     },
@@ -264,6 +285,13 @@ export default function ClusterPage(props: {
       cell: info => <span className="hbdr-hyper-table-text">{String(info.getValue() || '-')}</span>,
       meta: { kind: 'secondary', title: row => row.roles },
     },
+    ...(['index', 'drill'] as const).map(kind => ({
+      id: `${kind}Cache`,
+      header: kind === 'index' ? 'INDEX CACHE' : 'DRILL DATA CACHE',
+      size: 260,
+      minSize: 210,
+      cell: (info: { row: { original: ClusterNodeRow } }) => <NodeCacheCell label={kind === 'index' ? 'Index cache' : 'Drill data cache'} cache={nodeCacheReport?.nodes?.find(node => node.name === info.row.original.name)?.[kind]} stale={nodeCacheOffline || nodeCacheReport?.phase === 'failed'} />,
+    })),
     {
       accessorKey: 'age',
       header: 'AGE',
@@ -282,7 +310,7 @@ export default function ClusterPage(props: {
       cell: info => <span className="hbdr-hyper-table-text">{String(info.getValue() || '-')}</span>,
       meta: { kind: 'secondary', title: row => row.version },
     },
-  ], []);
+  ], [nodeCacheReport, nodeCacheOffline]);
   const storageClassColumns = useMemo<HyperTableColumn<ClusterStorageClassRow>[]>(() => [
     {
       accessorKey: 'name',
@@ -1024,7 +1052,8 @@ export default function ClusterPage(props: {
           const isStorageClasses = clusterResourceDetail.type === 'storageClasses';
           const isNodes = clusterResourceDetail.type === 'nodes';
           const cluster = clusterResourceDetail.cluster;
-          const namespaceRows = namespaceRowsForCluster(clusterResourceDetail.cluster);
+          const loadedNamespaceDetails = namespaceDetails?.clusterId === cluster.id ? namespaceDetails : undefined;
+          const namespaceRows = loadedNamespaceDetails && !loadedNamespaceDetails.loading && !loadedNamespaceDetails.error ? loadedNamespaceDetails.rows : namespaceRowsForCluster(cluster);
           const nodeRows = nodeRowsForCluster(clusterResourceDetail.cluster);
           const storageClassRows = storageClassRowsForCluster(clusterResourceDetail.cluster);
           const hasRealNodeDetails = (clusterResourceDetail.cluster.nodeDetails || []).length > 0;
@@ -1070,7 +1099,7 @@ export default function ClusterPage(props: {
                         <h4>Nodes</h4>
                         <p>{nodeRows.length || cluster.nodes} total</p>
                       </div>
-                      <span>kubectl get nodes</span>
+                      <NodeCacheRefresh clusterId={cluster.id} onReport={(report, offline) => { setNodeCacheReport(report); setNodeCacheOffline(offline); }} />
                     </div>
                     <HyperTable
                       variant="modal"
@@ -1089,7 +1118,7 @@ export default function ClusterPage(props: {
                     <div className="hbdr-cluster-detail-section-head">
                       <div>
                         <h4>Namespaces</h4>
-                        <p>{namespaceRows.length || cluster.namespaces} total</p>
+                        <p>{loadedNamespaceDetails && !loadedNamespaceDetails.loading && !loadedNamespaceDetails.error ? namespaceRows.length : namespaceRows.length || cluster.namespaces} total</p>
                       </div>
                       <span>kubectl get namespaces</span>
                     </div>
@@ -1099,8 +1128,9 @@ export default function ClusterPage(props: {
                       columns={namespaceColumns}
                       data={namespaceRows}
                       getRowId={row => row.name}
-                      emptyMessage="Namespace details are waiting for the next agent inventory report."
+                      emptyMessage={loadedNamespaceDetails?.error || (loadedNamespaceDetails?.loading || !loadedNamespaceDetails ? 'Loading namespace details…' : 'No namespaces reported.')}
                     />
+                    {loadedNamespaceDetails?.error && namespaceRows.length > 0 && <p role="alert" className="hbdr-cluster-resource-note">{loadedNamespaceDetails.error}</p>}
                   </section>
 
                   <section className={`hbdr-cluster-detail-section ${isStorageClasses ? 'is-active' : ''}`}>

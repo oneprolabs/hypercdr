@@ -517,6 +517,8 @@ type CommunityMigrationSession struct {
 }
 
 type Cluster struct {
+	NodeCacheUsageSupported    bool                  `json:"nodeCacheUsageSupported,omitempty"`
+	CacheUsage                 map[string]any        `json:"cacheUsage,omitempty"`
 	CacheState                 map[string]any        `json:"cacheState,omitempty"`
 	ID                         string                `json:"id"`
 	TenantID                   string                `json:"tenantId"`
@@ -716,6 +718,8 @@ func normalizedClusterType(value string) string {
 }
 
 type HeartbeatInput struct {
+	NodeCacheUsageSupported    bool
+	CacheObservationPending    bool
 	CacheState                 map[string]any
 	ClusterID                  string
 	Status                     string

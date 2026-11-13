@@ -1,6 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import { createTaskDetailLoader } from './task-detail-loader.ts';
+
+test('sync and recovery expose only server-created tasks and guard repeated submission', () => {
+  const page = readFileSync(new URL('../applications/application-dr-page.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(page, /submitting-sync:|submissionPending|const placeholder: ApiTask/);
+  assert.match(page, /if \(syncSubmittingRef\.current\) return;\s*syncSubmittingRef\.current = true;/);
+  assert.match(page, /finally \{\s*syncSubmittingRef\.current = false;\s*setSyncSubmitting\(false\)/);
+  assert.match(page, /syncSubmitting \? 'Submitting…' : 'Start Sync'/);
+  const recovery = page.slice(page.indexOf('const confirmRestoreAction ='), page.indexOf('const renderSyncTaskStatus ='));
+  assert.ok(recovery.indexOf('const createdTask = await createRecoveryTask') < recovery.indexOf('setSubmittedRecoveryTasks'));
+  const wizard = readFileSync(new URL('../../recovery-wizard-modal.tsx', import.meta.url), 'utf8');
+  assert.match(wizard, /if \(submitting \|\| submittingRef\.current\) return;/);
+  assert.match(wizard, /submittingRef\.current = true;\s*try \{\s*await onSubmit\(\)/);
+  assert.match(wizard, /finally \{\s*submittingRef\.current = false;/);
+});
 
 test('prefetch shares in-flight reads and expires without caching failures', async () => {
   let taskReads = 0;

@@ -45,16 +45,20 @@ test('protection configuration preserves an explicitly empty default target', ()
   assert.doesNotMatch(page, /plan\.targetClusterId \|\| plan\.sourceClusterId/);
   assert.doesNotMatch(page, /targetClusterId: targetCluster\?\.id \|\| currentClusterId/);
   const wizard = readFileSync(new URL('../protect-applications-wizard.tsx', import.meta.url), 'utf8');
-  assert.match(wizard, /props\.step === 2 && \(!props\.protectConfig\.targetCluster \|\|/);
-  assert.match(wizard, /checked=\{!props\.protectConfig\.targetCluster\}/);
+  assert.match(wizard, /props\.step === 2 && \(\(!props\.protectConfig\.targetCluster && noTargetSelected\) \|\|/);
+  assert.match(wizard, /checked=\{!props\.protectConfig\.targetCluster && noTargetSelected\}/);
+  assert.match(wizard, /\[noTargetSelected, setNoTargetSelected\] = useState\(false\)/);
+  assert.match(wizard, /props\.step === 3 && Boolean\(selectedRepo\)/);
+  assert.match(page, /storageId: '',\s*policy: ''/);
   const settings = readFileSync(new URL('../dr-configuration-modal.tsx', import.meta.url), 'utf8');
   assert.match(settings, /<option value="">No default target<\/option>/);
   assert.doesNotMatch(settings, /protectConfig\.targetCluster \|\| targetClusterOptions\.length === 0/);
 });
 
-test('protection configuration can skip or clear a policy without showing a default schedule', () => {
+test('protection configuration requires an explicit policy or manual-only choice without a default schedule', () => {
   const wizard = readFileSync(new URL('../protect-applications-wizard.tsx', import.meta.url), 'utf8');
-  assert.match(wizard, /props\.step === 4 && \(!props\.protectConfig\.policy \|\| props\.protectConfig\.policy === 'manual'/);
+  assert.match(wizard, /props\.step === 4 && \(props\.protectConfig\.policy === 'manual' \|\| Boolean\(selectedPolicy\)\)/);
+  assert.match(wizard, /checked=\{props\.protectConfig\.policy === 'manual'\}/);
   assert.match(wizard, /No policy \(manual only\)/);
   assert.match(wizard, /policy: 'manual'/);
   const page = readFileSync(new URL('../features/applications/application-dr-page.tsx', import.meta.url), 'utf8');

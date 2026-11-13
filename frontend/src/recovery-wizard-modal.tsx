@@ -281,6 +281,7 @@ export function RecoveryWizardModal(props: Props) {
   const [cacheSettingsOpen, setCacheSettingsOpen] = React.useState(false);
   const [cacheRefreshKey, setCacheRefreshKey] = React.useState(0);
   const submitErrorRef = React.useRef<HTMLDivElement>(null);
+  const submittingRef = React.useRef(false);
 
   useEffect(() => {
     if (open) {
@@ -863,7 +864,7 @@ export function RecoveryWizardModal(props: Props) {
                 className={mode === 'drill' ? 'hbdr-protect-primary is-primary' : 'hbdr-protect-primary'}
                 disabled={submitting}
                 onClick={async () => {
-                  if (submitting) return;
+                  if (submitting || submittingRef.current) return;
                   if (submissionBlocker || (mode === 'drill' && (scopeBlocker || drillNamespaceError(targetNamespace)))) {
                     setSubmitError(submissionBlocker || scopeBlocker || drillNamespaceError(targetNamespace));
                     window.requestAnimationFrame(() => submitErrorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
@@ -871,12 +872,15 @@ export function RecoveryWizardModal(props: Props) {
                   }
                   setSubmitError('');
                   rememberImageMappings(config.imageMappings || {});
+                  submittingRef.current = true;
                   try {
                     await onSubmit();
                   } catch (error) {
                     const message = recoverySubmissionError(error);
                     setSubmitError(message);
                     window.requestAnimationFrame(() => submitErrorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
+                  } finally {
+                    submittingRef.current = false;
                   }
                 }}
               >

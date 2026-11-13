@@ -22,9 +22,25 @@ func NewKubernetesCollector(cfg config.Config, reader kube.ClusterReader) *Kuber
 }
 
 func (c *KubernetesCollector) Collect() (Snapshot, error) {
+	return c.collect(false)
+}
+
+func (c *KubernetesCollector) CollectPeriodic() (Snapshot, error) {
+	return c.collect(true)
+}
+
+func (c *KubernetesCollector) collect(periodic bool) (Snapshot, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	state, err := c.reader.ReadCluster(ctx)
+	var state kube.ClusterState
+	var err error
+	if reader, ok := c.reader.(interface {
+		ReadClusterPeriodic(context.Context, time.Duration) (kube.ClusterState, error)
+	}); periodic && ok {
+		state, err = reader.ReadClusterPeriodic(ctx, c.cfg.InventoryInterval)
+	} else {
+		state, err = c.reader.ReadCluster(ctx)
+	}
 	if err != nil {
 		return Snapshot{}, err
 	}

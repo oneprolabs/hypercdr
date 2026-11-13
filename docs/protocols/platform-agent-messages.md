@@ -6,6 +6,33 @@ This document defines the first-phase message contract between the HyperCDR plat
 
 ## Design Rules
 
+### Collection cadence and node cache usage
+
+All collection tiers share the existing Agent WebSocket connection. Lightweight
+heartbeats and component readiness run every 30 seconds. Node status is collected
+every minute; resource inventories, image details and cache configuration every
+five minutes; cluster basics and StorageClasses every hour. Changed inventories
+use `agent.inventory.report`. Heartbeats reuse cached component details and do not
+wait for inventory or disk scans. Velero observation runs every minute while idle
+and every five seconds during active work. Component upgrade and cache-setting
+completion invalidate the relevant observation cache.
+
+Node cache disk usage is collected at Agent startup, then hourly, or on explicit
+`platform.inventory.request` with `scope: "cache-usage"`. Concurrent requests share
+one scan. Reports use `agent.inventory.report` with the same scope and a
+`cacheUsage` object containing `phase`, `error`, UTC `observedAt`, and `nodes`.
+Each node has `name`, `index`, and `drill`; each cache carries `enabled`, `path`,
+`maxBytes`, optional `usedBytes`, UTC `observedAt`, and optional `error`.
+Usage is allocated disk blocks, not logical file length. Read-only node Jobs
+inspect directory metadata without following symlinks or accessing object storage.
+Failed observations retain previous values and their original timestamps only
+for the same node and directory. A new directory never inherits old usage.
+The platform persists these reports separately from application inventory and
+rejects manual refresh for Agents without `nodeCacheUsageSupported`.
+`cacheObservationPending` heartbeats preserve the last cache configuration while
+an asynchronous runtime observation is pending; legacy absent values retain
+their previous protocol behavior.
+
 - Every WebSocket frame uses the same envelope.
 - Platform-to-agent commands are modeled as tasks.
 - Agent-to-platform messages are modeled as reports, acknowledgements, progress, terminal results, or events.

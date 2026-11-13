@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"hypercdr-platform/agent/comm-agent/internal/cacheusage"
 	"hypercdr-platform/agent/comm-agent/internal/config"
 	"hypercdr-platform/agent/comm-agent/internal/executor"
 	"hypercdr-platform/agent/comm-agent/internal/inventory"
@@ -19,6 +20,13 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "cache-usage" {
+		if err := cacheusage.Run(context.Background(), os.Args[2:], os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	cfg := config.Load()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level:       cfg.LogLevel,

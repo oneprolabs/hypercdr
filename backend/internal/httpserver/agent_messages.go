@@ -41,6 +41,8 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 				return
 			}
 			updated, ok, err := r.store.UpdateHeartbeat(store.HeartbeatInput{
+				NodeCacheUsageSupported:    heartbeat.Payload.NodeCacheUsageSupported,
+				CacheObservationPending:    heartbeat.Payload.CacheObservationPending,
 				CacheState:                 heartbeat.Payload.CacheState,
 				ClusterID:                  clusterID,
 				Status:                     heartbeat.Payload.Status,
@@ -78,6 +80,26 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 			if err := json.Unmarshal(data, &inventory); err != nil {
 				r.logger.Warn("failed to decode inventory report", "cluster_id", clusterID, "error", err)
 				return
+			}
+			if inventory.Payload.Scope == "cache-usage" {
+				writer, supported := r.store.(interface {
+					SaveClusterCacheUsage(string, map[string]any) error
+				})
+				var saveError error
+				if !supported {
+					saveError = errors.New("cache usage persistence unavailable")
+				} else {
+					saveError = writer.SaveClusterCacheUsage(clusterID, inventory.Payload.CacheUsage)
+				}
+				if saveError != nil {
+					r.logger.Error("failed to save cache usage", "cluster_id", clusterID, "error", saveError)
+					r.failInventoryRequest(clusterID, protocol.MessageErrorPayload{RequestID: inventory.Payload.RequestID, ErrorCode: "CACHE_USAGE_SAVE_FAILED", Message: "Unable to save node cache usage. Please retry."})
+				} else if inventory.Payload.CacheUsage["phase"] == "failed" {
+					r.failInventoryRequest(clusterID, protocol.MessageErrorPayload{RequestID: inventory.Payload.RequestID, ErrorCode: "CACHE_USAGE_COLLECTION_FAILED", Message: "Unable to collect node cache usage. Previous measurements are retained."})
+				} else {
+					r.completeInventoryRequest(clusterID, inventory.Payload)
+				}
+				continue
 			}
 			apps := make([]store.Application, 0, len(inventory.Payload.Apps))
 			for _, app := range inventory.Payload.Apps {
