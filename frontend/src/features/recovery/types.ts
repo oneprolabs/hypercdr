@@ -169,6 +169,7 @@ export type ApiTaskCancelResponse = {
   task: ApiTask;
   cancelTask?: ApiTask;
   warning?: string;
+  reused?: boolean;
 };
 
 export type ApiRestorePoint = {

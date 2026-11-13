@@ -60,6 +60,19 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 	if err := validateTaskReferences(tx, input, tenantID); err != nil {
 		return Task{}, err
 	}
+	if input.Type == "drill" || input.Type == "restore" || input.Type == "takeover" || (input.Type == "protection-cleanup" && input.Payload["cleanupMode"] == "drill") {
+		existingID, err := guardDrillCleanup(tx, input, tenantID)
+		if err != nil {
+			return Task{}, err
+		}
+		if existingID != "" {
+			if err := tx.Commit(); err != nil {
+				return Task{}, err
+			}
+			existing, _, err := s.GetTask(existingID)
+			return existing, err
+		}
+	}
 	if input.Type == "task-abort" {
 		targetID, _ := input.Payload["targetTaskId"].(string)
 		var status string
@@ -196,7 +209,7 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 		return Task{}, err
 	}
 	if task.Type == "task-abort" {
-		patch, err := json.Marshal(map[string]any{"abortTaskId": task.ID, "abortRequested": true, "lastStatusAt": now.Format(time.RFC3339Nano)})
+		patch, err := json.Marshal(map[string]any{"abortTaskId": task.ID, "abortRequested": true, "abortFailed": false, "lastStatusAt": now.Format(time.RFC3339Nano)})
 		if err != nil {
 			return Task{}, err
 		}

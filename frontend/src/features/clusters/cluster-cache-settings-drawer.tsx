@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { Info } from 'lucide-react';
+import { CheckCircle2, Info } from 'lucide-react';
 import { apiGet, apiPut } from '../../api/client';
 import { ResourceCreateDrawer } from '../../components/resource-create-drawer';
-import { confirmedCacheObservation } from './cache-settings-state';
+import { cacheDirectoryConfirmed, cacheDisableConfirmed, confirmedCacheObservation } from './cache-settings-state';
+
+function CacheChangeConfirmation({ name, value, onChange, disabled, disabling }: { name: string; value: string; onChange: (value: string) => void; disabled: boolean; disabling: boolean }) {
+  return <div className="hbdr-cache-disable-confirm"><p>{disabling ? 'This cache will be disabled and its cached data cleared.' : 'The old cache directory will be cleared. New tasks will use the new directory.'}</p><label><span>Type <strong>yes</strong> to confirm</span><input type="text" aria-label={disabling ? `Type yes to disable ${name}` : `Type yes to change ${name} directory`} autoComplete="off" spellCheck={false} value={value} disabled={disabled} onChange={event => onChange(event.target.value)} /></label></div>;
+}
 
 function CacheHelp({ cache }: { cache: 'index' | 'drill' }) {
   const label = cache === 'index' ? 'Index cache' : 'Drill data cache';
@@ -32,7 +36,6 @@ type Settings = { rootPath: string; indexPath: string; drillPath: string; indexE
 type CacheTask = { id: string; status: string; errorCode?: string; errorMessage?: string; completedAt?: string; payload?: Record<string, unknown> };
 type Observed = Settings & { phase: string; observedAt?: string };
 type Response = { settings: Settings; observed?: Observed | null; task: CacheTask | null };
-type Confirmation = { kind: 'disable' | 'path'; cache: 'index' | 'drill'; oldPath?: string; newPath?: string; apply: () => void };
 const active = (task: CacheTask | null) => !!task && !['succeeded', 'failed', 'cancelled', 'canceled'].includes(task.status);
 const comparable = (value: Settings): Settings => ({
   rootPath: value.rootPath,
@@ -65,7 +68,14 @@ export function ClusterCacheSettingsDrawer({ clusterId, name, onClose, onSaved }
   const [error, setError] = useState('');
   const [phase, setPhase] = useState('unknown');
   const [pathEditing, setPathEditing] = useState<'index' | 'drill' | null>(null);
-  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [discardConfirm, setDiscardConfirm] = useState(false);
+  const [successNotice, setSuccessNotice] = useState(0);
+  const [disableAnswers, setDisableAnswers] = useState({ index: '', drill: '' });
+  useEffect(() => {
+    if (!successNotice) return;
+    const timer = window.setTimeout(() => setSuccessNotice(0), 3000);
+    return () => window.clearTimeout(timer);
+  }, [successNotice]);
   const editing = useRef(false);
   const submitted = useRef<{ id: string; settings: Settings; at: number; applied?: boolean } | null>(null);
   const saved = useRef(onSaved);
@@ -85,24 +95,28 @@ export function ClusterCacheSettingsDrawer({ clusterId, name, onClose, onSaved }
         const observed = effective?.phase === 'applied' ? effective : null;
         setPhase(effective?.phase || 'unknown');
         if (!editing.current) {
-          setSettings(observed);
-          setInitialSettings(observed);
+          setSettings(previous => observed || previous);
+          setInitialSettings(previous => observed || previous);
         }
         const pending = submitted.current;
         if (pending && result.task?.id === pending.id) {
           if (result.task.status === 'succeeded') {
+            if (!same(result.settings, pending.settings)) {
+              setError('The saved settings do not match this request. Please reopen settings to check.');
+              return;
+            }
+            setPhase('applied');
             setSettings(comparable(pending.settings));
-            setInitialSettings(pending.settings);
+            setInitialSettings(comparable(pending.settings));
             setConfirming(false);
             setError('');
             if (!pending.applied) {
               pending.applied = true;
+              setSuccessNotice(Date.now());
               saved.current();
             }
-            if (observed && same(observed, pending.settings)) {
-              editing.current = false;
-              submitted.current = null;
-            }
+            editing.current = false;
+            submitted.current = null;
           } else if (!active(result.task) && result.task.status !== 'succeeded') {
             setError(result.task.errorMessage || 'Cache settings could not be applied. Please try again.');
             submitted.current = null;
@@ -128,8 +142,13 @@ export function ClusterCacheSettingsDrawer({ clusterId, name, onClose, onSaved }
   const busy = loading || saving || confirming || active(task) || phase !== 'applied';
   const valid = !!settings && settings.rootPath.startsWith('/') && (settings.indexPath || `${settings.rootPath}/index`).startsWith('/') && (settings.drillPath || `${settings.rootPath}/drill-data`).startsWith('/') && Number.isInteger(settings.indexMaxGiB) && settings.indexMaxGiB >= 1 && settings.indexMaxGiB <= 1024 && Number.isInteger(settings.drillMaxGiB) && settings.drillMaxGiB >= 1 && settings.drillMaxGiB <= 4096;
   const dirty = !!settings && !!initialSettings && !same(settings, initialSettings);
+  const disableConfirmed = !!settings && !!initialSettings
+    && cacheDisableConfirmed(initialSettings.indexEnabled, settings.indexEnabled, disableAnswers.index)
+    && cacheDisableConfirmed(initialSettings.drillEnabled, settings.drillEnabled, disableAnswers.drill)
+    && cacheDirectoryConfirmed(comparable(initialSettings).indexPath, comparable(settings).indexPath, disableAnswers.index)
+    && cacheDirectoryConfirmed(comparable(initialSettings).drillPath, comparable(settings).drillPath, disableAnswers.drill);
   const submit = async () => {
-    if (busy || !valid || !dirty || !settings) return;
+    if (busy || !valid || !dirty || !disableConfirmed || !settings || pathEditing) return;
     setSaving(true); setError('');
     const requested = { ...settings, indexPath: settings.indexPath || `${settings.rootPath}/index`, drillPath: settings.drillPath || `${settings.rootPath}/drill-data` };
     const startedAt = Date.now();
@@ -150,36 +169,46 @@ export function ClusterCacheSettingsDrawer({ clusterId, name, onClose, onSaved }
   };
   const requestToggle = (cache: 'index' | 'drill') => {
     if (!settings) return;
+    if (pathEditing === cache) setPathEditing(null);
     const enabled = cache === 'index' ? settings.indexEnabled : settings.drillEnabled;
     const apply = () => change(cache === 'index' ? { ...settings, indexEnabled: !enabled } : { ...settings, drillEnabled: !enabled });
-    if (enabled) setConfirmation({ kind: 'disable', cache, apply });
-    else apply();
+    setDisableAnswers(previous => ({ ...previous, [cache]: '' }));
+    apply();
   };
   const requestPath = (cache: 'index' | 'drill', nextPath: string) => {
     if (!settings) return;
     const oldPath = cache === 'index' ? settings.indexPath : settings.drillPath;
     if (nextPath === oldPath) { setPathEditing(null); return; }
-    const apply = () => change(cache === 'index' ? { ...settings, indexPath: nextPath } : { ...settings, drillPath: nextPath });
-    setConfirmation({ kind: 'path', cache, oldPath, newPath: nextPath, apply });
+    setDisableAnswers(previous => ({ ...previous, [cache]: '' }));
+    change(cache === 'index' ? { ...settings, indexPath: nextPath } : { ...settings, drillPath: nextPath });
+    setPathEditing(null);
   };
-  const cacheLabel = confirmation?.cache === 'index' ? 'Index cache' : 'Drill data cache';
-  return <ResourceCreateDrawer title="Cache settings" kind="cluster" className="hbdr-cache-settings" onClose={() => { if (!saving) onClose(); }} actions={<><button type="button" className="cache-cancel" onClick={onClose} disabled={saving}>Cancel</button><button type="button" className="is-primary cache-save" disabled={busy || !valid || !dirty} onClick={() => submit()}>{saving || confirming || active(task) ? 'Saving…' : 'Save'}</button></>}>
+  const applying = saving || confirming || active(task);
+  const requestClose = () => {
+    if (applying) return;
+    if (dirty || pathEditing) setDiscardConfirm(true);
+    else onClose();
+  };
+  return <ResourceCreateDrawer title="Cache settings" kind="cluster" className="hbdr-cache-settings" onClose={requestClose} actions={<><button type="button" className="cache-cancel" onClick={requestClose} disabled={applying}>{dirty || pathEditing ? 'Cancel' : 'Close'}</button><button type="button" className="is-primary cache-save" disabled={busy || !valid || !dirty || !disableConfirmed || !!pathEditing} onClick={() => submit()}>{applying ? 'Saving…' : 'Save'}</button></>}>
+    {successNotice > 0 && <div className="hbdr-toast fixed right-5 top-20 flex items-center gap-2 rounded border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-xl" role="status" aria-live="polite"><CheckCircle2 size={16} className="text-emerald-600" />Cache settings saved</div>}
+    {discardConfirm && <div className="hbdr-cache-confirm" role="alertdialog" aria-label="Discard cache changes"><strong>Discard unsaved changes?</strong><p>Your changes have not been saved.</p><div><button type="button" onClick={() => setDiscardConfirm(false)}>Keep editing</button><button type="button" className="is-primary" onClick={onClose}>Discard changes</button></div></div>}
     <div className="hbdr-cache-form">
       <p className="text-slate-500">{name}</p>
       {loading ? <p role="status">Loading cache settings…</p> : settings ? <>
         <section className="hbdr-cache-card" aria-labelledby="index-cache-title">
           <div className="hbdr-cache-card-header"><div><div className="hbdr-cache-title"><h3 id="index-cache-title">Index cache</h3><CacheHelp cache="index" /></div><p>Per node</p></div><div className="hbdr-cache-toggle"><span>{settings.indexEnabled ? 'Enabled' : 'Disabled'}</span><button type="button" className="hbdr-settings-switch" role="switch" aria-label="Index cache" aria-checked={settings.indexEnabled} disabled={busy || phase !== 'applied'} onClick={() => requestToggle('index')}><span /></button></div></div>
-          {settings.indexEnabled && <div className="hbdr-cache-card-fields"><label className="hbdr-cache-row"><span>Cache size</span><span className="hbdr-cache-size"><input aria-label="Index cache size per node" type="number" min={1} max={1024} step={1} value={Number.isNaN(settings.indexMaxGiB) ? '' : settings.indexMaxGiB} disabled={busy || phase !== 'applied'} onChange={event => change({ ...settings, indexMaxGiB: event.target.valueAsNumber })} /><span>GiB</span></span></label><div className="hbdr-cache-row hbdr-cache-path-row"><span>Cache path</span>{pathEditing === 'index' ? <span className="hbdr-cache-path-editor"><input aria-label="Index cache path per node" defaultValue={settings.indexPath || `${settings.rootPath}/index`} /><button type="button" onClick={event => { const input = event.currentTarget.parentElement?.querySelector('input'); if (input) requestPath('index', input.value); }}>Change</button><button type="button" onClick={() => setPathEditing(null)}>Cancel</button></span> : <span className="hbdr-cache-path-value"><code title={settings.indexPath || `${settings.rootPath}/index`}>{settings.indexPath || `${settings.rootPath}/index`}</code><button type="button" aria-label="Change index cache directory" onClick={() => setPathEditing('index')} disabled={busy || phase !== 'applied'}>Change</button></span>}</div></div>}
+          {settings.indexEnabled && <div className="hbdr-cache-card-fields"><label className="hbdr-cache-row"><span>Cache size</span><span className="hbdr-cache-size"><input aria-label="Index cache size per node" type="number" min={1} max={1024} step={1} value={Number.isNaN(settings.indexMaxGiB) ? '' : settings.indexMaxGiB} disabled={busy || phase !== 'applied'} onChange={event => change({ ...settings, indexMaxGiB: event.target.valueAsNumber })} /><span>GiB</span></span></label><div className="hbdr-cache-row hbdr-cache-path-row"><span>Cache path</span>{pathEditing === 'index' ? <span className="hbdr-cache-path-editor"><input aria-label="Index cache path per node" defaultValue={settings.indexPath || `${settings.rootPath}/index`} /><button type="button" onClick={event => { const input = event.currentTarget.parentElement?.querySelector('input'); if (input) requestPath('index', input.value); }}>Confirm</button><button type="button" onClick={() => setPathEditing(null)}>Cancel</button></span> : <span className="hbdr-cache-path-value"><code title={settings.indexPath || `${settings.rootPath}/index`}>{settings.indexPath || `${settings.rootPath}/index`}</code><button type="button" aria-label="Change index cache directory" onClick={() => setPathEditing('index')} disabled={busy || phase !== 'applied'}>Change</button></span>}</div></div>}
+          {initialSettings && ((initialSettings.indexEnabled && !settings.indexEnabled) || comparable(initialSettings).indexPath !== comparable(settings).indexPath) && <CacheChangeConfirmation name="Index cache" disabling={!settings.indexEnabled} value={disableAnswers.index} disabled={busy} onChange={value => setDisableAnswers(previous => ({ ...previous, index: value }))} />}
         </section>
         <section className="hbdr-cache-card" aria-labelledby="drill-cache-title">
           <div className="hbdr-cache-card-header"><div><div className="hbdr-cache-title"><h3 id="drill-cache-title">Drill data cache</h3><CacheHelp cache="drill" /></div><p>Per node</p></div><div className="hbdr-cache-toggle"><span>{settings.drillEnabled ? 'Enabled' : 'Disabled'}</span><button type="button" className="hbdr-settings-switch" role="switch" aria-label="Drill data cache" aria-checked={settings.drillEnabled} disabled={busy || phase !== 'applied'} onClick={() => requestToggle('drill')}><span /></button></div></div>
-          {settings.drillEnabled && <div className="hbdr-cache-card-fields"><label className="hbdr-cache-row"><span>Cache size</span><span className="hbdr-cache-size"><input aria-label="Drill data cache size per node" type="number" min={1} max={4096} step={1} value={Number.isNaN(settings.drillMaxGiB) ? '' : settings.drillMaxGiB} disabled={busy || phase !== 'applied'} onChange={event => change({ ...settings, drillMaxGiB: event.target.valueAsNumber })} /><span>GiB</span></span></label><div className="hbdr-cache-row hbdr-cache-path-row"><span>Cache path</span>{pathEditing === 'drill' ? <span className="hbdr-cache-path-editor"><input aria-label="Drill data cache path per node" defaultValue={settings.drillPath || `${settings.rootPath}/drill-data`} /><button type="button" onClick={event => { const input = event.currentTarget.parentElement?.querySelector('input'); if (input) requestPath('drill', input.value); }}>Change</button><button type="button" onClick={() => setPathEditing(null)}>Cancel</button></span> : <span className="hbdr-cache-path-value"><code title={settings.drillPath || `${settings.rootPath}/drill-data`}>{settings.drillPath || `${settings.rootPath}/drill-data`}</code><button type="button" aria-label="Change drill data cache directory" onClick={() => setPathEditing('drill')} disabled={busy || phase !== 'applied'}>Change</button></span>}</div></div>}
+          {settings.drillEnabled && <div className="hbdr-cache-card-fields"><label className="hbdr-cache-row"><span>Cache size</span><span className="hbdr-cache-size"><input aria-label="Drill data cache size per node" type="number" min={1} max={4096} step={1} value={Number.isNaN(settings.drillMaxGiB) ? '' : settings.drillMaxGiB} disabled={busy || phase !== 'applied'} onChange={event => change({ ...settings, drillMaxGiB: event.target.valueAsNumber })} /><span>GiB</span></span></label><div className="hbdr-cache-row hbdr-cache-path-row"><span>Cache path</span>{pathEditing === 'drill' ? <span className="hbdr-cache-path-editor"><input aria-label="Drill data cache path per node" defaultValue={settings.drillPath || `${settings.rootPath}/drill-data`} /><button type="button" onClick={event => { const input = event.currentTarget.parentElement?.querySelector('input'); if (input) requestPath('drill', input.value); }}>Confirm</button><button type="button" onClick={() => setPathEditing(null)}>Cancel</button></span> : <span className="hbdr-cache-path-value"><code title={settings.drillPath || `${settings.rootPath}/drill-data`}>{settings.drillPath || `${settings.rootPath}/drill-data`}</code><button type="button" aria-label="Change drill data cache directory" onClick={() => setPathEditing('drill')} disabled={busy || phase !== 'applied'}>Change</button></span>}</div></div>}
+          {initialSettings && ((initialSettings.drillEnabled && !settings.drillEnabled) || comparable(initialSettings).drillPath !== comparable(settings).drillPath) && <CacheChangeConfirmation name="Drill data cache" disabling={!settings.drillEnabled} value={disableAnswers.drill} disabled={busy} onChange={value => setDisableAnswers(previous => ({ ...previous, drill: value }))} />}
         </section>
         {!valid && <p role="alert" className="text-xs text-rose-600">Enter a whole number from 1 to 1024.</p>}
         {phase !== 'applied' && <p role="status">{phase === 'applying' ? 'Applying cache settings…' : 'Cluster configuration is unavailable.'}</p>}
       </> : <p role="status">{phase === 'applying' ? 'Applying cache settings…' : phase === 'unconfigured' ? 'Cache is not configured on this cluster.' : 'Cluster configuration is unavailable.'}</p>}
       {error && <p role="alert" className="text-xs text-rose-600">{error}</p>}
-      {confirmation && <div className="hbdr-cache-confirm" role="alertdialog" aria-label="Confirm cache change"><strong>{confirmation.kind === 'disable' ? `Disable ${cacheLabel}?` : `Change ${cacheLabel} directory?`}</strong><p>{confirmation.kind === 'disable' ? 'New tasks will not use this cache. Existing tasks will finish, then cached data will be cleared.' : `New tasks will use the new directory. Existing tasks will finish, then the old cache will be cleared.`}</p>{confirmation.kind === 'path' && <p><code>{confirmation.oldPath}</code> → <code>{confirmation.newPath}</code></p>}<div><button type="button" onClick={() => setConfirmation(null)}>Cancel</button><button type="button" className="is-primary" onClick={() => { confirmation.apply(); setConfirmation(null); setPathEditing(null); }}>Confirm</button></div></div>}
     </div>
   </ResourceCreateDrawer>;
 }

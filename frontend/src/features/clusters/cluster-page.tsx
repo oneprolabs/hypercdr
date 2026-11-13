@@ -782,7 +782,7 @@ export default function ClusterPage(props: {
 
   return (
     <motion.div key="clusters" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="hbdr-clusters-page">
-      {cacheCluster && <DialogModuleFrame module={ClusterCacheSettingsDrawer} title="Cache settings" onClose={() => setCacheCluster(null)}><ClusterCacheSettingsDrawer clusterId={cacheCluster.id} name={cacheCluster.name} onClose={() => setCacheCluster(null)} onSaved={() => toast('Cache settings saved')} /></DialogModuleFrame>}
+      {cacheCluster && <DialogModuleFrame module={ClusterCacheSettingsDrawer} title="Cache settings" onClose={() => setCacheCluster(null)}><ClusterCacheSettingsDrawer clusterId={cacheCluster.id} name={cacheCluster.name} onClose={() => setCacheCluster(null)} onSaved={() => { void onRefreshRegistration(); }} /></DialogModuleFrame>}
       <div className="hbdr-clusters-workspace">
       <SearchBar title="Clusters" desc="Register clusters and maintain the default cluster." />
 

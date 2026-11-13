@@ -478,6 +478,7 @@ func (r *KubernetesAgentRuntime) UpgradeAgent(ctx context.Context, options Agent
 }
 
 func (r *KubernetesAgentRuntime) VeleroRuntimeStatus(ctx context.Context, namespace string) (VeleroRuntimeStatus, error) {
+	collectedAt := time.Now().UTC()
 	namespace = firstNonEmpty(namespace, "hypercdr-agent")
 	deployment, err := r.client.AppsV1().Deployments(namespace).Get(ctx, "velero", metav1.GetOptions{})
 	if err != nil {
@@ -495,6 +496,7 @@ func (r *KubernetesAgentRuntime) VeleroRuntimeStatus(ctx context.Context, namesp
 		NodeAgentReady:   daemonSet.Status.NumberReady,
 	}
 	if status.CacheState != nil {
+		status.CacheState["observedAt"] = collectedAt.Format(time.RFC3339Nano)
 		status.CacheState["cleanup"] = r.cacheCleanupStatus(ctx, namespace)
 	}
 	status.Version = imageTag(status.Image)

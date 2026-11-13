@@ -140,7 +140,12 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 			})
 			if err != nil {
 				r.logger.Error("failed to apply inventory", "cluster_id", clusterID, "error", err)
-				return
+				r.failInventoryRequest(clusterID, protocol.MessageErrorPayload{
+					RequestID: inventory.Payload.RequestID,
+					ErrorCode: "INVENTORY_APPLY_FAILED",
+					Message:   "Unable to save cluster inventory. Please retry.",
+				})
+				continue
 			}
 			if !ok {
 				r.logger.Warn("inventory for unknown cluster", "cluster_id", clusterID)

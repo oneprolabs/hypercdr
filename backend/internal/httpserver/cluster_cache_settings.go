@@ -70,7 +70,7 @@ func (r *Router) clusterCacheSettings(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 	previousSettings := settings
-	if observed["phase"] == "applied" && observed["isolationSupported"] == true {
+	if observed["phase"] == "applied" && cacheObservationNewerThanTask(observed, latest) {
 		raw, marshalErr := json.Marshal(observed)
 		var actual store.ClusterCacheSettings
 		if marshalErr != nil || json.Unmarshal(raw, &actual) != nil || actual.RootPath == "" || actual.IndexPath == "" || actual.DrillPath == "" || actual.IndexMaxGiB < 1 || actual.DrillMaxGiB < 1 {
@@ -168,8 +168,8 @@ func (r *Router) clusterCacheSettings(w http.ResponseWriter, req *http.Request) 
 			return
 		}
 		nodes := stringSlicePayload(observed, "nodes")
-		if observed["isolationSupported"] != true || observed["phase"] != "applied" || len(nodes) == 0 {
-			writeJSON(w, http.StatusConflict, map[string]any{"error": "cache_isolation_unavailable", "message": "Upgrade the cluster agent and Velero before disabling cache or changing its directory."})
+		if len(nodes) == 0 {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "cache_nodes_unavailable", "message": "Cache node information is unavailable. Please retry after the agent reports its nodes."})
 			return
 		}
 		previousRaw, _ := json.Marshal(previousSettings)
@@ -194,6 +194,14 @@ func (r *Router) clusterCacheSettings(w http.ResponseWriter, req *http.Request) 
 	}
 	writeJSON(w, 202, map[string]any{"settings": settings, "task": settingsTask})
 	r.startWorker(func() { r.dispatchComponentUpgrade(conn, settingsTask, "Cache settings dispatched to cluster agent") })
+}
+
+func cacheObservationNewerThanTask(observed map[string]any, task *store.Task) bool {
+	if task == nil || task.Status != "succeeded" {
+		return true
+	}
+	observedAt, err := time.Parse(time.RFC3339Nano, stringPayload(observed, "observedAt"))
+	return err == nil && observedAt.After(task.CompletedAt)
 }
 
 func cacheCleanupPathsInactive(paths []string, settings store.ClusterCacheSettings) bool {

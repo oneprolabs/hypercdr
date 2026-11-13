@@ -3,6 +3,7 @@ import type { ApiList, ApiTask, ApiTaskCancelResponse, ApiTaskEvent, ApiTaskResp
 
 export interface TaskQuery {
   clusterId?: string;
+  protectionPlanId?: string;
   view?: 'summary';
   types?: string[];
   statuses?: string[];
@@ -12,6 +13,7 @@ export interface TaskQuery {
 export function listTasks(query: TaskQuery = {}) {
   const params = new URLSearchParams();
   if (query.clusterId) params.set('clusterId', query.clusterId);
+  if (query.protectionPlanId) params.set('protectionPlanId', query.protectionPlanId);
   if (query.view) params.set('view', query.view);
   if (query.types?.length) params.set('types', query.types.join(','));
   if (query.statuses?.length) params.set('statuses', query.statuses.join(','));
@@ -25,4 +27,4 @@ export const createBackupTask = (input: Record<string, unknown>) => apiPost<ApiT
 export const createRecoveryTask = (mode: 'restore' | 'drill' | 'takeover', input: Record<string, unknown>) => apiPost<ApiTask>(`/api/v1/tasks/${mode}`, input);
 export const cancelTask = (id: string) => apiPost<ApiTaskCancelResponse>(`/api/v1/tasks/${encodeURIComponent(id)}/cancel`, {});
 export const abortTask = (id: string) => apiPost<ApiTaskCancelResponse>(`/api/v1/tasks/${encodeURIComponent(id)}/abort`, {});
-export const cleanupDrillTask = (id: string) => apiPost<ApiTaskResponse>(`/api/v1/tasks/${encodeURIComponent(id)}/cleanup-drill`, {});
+export const cleanupDrillTask = (id: string, namespaces?: string[]) => apiPost<ApiTaskResponse>(`/api/v1/tasks/${encodeURIComponent(id)}/cleanup-drill`, namespaces ? { namespaces } : {});

@@ -55,8 +55,9 @@ type SnapshotInfo struct {
 
 // Progress which defined two variables to record progress
 type Progress struct {
-	TotalBytes int64 `json:"totalBytes,omitempty"`
-	BytesDone  int64 `json:"doneBytes,omitempty"`
+	TotalBytes int64       `json:"totalBytes,omitempty"`
+	BytesDone  int64       `json:"doneBytes,omitempty"`
+	CacheStats *CacheStats `json:"cacheStats,omitempty"`
 }
 
 // UploaderProgress which defined generic interface to update progress

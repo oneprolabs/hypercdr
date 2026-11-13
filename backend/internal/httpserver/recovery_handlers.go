@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"errors"
 	"fmt"
 	"hypercdr-platform/platform/backend/internal/store"
 	"net/http"
@@ -306,6 +307,10 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 	})
 	if err != nil {
 		r.logger.Error("failed to create recovery task", "task_type", taskType, "error", err)
+		if errors.Is(err, store.ErrProtectionPlanBusy) {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "recovery_target_busy", "message": "Target resources are being cleaned. Wait for cleanup to finish."})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "create_task_failed"})
 		return
 	}
@@ -442,6 +447,10 @@ func (r *Router) retryRecoveryTask(w http.ResponseWriter, req *http.Request) {
 	payload["requestedBy"] = requestActor(req)
 	task, err := r.store.CreateTask(store.TaskInput{ClusterID: original.ClusterID, AppID: original.AppID, ProtectionPlanID: original.ProtectionPlanID, RestorePointID: original.RestorePointID, Type: original.Type, Status: "queued", CommandID: store.NewPublicID(), Payload: payload})
 	if err != nil {
+		if errors.Is(err, store.ErrProtectionPlanBusy) {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "recovery_target_busy", "message": "Target resources are being cleaned. Wait for cleanup to finish."})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "retry_task_create_failed"})
 		return
 	}

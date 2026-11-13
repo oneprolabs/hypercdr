@@ -1,0 +1,15 @@
+# Drill cleanup selection
+
+Application DR → More → Cleanup Drill lists recorded, uncleaned drill resources for the selected protection plans. Selection starts empty and supports multiple targets. Repeated drills using the same target cluster and namespace are represented by the latest drill owning that namespace, not by multiple deletable historical copies. Failed drills remain eligible because they may have created resources. Resources manually removed outside HyperCDR remain listed until a cleanup succeeds and reconciles the task record.
+
+The dialog queries persisted drill and cleanup tasks on opening. Running recoveries and active cleanups disable conflicting entries. Once submitted, the batch rows remain visible until the dialog closes, including completed results. Reopening rebuilds the uncleaned resource list. Requests are independent; only failed entries can be retried without resubmitting accepted entries. Submission is not reported as completed deletion. The dialog polls operation task records, distinguishes queued, running and completed states, and reports polling errors as unavailable status rather than failed execution. Close does not cancel submitted operations; View tasks opens their records in Backup & Recovery Tasks.
+
+Force Abort uses the same batch interaction. Selection starts empty, repeated submission is blocked, and a target that finishes naturally is shown as already finished rather than falsely reported as aborted. Confirmed termination requires the target task's recorded abort result.
+
+`POST /api/v1/tasks/{id}/cleanup-drill` accepts an optional JSON `namespaces` array. Omitting it preserves the previous behavior of cleaning all recorded target namespaces. A supplied array must be nonempty and a subset of the drill's recorded targets; arbitrary namespaces are rejected. This permits cleanup of the remaining subset when later drills reused only some targets.
+
+The control plane verifies the persisted plan and protects agent, data-protection, system, and same-cluster source namespaces. Cross-cluster targets may intentionally retain the source namespace name; name equality across different clusters does not identify the source resource. Existing agents receive the established cleanup command structure without a protocol change.
+
+Task creation serializes cleanup and recovery creation for a target cluster. Repeated requests for the same drill and namespace set reuse an active or successful cleanup, and only its creator performs initial dispatch. Overlapping active recovery/cleanup and stale drill references superseded by newer drills are rejected with HTTP 409. New recovery must wait for overlapping cleanup to finish; unrelated target namespaces are not blocked by this guard.
+
+Agent deletion is idempotent: a missing namespace or Velero Restore counts as already removed. Permission, connectivity, and deletion timeout failures are not converted into success. Cleanup does not delete protection configuration or object-storage backups, and does not guarantee deletion of externally retained PVs.

@@ -21,6 +21,9 @@ type backupTaskResponse struct {
 	Warning string       `json:"warning,omitempty"`
 	Reused  any          `json:"reused,omitempty"`
 }
+type drillCleanupRequest struct {
+	Namespaces []string `json:"namespaces,omitempty"`
+}
 
 func taskPayloadContract(pattern string) (payloadContract, int, bool) {
 	contracts := map[string]payloadContract{
@@ -31,7 +34,7 @@ func taskPayloadContract(pattern string) (payloadContract, int, bool) {
 		"GET /api/v1/protection-plans/{id}/latest-recovery": {Response: reflect.TypeFor[latestTaskResponse]()},
 		"POST /api/v1/tasks/{id}/cancel":                    {Response: reflect.TypeFor[taskActionResponse]()},
 		"POST /api/v1/tasks/{id}/abort":                     {Response: reflect.TypeFor[taskActionResponse]()},
-		"POST /api/v1/tasks/{id}/cleanup-drill":             {Response: reflect.TypeFor[taskActionResponse]()},
+		"POST /api/v1/tasks/{id}/cleanup-drill":             {Request: reflect.TypeFor[drillCleanupRequest](), Response: reflect.TypeFor[taskActionResponse]()},
 		"POST /api/v1/tasks/{id}/retry":                     {Response: reflect.TypeFor[store.Task]()},
 		"POST /api/v1/tasks/backup":                         {Request: reflect.TypeFor[backupTaskRequest](), Response: reflect.TypeFor[backupTaskResponse](), Required: []string{"clusterId"}},
 		"POST /api/v1/tasks/restore":                        {Request: reflect.TypeFor[recoveryTaskRequest](), Response: reflect.TypeFor[store.Task](), Required: []string{"clusterId", "restorePointId"}},
@@ -56,6 +59,13 @@ func applyTaskPayloadContract(pattern string, operation map[string]any) bool {
 	}
 	applyPayloadShape(operation, c, status)
 	responses := operation["responses"].(map[string]any)
+	if pattern == "POST /api/v1/tasks/{id}/cleanup-drill" || pattern == "POST /api/v1/tasks/{id}/retry" {
+		responses["409"] = map[string]any{"description": "Target resources changed or are busy", "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/ApiError"}}}}
+	}
+	if pattern == "POST /api/v1/tasks/{id}/cleanup-drill" {
+		operation["requestBody"].(map[string]any)["required"] = false
+		responses["400"] = map[string]any{"description": "Invalid cleanup namespace selection", "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/ApiError"}}}}
+	}
 	if pattern == "POST /api/v1/tasks/{id}/cancel" || pattern == "POST /api/v1/tasks/{id}/abort" || pattern == "POST /api/v1/tasks/{id}/cleanup-drill" {
 		responses["200"] = map[string]any{"description": "Existing operation reused", "content": map[string]any{"application/json": map[string]any{"schema": wireSchema(c.Response)}}}
 	}

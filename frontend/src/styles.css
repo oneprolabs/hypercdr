@@ -27611,12 +27611,13 @@ html[data-theme='dark'] #root .tags-page .hbdr-page-hero p { color:var(--hc-text
 .hbdr-protect-wizard-inline .hbdr-register-command-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border-bottom:1px solid var(--hc-border); }
 .hbdr-protect-wizard-inline .hbdr-register-command-head strong { font-size:13px; font-weight:600; }
 .hbdr-protect-wizard-inline .hbdr-register-command-head button { min-height:28px; padding:0 10px; font-size:11px; }
-.hbdr-protect-wizard-inline .hbdr-register-command-compact pre { max-height:170px; margin:0; padding:13px; border:0; border-radius:0; background:#0f172a; color:#bfdbfe; overflow:auto; overflow-wrap:anywhere; font:12px/1.55 'IBM Plex Mono',monospace; }
+.hbdr-protect-wizard-inline .hbdr-register-command-compact pre { max-height:170px; margin:0; padding:13px; border:0; border-radius:0; background:#0f172a; color:#bfdbfe; overflow:auto; white-space:pre; overflow-wrap:normal; word-break:normal; font:12px/1.55 'IBM Plex Mono',monospace; }
 .hbdr-protect-wizard-inline .hbdr-register-command-compact section > p[role="alert"] { margin:0; padding:12px; color:var(--hc-danger); }
 .hbdr-protect-wizard-inline .hbdr-policy-form-fields .hbdr-advanced-filter-section:first-child .hbdr-policy-form-box > span:first-child { display:none; }
 .hbdr-resource-create-layer { position:fixed; inset:0; z-index:400; }
 .hbdr-resource-create-layer .hbdr-filter-drawer-backdrop { z-index:0; }
 .premium-app .hbdr-resource-create-layer .hbdr-resource-create-drawer { z-index:1; width:min(760px,100vw); }
+.premium-app .hbdr-resource-create-layer .hbdr-resource-create-drawer.hbdr-resource-create-cluster { width:min(800px,100vw); }
 .hbdr-resource-create-layer .hbdr-resource-create-body { min-height:0; }
 .hbdr-resource-create-layer .hbdr-resource-create-actions { flex:none; padding:14px 24px; border-top:1px solid var(--hc-border); }
 .hbdr-resource-create-layer .hbdr-resource-create-actions button { display:inline-flex; align-items:center; justify-content:center; min-height:38px; padding:0 14px; border:1px solid var(--hc-border-strong); border-radius:5px; background:var(--hc-surface); color:var(--hc-text); font:500 12px 'IBM Plex Sans',sans-serif; }
@@ -27633,7 +27634,7 @@ html[data-theme='dark'] #root .tags-page .hbdr-page-hero p { color:var(--hc-text
 .hbdr-resource-create-cluster .hbdr-register-command-tools .hbdr-register-regenerate { display:inline-flex; align-items:center; gap:5px; min-height:28px; padding:0 5px; border:0; background:transparent; color:var(--hc-text-3); font-size:11px; font-weight:500; cursor:pointer; }
 .hbdr-resource-create-cluster .hbdr-register-command-tools .hbdr-register-regenerate:hover { background:transparent; color:var(--hc-accent); }
 .hbdr-resource-create-cluster .hbdr-register-command-tools .hbdr-register-regenerate:disabled { opacity:.5; cursor:wait; }
-.hbdr-resource-create-layer .hbdr-resource-create-cluster .hbdr-register-command-compact pre { max-height:300px; margin:0; padding:13px; background:#0f172a; color:#bfdbfe; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.55 'IBM Plex Mono',monospace; }
+.hbdr-resource-create-layer .hbdr-resource-create-cluster .hbdr-register-command-compact pre { max-height:300px; margin:0; padding:13px; background:#0f172a; color:#bfdbfe; overflow:auto; white-space:pre; overflow-wrap:normal; word-break:normal; font:12px/1.55 'IBM Plex Mono',monospace; }
 .hbdr-register-platform-ip { display:grid; gap:10px; color:var(--hc-text-2); font:400 12px/1.5 'IBM Plex Sans',sans-serif; }
 .hbdr-register-platform-ip-option { display:flex; align-items:center; gap:8px; width:fit-content; cursor:pointer; }
 .hbdr-register-platform-ip-option input { width:14px; height:14px; margin:0; accent-color:var(--hc-accent); }
@@ -29884,3 +29885,10 @@ html[data-theme='dark'] #root .hbdr-dr-task-log-drawer .hbdr-task-final-result.i
 #root .premium-app .hbdr-cache-confirm > div { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 #root .premium-app .hbdr-cache-confirm button { padding: 5px 10px; border: 1px solid var(--hc-border); border-radius: 6px; background: var(--hc-surface); color: var(--hc-text); font-size: 12px; }
 #root .premium-app .hbdr-cache-confirm button.is-primary { border-color: var(--hc-accent); background: var(--hc-accent); color: #fff; }
+#root .premium-app .hbdr-cache-disable-confirm { margin-top: 16px; padding: 12px; border: 1px solid var(--hc-border); border-radius: 6px; background: var(--hc-surface); color: var(--hc-text-2); font-size: 12px; }
+#root .premium-app .hbdr-cache-disable-confirm p { margin: 0 0 8px; color: color-mix(in srgb, var(--hc-warn) 80%, var(--hc-text)); }
+#root .premium-app .hbdr-cache-disable-confirm label strong { color: color-mix(in srgb, var(--hc-warn) 80%, var(--hc-text)); font-weight: 600; }
+#root .premium-app .hbdr-cache-disable-confirm label { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; margin: 0; }
+#root .premium-app .hbdr-cache-disable-confirm label > span { margin: 0; line-height: 1.45; }
+#root .premium-app .hbdr-cache-disable-confirm input { flex: 0 0 88px; width: 88px; min-width: 0; height: 32px; margin: 0; padding: 6px 8px; border: 1px solid var(--hc-border-strong); border-radius: 5px; background: var(--hc-surface); color: var(--hc-text); font: inherit; }
+#root .premium-app .hbdr-recovery-cluster-cache-details.is-warning { color: color-mix(in srgb, var(--hc-warn) 80%, var(--hc-text)); }

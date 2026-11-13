@@ -2,6 +2,18 @@ package httpserver
 
 import "testing"
 
+func TestCacheHitChangesAreNotDeduplicated(t *testing.T) {
+	observation := func(hit int) map[string]any {
+		return map[string]any{"name": "backup-cache", "kind": "Backup", "resourceVersion": "42", "volumeProgress": map[string]any{"items": []map[string]any{{"name": "pvb", "cacheStats": map[string]any{"version": 1, "indexHitBytes": hit, "indexReadBytes": 100}}}}}
+	}
+	if sameVeleroEventPayload(observation(30), observation(50)) {
+		t.Fatal("cache statistics change was lost")
+	}
+	if !sameVeleroEventPayload(observation(30), observation(30)) {
+		t.Fatal("same statistics not deduplicated")
+	}
+}
+
 func TestCacheCleanupRetryChangesAreNotDeduplicated(t *testing.T) {
 	previous := map[string]any{"kind": "CacheCleanup", "completed": 0, "total": 2, "failedAttempts": 0}
 	unchanged := map[string]any{"kind": "CacheCleanup", "completed": float64(0), "total": float64(2), "failedAttempts": float64(0)}

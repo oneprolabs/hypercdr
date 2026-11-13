@@ -1,8 +1,10 @@
 package httpserver
 
 import (
+	"errors"
 	"fmt"
 	"hypercdr-platform/platform/backend/internal/store"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -391,16 +393,38 @@ func (r *Router) cleanupDrillTask(w http.ResponseWriter, req *http.Request) {
 		[]string{stringPayload(drill.Payload, "targetNamespace")},
 		mapStringValues(stringMapPayload(drill.Payload, "targetNamespaces"))...,
 	))
+	var body drillCleanupRequest
+	if err := decodeJSON(req, &body); err != nil && !errors.Is(err, io.EOF) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
+		return
+	}
+	if body.Namespaces != nil {
+		requested := uniqueNonEmptyStrings(body.Namespaces)
+		if len(requested) == 0 || slices.ContainsFunc(requested, func(namespace string) bool { return !slices.Contains(targetNamespaces, namespace) }) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_drill_cleanup_namespaces"})
+			return
+		}
+		targetNamespaces = requested
+	}
+	slices.Sort(targetNamespaces)
 	sourceNamespaces := uniqueNonEmptyStrings(append(
 		[]string{stringPayload(drill.Payload, "sourceNamespace")},
 		stringSlicePayload(drill.Payload, "sourceNamespaces")...,
 	))
+	plan, planFound, planErr := r.store.GetProtectionPlan(drill.ProtectionPlanID)
+	if planErr != nil || !planFound || plan.TenantID != drill.TenantID {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "drill_plan_unavailable", "message": "Cannot verify drill resource ownership."})
+		return
+	}
+	if drill.ClusterID != plan.SourceClusterID {
+		sourceNamespaces = nil
+	}
 	if len(targetNamespaces) == 0 {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "drill_target_namespace_missing", "message": "The drill task does not record a target namespace."})
 		return
 	}
 	for _, namespace := range targetNamespaces {
-		if namespace == r.agentNamespaceForCluster(drill.ClusterID) || namespace == r.dataProtectionNamespaceForCluster(drill.ClusterID) || slices.Contains(sourceNamespaces, namespace) {
+		if namespace == r.agentNamespaceForCluster(drill.ClusterID) || namespace == r.dataProtectionNamespaceForCluster(drill.ClusterID) || slices.Contains([]string{"kube-system", "kube-public", "kube-node-lease", "default"}, namespace) || slices.Contains(sourceNamespaces, namespace) {
 			writeJSON(w, http.StatusConflict, map[string]any{"error": "unsafe_drill_cleanup_target", "message": "Refusing to delete an agent or source namespace."})
 			return
 		}
@@ -411,19 +435,28 @@ func (r *Router) cleanupDrillTask(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	for _, item := range items {
+		if item.TenantID != drill.TenantID {
+			continue
+		}
 		if item.Type == "protection-cleanup" && stringPayload(item.Payload, "cleanupMode") == "drill" && stringPayload(item.Payload, "drillTaskId") == drill.ID {
+			cleanedNamespaces := uniqueNonEmptyStrings(stringSlicePayload(item.Payload, "drillNamespaces"))
+			slices.Sort(cleanedNamespaces)
+			if !slices.Equal(cleanedNamespaces, targetNamespaces) {
+				continue
+			}
 			if item.Status == "succeeded" || isActiveTaskStatus(item.Status) {
 				writeJSON(w, http.StatusOK, map[string]any{"task": item, "reused": true})
 				return
 			}
 		}
 	}
+	commandID := store.NewPublicID()
 	cleanup, err := r.store.CreateTask(store.TaskInput{
 		ClusterID:        drill.ClusterID,
 		ProtectionPlanID: drill.ProtectionPlanID,
 		Type:             "protection-cleanup",
 		Status:           "queued",
-		CommandID:        store.NewPublicID(),
+		CommandID:        commandID,
 		Payload: map[string]any{
 			"planId":           drill.ProtectionPlanID,
 			"cleanupMode":      "drill",
@@ -438,7 +471,15 @@ func (r *Router) cleanupDrillTask(w http.ResponseWriter, req *http.Request) {
 		},
 	})
 	if err != nil {
+		if errors.Is(err, store.ErrProtectionPlanBusy) {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "drill_cleanup_target_busy", "message": "Drill resources changed or are in use. Refresh the list and try again."})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "create_drill_cleanup_failed", "message": err.Error()})
+		return
+	}
+	if cleanup.CommandID != commandID {
+		writeJSON(w, http.StatusOK, map[string]any{"task": cleanup, "reused": true})
 		return
 	}
 	conn, connected := r.hub.get(cleanup.ClusterID)

@@ -776,6 +776,7 @@ func backupInventoryVolumeProgressPayload(progress VolumeProgress) map[string]an
 			"totalBytes":       item.TotalBytes,
 			"incrementalBytes": item.IncrementalBytes,
 			"incrementalKnown": item.IncrementalKnown,
+			"cacheStats":       item.CacheStats,
 			"knownTotal":       item.KnownTotal,
 			"message":          item.Message,
 		})

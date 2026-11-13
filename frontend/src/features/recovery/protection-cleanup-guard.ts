@@ -9,9 +9,19 @@ export function protectionCleanupBlockingTasks(planIds: string[], tasks: ApiTask
     && !['succeeded', 'completed', 'success', 'failed', 'canceled', 'cancelled', 'error', 'timeout', 'timed_out'].includes(task.status.toLowerCase()));
 }
 
-export function forceAbortableTasks(planIds: string[], tasks: ApiTask[]): ApiTask[] {
+export function forceAbortCandidates(planIds: string[], tasks: ApiTask[]): ApiTask[] {
   const types = new Set(['backup', 'restore', 'drill', 'takeover', 'protection-cleanup', 'retention-cleanup', 'storage-sync', 'schedule-sync']);
-  return protectionCleanupBlockingTasks(planIds, tasks).filter(task => types.has(task.type)
-    && task.status.toLowerCase() !== 'canceling'
-    && !task.completedAt);
+  return protectionCleanupBlockingTasks(planIds, tasks).filter(task => types.has(task.type));
+}
+
+export function forceAbortBlockedReason(task: ApiTask): string | null {
+  if (['succeeded', 'completed', 'success', 'failed', 'canceled', 'cancelled', 'error', 'timeout', 'timed_out'].includes(task.status.toLowerCase())
+    || (task.completedAt && !task.completedAt.startsWith('0001-'))) return 'Task has finished';
+  if (task.status.toLowerCase() === 'canceling' || task.payload?.abortRequested === true) return 'Aborting';
+  if (['data_ready', 'deleting_old_point'].includes(String(task.payload?.quotaStage || ''))) return 'Restore point replacement in progress';
+  return null;
+}
+
+export function forceAbortableTasks(planIds: string[], tasks: ApiTask[]): ApiTask[] {
+  return forceAbortCandidates(planIds, tasks).filter(task => !forceAbortBlockedReason(task));
 }

@@ -111,6 +111,18 @@ func TestTaskActualReadCancelRetryCleanupMatchContracts(t *testing.T) {
 	run("GET /api/v1/protection-plans/{id}/latest-recovery", "", plan.ID, r.latestPlanRecoveryTask, 200)
 	run("POST /api/v1/tasks/{id}/cleanup-drill", "", drill.ID, r.tenantGuard("task", r.cleanupDrillTask), 202)
 	run("POST /api/v1/tasks/{id}/cleanup-drill", "", drill.ID, r.tenantGuard("task", r.cleanupDrillTask), 200)
+	run("POST /api/v1/tasks/{id}/retry", "", drill.ID, r.tenantGuard("task", r.retryRecoveryTask), 409)
+	cleanups, err := repo.ListTasks(plan.TargetClusterID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cleanup := range cleanups {
+		if cleanup.Type == "protection-cleanup" {
+			if _, _, err := repo.UpdateTaskStatus(store.TaskStatusInput{TaskID: cleanup.ID, Status: "succeeded", MarkDone: true}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	run("POST /api/v1/tasks/{id}/retry", "", drill.ID, r.tenantGuard("task", r.retryRecoveryTask), 201)
 }
 

@@ -18,6 +18,7 @@ package datapath
 
 import (
 	"context"
+	"github.com/kopia/kopia/repo/cachemetrics"
 	"os"
 	"strconv"
 	"strings"
@@ -86,6 +87,9 @@ type fileSystemBR struct {
 	wgDataPath     sync.WaitGroup
 	dataPathLock   sync.Mutex
 	cacheLease     *persistentcache.Lease
+	cacheObserver  *cachemetrics.Observer
+	progressLock   sync.Mutex
+	lastProgress   uploader.Progress
 }
 
 func newFileSystemBR(jobName string, requestorType string, client client.Client, namespace string, callbacks Callbacks, log logrus.FieldLogger) AsyncBR {
@@ -144,6 +148,9 @@ func (fs *fileSystemBR) Init(ctx context.Context, param any) error {
 			}
 		}
 	}
+	fs.cacheObserver = cachemetrics.New(os.Getenv("HCDR_CACHE_PERSISTENCE") == "true" && fs.cacheLease != nil, strings.HasPrefix(initParam.CacheIdentity, "restore/") && os.Getenv("HCDR_DRILL_DATA_CACHE") == "true" && fs.cacheLease != nil)
+	ctx = cachemetrics.WithObserver(ctx, fs.cacheObserver)
+	fs.ctx = cachemetrics.WithObserver(fs.ctx, fs.cacheObserver)
 	err = fs.boostRepoConnect(ctx, initParam.RepositoryType, initParam.CredentialGetter, cacheDir)
 	if err != nil {
 		return errors.Wrapf(err, "error to boost backup repository connection %s-%s-%s", initParam.BSLName, initParam.SourceNamespace, initParam.RepositoryType)
@@ -220,6 +227,7 @@ func (fs *fileSystemBR) StartBackup(source AccessPoint, uploaderConfig map[strin
 
 		snapshotID, emptySnapshot, totalBytes, incrementalBytes, err := fs.uploaderProv.RunBackup(fs.ctx, source.ByPath, backupParam.RealSource, backupParam.Tags, backupParam.ForceFull,
 			backupParam.ParentSnapshot, source.VolMode, uploaderConfig, fs)
+		fs.flushCacheProgress()
 
 		if err == provider.ErrorCanceled {
 			fs.callbacks.OnCancelled(context.Background(), fs.namespace, fs.jobName)
@@ -253,6 +261,7 @@ func (fs *fileSystemBR) StartRestore(snapshotID string, target AccessPoint, uplo
 		}()
 
 		totalBytes, err := fs.uploaderProv.RunRestore(fs.ctx, snapshotID, target.ByPath, target.VolMode, uploaderConfigs, fs)
+		fs.flushCacheProgress()
 
 		if err == provider.ErrorCanceled {
 			fs.callbacks.OnCancelled(context.Background(), fs.namespace, fs.jobName)
@@ -272,8 +281,26 @@ func (fs *fileSystemBR) StartRestore(snapshotID string, target AccessPoint, uplo
 
 // UpdateProgress which implement ProgressUpdater interface to update progress status
 func (fs *fileSystemBR) UpdateProgress(p *uploader.Progress) {
+	fs.progressLock.Lock()
+	defer fs.progressLock.Unlock()
+	fs.lastProgress = *p
+	fs.reportProgress(p)
+}
+
+func (fs *fileSystemBR) flushCacheProgress() {
+	fs.progressLock.Lock()
+	defer fs.progressLock.Unlock()
+	fs.reportProgress(&fs.lastProgress)
+}
+
+func (fs *fileSystemBR) reportProgress(p *uploader.Progress) {
+	copyProgress := *p
+	if fs.cacheObserver != nil {
+		stats := fs.cacheObserver.Snapshot()
+		copyProgress.CacheStats = &uploader.CacheStats{Version: stats.Version, IndexEnabled: stats.IndexEnabled, DataEnabled: stats.DataEnabled, IndexHitBytes: stats.IndexHitBytes, IndexReadBytes: stats.IndexReadBytes, DataHitBytes: stats.DataHitBytes, DataReadBytes: stats.DataReadBytes}
+	}
 	if fs.callbacks.OnProgress != nil {
-		fs.callbacks.OnProgress(context.Background(), fs.namespace, fs.jobName, &uploader.Progress{TotalBytes: p.TotalBytes, BytesDone: p.BytesDone})
+		fs.callbacks.OnProgress(context.Background(), fs.namespace, fs.jobName, &copyProgress)
 	}
 }
 

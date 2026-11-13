@@ -1272,24 +1272,28 @@ func (s *PostgresStore) ApplyInventory(input InventoryInput) (Cluster, bool, err
 		reportedIDs[app.Namespace] = realID
 	}
 
-	// Remove only the rows that are no longer reported by the agent so the
-	// applications list stays in sync with the cluster. Operator-driven fields
-	// (protection_status, protection_score) for surviving rows are preserved.
+	missingCondition := "cluster_id = $1"
+	args := []any{input.ClusterID}
 	if len(reportedIDs) > 0 {
-		args := []any{input.ClusterID}
 		placeholders := make([]string, 0, len(reportedIDs))
 		for ns := range reportedIDs {
 			args = append(args, ns)
 			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
 		}
-		query := "delete from applications where cluster_id = $1 and namespace not in (" + strings.Join(placeholders, ",") + ")"
-		if _, err := tx.Exec(query, args...); err != nil {
-			return Cluster{}, false, err
-		}
-	} else {
-		if _, err := tx.Exec(`delete from applications where cluster_id = $1`, input.ClusterID); err != nil {
-			return Cluster{}, false, err
-		}
+		missingCondition += " and namespace not in (" + strings.Join(placeholders, ",") + ")"
+	}
+	if _, err := tx.Exec(`update applications set status = 'Missing', workload_count = 0,
+		service_count = 0, ingress_count = 0, configmap_count = 0, secret_count = 0,
+		pvc_count = 0, pv_capacity_bytes = 0, resource_summary = '{}'::jsonb,
+		updated_at = now() where `+missingCondition, args...); err != nil {
+		return Cluster{}, false, err
+	}
+	if _, err := tx.Exec(`delete from applications a where `+missingCondition+`
+		and not exists (select 1 from protection_plans p where p.app_id = a.id)
+		and not exists (select 1 from protection_plan_apps p where p.app_id = a.id)
+		and not exists (select 1 from restore_points r where r.app_id = a.id)
+		and not exists (select 1 from tasks t where t.app_id = a.id)`, args...); err != nil {
+		return Cluster{}, false, err
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -1308,7 +1312,9 @@ func (s *PostgresStore) UpdateHeartbeat(input HeartbeatInput) (Cluster, bool, er
 		for key, value := range input.CacheState {
 			observed[key] = value
 		}
-		observed["observedAt"] = now.Format(time.RFC3339Nano)
+		if collectedAt, err := time.Parse(time.RFC3339Nano, stringValue(input.CacheState, "observedAt")); err != nil || collectedAt.After(now) {
+			observed["observedAt"] = now.Format(time.RFC3339Nano)
+		}
 		cacheState = observed
 	}
 	cacheJSON, err := json.Marshal(cacheState)

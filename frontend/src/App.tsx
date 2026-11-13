@@ -1010,6 +1010,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
   const [clusterPickerOpen, setClusterPickerOpen] = useState(false);
   const [clusterMenuId, setClusterMenuId] = useState<string | null>(null);
   const [diagnosticTaskId, setDiagnosticTaskId] = useState('');
+  const [taskOperationFocus, setTaskOperationFocus] = useState<string[]>([]);
   const prefetchedAgentTokenRef = useRef<ApiAgentToken | null>(null);
   const prefetchingAgentTokenRef = useRef<Promise<ApiAgentToken | null> | null>(null);
   const agentTokenOwnerRef = useRef('');
@@ -1584,6 +1585,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
   }, [activeModule, authSession?.user.systemAdmin, hasEnterpriseAuditModule, productCapabilities.advancedAudit?.enabled, productCapabilities.advancedIdentity?.enabled, visibleExtensionModules, view, modules]);
 
   const openView = (nextView: View, options: { preserveSelectedCluster?: boolean; diagnosticTaskId?: string } = {}) => {
+    setTaskOperationFocus([]);
     prefetchView(nextView);
     if (!options.preserveSelectedCluster && (nextView === 'dashboard' || nextView === 'applications' || nextView === 'failback')) {
       const target = defaultWorkspaceCluster;
@@ -2068,6 +2070,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
                   openStorage={() => openView('storage')}
                   openClusters={() => openView('clusters')}
                   openPolicies={() => openView('policies')}
+                  openTasks={ids => { openView('dr_tasks', { preserveSelectedCluster: true }); setTaskOperationFocus(ids); }}
                   toast={setToast}
                   refreshPlatformData={refreshPlatformData}
                   liveAppTasks={liveAppTasks}
@@ -2171,6 +2174,8 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
             ))}
             {view === 'dr_tasks' && (onboarding !== 'ready' ? onboardingGate : (
               <React.Suspense fallback={<PageLoadFallback />}><LazyBackupRecoveryTaskPage
+                focusedTaskIds={taskOperationFocus}
+                onClearTaskFocus={() => setTaskOperationFocus([])}
                 toast={setToast}
                 workspaceCluster={drWorkspaceCluster}
                 initialTasks={liveApiTasks}

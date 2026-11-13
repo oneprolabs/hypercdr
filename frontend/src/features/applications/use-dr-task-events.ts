@@ -1,15 +1,17 @@
 import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
-import { getTask, listTaskEvents } from '../../api/tasks';
+import { listTaskEvents } from '../../api/tasks';
 import type { AppItem } from '../clusters/types';
 import { listItems, type ApiTask, type ApiTaskEvent } from '../recovery/types';
 import { taskFailureSummary } from '../recovery/task-ui';
 import { preferTaskSnapshot } from '../recovery/progress-snapshot';
+import type { createTaskDetailLoader } from '../recovery/task-detail-loader';
 
 type TaskDetail = { app: AppItem; task: ApiTask; failure?: ReturnType<typeof taskFailureSummary> } | null;
 
 // Own task-event refresh lifetime independently of the page's rendering and
 // mutations. Cleanup prevents delayed responses from updating a closed page.
-export function useDrTaskEvents({ displayedDrTaskKey, hasActiveDisplayedTask, refreshPlatformData, syncTaskDetail, setSyncTaskDetail, namespaceDetailTaskId, drTaskEvents, setDrTaskEvents, setRefreshedTasks }: {
+export function useDrTaskEvents({ displayedDrTaskKey, hasActiveDisplayedTask, refreshPlatformData, syncTaskDetail, setSyncTaskDetail, namespaceDetailTaskId, drTaskEvents, setDrTaskEvents, setRefreshedTasks, taskDetailLoader }: {
+  taskDetailLoader: ReturnType<typeof createTaskDetailLoader<ApiTask, Awaited<ReturnType<typeof listTaskEvents>>>>;
   setRefreshedTasks: Dispatch<SetStateAction<Record<string, ApiTask>>>;
   displayedDrTaskKey: string;
   hasActiveDisplayedTask: boolean;
@@ -31,7 +33,7 @@ export function useDrTaskEvents({ displayedDrTaskKey, hasActiveDisplayedTask, re
       loading = true;
       const entries = await Promise.all(ids.map(async taskId => {
         try {
-          const [res, task] = await Promise.all([listTaskEvents(taskId), getTask(taskId)]);
+          const [res, task] = await Promise.all([taskDetailLoader.events(taskId), taskDetailLoader.task(taskId)]);
           return [taskId, listItems(res), task] as const;
         } catch {
           return [taskId, null, null] as const;
@@ -99,8 +101,8 @@ export function useDrTaskEvents({ displayedDrTaskKey, hasActiveDisplayedTask, re
       loading = true;
       try {
         const [eventResult, latest] = await Promise.all([
-          listTaskEvents(taskId),
-          getTask(taskId),
+          taskDetailLoader.events(taskId),
+          taskDetailLoader.task(taskId),
         ]);
         if (cancelled) return;
         const nextEvents = listItems(eventResult);

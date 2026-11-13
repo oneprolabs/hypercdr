@@ -873,6 +873,7 @@ func (r *PodVolumeRestoreReconciler) OnDataPathProgress(ctx context.Context, nam
 
 	if err := UpdatePVRWithRetry(ctx, r.client, types.NamespacedName{Namespace: namespace, Name: pvrName}, log, func(pvr *velerov1api.PodVolumeRestore) bool {
 		pvr.Status.Progress = veleroapishared.DataMoveOperationProgress{TotalBytes: progress.TotalBytes, BytesDone: progress.BytesDone}
+		uploader.SetCacheStats(pvr, progress.CacheStats)
 		return true
 	}); err != nil {
 		log.WithError(err).Error("Failed to update progress")

@@ -196,6 +196,7 @@ type RestoreResultSummary struct {
 }
 
 type VolumeProgressItem struct {
+	CacheStats       *CacheStats
 	Volume           string
 	Pod              string
 	Namespace        string
@@ -665,6 +666,7 @@ func volumeProgressFromItem(kind string, item unstructured.Unstructured) VolumeP
 	}
 	startedAt, _, _ := unstructured.NestedString(item.Object, "status", "startTimestamp")
 	return VolumeProgressItem{
+		CacheStats:       parseCacheStats(item.GetAnnotations()["hypercdr.io/cache-stats-v1"]),
 		Volume:           volume,
 		Pod:              pod,
 		Namespace:        namespace,

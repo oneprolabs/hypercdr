@@ -1,4 +1,5 @@
 import PageTitleBar from '../../components/page-title-bar';
+import { RecoveryTaskContext } from '../recovery/recovery-task-context';
 import React, { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { AlertCircle, Archive, ArrowDown, CheckCircle2, ChevronDown, Clock, DatabaseBackup, Eye, Filter, HardDrive, History, MoreVertical, Play, RefreshCw, Search, Server, X, Zap } from 'lucide-react';
@@ -6,6 +7,9 @@ import { HyperTable, type HyperTableColumn } from '../../components/table';
 import { SearchBar } from '../../components/search-bar';
 import ListToolbarControls from '../../components/list-toolbar-controls';
 import { apiGet } from '../../api/client';
+import { getTask, listTaskEvents } from '../../api/tasks';
+import { createTaskDetailLoader } from '../recovery/task-detail-loader';
+import { preferTaskSnapshot } from '../recovery/progress-snapshot';
 import { formatLocalDateTime } from '../../lib/date-time';
 import type { Cluster } from '../clusters/types';
 import type { ApiCluster, ApiStorageRepo } from '../recovery/platform-types';
@@ -40,6 +44,8 @@ export default function BackupRecoveryTaskPage({
   initialClusters = [],
   initialApps = [],
   initialStorageRepos = [],
+  focusedTaskIds = [],
+  onClearTaskFocus,
 }: {
   toast: (msg: string) => void;
   workspaceCluster?: Cluster | ApiCluster | null;
@@ -49,6 +55,8 @@ export default function BackupRecoveryTaskPage({
   initialClusters?: ApiCluster[];
   initialApps?: ApiApplication[];
   initialStorageRepos?: ApiStorageRepo[];
+  focusedTaskIds?: string[];
+  onClearTaskFocus?: () => void;
 }) {
   type Row = {
     id: string;
@@ -78,6 +86,7 @@ export default function BackupRecoveryTaskPage({
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const [visibleColumns, setVisibleColumns] = useState<string[]>(['namespace', 'repository', 'restorePoint', 'createdAt', 'completedAt']);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [taskDetailLoader] = useState(() => createTaskDetailLoader(getTask, listTaskEvents));
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   const [selectedTaskEvents, setSelectedTaskEvents] = useState<ApiTaskEvent[]>([]);
   const [timeWindow, setTimeWindow] = useState<'24h' | '7d' | '30d' | 'all'>('7d');
@@ -90,7 +99,8 @@ export default function BackupRecoveryTaskPage({
       apiGet<ApiList<ApiApplication>>('/api/v1/applications'),
       apiGet<ApiList<ApiStorageRepo>>('/api/v1/storage-repositories'),
     ]);
-    setTasks(listItems(taskRes));
+    const focusedTasks = await Promise.all(focusedTaskIds.map(id => getTask(id).catch(() => undefined)));
+    setTasks([...new Map([...listItems(taskRes), ...focusedTasks.filter((task): task is ApiTask => Boolean(task))].map(task => [task.id, task])).values()]);
     setRestorePoints(listItems(pointRes));
     setClusters(listItems(clusterRes));
     setApps(listItems(appRes));
@@ -121,7 +131,7 @@ export default function BackupRecoveryTaskPage({
   const clustersById = new Map(clusters.map(cluster => [cluster.id, cluster]));
   const appsById = new Map(apps.map(app => [app.id, app]));
   const storageById = new Map(storageRepos.map(repo => [repo.id, repo]));
-  const taskTypes = new Set(['backup', 'restore', 'drill', 'takeover', 'failover', 'failback']);
+  const taskTypes = new Set(['backup', 'restore', 'drill', 'takeover', 'failover', 'failback', 'task-abort', 'protection-cleanup']);
 
   const taskPoint = (task: ApiTask): ApiRestorePoint | undefined => {
     const pointByTask = pointsByBackupTaskId.get(task.id);
@@ -145,6 +155,7 @@ export default function BackupRecoveryTaskPage({
   };
 
   const namespaceForTask = (task: ApiTask, point?: ApiRestorePoint) => {
+    if (task.payload?.cleanupMode === 'drill' && Array.isArray(task.payload.drillNamespaces)) return task.payload.drillNamespaces.join(', ');
     const app = task.appId ? appsById.get(task.appId) : undefined;
     return String(task.payload?.sourceNamespace || point?.sourceNamespace || app?.namespace || '-');
   };
@@ -161,6 +172,7 @@ export default function BackupRecoveryTaskPage({
   };
 
   const restorePointStateForTask = (task: ApiTask, point?: ApiRestorePoint): Row['restorePointState'] => {
+    if (['task-abort', 'protection-cleanup'].includes(task.type)) return 'not_created';
     if (point) return restorePointListStatus(point) === 'available' ? 'available' : 'cleared';
     if (isFailedStatus(task.status)) return 'failed';
     if (isActiveTaskStatus(task.status)) return 'pending';
@@ -170,6 +182,8 @@ export default function BackupRecoveryTaskPage({
   };
 
   const operationLabel = (type: string) => {
+    if (type === 'task-abort') return 'Force Abort';
+    if (type === 'protection-cleanup') return 'Cleanup';
     if (type === 'backup') return 'Backup';
     if (type === 'drill') return 'DR Drill';
     if (type === 'takeover' || type === 'failover') return 'Takeover';
@@ -248,6 +262,7 @@ export default function BackupRecoveryTaskPage({
 
   const timeWindowLabel = timeWindowOptions.find(option => option.value === timeWindow)?.label || 'Last 7 days';
   const rowsInTimeWindow = rows.filter(row => {
+    if (focusedTaskIds.length) return focusedTaskIds.includes(row.id);
     if (timeWindow === 'all') return true;
     if (isActiveTaskStatus(row.status) && !row.task.createdAt) return true;
     const created = row.task.createdAt ? new Date(row.task.createdAt).getTime() : 0;
@@ -290,18 +305,21 @@ export default function BackupRecoveryTaskPage({
       return;
     }
     let cancelled = false;
-    apiGet<ApiTask>(`/api/v1/tasks/${selectedTaskId}`)
-      .then(task => { if (!cancelled) setTasks(items => items.map(item => item.id === task.id ? task : item)); })
-      .catch(() => undefined);
-    apiGet<ApiList<ApiTaskEvent>>(`/api/v1/tasks/${selectedTaskId}/events`)
-      .then(result => {
-        if (!cancelled) setSelectedTaskEvents(listItems(result));
-      })
-      .catch(() => {
-        if (!cancelled) setSelectedTaskEvents([]);
-      });
+    const cachedEvents = taskDetailLoader.events.peek(selectedTaskId);
+    setSelectedTaskEvents(cachedEvents ? listItems(cachedEvents) : []);
+    const refresh = () => {
+      void taskDetailLoader.task(selectedTaskId)
+        .then(task => { if (!cancelled) setTasks(items => items.map(item => item.id === task.id ? preferTaskSnapshot(item, task) : item)); })
+        .catch(() => undefined);
+      void taskDetailLoader.events(selectedTaskId)
+        .then(result => { if (!cancelled) setSelectedTaskEvents(listItems(result)); })
+        .catch(() => undefined);
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 2000);
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
     };
   }, [selectedTaskId]);
 
@@ -375,7 +393,7 @@ export default function BackupRecoveryTaskPage({
 
   const columns = useMemo<HyperTableColumn<Row>[]>(() => [
     { id: 'select', header: () => <input type="checkbox" aria-label="Select all filtered tasks" checked={filteredRows.length > 0 && filteredRows.every(row => selectedTaskIds.includes(row.id))} onChange={event => setSelectedTaskIds(event.target.checked ? filteredRows.map(row => row.id) : [])} onClick={event => event.stopPropagation()} />, size: 42, minSize: 42, maxSize: 54, enableSorting: false, enableResizing: false, cell: info => <input type="checkbox" aria-label={`Select ${info.row.original.operation} task`} checked={selectedTaskIds.includes(info.row.original.id)} onClick={event => event.stopPropagation()} onChange={() => setSelectedTaskIds(ids => ids.includes(info.row.original.id) ? ids.filter(id => id !== info.row.original.id) : [...ids, info.row.original.id])} />, meta: { align: 'center' } },
-    { id: 'operation', header: 'Task Type', accessorFn: row => row.operation, size: 145, minSize: 125, cell: info => renderTaskType(info.row.original), meta: { title: row => row.id } },
+    { id: 'operation', header: 'Task Type', accessorFn: row => row.operation, size: 145, minSize: 125, cell: info => <span onMouseEnter={() => taskDetailLoader.prefetch(info.row.original.id)} onFocus={() => taskDetailLoader.prefetch(info.row.original.id)}>{renderTaskType(info.row.original)}</span>, meta: { title: row => row.id } },
     ...(visibleColumns.includes('namespace') ? [{ id: 'namespace', header: 'Namespace', accessorFn: (row: Row) => row.namespace, size: 190, minSize: 150, maxSize: 320, cell: (info: any) => <span>{info.row.original.namespace}</span>, meta: { kind: 'primary', title: (row: Row) => row.namespace } }] : []),
     ...(visibleColumns.includes('cluster') ? [{ id: 'cluster', header: 'Cluster', accessorFn: (row: Row) => row.cluster, size: 160, minSize: 130, maxSize: 260, cell: (info: any) => <span>{info.row.original.cluster}</span>, meta: { kind: 'secondary', title: (row: Row) => row.cluster } }] : []),
     ...(visibleColumns.includes('repository') ? [{ id: 'repository', header: 'Repository', accessorFn: (row: Row) => row.repository, size: 145, minSize: 120, maxSize: 240, cell: (info: any) => <span>{info.row.original.repository}</span>, meta: { kind: 'secondary', title: (row: Row) => row.repository } }] : []),
@@ -395,6 +413,7 @@ export default function BackupRecoveryTaskPage({
         {clusterContext && <div className="hbdr-dashboard-design-cluster">{clusterContext}</div>}
       </PageTitleBar>
       <div className="hbdr-task-ledger-range">
+        {focusedTaskIds.length > 0 && <div className="text-xs text-slate-500">Showing tasks from this operation <button type="button" className="ml-3 underline" onClick={onClearTaskFocus}>Show all tasks</button></div>}
         <div className="hbdr-task-ledger-range-options">
           {timeWindowOptions.map(option => (
             <button key={option.value} type="button" className={timeWindow === option.value ? 'is-active' : ''} onClick={() => setTimeWindow(option.value)}>
@@ -505,13 +524,16 @@ export default function BackupRecoveryTaskPage({
                 </div>
               </div>
 
+              <RecoveryTaskContext task={selectedRow.task} point={selectedRow.point} clusters={clusters} events={selectedTaskEvents} />
               <div className="hbdr-task-detail-grid">
                 <Info label="Cluster" value={selectedRow.cluster} />
                 <Info label="Repository" value={selectedRow.repository} />
                 <Info label="Progress" value={progressLabel(selectedRow)} />
-                <Info label="Duration" value={taskDurationLabel(selectedRow)} />
-                <Info label="Started" value={selectedRow.createdAt || '-'} />
-                <Info label="Completed" value={selectedRow.completedAt || '-'} />
+                {!['backup', 'drill', 'restore', 'takeover', 'failover', 'failback'].includes(selectedRow.task.type) && <>
+                  <Info label="Duration" value={taskDurationLabel(selectedRow)} />
+                  <Info label="Started" value={selectedRow.createdAt || '-'} />
+                  <Info label="Completed" value={selectedRow.completedAt || '-'} />
+                </>}
               </div>
 
               {(selectedRow.task.errorCode || selectedRow.task.errorMessage || taskFailureDetails(selectedRow.task, selectedTaskEvents).length > 0) && (

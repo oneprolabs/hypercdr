@@ -19,7 +19,10 @@ test('cleanup failure is authoritative and force abort targets active tasks', ()
   assert.match(page, /const failedPlans = remainingPlans\.filter\(plan => plan\.status === 'cleanup_failed'\)/);
   assert.match(page, /Force Abort/);
   assert.doesNotMatch(page, /Cancel Sync/);
-  assert.match(page, /forceAbortableTasks\(/);
+  assert.match(page, /forceAbortCandidates\(/);
+  assert.match(page, /targets\.length === 0/);
+  assert.match(page, /setAbortSelectedIds\(\[\]\)/);
+  assert.match(page, /targets\.map\(task => abortTask\(task.id\)\)/);
   const polling = readFileSync(new URL('../features/applications/use-dr-task-events.ts', import.meta.url), 'utf8');
   assert.match(polling, /\['failed', 'canceled', 'cancelled', 'succeeded'\]\.includes\(task.status\)/);
 });

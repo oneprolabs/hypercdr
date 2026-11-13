@@ -7,7 +7,22 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestCacheObservationDoesNotOverrideLaterTaskSuccess(t *testing.T) {
+	completed := time.Date(2026, 11, 13, 6, 36, 40, 0, time.UTC)
+	task := &store.Task{Status: "succeeded", CompletedAt: completed}
+	for _, offset := range []time.Duration{-time.Second, 0, time.Second} {
+		observed := map[string]any{"observedAt": completed.Add(offset).Format(time.RFC3339Nano)}
+		if got := cacheObservationNewerThanTask(observed, task); got != (offset > 0) {
+			t.Fatalf("offset %s: newer = %v", offset, got)
+		}
+	}
+	if cacheObservationNewerThanTask(nil, task) {
+		t.Fatal("missing observation superseded successful task")
+	}
+}
 
 func TestCacheTaskTransitionPreservesIsolationOnDispatch(t *testing.T) {
 	want := &protocol.CacheSettingsTransition{IsolationID: strings.Repeat("a", 64), Nodes: []string{"node-one"}, Paths: []string{"/cache/old"}, Previous: protocol.CacheConfigurationSnapshot{IndexEnabled: true, IndexPath: "/cache/index", IndexMaxGiB: 5}}
@@ -117,6 +132,20 @@ func TestClusterCacheSettingsReportsObservedNotDesired(t *testing.T) {
 		} else if result.Observed["enabled"] != false || result.Observed["maxGiB"] != float64(3) || result.Observed["observedAt"] == nil {
 			t.Fatalf("desired settings substituted for actual: %+v", result.Observed)
 		}
+	}
+}
+
+func TestCacheHeartbeatPreservesCollectionTime(t *testing.T) {
+	repo := newTestStore(t)
+	actor := testAdmin(t, repo)
+	cluster := testTenantCluster(t, repo, actor.TenantID, "cache-collection-time")
+	collectedAt := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano)
+	updated, ok, err := repo.UpdateHeartbeat(store.HeartbeatInput{ClusterID: cluster.ID, Status: "healthy", CacheState: map[string]any{"phase": "applied", "observedAt": collectedAt, "drillEnabled": false}})
+	if err != nil || !ok {
+		t.Fatalf("heartbeat: %v %v", ok, err)
+	}
+	if updated.CacheState["observedAt"] != collectedAt || updated.CacheState["drillEnabled"] != false {
+		t.Fatalf("collection time or actual state was replaced: %+v", updated.CacheState)
 	}
 }
 

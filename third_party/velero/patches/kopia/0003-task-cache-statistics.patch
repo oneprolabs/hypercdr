@@ -1,0 +1,365 @@
+diff --git a/internal/cache/persistent_lru_cache.go b/internal/cache/persistent_lru_cache.go
+index 489843a..6fc9ccb 100644
+--- a/internal/cache/persistent_lru_cache.go
++++ b/internal/cache/persistent_lru_cache.go
+@@ -16,6 +16,7 @@
+ 	"github.com/kopia/kopia/internal/releasable"
+ 	"github.com/kopia/kopia/internal/timetrack"
+ 	"github.com/kopia/kopia/repo/blob"
++	"github.com/kopia/kopia/repo/cachemetrics"
+ 	"github.com/kopia/kopia/repo/logging"
+ )
+ 
+@@ -96,6 +97,7 @@ func (c *PersistentCache) getFull(ctx context.Context, key string, output *gathe
+ }
+ 
+ func (c *PersistentCache) getPartialCacheHit(ctx context.Context, key string, length int64, output *gather.WriteBuffer) {
++	cachemetrics.MarkHit(ctx)
+ 	// cache hit
+ 	c.reportHitBytes(int64(output.Length()))
+ 
+diff --git a/repo/cachemetrics/observer.go b/repo/cachemetrics/observer.go
+new file mode 100644
+index 0000000..cce83cb
+--- /dev/null
++++ b/repo/cachemetrics/observer.go
+@@ -0,0 +1,90 @@
++package cachemetrics
++
++import (
++	"context"
++	"sync"
++)
++
++type Snapshot struct {
++	Version        int   `json:"version"`
++	IndexEnabled   bool  `json:"indexEnabled"`
++	DataEnabled    bool  `json:"dataEnabled"`
++	IndexHitBytes  int64 `json:"indexHitBytes"`
++	IndexReadBytes int64 `json:"indexReadBytes"`
++	DataHitBytes   int64 `json:"dataHitBytes"`
++	DataReadBytes  int64 `json:"dataReadBytes"`
++}
++
++type Observer struct {
++	mu      sync.Mutex
++	stats   Snapshot
++	indexes map[string]bool
++}
++type observerKey struct{}
++type readKey struct{}
++type fileKey struct{}
++type Read struct{ Hit bool }
++type Range struct{ Start, End int64 }
++
++func New(indexEnabled, dataEnabled bool) *Observer {
++	return &Observer{stats: Snapshot{Version: 1, IndexEnabled: indexEnabled, DataEnabled: dataEnabled}}
++}
++func WithObserver(ctx context.Context, observer *Observer) context.Context {
++	return context.WithValue(ctx, observerKey{}, observer)
++}
++func FromContext(ctx context.Context) *Observer {
++	observer, _ := ctx.Value(observerKey{}).(*Observer)
++	return observer
++}
++func (observer *Observer) Snapshot() Snapshot {
++	observer.mu.Lock()
++	defer observer.mu.Unlock()
++	return observer.stats
++}
++func WithRead(ctx context.Context) (context.Context, *Read) {
++	read := &Read{}
++	return context.WithValue(ctx, readKey{}, read), read
++}
++func MarkHit(ctx context.Context) {
++	if read, ok := ctx.Value(readKey{}).(*Read); ok {
++		read.Hit = true
++	}
++}
++func WithFileRead(ctx context.Context, enabled bool) context.Context {
++	return context.WithValue(ctx, fileKey{}, enabled)
++}
++func IsFileRead(ctx context.Context) bool { enabled, _ := ctx.Value(fileKey{}).(bool); return enabled }
++func RecordIndex(ctx context.Context, id string, total int64, hit bool) {
++	if observer := FromContext(ctx); observer != nil && total > 0 {
++		observer.mu.Lock()
++		defer observer.mu.Unlock()
++		if observer.indexes == nil {
++			observer.indexes = map[string]bool{}
++		}
++		if observer.indexes[id] {
++			return
++		}
++		observer.indexes[id] = true
++		observer.stats.IndexReadBytes += total
++		if hit {
++			observer.stats.IndexHitBytes += total
++		}
++	}
++}
++func RecordData(ctx context.Context, total, hit int64) {
++	if observer := FromContext(ctx); observer != nil && IsFileRead(ctx) && total > 0 {
++		observer.mu.Lock()
++		defer observer.mu.Unlock()
++		observer.stats.DataReadBytes += total
++		observer.stats.DataHitBytes += hit
++	}
++}
++func Hits(ranges []Range, start, length int64) int64 {
++	var total int64
++	for _, span := range ranges {
++		if overlap := min(start+length, span.End) - max(start, span.Start); overlap > 0 {
++			total += overlap
++		}
++	}
++	return total
++}
+diff --git a/repo/cachemetrics/observer_test.go b/repo/cachemetrics/observer_test.go
+new file mode 100644
+index 0000000..e88ed47
+--- /dev/null
++++ b/repo/cachemetrics/observer_test.go
+@@ -0,0 +1,45 @@
++package cachemetrics
++
++import (
++	"context"
++	"sync"
++	"testing"
++)
++
++func TestTaskIsolationAndConcurrentReads(t *testing.T) {
++	first, second := New(true, true), New(true, false)
++	firstCtx := WithFileRead(WithObserver(context.Background(), first), true)
++	secondCtx := WithObserver(context.Background(), second)
++	var workers sync.WaitGroup
++	for index := 0; index < 50; index++ {
++		workers.Add(1)
++		go func() {
++			defer workers.Done()
++			RecordData(firstCtx, 100, 75)
++			RecordIndex(secondCtx, "same-index", 10, true)
++		}()
++	}
++	workers.Wait()
++	if stats := first.Snapshot(); stats.DataReadBytes != 5000 || stats.DataHitBytes != 3750 || stats.IndexReadBytes != 0 {
++		t.Fatal(stats)
++	}
++	if stats := second.Snapshot(); stats.DataReadBytes != 0 || stats.IndexHitBytes != 10 {
++		t.Fatal(stats)
++	}
++	RecordData(WithFileRead(firstCtx, false), 100, 100)
++	if first.Snapshot().DataReadBytes != 5000 {
++		t.Fatal("nested or metadata read counted")
++	}
++}
++
++func TestReadMarkersAndRanges(t *testing.T) {
++	ctx, first := WithRead(context.Background())
++	nested, second := WithRead(ctx)
++	MarkHit(nested)
++	if first.Hit || !second.Hit {
++		t.Fatal("read origins mixed")
++	}
++	if total := Hits([]Range{{Start: 0, End: 10}, {Start: 20, End: 30}}, 5, 20); total != 10 {
++		t.Fatal(total)
++	}
++}
+diff --git a/repo/content/committed_content_index_disk_cache.go b/repo/content/committed_content_index_disk_cache.go
+index 6a65908..396032e 100644
+--- a/repo/content/committed_content_index_disk_cache.go
++++ b/repo/content/committed_content_index_disk_cache.go
+@@ -15,6 +15,7 @@
+ 	"github.com/kopia/kopia/internal/contentlog/logparam"
+ 	"github.com/kopia/kopia/internal/gather"
+ 	"github.com/kopia/kopia/repo/blob"
++	"github.com/kopia/kopia/repo/cachemetrics"
+ 	"github.com/kopia/kopia/repo/content/index"
+ )
+ 
+@@ -48,6 +49,7 @@ func (c *diskCommittedContentIndexCache) openIndex(ctx context.Context, indexBlo
+ 		return nil, errors.Wrapf(err, "error opening index from %v", indexBlobID)
+ 	}
+ 
++	cachemetrics.RecordIndex(ctx, string(indexBlobID), int64(len(f)), true)
+ 	return ndx, nil
+ }
+ 
+diff --git a/repo/content/indexblob/index_blob_encryption.go b/repo/content/indexblob/index_blob_encryption.go
+index 071520d..bd7450e 100644
+--- a/repo/content/indexblob/index_blob_encryption.go
++++ b/repo/content/indexblob/index_blob_encryption.go
+@@ -13,6 +13,7 @@
+ 	"github.com/kopia/kopia/internal/gather"
+ 	"github.com/kopia/kopia/internal/timetrack"
+ 	"github.com/kopia/kopia/repo/blob"
++	"github.com/kopia/kopia/repo/cachemetrics"
+ )
+ 
+ // Metadata is an information about a single index blob managed by Manager.
+@@ -88,6 +89,7 @@ type EncryptionManager struct {
+ // GetEncryptedBlob fetches and decrypts the contents of a given encrypted blob
+ // using cache first and falling back to the underlying storage.
+ func (m *EncryptionManager) GetEncryptedBlob(ctx context.Context, blobID blob.ID, output *gather.WriteBuffer) error {
++	ctx, read := cachemetrics.WithRead(ctx)
+ 	var payload gather.WriteBuffer
+ 	defer payload.Close()
+ 
+@@ -97,7 +99,11 @@ func (m *EncryptionManager) GetEncryptedBlob(ctx context.Context, blobID blob.ID
+ 		return errors.Wrap(err, "getContent")
+ 	}
+ 
+-	return errors.Wrap(blobcrypto.Decrypt(m.crypter, payload.Bytes(), blobID, output), "decrypt blob")
++	if err := blobcrypto.Decrypt(m.crypter, payload.Bytes(), blobID, output); err != nil {
++		return errors.Wrap(err, "decrypt blob")
++	}
++	cachemetrics.RecordIndex(ctx, string(blobID), int64(output.Length()), read.Hit)
++	return nil
+ }
+ 
+ // EncryptAndWriteBlob encrypts and writes the provided data into a blob,
+diff --git a/repo/object/object_reader.go b/repo/object/object_reader.go
+index f3ce2cb..20ee4f3 100644
+--- a/repo/object/object_reader.go
++++ b/repo/object/object_reader.go
+@@ -8,6 +8,7 @@
+ 
+ 	"github.com/pkg/errors"
+ 
++	"github.com/kopia/kopia/repo/cachemetrics"
+ 	"github.com/kopia/kopia/repo/compression"
+ 	"github.com/kopia/kopia/repo/content"
+ )
+@@ -36,6 +37,8 @@ func VerifyObject(ctx context.Context, cr contentReader, oid ID) ([]content.ID,
+ }
+ 
+ type objectReader struct {
++	currentChunkHits []cachemetrics.Range
++	hitRanges        []cachemetrics.Range
+ 	// objectReader implements io.Reader, but needs context to read from repository
+ 	ctx context.Context //nolint:containedctx
+ 
+@@ -77,6 +80,18 @@ func (r *objectReader) Read(buffer []byte) (int, error) {
+ 
+ 			copy(buffer[readBytes:],
+ 				r.currentChunkData[r.currentChunkPosition:r.currentChunkPosition+toCopy])
++			for _, span := range r.currentChunkHits {
++				start, end := max(int64(r.currentChunkPosition), span.Start), min(int64(r.currentChunkPosition+toCopy), span.End)
++				if end > start {
++					span := cachemetrics.Range{Start: r.currentPosition + start - int64(r.currentChunkPosition), End: r.currentPosition + end - int64(r.currentChunkPosition)}
++					if count := len(r.hitRanges); count > 0 && r.hitRanges[count-1].End == span.Start {
++						r.hitRanges[count-1].End = span.End
++					} else {
++						r.hitRanges = append(r.hitRanges, span)
++					}
++				}
++			}
++			cachemetrics.RecordData(r.ctx, int64(toCopy), cachemetrics.Hits(r.currentChunkHits, int64(r.currentChunkPosition), int64(toCopy)))
+ 
+ 			r.currentChunkPosition += toCopy
+ 			r.currentPosition += int64(toCopy)
+@@ -106,7 +121,7 @@ func (r *objectReader) Read(buffer []byte) (int, error) {
+ func (r *objectReader) openCurrentChunk() error {
+ 	st := r.seekTable[r.currentChunkIndex]
+ 
+-	rd, err := openAndAssertLength(r.ctx, r.cr, st.Object, st.Length)
++	rd, err := openAndAssertLength(cachemetrics.WithFileRead(r.ctx, false), r.cr, st.Object, st.Length)
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -119,6 +134,10 @@ func (r *objectReader) openCurrentChunk() error {
+ 	}
+ 
+ 	r.currentChunkData = b
++	r.currentChunkHits = nil
++	if source, ok := rd.(interface{ CacheHitRanges() []cachemetrics.Range }); ok {
++		r.currentChunkHits = source.CacheHitRanges()
++	}
+ 	r.currentChunkPosition = 0
+ 
+ 	return nil
+@@ -126,8 +145,11 @@ func (r *objectReader) openCurrentChunk() error {
+ 
+ func (r *objectReader) closeCurrentChunk() {
+ 	r.currentChunkData = nil
++	r.currentChunkHits = nil
+ }
+ 
++func (r *objectReader) CacheHitRanges() []cachemetrics.Range { return r.hitRanges }
++
+ func (r *objectReader) findChunkIndexForOffset(offset int64) (int, error) {
+ 	left := 0
+ 	right := len(r.seekTable) - 1
+@@ -266,6 +288,7 @@ type indirectObject struct {
+ 
+ // LoadIndexObject returns entries comprising index object.
+ func LoadIndexObject(ctx context.Context, cr contentReader, indexObjectID ID) ([]IndirectObjectEntry, error) {
++	ctx = cachemetrics.WithFileRead(ctx, false)
+ 	r, err := openAndAssertLength(ctx, cr, indexObjectID, -1)
+ 	if err != nil {
+ 		return nil, err
+@@ -282,6 +305,7 @@ func LoadIndexObject(ctx context.Context, cr contentReader, indexObjectID ID) ([
+ }
+ 
+ func newRawReader(ctx context.Context, cr contentReader, objectID ID, assertLength int64) (Reader, error) {
++	ctx, read := cachemetrics.WithRead(ctx)
+ 	contentID, compressed, ok := objectID.ContentID()
+ 	if !ok {
+ 		return nil, errors.Errorf("unsupported object ID: %v", objectID)
+@@ -310,12 +334,35 @@ func newRawReader(ctx context.Context, cr contentReader, objectID ID, assertLeng
+ 		return nil, errors.Errorf("unexpected chunk length %v, expected %v", len(payload), assertLength)
+ 	}
+ 
+-	return newObjectReaderWithData(payload), nil
++	reader := newObjectReaderWithData(payload).(*readerWithData)
++	reader.ctx = ctx
++	reader.cached = read.Hit
++	return reader, nil
+ }
+ 
+ type readerWithData struct {
+ 	io.ReadSeeker
+ 	length int64
++	ctx    context.Context
++	cached bool
++}
++
++func (rwd *readerWithData) Read(buffer []byte) (int, error) {
++	count, err := rwd.ReadSeeker.Read(buffer)
++	if rwd.ctx != nil {
++		hit := int64(0)
++		if rwd.cached {
++			hit = int64(count)
++		}
++		cachemetrics.RecordData(rwd.ctx, int64(count), hit)
++	}
++	return count, err
++}
++func (rwd *readerWithData) CacheHitRanges() []cachemetrics.Range {
++	if rwd.cached {
++		return []cachemetrics.Range{{Start: 0, End: rwd.length}}
++	}
++	return nil
+ }
+ 
+ func (rwd *readerWithData) Close() error {
+diff --git a/snapshot/restore/local_fs_output.go b/snapshot/restore/local_fs_output.go
+index 1d43ba0..66f30e8 100644
+--- a/snapshot/restore/local_fs_output.go
++++ b/snapshot/restore/local_fs_output.go
+@@ -17,6 +17,7 @@
+ 	"github.com/kopia/kopia/internal/iocopy"
+ 	"github.com/kopia/kopia/internal/sparsefile"
+ 	"github.com/kopia/kopia/internal/stat"
++	"github.com/kopia/kopia/repo/cachemetrics"
+ 	"github.com/kopia/kopia/snapshot"
+ )
+ 
+@@ -409,6 +410,7 @@ func write(targetPath string, r fs.Reader, size int64, flush bool, c streamCopie
+ }
+ 
+ func (o *FilesystemOutput) copyFileContent(ctx context.Context, targetPath string, f fs.File, progressCb FileWriteProgress) error {
++	ctx = cachemetrics.WithFileRead(ctx, true)
+ 	switch _, err := os.Stat(targetPath); {
+ 	case os.IsNotExist(err): // copy file below
+ 	case err == nil:

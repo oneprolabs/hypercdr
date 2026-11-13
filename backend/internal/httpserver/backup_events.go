@@ -479,7 +479,7 @@ func volumeProgressState(progress map[string]any) string {
 	for _, raw := range sliceFromAny(progress["items"]) {
 		item := mapFromAny(raw)
 		stable := map[string]any{}
-		for _, key := range []string{"kind", "name", "phase", "startedAt", "volume", "pod", "namespace", "bytesDone", "totalBytes", "knownTotal", "message", "errorCode"} {
+		for _, key := range []string{"kind", "name", "phase", "startedAt", "volume", "pod", "namespace", "bytesDone", "totalBytes", "knownTotal", "message", "errorCode", "cacheStats"} {
 			stable[key] = item[key]
 		}
 		encoded, _ := json.Marshal(stable)

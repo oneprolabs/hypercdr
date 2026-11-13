@@ -19,6 +19,7 @@ import { ApiRequestError } from './api/client';
 import { apiGet } from './api/client';
 import { clusterCompatibilityMessage } from './lib/cluster-compatibility';
 import { ClusterCacheSettingsDrawer } from './features/clusters/cluster-cache-settings-drawer';
+import { confirmedCacheObservation, type CacheSettings } from './features/clusters/cache-settings-state';
 
 export type RecoveryWizardMode = 'drill' | 'takeover';
 
@@ -76,17 +77,9 @@ type ClusterOption = {
 };
 
 type ClusterCacheSettingsPreview = {
-  settings?: {
-    drillEnabled: boolean;
-    drillMaxGiB: number;
-    drillPath: string;
-  } | null;
-  observed?: {
-    phase: string;
-    drillEnabled: boolean;
-    drillMaxGiB: number;
-    drillPath: string;
-  } | null;
+  settings: CacheSettings;
+  observed?: (CacheSettings & { phase: string; observedAt?: string }) | null;
+  task: { status: string; completedAt?: string; payload?: Record<string, unknown> } | null;
 };
 
 export type BackupContentResource = {
@@ -310,7 +303,8 @@ export function RecoveryWizardModal(props: Props) {
   const targetNamespace = namespaceValue(config, sourceNamespace);
   const restoresToOriginalNamespace = config.namespaceMode === 'original' || targetNamespace === sourceNamespace;
   const targetClusterOption = clusterOptions.find(item => item.name === config.targetCluster);
-  const targetCacheSettings = cachePreview?.observed?.phase === 'applied' ? cachePreview.observed : cachePreview?.settings;
+  const effectiveCache = cachePreview ? confirmedCacheObservation(cachePreview.settings, cachePreview.observed, cachePreview.task) : null;
+  const targetCacheSettings = effectiveCache?.phase === 'applied' ? effectiveCache : null;
 
   useEffect(() => {
     if (!open || mode !== 'drill' || drillStep !== 1 || !targetClusterOption?.id) {
@@ -669,7 +663,7 @@ export function RecoveryWizardModal(props: Props) {
                               <span className="hbdr-recovery-cluster-cache-copy"><strong>Drill data cache <em className="is-enabled">· Enabled</em></strong><span className="hbdr-recovery-cluster-cache-details">{targetCacheSettings.drillMaxGiB} GB per node · {targetCacheSettings.drillPath}</span></span>
                               <button type="button" className="hbdr-recovery-cluster-cache-action" onClick={() => setCacheSettingsOpen(true)}>Manage</button>
                             </> : <>
-                              <span className="hbdr-recovery-cluster-cache-copy"><strong>Drill data cache <em className="is-disabled">· Disabled</em></strong><span className="hbdr-recovery-cluster-cache-details">Repeated Drill data cannot be reused</span></span>
+                              <span className="hbdr-recovery-cluster-cache-copy"><strong>Drill data cache <em className="is-disabled">· Disabled</em></strong><span className="hbdr-recovery-cluster-cache-details is-warning">Repeated Drill data cannot be reused</span></span>
                               <button type="button" className="hbdr-recovery-cluster-cache-action is-primary" onClick={() => setCacheSettingsOpen(true)}>Enable cache</button>
                             </>}
                           </div>
@@ -827,7 +821,7 @@ export function RecoveryWizardModal(props: Props) {
                   )}
                 </div>
 
-                {cacheSettingsOpen && targetClusterOption && <ClusterCacheSettingsDrawer clusterId={targetClusterOption.id} name={targetClusterOption.name} onClose={() => setCacheSettingsOpen(false)} onSaved={() => { setCacheSettingsOpen(false); setCacheRefreshKey(value => value + 1); }} />}
+                {cacheSettingsOpen && targetClusterOption && <ClusterCacheSettingsDrawer clusterId={targetClusterOption.id} name={targetClusterOption.name} onClose={() => setCacheSettingsOpen(false)} onSaved={() => { setCacheRefreshKey(value => value + 1); }} />}
 
                 {mode === 'drill' && drillStep === 3 && <div className="hbdr-protect-review-groups hbdr-drill-review">
                   <section><h4><span>1</span>Restore Point</h4><dl><div><dt>Source application</dt><dd>{currentClusterName} / {sourceNamespace}</dd></div><div><dt>Restore point</dt><dd>{selectedPoint?.time || config.pointId}</dd></div></dl></section>

@@ -46,6 +46,9 @@ git -C "${KOPIA_TARGET}" apply "${KOPIA_PATCH}"
 KOPIA_CACHE_PATCH="${PATCH_ROOT}/kopia/0002-handle-disabled-content-cache.patch"
 git -C "${KOPIA_TARGET}" apply --check "${KOPIA_CACHE_PATCH}"
 git -C "${KOPIA_TARGET}" apply "${KOPIA_CACHE_PATCH}"
+KOPIA_STATS_PATCH="${PATCH_ROOT}/kopia/0003-task-cache-statistics.patch"
+git -C "${KOPIA_TARGET}" apply --check "${KOPIA_STATS_PATCH}"
+git -C "${KOPIA_TARGET}" apply "${KOPIA_STATS_PATCH}"
 
 (
   cd "${OUTPUT_ROOT}"

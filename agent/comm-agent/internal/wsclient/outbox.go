@@ -27,18 +27,19 @@ type taskLedger struct {
 }
 
 type taskLedgerRecord struct {
-	AbortRequested  bool                 `json:"abortRequested,omitempty"`
-	CacheTransition cacheTransitionState `json:"cacheTransition,omitempty"`
-	TaskID          string               `json:"taskId"`
-	CommandID       string               `json:"commandId,omitempty"`
-	Type            string               `json:"type"`
-	PlanID          string               `json:"planId,omitempty"`
-	Task            json.RawMessage      `json:"task,omitempty"`
-	Object          taskLedgerObject     `json:"object"`
-	TerminalAcked   bool                 `json:"terminalAcked,omitempty"`
-	CleanupPending  bool                 `json:"cleanupPending,omitempty"`
-	CreatedAt       string               `json:"createdAt,omitempty"`
-	UpdatedAt       string               `json:"updatedAt,omitempty"`
+	AbortRequested    bool                 `json:"abortRequested,omitempty"`
+	CacheTransition   cacheTransitionState `json:"cacheTransition,omitempty"`
+	TaskID            string               `json:"taskId"`
+	CommandID         string               `json:"commandId,omitempty"`
+	Type              string               `json:"type"`
+	PlanID            string               `json:"planId,omitempty"`
+	Task              json.RawMessage      `json:"task,omitempty"`
+	Object            taskLedgerObject     `json:"object"`
+	TerminalAcked     bool                 `json:"terminalAcked,omitempty"`
+	CleanupPending    bool                 `json:"cleanupPending,omitempty"`
+	SubmissionPending bool                 `json:"submissionPending,omitempty"`
+	CreatedAt         string               `json:"createdAt,omitempty"`
+	UpdatedAt         string               `json:"updatedAt,omitempty"`
 }
 
 type taskLedgerObject struct {
@@ -177,6 +178,9 @@ func (l *taskLedger) recordTask(taskID string, commandID string, planID string, 
 	}
 	_ = json.Unmarshal(raw, &meta)
 	record.Type = meta.Type
+	if record.Type == "restore" || record.Type == "drill" || record.Type == "takeover" {
+		record.SubmissionPending = true
+	}
 	record.TerminalAcked = false
 	l.Records[taskID] = record
 	if taskID != "" {
@@ -188,6 +192,22 @@ func (l *taskLedger) recordTask(taskID string, commandID string, planID string, 
 	if planID != "" {
 		l.PlanIDs[planID] = struct{}{}
 	}
+	return l.flushLocked()
+}
+
+func (l *taskLedger) markSubmitted(taskID string) error {
+	if l == nil {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	record, ok := l.Records[taskID]
+	if !ok {
+		return fmt.Errorf("task ledger record is missing: %s", taskID)
+	}
+	record.SubmissionPending = false
+	record.UpdatedAt = nowRFC3339()
+	l.Records[taskID] = record
 	return l.flushLocked()
 }
 

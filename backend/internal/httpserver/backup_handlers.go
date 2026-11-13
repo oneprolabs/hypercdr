@@ -2,10 +2,13 @@ package httpserver
 
 import (
 	"errors"
+	"fmt"
 	"hypercdr-platform/platform/backend/internal/store"
 	"net/http"
 	"slices"
 )
+
+var errSourceNamespaceMissing = errors.New("source namespace is missing")
 
 func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 	var body backupTaskRequest
@@ -119,6 +122,10 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 			}
 			task, err := r.createPendingBackupTask(body, "")
 			if err != nil {
+				if errors.Is(err, errSourceNamespaceMissing) {
+					writeJSON(w, http.StatusConflict, map[string]any{"error": "source_namespace_missing", "message": err.Error()})
+					return
+				}
 				if errors.Is(err, store.ErrProtectionPlanBusy) {
 					writeJSON(w, http.StatusConflict, map[string]any{"error": "sync_already_running", "message": "Wait for the current sync and restore point replacement to finish."})
 					return
@@ -252,6 +259,10 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 		}
 		task, err := r.createPendingBackupTask(body, tgt.appID)
 		if err != nil {
+			if errors.Is(err, errSourceNamespaceMissing) {
+				writeJSON(w, http.StatusConflict, map[string]any{"error": "source_namespace_missing", "message": err.Error()})
+				return
+			}
 			if errors.Is(err, store.ErrProtectionPlanBusy) {
 				writeJSON(w, http.StatusConflict, map[string]any{"error": "sync_already_running", "message": "Wait for the current sync and restore point replacement to finish."})
 				return
@@ -409,6 +420,15 @@ func (r *Router) createPendingBackupTask(body backupTaskRequest, appID string) (
 	}
 	if appID == "" {
 		return store.Task{}, errors.New("backup task requires application id")
+	}
+	apps, err := r.store.ListApplicationsFiltered(store.ApplicationFilter{ClusterID: body.ClusterID, Summary: true})
+	if err != nil {
+		return store.Task{}, err
+	}
+	for _, app := range apps {
+		if app.Status == "Missing" && (app.ID == appID || app.Namespace == body.SourceNamespace || slices.Contains(body.SourceNamespaces, app.Namespace)) {
+			return store.Task{}, fmt.Errorf("%w: %s. Existing restore points remain available for recovery", errSourceNamespaceMissing, app.Namespace)
+		}
 	}
 	commandID := store.NewPublicID()
 	veleroBackupName := ""

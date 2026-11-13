@@ -1,0 +1,5 @@
+.hbdr-recovery-context { margin-bottom:14px; border:1px solid var(--hc-border); border-radius:4px; background:var(--hc-surface); padding:10px 12px; }
+.hbdr-recovery-context dl { margin:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 18px; }
+.hbdr-recovery-context dl > div { min-width:0; display:flex; align-items:baseline; gap:8px; }
+.hbdr-recovery-context dt { flex-shrink:0; font-size:11.5px; color:var(--hc-text-3); }
+.hbdr-recovery-context dd { min-width:0; margin:0; font-size:12px; font-weight:400; color:var(--hc-text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

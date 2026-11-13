@@ -743,7 +743,7 @@ func (c *Client) recoverLedgerTasks() {
 	if c.statusReader == nil {
 		return
 	}
-	c.recoverObservedTasks()
+	c.recoverObservedTasks(false)
 }
 
 func (c *Client) reconcileCacheTasks(ctx context.Context) {
@@ -755,6 +755,9 @@ func (c *Client) reconcileCacheTasks(ctx context.Context) {
 			return
 		case <-ticker.C:
 			c.recoverCacheTasks()
+			if c.statusReader != nil {
+				c.recoverObservedTasks(true)
+			}
 		}
 	}
 }
@@ -779,8 +782,11 @@ func (c *Client) recoverCacheTasks() {
 	}
 }
 
-func (c *Client) recoverObservedTasks() {
+func (c *Client) recoverObservedTasks(pendingSubmissionsOnly bool) {
 	for _, record := range c.ledger.recoverableRecords() {
+		if pendingSubmissionsOnly && !record.SubmissionPending {
+			continue
+		}
 		if c.outbox.hasTask(record.TaskID) {
 			continue
 		}
@@ -803,12 +809,28 @@ func (c *Client) recoverObservedTasks() {
 				c.pollVeleroStatus(task, object, manifestPayload(object.Kind, object.Name, object.Namespace), backupStatusResult)
 			})
 		case "restore", "drill", "takeover":
-			go c.runAbortableTask(task, func() { c.pollRestoreStatus(task, object, manifestPayload(object.Kind, object.Name, object.Namespace)) })
+			go c.runAbortableTask(task, func() {
+				if record.SubmissionPending {
+					resume, err := c.reconcileRestoreSubmission(task, object)
+					if resume {
+						c.executeTaskBody(task)
+						return
+					}
+					if err != nil {
+						c.logger.Warn("cannot reconcile pending restore submission", "task_id", task.TaskID, "error", err)
+						return
+					}
+				}
+				c.pollRestoreStatus(task, object, manifestPayload(object.Kind, object.Name, object.Namespace))
+			})
 		case "protection-cleanup", "retention-cleanup":
 			go c.executeTask(task)
 		default:
 			c.logger.Info("ledger task type is not recoverable by status polling", "task_id", task.TaskID, "type", task.Type)
 		}
+	}
+	if pendingSubmissionsOnly {
+		return
 	}
 	for _, record := range c.ledger.cleanupPendingRecords() {
 		var task protocol.TaskDispatchPayload
@@ -828,6 +850,19 @@ func (c *Client) recoverObservedTasks() {
 		c.logger.Info("resuming persisted failed Drill cleanup", "task_id", task.TaskID, "restore", object.Name)
 		go c.finishFailedDrillCleanup(task, object)
 	}
+}
+
+func (c *Client) reconcileRestoreSubmission(task protocol.TaskDispatchPayload, object kube.AppliedObject) (bool, error) {
+	checkCtx, cancel := context.WithTimeout(c.taskContext(task), 10*time.Second)
+	defer cancel()
+	_, err := c.statusReader.GetManifestStatus(checkCtx, object)
+	if apierrors.IsNotFound(err) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return false, c.ledger.markSubmitted(task.TaskID)
 }
 
 func (c *Client) executeTaskBody(task protocol.TaskDispatchPayload) {
@@ -1641,6 +1676,9 @@ func (c *Client) executeRestoreTask(task protocol.TaskDispatchPayload) {
 	if err := c.restoreExec.SubmitRestore(c.taskContext(task), manifest); err != nil {
 		_ = c.sendTaskFailed(task, restoreSubmitErrorCode(err), err.Error())
 		return
+	}
+	if err := c.ledger.markSubmitted(task.TaskID); err != nil {
+		c.logger.Warn("failed to persist restore submission; continuing observation", "task_id", task.TaskID, "error", err)
 	}
 	if c.statusReader != nil {
 		payload := restoreVeleroPayload(manifest, true)
@@ -3181,6 +3219,7 @@ func (c *Client) buildVolumeProgressPayload(ctx context.Context, object kube.App
 			"totalBytes":       item.TotalBytes,
 			"incrementalBytes": item.IncrementalBytes,
 			"incrementalKnown": item.IncrementalKnown,
+			"cacheStats":       item.CacheStats,
 			"knownTotal":       item.KnownTotal,
 			"message":          item.Message,
 			"errorCode":        item.ErrorCode,
@@ -3813,6 +3852,9 @@ func (c *Client) sendVeleroBackupEvent(backup kube.VeleroBackupSummary) error {
 		states := make([]string, 0, len(items))
 		for _, item := range items {
 			states = append(states, fmt.Sprintf("%v/%v/%v/%v/%v/%v/%v", item["kind"], item["name"], item["phase"], item["startedAt"], item["knownTotal"], item["bytesDone"], item["totalBytes"]))
+			if stats, err := json.Marshal(item["cacheStats"]); err == nil {
+				states = append(states, fmt.Sprintf("%v/%s", item["name"], stats))
+			}
 		}
 		slices.Sort(states)
 		signature += fmt.Sprintf("|%v|%v|", volumePayload["discoveryComplete"], volumePayload["discoveryCount"]) + strings.Join(states, "|")

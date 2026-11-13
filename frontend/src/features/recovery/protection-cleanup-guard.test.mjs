@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { protectionCleanupBlockingTasks, forceAbortableTasks } from './protection-cleanup-guard.ts';
+import { protectionCleanupBlockingTasks, forceAbortableTasks, forceAbortCandidates, forceAbortBlockedReason } from './protection-cleanup-guard.ts';
 
 test('any executing task in any selected plan blocks cleanup, not only the latest backup', () => {
   for (const type of ['backup', 'drill', 'restore', 'takeover', 'storage-sync', 'schedule-sync', 'retention-cleanup']) {
@@ -11,6 +11,21 @@ test('any executing task in any selected plan blocks cleanup, not only the lates
       assert.deepEqual(protectionCleanupBlockingTasks(['plan-one'], [active]), []);
     }
   }
+});
+
+test('zero completion timestamps do not disable active tasks and blocked tasks remain visible', () => {
+  for (const completedAt of [undefined, '', '0001-01-01T00:00:00Z', '0001-01-01T08:05:43+08:05']) {
+    const task = { id: 'active', protectionPlanId: 'plan', type: 'backup', status: 'running', completedAt };
+    assert.equal(forceAbortBlockedReason(task), null);
+    assert.deepEqual(forceAbortableTasks(['plan'], [task]), [task]);
+  }
+  for (const patch of [{ status: 'canceling' }, { payload: { abortRequested: true } }, { payload: { quotaStage: 'data_ready' } }, { payload: { quotaStage: 'deleting_old_point' } }]) {
+    const task = { id: 'active', protectionPlanId: 'plan', type: 'backup', status: 'running', ...patch };
+    assert.ok(forceAbortBlockedReason(task));
+    assert.deepEqual(forceAbortCandidates(['plan'], [task]), [task]);
+    assert.deepEqual(forceAbortableTasks(['plan'], [task]), []);
+  }
+  assert.equal(forceAbortBlockedReason({ status: 'running', completedAt: '2026-11-13T01:00:00Z' }), 'Task has finished');
 });
 
 test('terminal tasks do not block and delayed snapshots do not re-enable cleanup', () => {

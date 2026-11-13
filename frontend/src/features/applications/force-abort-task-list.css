@@ -1,0 +1,11 @@
+.hbdr-abort-tasks { display:grid; gap:10px; margin-top:16px; font-size:13px; color:var(--hc-text-2); }
+.hbdr-abort-task { display:flex; align-items:flex-start; gap:10px; padding:12px; border:1px solid var(--hc-border); border-radius:5px; background:var(--hc-surface); }
+.hbdr-abort-task > input { flex:none; width:15px; height:15px; margin-top:3px; accent-color:var(--hc-accent); }
+.hbdr-abort-task-content { display:grid; flex:1; min-width:0; gap:5px; }
+.hbdr-abort-task-heading { display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+.hbdr-abort-task-heading strong { color:var(--hc-text); font-weight:500; }
+.hbdr-abort-task-heading > span { font-size:12px; color:var(--hc-text-3); text-align:right; }
+.hbdr-abort-task-description { overflow-wrap:anywhere; }
+.hbdr-abort-task-time { font-size:12px; color:var(--hc-text-3); }
+.hbdr-abort-task-error { color:var(--hc-danger); font-size:12px; overflow-wrap:anywhere; }
+.hbdr-abort-task-result { font-size:12px; color:var(--hc-text-2); }

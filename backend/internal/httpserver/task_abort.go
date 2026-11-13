@@ -43,9 +43,10 @@ func (r *Router) abortTask(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, 409, map[string]any{"error": "task_abort_agent_unavailable", "message": "The task's Comm-agent must be online and upgraded before force abort."})
 		return
 	}
+	commandID := store.NewPublicID()
 	abort, err := r.store.CreateTask(store.TaskInput{
 		ClusterID: target.ClusterID, AppID: target.AppID, ProtectionPlanID: target.ProtectionPlanID,
-		Type: "task-abort", Status: "queued", CommandID: store.NewPublicID(),
+		Type: "task-abort", Status: "queued", CommandID: commandID,
 		Payload: map[string]any{"targetTaskId": target.ID, "requestedBy": requestActor(req)},
 	})
 	if err != nil {
@@ -54,6 +55,15 @@ func (r *Router) abortTask(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		writeJSON(w, 500, map[string]any{"error": "create_abort_task_failed"})
+		return
+	}
+	if abort.CommandID != commandID {
+		current, ok, loadErr := r.store.GetTask(target.ID)
+		if loadErr != nil || !ok {
+			writeJSON(w, 500, map[string]any{"error": "get_task_failed"})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"task": current, "cancelTask": abort, "reused": true})
 		return
 	}
 	target, _, err = r.findTaskByID(target.ClusterID, target.ID)
@@ -83,7 +93,7 @@ func (r *Router) finishTaskAbort(clusterID string, abort store.Task, completed p
 	if !found || !supportsTaskAbort(target.Type) {
 		return errors.New("abort target task not found")
 	}
-	if target.CompletedAt.IsZero() {
+	if target.CompletedAt.IsZero() && stringPayload(target.Payload, "abortTaskId") == abort.ID {
 		target, _, err = r.store.UpdateTaskStatus(store.TaskStatusInput{
 			TaskID: target.ID, Status: "failed", Progress: target.Progress, MarkDone: true,
 			ErrorCode: "TASK_ABORTED_BY_USER", ErrorMessage: "Aborted by user.",
@@ -112,7 +122,7 @@ func (r *Router) markTaskAbortFailed(abort store.Task, message string) {
 	_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{
 		TaskID: target.ID, Status: "running", Progress: target.Progress,
 		ErrorCode: "TASK_ABORT_FAILED", ErrorMessage: message,
-		Payload: map[string]any{"abortFailed": true},
+		Payload: map[string]any{"abortFailed": true, "abortRequested": false},
 	})
 	_ = r.addTaskEventIfChanged(store.TaskEventInput{TaskID: target.ID, Level: "error", Reason: "TASK_ABORT_FAILED", Message: message})
 }

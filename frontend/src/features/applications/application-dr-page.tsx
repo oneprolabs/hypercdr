@@ -1,6 +1,8 @@
 import { useDrTaskEvents } from './use-dr-task-events';
 import { getRestorePointContents } from '../../api/restore-points';
-import { getTask, listTasks, createBackupTask, createRecoveryTask, abortTask, cleanupDrillTask } from '../../api/tasks';
+import { RecoveryTaskContext } from '../recovery/recovery-task-context';
+import { getTask, listTaskEvents, listTasks, createBackupTask, createRecoveryTask, abortTask, cleanupDrillTask } from '../../api/tasks';
+import { createTaskDetailLoader } from '../recovery/task-detail-loader';
 import { listProtectionPlans, createProtectionPlan, updateProtectionPlan, activateProtectionPlan, reconfigureProtectionPlanStorage, deleteProtectionPlan } from '../../api/protection-plans';
 import { listApplications, updateApplicationProtection } from '../../api/applications';
 import { requestClusterInventory, getInventoryRequestStatus } from '../../api/inventory';
@@ -35,7 +37,13 @@ import {
 import { isActiveTaskStatus, isCompletedTaskStatus, isFailedStatus, isSucceededStatus, taskHasWarning } from '../recovery/task-status';
 import { selectPointedPlanTask } from '../recovery/plan-task-selection';
 import { preferTaskSnapshot } from '../recovery/progress-snapshot';
-import { protectionCleanupBlockingTasks, forceAbortableTasks } from '../recovery/protection-cleanup-guard';
+import { protectionCleanupBlockingTasks, forceAbortCandidates, forceAbortBlockedReason } from '../recovery/protection-cleanup-guard';
+import { ForceAbortTaskList, type AbortRequestResult } from './force-abort-task-list';
+import { DrillCleanupTaskList } from './drill-cleanup-task-list';
+import { drillCleanupCandidates, type DrillCleanupCandidate } from './drill-cleanup-model';
+import { operationOutcome } from './task-operation-model';
+import { useTaskOperationProgress } from './use-task-operation-progress';
+import { TaskOperationActions } from './task-operation-actions';
 import {
   TaskErrorDetailBlock, TaskErrorStatus, TaskFinalResult, TaskOriginLabel, TaskProcessTimeline,
   canRetryDrActivation, drStatusForPlan, formatAge, formatBytes, formatBytesPerSecond,
@@ -75,6 +83,7 @@ export default function ApplicationDrPage(props: {
   openStorage: () => void;
   openClusters: () => void;
   openPolicies: () => void;
+  openTasks: (ids: string[]) => void;
   toast: (msg: string) => void;
   refreshPlatformData: () => Promise<unknown>;
   liveAppTasks: Record<string, ApiTask>;
@@ -195,6 +204,7 @@ export default function ApplicationDrPage(props: {
     }
   };
   const [refreshedDrTasks, setRefreshedDrTasks] = useState<Record<string, ApiTask>>({});
+  const [taskDetailLoader] = useState(() => createTaskDetailLoader(getTask, listTaskEvents));
   const [syncTaskDetail, updateSyncTaskDetail] = useState<{ app: AppItem; task: ApiTask; failure?: ReturnType<typeof taskFailureSummary> } | null>(null);
   const [taskDetailLoading, setTaskDetailLoading] = useState(false);
   const [taskDetailLoadError, setTaskDetailLoadError] = useState(false);
@@ -203,13 +213,13 @@ export default function ApplicationDrPage(props: {
     if (typeof value === 'function') { updateSyncTaskDetail(value); return; }
     const request = ++taskDetailRequestRef.current;
     if (!value) { setTaskDetailLoading(false); updateSyncTaskDetail(null); return; }
-    updateSyncTaskDetail(value);
+    updateSyncTaskDetail({ ...value, task: preferTaskSnapshot(value.task, refreshedDrTasks[value.task.id] || value.task) });
     setTaskDetailLoading(true);
     setTaskDetailLoadError(false);
-    void getTask(value.task.id).then(latest => {
+    void taskDetailLoader.task(value.task.id).then(latest => {
       if (request !== taskDetailRequestRef.current) return;
-      setRefreshedDrTasks(prev => ({ ...prev, [latest.id]: latest }));
-      updateSyncTaskDetail({ ...value, task: latest });
+      setRefreshedDrTasks(prev => ({ ...prev, [latest.id]: preferTaskSnapshot(prev[latest.id], latest) }));
+      updateSyncTaskDetail(prev => prev?.task.id === latest.id ? { ...prev, task: preferTaskSnapshot(prev.task, latest), failure: undefined } : prev);
       setTaskDetailLoading(false);
     }).catch(() => {
       if (request === taskDetailRequestRef.current) { setTaskDetailLoading(false); setTaskDetailLoadError(true); }
@@ -225,6 +235,24 @@ export default function ApplicationDrPage(props: {
   const [drSupportErrorDetail, setDrSupportErrorDetail] = useState<AppItem | null>(null);
   const [operationConfirm, setOperationConfirm] = useState<'force-abort' | 'cleanup-drill' | 'remove-config' | null>(null);
   const [abortSubmitting, setAbortSubmitting] = useState(false);
+  const abortSubmittingRef = useRef(false);
+  const [abortDialogTasks, setAbortDialogTasks] = useState<ApiTask[]>([]);
+  const [abortSelectedIds, setAbortSelectedIds] = useState<string[]>([]);
+  const [abortResults, setAbortResults] = useState<Record<string, AbortRequestResult>>({});
+  const [abortLoading, setAbortLoading] = useState(false);
+  const [abortLoadError, setAbortLoadError] = useState('');
+  const abortLoadGeneration = useRef(0);
+  const [drillCleanupTasks, setDrillCleanupTasks] = useState<ApiTask[]>([]);
+  const [drillCleanupSelected, setDrillCleanupSelected] = useState<string[]>([]);
+  const [drillCleanupResults, setDrillCleanupResults] = useState<Record<string, AbortRequestResult>>({});
+  const [drillCleanupLoading, setDrillCleanupLoading] = useState(false);
+  const [drillCleanupError, setDrillCleanupError] = useState('');
+  const [drillCleanupSubmitting, setDrillCleanupSubmitting] = useState(false);
+  const drillCleanupSubmittingRef = useRef(false);
+  const drillCleanupGeneration = useRef(0);
+  const frozenCleanupCandidates = useRef<DrillCleanupCandidate[]>([]);
+  const refreshAbortProgress = useTaskOperationProgress('abort', abortResults, setAbortResults, operationConfirm === 'force-abort');
+  const refreshCleanupProgress = useTaskOperationProgress('cleanup', drillCleanupResults, setDrillCleanupResults, operationConfirm === 'cleanup-drill');
   const [forceCleanup, setForceCleanup] = useState(false);
   useEffect(() => { setForceCleanup(false); }, [operationConfirm]);
   const namespaceDetail = useNamespaceDetail(protectionPlans);
@@ -264,6 +292,17 @@ export default function ApplicationDrPage(props: {
     drSupportAutoRequestedRef.current.clear();
     setSyncTasks({});
     setAppBulkMenuOpen(false);
+    setOperationConfirm(null);
+    setAbortDialogTasks([]);
+    setAbortSelectedIds([]);
+    setAbortResults({});
+    abortLoadGeneration.current++;
+    drillCleanupGeneration.current++;
+    setDrillCleanupSelected([]);
+    setDrillCleanupTasks([]);
+    setDrillCleanupResults({});
+    setAbortLoading(false);
+    setAbortLoadError('');
   // Transaction-owned UI state must only be reset when the operator actually
   // changes clusters. `apps` is refreshed while configuration and cleanup are
   // running; depending on it here used to clear `cleaningPlanIds` on every
@@ -507,7 +546,7 @@ export default function ApplicationDrPage(props: {
       toast('Failed to reconfigure storage: ' + (error instanceof Error ? error.message : 'unknown error'));
     }
   };
-  useDrTaskEvents({ displayedDrTaskKey, hasActiveDisplayedTask, refreshPlatformData, syncTaskDetail, setSyncTaskDetail, namespaceDetailTaskId, drTaskEvents, setDrTaskEvents, setRefreshedTasks: setRefreshedDrTasks });
+  useDrTaskEvents({ displayedDrTaskKey, hasActiveDisplayedTask, refreshPlatformData, syncTaskDetail, setSyncTaskDetail, namespaceDetailTaskId, drTaskEvents, setDrTaskEvents, setRefreshedTasks: setRefreshedDrTasks, taskDetailLoader });
   const unitMembers = (app: AppItem) => app.memberApps?.length ? app.memberApps : [app];
   const unitNamespaces = (app: AppItem) => unitMembers(app).map(item => item.namespace || item.name);
   const taskForUnit = (tasks: Record<string, ApiTask>, app: AppItem, allowedTypes: string[] = ['backup']) => {
@@ -1532,7 +1571,7 @@ export default function ApplicationDrPage(props: {
         size: 300,
         minSize: 280,
         maxSize: 520,
-        cell: info => <div className="hbdr-task-status-cell">{renderSyncTaskStatus(info.row.original)}</div>,
+        cell: info => <div className="hbdr-task-status-cell" onMouseEnter={() => { const task = submittingSyncTasks[info.row.original.name] || taskForUnit(syncTasks, info.row.original); if (task) taskDetailLoader.prefetch(task.id); }} onFocus={() => { const task = submittingSyncTasks[info.row.original.name] || taskForUnit(syncTasks, info.row.original); if (task) taskDetailLoader.prefetch(task.id); }}>{renderSyncTaskStatus(info.row.original)}</div>,
       });
     }
     if (visibleRunColumns.includes('recoveryTask')) {
@@ -1543,7 +1582,7 @@ export default function ApplicationDrPage(props: {
         size: 340,
         minSize: 300,
         maxSize: 580,
-        cell: info => <div className="hbdr-task-status-cell">{renderRecoveryTaskStatus(info.row.original)}</div>,
+        cell: info => <div className="hbdr-task-status-cell" onMouseEnter={() => { const task = recoveryTaskForUnit(info.row.original); if (task) taskDetailLoader.prefetch(task.id); }} onFocus={() => { const task = recoveryTaskForUnit(info.row.original); if (task) taskDetailLoader.prefetch(task.id); }}>{renderRecoveryTaskStatus(info.row.original)}</div>,
       });
     }
     if (visibleRunColumns.includes('resource')) {
@@ -1602,13 +1641,24 @@ export default function ApplicationDrPage(props: {
   const selectedRunActiveSyncTasks = selectedRunRows
     .map(row => taskForUnit(syncTasks, row))
     .filter((task): task is ApiTask => Boolean(task?.id && isActiveTaskStatus(task.status)));
-  const selectedAbortableTasks = forceAbortableTasks(
+  const selectedAbortCandidates = forceAbortCandidates(
     selectedRunRows.map(app => app.protectionPlanId || '').filter(Boolean),
     [...platformTasks, ...Object.values(syncTasks), ...Object.values(recoveryTasks), ...Object.values(submittingSyncTasks), ...Object.values(refreshedDrTasks)],
   );
   const selectedRunHasRunningSync = selectedRunActiveSyncTasks.length > 0;
   const canStartSync = selectedRunApps.length > 0 && !syncSubmitting && !selectedRunHasRunningSync && !selectedRunHasCleanupRunning && selectedRunNotReadyRows.length === 0;
-  const canForceAbort = selectedAbortableTasks.length > 0 && !abortSubmitting;
+  const canForceAbort = selectedRunRows.length > 0 && !abortSubmitting;
+  const abortTaskSnapshots = [...platformTasks, ...Object.values(syncTasks), ...Object.values(recoveryTasks), ...Object.values(refreshedDrTasks)];
+  const abortStarted = Object.keys(abortResults).length > 0;
+  const cleanupStarted = Object.keys(drillCleanupResults).length > 0;
+  const displayedAbortTasks = abortStarted ? abortDialogTasks : abortDialogTasks.map(task => abortTaskSnapshots.filter(snapshot => snapshot.id === task.id).reduce(preferTaskSnapshot, task));
+  const selectedAbortTasks = displayedAbortTasks.filter(task => abortSelectedIds.includes(task.id) && !forceAbortBlockedReason(task) && (!abortResults[task.id] || abortResults[task.id].failed));
+  const describeAbortTask = (task: ApiTask) => {
+    const plan = protectionPlans.find(item => item.id === task.protectionPlanId);
+    const app = apps.find(item => item.protectionPlanId === task.protectionPlanId);
+    return [app?.namespace || app?.name || task.payload?.sourceNamespace || plan?.id || task.id,
+      task.payload?.targetNamespace].filter(Boolean).filter((item, index, items) => items.indexOf(item) === index).join(' · ');
+  };
   const restorePointsForApp = (app: AppItem) => {
     if (!app.protectionPlanId) return [];
     const realPoints = liveRestorePoints
@@ -1635,13 +1685,9 @@ export default function ApplicationDrPage(props: {
   };
   const selectedRunActiveRecoveryTask = selectedRunRows.length === 1 ? recoveryTaskForUnit(selectedRunRows[0]) : undefined;
   const hasSelectedRunActiveRecoveryTask = isActiveTaskStatus(selectedRunActiveRecoveryTask?.status);
-  const selectedRunDrillTask = selectedRunRows.length === 1 ? recoveryTaskForUnit(selectedRunRows[0]) : undefined;
-  const canCleanupDrill = Boolean(
-    selectedRunDrillTask?.id
-    && selectedRunDrillTask.type === 'drill'
-    && !isActiveTaskStatus(selectedRunDrillTask.status)
-    && String(selectedRunDrillTask.payload?.targetNamespace || '').trim(),
-  );
+  const canCleanupDrill = selectedRunRows.length > 0 && !drillCleanupSubmitting;
+  const cleanupCandidates = cleanupStarted ? frozenCleanupCandidates.current : drillCleanupCandidates(selectedRunRows.map(app => app.protectionPlanId || '').filter(Boolean), drillCleanupTasks.map(task => abortTaskSnapshots.filter(snapshot => snapshot.id === task.id).reduce(preferTaskSnapshot, task)));
+  const selectedCleanupCandidates = cleanupCandidates.filter(item => drillCleanupSelected.includes(item.task.id) && !item.blockedReason && (!drillCleanupResults[item.task.id] || drillCleanupResults[item.task.id].failed));
   const canRestoreAction = selectedRunRows.length === 1 && isProtectionPlanReady(protectionPlanForApp(selectedRunRows[0])?.status) && restorePointsForApp(selectedRunRows[0]).length > 0 && !hasSelectedRunActiveRecoveryTask;
   const buildRecoveryDraft = (mode: 'drill' | 'takeover', app: AppItem, pointId: string): RecoveryWizardConfig => {
     const selectedPoint = restorePointsForApp(app).find(point => point.id === pointId);
@@ -2172,14 +2218,28 @@ export default function ApplicationDrPage(props: {
     setSelectedRunApps(selectedRunApps);
     toast(syncWarning || 'Sync job started');
   };
-  const forceAbort = async () => {
-    if (!canForceAbort) {
-      toast('Select an application with an active task');
-      return;
-    }
+  const forceAbort = async (retry = false) => {
+    const targets = retry ? displayedAbortTasks.filter(task => abortResults[task.id] && operationOutcome('abort', abortResults[task.id]).retryable) : selectedAbortTasks;
+    if (abortSubmittingRef.current || abortLoading || abortLoadError || targets.length === 0 || (abortStarted && !retry)) return;
+    abortSubmittingRef.current = true;
     setAbortSubmitting(true);
+    const generation = abortLoadGeneration.current;
+    setAbortResults(previous => ({ ...previous, ...Object.fromEntries(targets.map(task => [task.id, { failed: false, message: '', submitting: true }])) }));
     try {
-      const responses = await Promise.allSettled(selectedAbortableTasks.map(task => abortTask(task.id)));
+      const responses = await Promise.allSettled(targets.map(task => abortTask(task.id)));
+      const latestTargets = await Promise.all(responses.map((response, index) => response.status === 'rejected' ? getTask(targets[index].id).catch(() => undefined) : Promise.resolve(response.value.task)));
+      const reconciledAborts = await Promise.all(latestTargets.map((target, index) => responses[index].status === 'rejected' && typeof target?.payload?.abortTaskId === 'string' && target.payload.abortRequested === true ? getTask(target.payload.abortTaskId).catch(() => undefined) : Promise.resolve(undefined)));
+      if (generation !== abortLoadGeneration.current) return;
+      setAbortResults(previous => {
+        const next = { ...previous };
+        responses.forEach((response, index) => {
+          next[targets[index].id] = response.status === 'fulfilled'
+            ? { failed: false, message: response.value.warning || '', operationTask: response.value.cancelTask, targetTask: response.value.task, acceptedAt: Date.now() }
+            : { failed: !reconciledAborts[index], operationTask: reconciledAborts[index], message: response.reason instanceof Error ? response.reason.message : String(response.reason), targetTask: latestTargets[index], acceptedAt: Date.now() };
+        });
+        return next;
+      });
+      setAbortSelectedIds([]);
       setRefreshedDrTasks(previous => {
         const next = { ...previous };
         for (const response of responses) {
@@ -2188,13 +2248,31 @@ export default function ApplicationDrPage(props: {
         return next;
       });
       await refreshPlatformData();
-      const failed = responses.find(response => response.status === 'rejected');
-      const warning = responses.flatMap(response => response.status === 'fulfilled' && response.value.warning ? [response.value.warning] : [])[0];
-      toast(failed?.status === 'rejected' ? 'Some tasks could not be aborted: ' + String(failed.reason) : warning || 'Force abort requested');
     } catch (error) {
       toast('Failed to refresh task status: ' + (error instanceof Error ? error.message : 'unknown error'));
     } finally {
+      abortSubmittingRef.current = false;
       setAbortSubmitting(false);
+    }
+  };
+  const openForceAbort = async () => {
+    const generation = ++abortLoadGeneration.current;
+    const planIds = [...new Set(selectedRunRows.map(app => app.protectionPlanId || '').filter(Boolean))];
+    setAppBulkMenuOpen(false);
+    setAbortDialogTasks(selectedAbortCandidates);
+    setAbortSelectedIds([]);
+    setAbortResults({});
+    setAbortLoadError('');
+    setAbortLoading(true);
+    setOperationConfirm('force-abort');
+    try {
+      const responses = await Promise.all(planIds.map(protectionPlanId => listTasks({ protectionPlanId, statuses: ['queued', 'dispatched', 'accepted', 'running', 'syncing', 'finalizing', 'canceling'] })));
+      if (generation !== abortLoadGeneration.current) return;
+      setAbortDialogTasks(forceAbortCandidates(planIds, responses.flatMap(response => response.items)));
+    } catch (error) {
+      if (generation === abortLoadGeneration.current) setAbortLoadError(error instanceof Error ? error.message : 'Unable to load active tasks');
+    } finally {
+      if (generation === abortLoadGeneration.current) setAbortLoading(false);
     }
   };
   const modifyProtection = async () => {
@@ -2351,42 +2429,60 @@ export default function ApplicationDrPage(props: {
     pollCleanup(40);
   };
 
-  const cleanupDrillResources = async () => {
-    if (!selectedRunDrillTask?.id || !canCleanupDrill) {
-      toast('Select one completed drill with resources to clean up');
-      return;
-    }
-    const targetNamespace = String(selectedRunDrillTask.payload?.targetNamespace || '').trim();
+  const openDrillCleanup = async () => {
+    const generation = ++drillCleanupGeneration.current;
+    setAppBulkMenuOpen(false);
+    setOperationConfirm('cleanup-drill');
+    setDrillCleanupSelected([]);
+    setDrillCleanupResults({});
+    frozenCleanupCandidates.current = [];
+    setDrillCleanupError('');
+    setDrillCleanupLoading(true);
     try {
-      const response = await cleanupDrillTask(selectedRunDrillTask.id);
-      const cleanupTask = 'task' in response ? response.task : response;
-      const cleanupWarning = 'warning' in response ? response.warning : '';
-      toast(cleanupWarning || `Drill cleanup submitted for ${targetNamespace}`);
-      const cleanupTaskId = cleanupTask.id;
-      if (!cleanupTaskId) return;
-      const poll = (remaining: number) => {
-        window.setTimeout(async () => {
-          try {
-            const result = await listTasks({ types: ['protection-cleanup'] });
-            const task = listItems(result).find(item => item.id === cleanupTaskId);
-            if (task && isCompletedTaskStatus(task.status)) {
-              await refreshPlatformData();
-              toast(`Drill resources cleaned: ${targetNamespace}`);
-              return;
-            }
-            if (task && isFailedStatus(task.status)) {
-              toast(`Failed to clean drill resources: ${task.errorMessage || 'unknown error'}`);
-              return;
-            }
-            if (remaining > 0) poll(remaining - 1);
-          } catch {
-            if (remaining > 0) poll(remaining - 1);
-          }
-        }, 2000);
-      };
-      poll(150);
+      const planIds = [...new Set(selectedRunRows.map(app => app.protectionPlanId || '').filter(Boolean))];
+      const responses = await Promise.all(planIds.map(protectionPlanId => listTasks({ protectionPlanId, types: ['drill', 'restore', 'takeover', 'protection-cleanup'] })));
+      if (generation === drillCleanupGeneration.current) setDrillCleanupTasks(responses.flatMap(response => response.items));
     } catch (error) {
-      toast('Failed to clean drill resources: ' + (error instanceof Error ? error.message : 'unknown error'));
+      if (generation === drillCleanupGeneration.current) setDrillCleanupError(error instanceof Error ? error.message : 'Unable to load drill resources');
+    } finally {
+      if (generation === drillCleanupGeneration.current) setDrillCleanupLoading(false);
+    }
+  };
+  const cleanupDrillResources = async (retry = false) => {
+    const targets = retry ? cleanupCandidates.filter(item => drillCleanupResults[item.task.id] && operationOutcome('cleanup', drillCleanupResults[item.task.id]).retryable) : selectedCleanupCandidates;
+    if (drillCleanupSubmittingRef.current || drillCleanupLoading || drillCleanupError || !targets.length || (cleanupStarted && !retry)) return;
+    drillCleanupSubmittingRef.current = true;
+    setDrillCleanupSubmitting(true);
+    const generation = drillCleanupGeneration.current;
+    if (!cleanupStarted) frozenCleanupCandidates.current = cleanupCandidates;
+    setDrillCleanupResults(previous => ({ ...previous, ...Object.fromEntries(targets.map(item => [item.task.id, { failed: false, message: '', submitting: true }])) }));
+    try {
+      const responses = await Promise.allSettled(targets.map(item => cleanupDrillTask(item.task.id, item.namespaces)));
+      const reconciledCleanups = await Promise.all(responses.map(async (response, index) => {
+        if (response.status !== 'rejected') return undefined;
+        try {
+          const tasks = await listTasks({ protectionPlanId: targets[index].task.protectionPlanId, types: ['protection-cleanup'] });
+          return tasks.items.filter(task => task.payload?.cleanupMode === 'drill' && task.payload?.drillTaskId === targets[index].task.id && !isFailedStatus(task.status) && JSON.stringify([...(task.payload?.drillNamespaces || [])].sort()) === JSON.stringify([...targets[index].namespaces].sort())).sort((first, second) => second.createdAt.localeCompare(first.createdAt))[0];
+        } catch { return undefined; }
+      }));
+      if (generation !== drillCleanupGeneration.current) return;
+      setDrillCleanupResults(previous => {
+        const next = { ...previous };
+        responses.forEach((response, index) => {
+          next[targets[index].task.id] = response.status === 'fulfilled'
+            ? { failed: false, message: ('warning' in response.value && response.value.warning) || '', operationTask: 'task' in response.value ? response.value.task : response.value, acceptedAt: Date.now() }
+            : { failed: !reconciledCleanups[index], operationTask: reconciledCleanups[index], message: response.reason instanceof Error ? response.reason.message : String(response.reason), acceptedAt: Date.now() };
+        });
+        return next;
+      });
+      setDrillCleanupSelected([]);
+      setDrillCleanupTasks(previous => [...previous, ...responses.flatMap(response => response.status === 'fulfilled' ? ['task' in response.value ? response.value.task : response.value] : [])]);
+      await refreshPlatformData();
+    } catch (error) {
+      toast('Unable to refresh cleanup status: ' + (error instanceof Error ? error.message : String(error)));
+    } finally {
+      drillCleanupSubmittingRef.current = false;
+      setDrillCleanupSubmitting(false);
     }
   };
   const pollProtectionPlanActivation = (planIds: string[], appNames: string[], remaining: number) => {
@@ -2851,8 +2947,7 @@ export default function ApplicationDrPage(props: {
                           <button
                             disabled={!canForceAbort}
                             onClick={() => {
-                              setAppBulkMenuOpen(false);
-                              setOperationConfirm('force-abort');
+                              void openForceAbort();
                             }}
                             className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-rose-600 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"
                           >
@@ -2861,8 +2956,7 @@ export default function ApplicationDrPage(props: {
                           <button
                             disabled={!canCleanupDrill}
                             onClick={() => {
-                              setAppBulkMenuOpen(false);
-                              setOperationConfirm('cleanup-drill');
+                              void openDrillCleanup();
                             }}
                             className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"
                           >
@@ -2979,45 +3073,48 @@ export default function ApplicationDrPage(props: {
             >
               <div className="hbdr-filter-drawer-head">
                 <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.16em] text-rose-500">Confirm operation</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">{(operationConfirm === 'force-abort' && abortStarted) || (operationConfirm === 'cleanup-drill' && cleanupStarted) ? 'Operation progress' : 'Confirm operation'}</p>
                   <h3 id="dr-operation-confirm-title" className="mt-1 text-lg font-black text-slate-950">
-                    {operationConfirm === 'force-abort' ? 'Force Abort Task?' : operationConfirm === 'cleanup-drill' ? 'Cleanup Drill' : 'Remove DR Configuration'}
+                    {operationConfirm === 'force-abort' ? 'Force Abort Tasks' : operationConfirm === 'cleanup-drill' ? 'Cleanup Drill' : 'Remove DR Configuration'}
                   </h3>
                 </div>
                 <button type="button" onClick={() => setOperationConfirm(null)} aria-label="Close confirmation"><X size={18} /></button>
               </div>
               <div className="hbdr-filter-drawer-body">
-                <div className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-900">
+                <div className={operationConfirm === 'remove-config' ? 'rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-900' : 'hbdr-operation-description'}>
                   {operationConfirm === 'force-abort' && (
-                    <p>{selectedAbortableTasks.length === 1 ? 'The current task will' : `The ${selectedAbortableTasks.length} active tasks will`} be aborted and marked as failed. Completed changes will not be rolled back.</p>
+                    <p>Stop selected tasks. Completed changes will not be rolled back.</p>
                   )}
                   {operationConfirm === 'cleanup-drill' && (
-                    <p>Delete drill namespace <strong>{String(selectedRunDrillTask?.payload?.targetNamespace || '-')}</strong> from target cluster <strong>{selectedRunDrillTask?.payload?.targetClusterName || selectedRunRows[0]?.targetCluster || 'configured target'}</strong>. The DR configuration, policy, restore points, source namespace, and object-storage data are retained.</p>
+                    <p>Delete selected drill namespaces. Source applications and restore points are retained.</p>
                   )}
                   {operationConfirm === 'remove-config' && (
                     <p>Scheduled sync, restore points (including retained points), this plan, and its object-storage data will be deleted. Cleanup is blocked while tasks are in progress. Existing drill or takeover workloads are not deleted.</p>
                   )}
                 </div>
+                {operationConfirm === 'force-abort' && (abortLoading ? <p role="status" className="mt-4 text-sm">Loading tasks…</p> : abortLoadError ? <div role="alert" className="mt-4 text-sm"><p>{abortLoadError}</p><button type="button" onClick={() => void openForceAbort()}>Retry</button></div> : <ForceAbortTaskList tasks={displayedAbortTasks} selected={abortSelectedIds} results={abortResults} submitting={abortSubmitting} describe={describeAbortTask} clusterName={id => clusters.find(cluster => cluster.id === id)?.name || id} onRefresh={refreshAbortProgress} onSelect={(id, checked) => setAbortSelectedIds(previous => checked ? [...previous, id] : previous.filter(value => value !== id))} />)}
                 {operationConfirm === 'remove-config' && <p className="mt-4 text-xs font-semibold leading-5 text-slate-500">Clean up drill resources first if they are no longer required.</p>}
+                {operationConfirm === 'cleanup-drill' && (drillCleanupLoading ? <p role="status" className="mt-4 text-sm">Loading drill resources…</p> : drillCleanupError ? <div role="alert" className="mt-4 text-sm"><p>{drillCleanupError}</p><button type="button" onClick={() => void openDrillCleanup()}>Retry</button></div> : <DrillCleanupTaskList candidates={cleanupCandidates} selected={drillCleanupSelected} results={drillCleanupResults} submitting={drillCleanupSubmitting} clusterName={id => clusters.find(cluster => cluster.id === id)?.name || id} onRefresh={refreshCleanupProgress} onSelect={(id, checked) => setDrillCleanupSelected(previous => checked ? [...previous, id] : previous.filter(value => value !== id))} />)}
                 {operationConfirm === 'remove-config' && <label className="mt-4 flex items-start gap-2 text-sm"><input type="checkbox" checked={forceCleanup} onChange={event => setForceCleanup(event.target.checked)} /><span>Force cleanup<span className="mt-1 block text-xs text-slate-500">Remove configuration even if backup storage cannot be cleaned. Remote data may remain.</span></span></label>}
               </div>
-              <div className="hbdr-filter-drawer-actions">
+              {operationConfirm !== 'remove-config' ? <TaskOperationActions mode={operationConfirm === 'force-abort' ? 'abort' : 'cleanup'} results={operationConfirm === 'force-abort' ? abortResults : drillCleanupResults} selectedCount={operationConfirm === 'force-abort' ? selectedAbortTasks.length : selectedCleanupCandidates.length} rowCount={operationConfirm === 'force-abort' ? displayedAbortTasks.length : cleanupCandidates.length} loading={operationConfirm === 'force-abort' ? abortLoading || Boolean(abortLoadError) : drillCleanupLoading || Boolean(drillCleanupError)} submitting={operationConfirm === 'force-abort' ? abortSubmitting : drillCleanupSubmitting} onSubmit={() => operationConfirm === 'force-abort' ? void forceAbort() : void cleanupDrillResources()} onRetry={() => operationConfirm === 'force-abort' ? void forceAbort(true) : void cleanupDrillResources(true)} onClose={() => setOperationConfirm(null)} onViewTasks={() => {
+                const results = operationConfirm === 'force-abort' ? abortResults : drillCleanupResults;
+                props.openTasks(Object.entries(results).map(([id, result]) => result.operationTask?.id || id));
+                setOperationConfirm(null);
+              }} /> : <div className="hbdr-filter-drawer-actions">
                 <button type="button" onClick={() => setOperationConfirm(null)}>Cancel</button>
                 <button
                   type="button"
-                  disabled={operationConfirm === 'remove-config' && (selectedRunHasActiveTasks || selectedRunHasCleanupRunning)}
-                  className="!bg-rose-600 !text-white hover:!bg-rose-700"
+                  disabled={selectedRunHasActiveTasks || selectedRunHasCleanupRunning}
+                  className="!bg-rose-600 !text-white hover:!bg-rose-700 disabled:!bg-slate-100 disabled:!text-slate-400 disabled:cursor-not-allowed"
                   onClick={() => {
-                    const action = operationConfirm;
                     setOperationConfirm(null);
-                    if (action === 'force-abort') void forceAbort();
-                    if (action === 'cleanup-drill') void cleanupDrillResources();
-                    if (action === 'remove-config') void deleteDrConfiguration();
+                    void deleteDrConfiguration();
                   }}
                 >
-                  {operationConfirm === 'force-abort' ? 'Force Abort' : operationConfirm === 'cleanup-drill' ? 'Delete Drill Namespace' : forceCleanup ? 'Force Cleanup' : 'Remove Configuration'}
+                  {forceCleanup ? 'Force Cleanup' : 'Remove Configuration'}
                 </button>
-              </div>
+              </div>}
             </motion.aside>
           </div>
         )}
@@ -3089,14 +3186,15 @@ export default function ApplicationDrPage(props: {
               </div>
               <div className="hbdr-filter-drawer-body">
             {(() => {
-              if (taskDetailLoading) return <p className="hbdr-task-detail-empty" role="status">Loading current task details…</p>;
-              if (taskDetailLoadError) return <p className="hbdr-task-detail-empty" role="alert">Unable to load current task details. Close and try again.</p>;
               const events = drTaskEvents[syncTaskDetail.task.id] || [];
               const failure = syncTaskDetail.failure || taskFailureSummary(syncTaskDetail.task, events);
               const details = taskFailureDetails(syncTaskDetail.task, events);
               const showError = isFailedStatus(syncTaskDetail.task.status) || taskHasWarning(syncTaskDetail.task);
               return (
                 <div className="hbdr-sync-detail">
+                  <RecoveryTaskContext task={syncTaskDetail.task} point={liveRestorePoints.find(point => point.id === taskRestorePointId(syncTaskDetail.task) || point.backupTaskId === syncTaskDetail.task.id || Boolean(syncTaskDetail.task.payload?.veleroBackupName && point.veleroBackupName === syncTaskDetail.task.payload.veleroBackupName))} clusters={clusters} events={events} />
+                  {taskDetailLoadError && <p className="hbdr-task-detail-empty" role="alert">Unable to refresh details. Showing the last available information.</p>}
+                  {taskDetailLoading && events.length === 0 && <p className="hbdr-task-detail-empty" role="status">Loading task events…</p>}
                   {isActiveTaskStatus(syncTaskDetail.task.status) && progressIsStale(syncTaskDetail.task, clusters.find(cluster => cluster.id === syncTaskDetail.task.clusterId)) && <p className="hbdr-task-detail-empty" role="status">{progressFreshnessDetail(syncTaskDetail.task, clusters.find(cluster => cluster.id === syncTaskDetail.task.clusterId), '')}</p>}
                   <TaskProcessTimeline task={syncTaskDetail.task} events={events} />
                   {showError && <TaskErrorDetailBlock failure={failure} details={details} />}
