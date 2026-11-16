@@ -158,7 +158,6 @@ jobs:
           HCDR_RELEASE_PHASE: dependencies
           HCDR_DEPENDENCY_COMPONENT: all
           HCDR_FORCE_VELERO_BUILD: ${{ inputs.force_velero_build || 'false' }}
-          HCDR_VELERO_CACHE_REGISTRY: 'true'
           HCDR_OADP_PARALLELISM: '3'
           HCDR_OADP_IMAGE_TIMEOUT_SECONDS: '900'
           HCDR_DOCKER_PUSH_TIMEOUT_SECONDS: '900'

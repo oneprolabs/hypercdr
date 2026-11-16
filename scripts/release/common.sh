@@ -77,15 +77,9 @@ mirror_release_image() {
   fi
   digest="$(docker_manifest_digest "$source")" || return 1
   log "Mirroring $source@$digest to $target"
-  local attempt
-  for attempt in 1 2; do
-    if timeout --kill-after=15s "${HCDR_DOCKER_PUSH_TIMEOUT_SECONDS:-900}" \
-        docker buildx imagetools create --prefer-index=false --tag "$target" "${source%:*}@$digest"; then
-      break
-    fi
-    [[ "$attempt" != 2 ]] || return 1
-    sleep 5
-  done
+  timeout --kill-after=15s "${HCDR_DOCKER_PULL_TIMEOUT_SECONDS:-600}" docker pull --platform linux/amd64 "$source" || return 1
+  docker tag "$source" "$target"
+  docker_push_with_retry "$target"
   local target_digest
   target_digest="$(docker_manifest_digest "$target")" || return 1
   [[ "$digest" == "$target_digest" ]] || die "mirrored digest mismatch: $target"
