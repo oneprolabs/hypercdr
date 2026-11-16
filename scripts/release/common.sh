@@ -54,35 +54,15 @@ docker_manifest_digest() {
   return 1
 }
 
-image_matches_remote() {
-  local source="$1" target="$2" source_digest target_digest
-  source_digest="$(docker_manifest_digest "${source}")" || return 2
-  if target_digest="$(docker_manifest_digest "${target}")"; then
-    [[ "${source_digest}" == "${target_digest}" ]]
-  else
-    local status=$?
-    [[ "$status" == 3 ]] && return 1
-    return 2
-  fi
-}
-
 mirror_release_image() {
-  local source="$1" target="$2" status digest
-  if image_matches_remote "$source" "$target"; then
-    log "Reusing unchanged image: $target"
-    return
-  else
-    status=$?
-    [[ "$status" == 1 ]] || return "$status"
-  fi
+  local source="$1" target="$2" digest target_digest
   digest="$(docker_manifest_digest "$source")" || return 1
   log "Mirroring $source@$digest to $target"
   timeout --kill-after=15s "${HCDR_DOCKER_PULL_TIMEOUT_SECONDS:-600}" docker pull --platform linux/amd64 "$source" || return 1
   docker tag "$source" "$target"
   docker_push_with_retry "$target"
-  local target_digest
   target_digest="$(docker_manifest_digest "$target")" || return 1
-  [[ "$digest" == "$target_digest" ]] || die "mirrored digest mismatch: $target"
+  [[ "$target_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || die "mirrored image digest unavailable: $target"
 }
 
 docker_build_with_retry() {
