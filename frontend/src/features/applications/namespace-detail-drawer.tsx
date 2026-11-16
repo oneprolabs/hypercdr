@@ -13,6 +13,7 @@ import { formatDateTime, formatLocalDateTime } from '../../lib/date-time';
 import { isFailedStatus, isSucceededStatus, taskHasWarning } from '../recovery/task-status';
 import { TaskErrorDetailBlock, TaskFinalResult, TaskOriginLabel, TaskProcessTimeline, formatBytes, recordFromUnknown, resourceCategoryIconMap, taskDetailFullLabel, taskDetailLabel, taskFailureDetails, taskFailureSummary } from '../recovery/task-ui';
 import { formatPolicySchedule, normalizeResourceCategories, restorePointDisplayLabel } from './application-support';
+import { mergeNamespaceResourceCategories } from './namespace-resource-summary';
 
 interface NamespaceDetailDrawerProps {
   detail: ReturnType<typeof useNamespaceDetail>;
@@ -86,7 +87,8 @@ export default function NamespaceDetailDrawer({detail, catalog, presentation, on
   const supportMeta = drSupportMetaForApp(selectedDetailApp);
   const supportFailure = drSupportFailureForApp(selectedDetailApp);
   const supportDetails = drSupportFailureDetailsForApp(selectedDetailApp);
-  const categories = normalizeResourceCategories(selectedDetailApp).filter(category => category.total > 0);
+  const detailMembers = selectedDetailApp.memberApps?.length ? selectedDetailApp.memberApps : [selectedDetailApp];
+  const categories = mergeNamespaceResourceCategories(detailMembers.map(member => ({ namespace: member.namespace, categories: normalizeResourceCategories(member) })));
   const storageCategory = categories.find(category => category.key === 'storage');
   const pvcItem = storageCategory?.items?.find(item => item.kind === 'PersistentVolumeClaim');
   const pvcRows = pvcItem?.resources || [];
@@ -104,7 +106,7 @@ export default function NamespaceDetailDrawer({detail, catalog, presentation, on
     : detailStage === 'config'
       ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-100'
       : 'bg-slate-100 text-slate-600 ring-1 ring-slate-200';
-  const resourceCount = resourceSummaryTotal(selectedDetailApp);
+  const resourceCount = categories.reduce((sum, category) => sum + category.total, 0) || resourceSummaryTotal(selectedDetailApp);
   const storageUsage = planStorageSizeForApp(selectedDetailApp);
   const nextSyncLabel = nextSyncLabelForApp(selectedDetailApp);
   const primaryFacts = detailStage === 'run'
@@ -321,7 +323,7 @@ export default function NamespaceDetailDrawer({detail, catalog, presentation, on
               </div>
               {pvcRows.length > 0 ? (
                 <div className="hbdr-app-detail-pvc-list">
-                  {pvcRows.slice(0, 6).map(pvc => {
+                  {pvcRows.map(pvc => {
                     const status = pvc.fields?.STATUS || pvc.fields?.Status || '-';
                     const storageClass = pvc.fields?.STORAGECLASS || pvc.fields?.StorageClass || '-';
                     const capacity = pvc.fields?.CAPACITY || pvc.fields?.Capacity || '-';
@@ -330,13 +332,12 @@ export default function NamespaceDetailDrawer({detail, catalog, presentation, on
                       <div key={`${pvc.namespace || selectedDetailApp.namespace}-${pvc.name}`} className="hbdr-app-detail-pvc-row">
                         <div className="min-w-0">
                           <strong>{pvc.name}</strong>
-                          <p>{storageClass} · {capacity}{usedBy ? ` · Used by ${usedBy}` : ''}</p>
+                          <p>{pvc.namespace ? `${pvc.namespace} · ` : ''}{storageClass} · {capacity}{usedBy ? ` · Used by ${usedBy}` : ''}</p>
                         </div>
                         <span className={status === 'Bound' ? 'is-bound' : 'is-warning'}>{status}</span>
                       </div>
                     );
                   })}
-                  {pvcRows.length > 6 && <p className="hbdr-app-detail-more">+{pvcRows.length - 6} more PVCs</p>}
                 </div>
               ) : (
                 <p className="hbdr-app-detail-empty-line">{(selectedDetailApp.pvcCount || selectedDetailApp.resourceSummary?.pvcs || 0) > 0 ? 'PVC count is available, detailed PVC inventory is not reported yet.' : 'No PVC reported.'}</p>

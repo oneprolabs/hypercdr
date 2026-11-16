@@ -53,6 +53,10 @@ func TestPostgresStoreTaskSummaryKeepsListFieldsAndGetTaskKeepsFullPayload(t *te
 			"stage":             "restoring",
 			"recoveryStages":    []any{map[string]any{"id": "waiting_for_workloads", "status": "running"}},
 			"technicalDetails":  map[string]any{"large": true},
+			"sizeMetricsV2": map[string]any{
+				"logical": map[string]any{"known": true, "totalBytes": int64(1000)},
+				"newData": map[string]any{"known": true, "totalBytes": int64(250)},
+			},
 		},
 	})
 	if err != nil {
@@ -77,6 +81,10 @@ func TestPostgresStoreTaskSummaryKeepsListFieldsAndGetTaskKeepsFullPayload(t *te
 	}
 	if _, ok := items[0].Payload["technicalDetails"]; ok {
 		t.Fatalf("summary payload=%v, technical details must be omitted", items[0].Payload)
+	}
+	metrics, ok := items[0].Payload["sizeMetricsV2"].(map[string]any)
+	if !ok || metrics["logical"] == nil || metrics["newData"] == nil {
+		t.Fatalf("summary payload=%v, data reuse metrics must be retained", items[0].Payload)
 	}
 
 	item, ok, err := repo.GetTask(task.ID)

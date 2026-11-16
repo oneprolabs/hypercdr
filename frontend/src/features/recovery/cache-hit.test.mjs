@@ -4,6 +4,10 @@ import { taskCacheHit } from './cache-hit-model.ts';
 
 const stats = { version: 1, indexEnabled: true, dataEnabled: true, indexHitBytes: 30, indexReadBytes: 40, dataHitBytes: 700, dataReadBytes: 1000 };
 const task = (type, values = [stats]) => ({ id: 'one', type, payload: { volumeProgress: { items: values.map(cacheStats => ({ cacheStats })) } } });
+test('merged-namespace backup displays measured overall data reuse', () => {
+  const backup = { id: 'merged', type: 'backup', status: 'succeeded', payload: { sourceNamespaces: ['nextcloud', 'redis', 'rustfs', 'wordpress'], sizeMetricsV2: { logical: { known: true, totalBytes: 1809720380 }, newData: { known: true, totalBytes: 706384004 } } } };
+  assert.equal(taskCacheHit(backup).value, '61.0%');
+});
 test('backup data reuse and drill logical-data rates use separate denominators', () => {
   assert.equal(taskCacheHit(task('backup')).value, 'Unavailable');
   assert.equal(taskCacheHit(task('drill')).value, '70.0%');

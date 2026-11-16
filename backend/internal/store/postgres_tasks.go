@@ -326,7 +326,8 @@ func (s *PostgresStore) listTasks(filter TaskFilter) ([]Task, error) {
 			'pointId',payload->'pointId','veleroBackupName',payload->'veleroBackupName','backupName',payload->'backupName',
 			'storageRepoId',payload->'storageRepoId','repositoryId',payload->'repositoryId',
 			'storageRepo',payload->'storageRepo','backupStorageName',payload->'backupStorageName',
-			'storageLocation',payload->'storageLocation','repository',payload->'repository','name',payload->'name'))`
+			'storageLocation',payload->'storageLocation','repository',payload->'repository','name',payload->'name',
+			'sizeMetricsV2',payload->'sizeMetricsV2','restorePointChanges',payload->'restorePointChanges'))`
 	}
 	query := `
 		select id, tenant_id, coalesce(cluster_id::text, ''), coalesce(app_id::text, ''), coalesce(protection_plan_id::text, ''),
