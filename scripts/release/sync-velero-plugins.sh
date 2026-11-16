@@ -37,8 +37,5 @@ for entry in "${plugins[@]}"; do
   name="${entry%%|*}"
   source_image="${entry#*|}"
   target_image="$(image_ref "${REGISTRY}" "${name}" "${PLUGIN_VERSION}")"
-  log "Mirroring ${source_image} to ${target_image}"
-  docker pull "${source_image}"
-  docker tag "${source_image}" "${target_image}"
-  docker_push_with_retry "${target_image}"
+  mirror_release_image "$source_image" "$target_image"
 done

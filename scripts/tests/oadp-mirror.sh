@@ -10,13 +10,13 @@ cat >"$tmp/bin/docker" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >>"${FAKE_DOCKER_LOG}"
-if [[ "$1 $2 $3" == "manifest inspect --verbose" ]]; then
+if [[ "$1 $2 $3" == "buildx imagetools inspect" ]]; then
   case "$4" in
     *oadp-operator*) digest="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ;;
     *oadp-velero*) digest="sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ;;
     *) exit 1 ;;
   esac
-  jq -cn --arg digest "$digest" '{Descriptor:{digest:$digest}}'
+  jq -cn --arg digest "$digest" '{digest:$digest}'
 fi
 EOF
 chmod +x "$tmp/bin/docker"

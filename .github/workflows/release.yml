@@ -8,6 +8,7 @@ on:
       version: {description: 'Community release tag, for example ce-v0.0.0', required: true}
       registry_profile: {description: 'Profile from config/registries.conf', required: true, default: aliyun_acr}
       deploy: {description: 'Deploy the published version to the configured environment', required: true, default: false, type: boolean}
+      force_velero_build: {description: 'Rebuild Velero even when its input fingerprint is unchanged', required: false, default: false, type: boolean}
 # A newer immutable release supersedes an older queued build. Keeping the
 # newest tag moving prevents a slow dependency mirror from blocking delivery.
 concurrency: {group: hypercdr-release, cancel-in-progress: true}
@@ -81,12 +82,12 @@ jobs:
           fi
 
   build-images:
-    name: build-images (${{ matrix.image_name }})
+    name: build-images (${{ matrix.image_name }}${{ matrix.dependency_component && format(' / {0}', matrix.dependency_component) || '' }})
     # Image publication and source tests run in parallel. The final publish
     # job waits for both, so a failed test still prevents a Release.
     needs: prepare-release
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -107,6 +108,11 @@ jobs:
             context: ./backend
             dockerfile: ./backend/cluster-registration-executor.Dockerfile
           - image_name: dependencies
+            dependency_component: runtime
+          - image_name: dependencies
+            dependency_component: plugins
+          - image_name: dependencies
+            dependency_component: oadp
     steps:
       - uses: actions/checkout@v4
       - name: Resolve image reference
@@ -155,8 +161,12 @@ jobs:
         env:
           HCDR_RUNTIME_ROOT: /tmp/hypercdr-runtime
           HCDR_RELEASE_PHASE: dependencies
+          HCDR_DEPENDENCY_COMPONENT: ${{ matrix.dependency_component }}
+          HCDR_FORCE_VELERO_BUILD: ${{ inputs.force_velero_build || 'false' }}
+          HCDR_VELERO_CACHE_REGISTRY: 'true'
           HCDR_OADP_PARALLELISM: '3'
-          HCDR_OADP_IMAGE_TIMEOUT_SECONDS: '3600'
+          HCDR_OADP_IMAGE_TIMEOUT_SECONDS: '900'
+          HCDR_DOCKER_PUSH_TIMEOUT_SECONDS: '900'
           GITHUB_TOKEN: ${{ github.token }}
           HCDR_AUTH_CHALLENGE_MODE: ${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'turnstile' }}
           HCDR_TURNSTILE_SITE_KEY: ${{ secrets.HCDR_TURNSTILE_SITE_KEY }}
@@ -184,7 +194,7 @@ jobs:
           export HCDR_REGISTRY_PROFILE="${{ needs.prepare-release.outputs.registry_profile }}"
           ./scripts/release/release-all.sh --config "${RUNNER_TEMP}/release.conf"
       - uses: actions/upload-artifact@v4
-        if: ${{ matrix.image_name == 'dependencies' }}
+        if: ${{ matrix.image_name == 'dependencies' && matrix.dependency_component == 'oadp' }}
         with:
           name: hypercdr-oadp-lock-${{ needs.prepare-release.outputs.image_version }}
           path: /tmp/hypercdr-runtime/oadp-mirror/resolved-image-lock.json

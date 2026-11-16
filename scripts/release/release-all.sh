@@ -222,29 +222,41 @@ fi
 if [[ "${PHASE}" == "all" || "${PHASE}" == "dependencies" ]]; then
   DEPENDENCY_STEP_TIMEOUT="${HCDR_DEPENDENCY_STEP_TIMEOUT_SECONDS:-3600}"
   [[ "${DEPENDENCY_STEP_TIMEOUT}" =~ ^[1-9][0-9]*$ ]] || die "HCDR_DEPENDENCY_STEP_TIMEOUT_SECONDS must be a positive integer"
+  dependency_component="${HCDR_DEPENDENCY_COMPONENT:-all}"
+  case "$dependency_component" in all|runtime|plugins|oadp) ;; *) die "invalid dependency component: $dependency_component" ;; esac
+  if [[ "$dependency_component" == all || "$dependency_component" == runtime ]]; then
   log "Publishing required runtime images"
-  timeout "${DEPENDENCY_STEP_TIMEOUT}" "${SCRIPT_DIR}/publish-runtime-images.sh" --registry "${REGISTRY}" --force-velero-build
+  runtime_args=(--registry "$REGISTRY")
+  [[ "${HCDR_FORCE_VELERO_BUILD:-false}" != true ]] || runtime_args+=(--force-velero-build)
+  timeout --kill-after=15s "${DEPENDENCY_STEP_TIMEOUT}" "${SCRIPT_DIR}/publish-runtime-images.sh" "${runtime_args[@]}"
+  fi
 
+  if [[ "$dependency_component" == all || "$dependency_component" == plugins ]]; then
   log "Mirroring Velero object-storage plugins"
   plugin_sync_args=(--registry "${REGISTRY}" --version "${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}")
   if [[ -n "${HCDR_VELERO_PLUGIN_SOURCE_REGISTRY:-}" ]]; then
     plugin_sync_args+=(--source-registry "${HCDR_VELERO_PLUGIN_SOURCE_REGISTRY}")
   fi
   timeout "${DEPENDENCY_STEP_TIMEOUT}" "${SCRIPT_DIR}/sync-velero-plugins.sh" "${plugin_sync_args[@]}"
+  fi
 
+  if [[ "$dependency_component" == all || "$dependency_component" == oadp ]]; then
   log "Mirroring the pinned OADP image closure"
   timeout "${DEPENDENCY_STEP_TIMEOUT}" "${SCRIPT_DIR}/mirror-community-oadp-images.sh" --registry "${REGISTRY}"
   log "Building the pinned OADP bundle"
   timeout "${DEPENDENCY_STEP_TIMEOUT}" "${SCRIPT_DIR}/build-community-oadp-bundle.sh" --registry "${REGISTRY}"
   log "Building the self-contained OADP catalog"
   timeout "${DEPENDENCY_STEP_TIMEOUT}" "${SCRIPT_DIR}/build-community-oadp-catalog.sh" --registry "${REGISTRY}"
+  fi
 fi
 
 OADP_RESOLVED_LOCK="${HCDR_OADP_RESOLVED_LOCK:-${HCDR_RUNTIME_ROOT:-/data/hypercdr-runtime}/oadp-mirror/resolved-image-lock.json}"
 
 if [[ "${PHASE}" == "dependencies" ]]; then
-  [[ -r "${OADP_RESOLVED_LOCK}" ]] || die "resolved OADP image lock is missing: ${OADP_RESOLVED_LOCK}"
-  log "Release dependencies published: ${OADP_RESOLVED_LOCK}"
+  if [[ "$dependency_component" == all || "$dependency_component" == oadp ]]; then
+    [[ -r "${OADP_RESOLVED_LOCK}" ]] || die "resolved OADP image lock is missing: ${OADP_RESOLVED_LOCK}"
+  fi
+  log "Release dependency component published: $dependency_component"
   exit 0
 fi
 

@@ -23,8 +23,10 @@ log() {
 }
 
 docker_push_with_retry() {
-  local image="$1" attempt=1 max_attempts="${HCDR_DOCKER_PUSH_ATTEMPTS:-5}"
-  while ! docker push "${image}"; do
+  local image="$1" attempt=1 max_attempts="${HCDR_DOCKER_PUSH_ATTEMPTS:-2}"
+  local timeout_seconds="${HCDR_DOCKER_PUSH_TIMEOUT_SECONDS:-900}"
+  [[ "$timeout_seconds" =~ ^[1-9][0-9]*$ && "$max_attempts" =~ ^[1-9][0-9]*$ ]] || die "invalid push timeout or attempt count"
+  while ! timeout --kill-after=15s "${timeout_seconds}" docker push "${image}"; do
     if (( attempt >= max_attempts )); then
       echo "error: failed to push ${image} after ${max_attempts} attempts" >&2
       return 1
@@ -34,6 +36,59 @@ docker_push_with_retry() {
     sleep "${delay}"
     ((attempt++))
   done
+}
+
+docker_manifest_digest() {
+  local image="$1" result status
+  if result="$(timeout --kill-after=15s "${HCDR_MANIFEST_TIMEOUT_SECONDS:-60}" docker buildx imagetools inspect "$image" --format '{{json .Manifest}}' 2>&1)"; then
+    jq -er '.digest | select(test("^sha256:[0-9a-f]{64}$"))' <<<"$result"
+    return
+  else
+    status=$?
+  fi
+  if [[ "$result" != *"unauthorized"* && "$result" != *"denied"* && "$result" != *"forbidden"* ]] && \
+      [[ "$result" == *"manifest unknown"* || "$result" == *"MANIFEST_UNKNOWN"* || "$result" == *": not found"* ]]; then
+    return 3
+  fi
+  echo "error: manifest lookup failed for $image (status $status): $result" >&2
+  return 1
+}
+
+image_matches_remote() {
+  local source="$1" target="$2" source_digest target_digest
+  source_digest="$(docker_manifest_digest "${source}")" || return 2
+  if target_digest="$(docker_manifest_digest "${target}")"; then
+    [[ "${source_digest}" == "${target_digest}" ]]
+  else
+    local status=$?
+    [[ "$status" == 3 ]] && return 1
+    return 2
+  fi
+}
+
+mirror_release_image() {
+  local source="$1" target="$2" status digest
+  if image_matches_remote "$source" "$target"; then
+    log "Reusing unchanged image: $target"
+    return
+  else
+    status=$?
+    [[ "$status" == 1 ]] || return "$status"
+  fi
+  digest="$(docker_manifest_digest "$source")" || return 1
+  log "Mirroring $source@$digest to $target"
+  local attempt
+  for attempt in 1 2; do
+    if timeout --kill-after=15s "${HCDR_DOCKER_PUSH_TIMEOUT_SECONDS:-900}" \
+        docker buildx imagetools create --prefer-index=false --tag "$target" "${source%:*}@$digest"; then
+      break
+    fi
+    [[ "$attempt" != 2 ]] || return 1
+    sleep 5
+  done
+  local target_digest
+  target_digest="$(docker_manifest_digest "$target")" || return 1
+  [[ "$digest" == "$target_digest" ]] || die "mirrored digest mismatch: $target"
 }
 
 docker_build_with_retry() {
@@ -53,7 +108,7 @@ docker_build_with_retry() {
 
 docker_pull_with_retry() {
   local image="$1" attempt=1 max_attempts="${HCDR_DOCKER_PUSH_ATTEMPTS:-5}"
-  while ! docker pull --platform linux/amd64 "${image}"; do
+  while ! timeout --kill-after=15s "${HCDR_DOCKER_PULL_TIMEOUT_SECONDS:-600}" docker pull --platform linux/amd64 "${image}"; do
     if (( attempt >= max_attempts )); then return 1; fi
     local delay=$((5 * attempt)); log "Pull verification failed for ${image}; retrying in ${delay}s (${attempt}/${max_attempts})"; sleep "${delay}"; ((attempt++))
   done

@@ -84,7 +84,12 @@ fi
 
 log "Building ${IMAGE} from upstream baseline ${UPSTREAM_COMMIT}"
 log "Build metadata and temporary exports: ${BUILD_DIR}"
+cache_args=()
+if [[ "${HCDR_VELERO_CACHE_REGISTRY:-false}" == true ]]; then
+  cache_args+=(--cache-from "type=registry,ref=${IMAGE}-buildcache" --cache-to "type=registry,ref=${IMAGE}-buildcache,mode=max")
+fi
 docker buildx build --pull --load \
+  "${cache_args[@]}" \
   --build-context "restic-source=${RESTIC_SOURCE_DIR}" \
   --platform "${PLATFORM}" \
   --provenance=false --sbom=false \

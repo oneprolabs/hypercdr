@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source "$ROOT_DIR/scripts/lib/registry-config.sh"
+source "$ROOT_DIR/scripts/release/common.sh"
 LOCK_FILE="${ROOT_DIR}/packaging/oadp/image-lock.json"
 REGISTRY="${HCDR_IMAGE_REGISTRY:-}"
 OUTPUT="${HCDR_OADP_RESOLVED_LOCK:-${HCDR_RUNTIME_ROOT:-/data/hypercdr-runtime}/oadp-mirror/resolved-image-lock.json}"
@@ -41,15 +41,14 @@ jq '. + {resolvedAt:(now|todateiso8601), registry:$registry, images:[]}' \
   --arg registry "$REGISTRY" "$LOCK_FILE" >"$tmp"
 
 manifest_digest() {
-  docker manifest inspect --verbose "$1" 2>/dev/null \
-    | jq -r 'if type == "array" then .[0].Descriptor.digest else .Descriptor.digest end // empty'
+  docker_manifest_digest "$1"
 }
 
 retry_image_command() {
   local label="$1" attempt status
   shift
   for attempt in 1 2 3; do
-    if timeout "$IMAGE_TIMEOUT" "$@"; then
+    if timeout --kill-after=15s "$IMAGE_TIMEOUT" "$@"; then
       return 0
     else
       status=$?
@@ -66,7 +65,12 @@ mirror_image() {
   target="$(image_ref "${REGISTRY}" "${component}" "${release}")"
   [[ "$source_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "locked source digest is invalid: $component" >&2; exit 1; }
 
-  target_digest="$(manifest_digest "$target" || true)"
+  if target_digest="$(manifest_digest "$target")"; then
+    :
+  else
+    local status=$?
+    [[ "$status" == 3 ]] || return "$status"
+  fi
   if [[ "$target_digest" == "$source_digest" ]]; then
     echo "==> Reusing verified OADP image ${target}@${target_digest}"
   else
@@ -89,7 +93,7 @@ mirror_image() {
 }
 
 export REGISTRY release platform IMAGE_TIMEOUT parts_dir
-export -f image_ref manifest_digest retry_image_command mirror_image
+export -f image_ref docker_manifest_digest manifest_digest retry_image_command mirror_image
 jq -r '.images[] | [.component,.source,.sourceDigest,(.required|tostring)] | @tsv' "$LOCK_FILE" \
   | xargs -P "$PARALLELISM" -n 4 bash -c 'mirror_image "$@"' _
 

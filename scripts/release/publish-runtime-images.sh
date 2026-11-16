@@ -26,19 +26,30 @@ REGISTRY="${REGISTRY%/}"
 
 mirror_image() {
   local source="$1" target="$2"
-  log "Mirroring ${source} to ${target}"
-  docker pull "${source}"
-  docker tag "${source}" "${target}"
-  docker_push_with_retry "${target}"
+  mirror_release_image "$source" "$target"
 }
 
 mirror_image "${POSTGRES_SOURCE}" "$(image_ref "${REGISTRY}" "postgres" "16")"
 
 VELERO_TARGET="$(image_ref "${REGISTRY}" "velero" "${VELERO_TAG}")"
-if [[ "${FORCE_VELERO_BUILD}" == "true" ]] || ! docker manifest inspect "${VELERO_TARGET}" >/dev/null 2>&1; then
+source "${SCRIPT_DIR}/dependency-fingerprint.sh"
+fingerprint="$(velero_input_fingerprint)"
+cache_image="$(image_ref "$REGISTRY" velero "${VELERO_TAG}-input-${fingerprint}")"
+cache_digest=''
+if cache_digest="$(docker_manifest_digest "$cache_image")"; then
+  :
+else
+  status=$?
+  [[ "$status" == 3 ]] || exit "$status"
+fi
+if [[ "${FORCE_VELERO_BUILD}" == "true" || -z "$cache_digest" ]]; then
   log "Building pinned HyperCDR Velero image from third_party/velero"
   "${SCRIPT_DIR}/build-velero.sh" \
-    --registry "${REGISTRY}" --tag "${VELERO_TAG}" --push
+    --registry "${REGISTRY}" --tag "${VELERO_TAG}"
+  docker tag "$VELERO_TARGET" "$cache_image"
+  docker_push_with_retry "$cache_image"
+  mirror_release_image "$cache_image" "$VELERO_TARGET"
 else
-  log "Velero image already published: ${VELERO_TARGET}"
+  log "Reusing Velero input fingerprint: $fingerprint"
+  mirror_release_image "$cache_image" "$VELERO_TARGET"
 fi

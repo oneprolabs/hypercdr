@@ -57,6 +57,7 @@ verify: lint test
 	bash scripts/tests/velero-build-runtime.sh
 	python3 -B scripts/tests/release-version-install.py
 	bash scripts/tests/oadp-mirror.sh
+	bash scripts/tests/dependency-release.sh
 	bash scripts/tests/pr-review-notification.sh
 	git diff --check -- . ':!third_party/velero'
 	test "$$(cat third_party/velero/UPSTREAM_BASELINE)" = "c253c7fe37d78c9b7e55c68544f7c5b2608712d8"
