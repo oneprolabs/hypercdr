@@ -22,16 +22,6 @@ REGISTRY="${REGISTRY%/}"
 for command in curl jq docker; do command -v "$command" >/dev/null; done
 release="$(jq -er .release "$RESOLVED_LOCK")"
 commit="$(jq -er .sourceCommit "$RESOLVED_LOCK")"
-source "$ROOT_DIR/scripts/release/dependency-cache.sh"
-bundle_image="$(image_ref "$REGISTRY" oadp-bundle "$release")"
-bundle_key="$(dependency_cache_key bundle)"
-bundle_cache="$(image_ref "$REGISTRY" oadp-bundle "${release}-input-${bundle_key}")"
-if restore_dependency_cache bundle "$bundle_image" "$bundle_cache"; then
-  exit 0
-else
-  cache_status=$?
-  [[ "$cache_status" == 3 ]] || exit "$cache_status"
-fi
 bundle_dir="${WORK_DIR}/${release}/bundle"
 mkdir -p "$bundle_dir/manifests" "$bundle_dir/metadata"
 github_api_args=()
@@ -111,4 +101,3 @@ jq '.bundle={component:"oadp-bundle",version:$version,image:$image,imageDigest:$
   "$RESOLVED_LOCK" >"${RESOLVED_LOCK}.next"
 mv "${RESOLVED_LOCK}.next" "$RESOLVED_LOCK"
 echo "OADP bundle verified: ${bundle_image}@${bundle_digest}"
-mirror_release_image "$bundle_image" "$bundle_cache"

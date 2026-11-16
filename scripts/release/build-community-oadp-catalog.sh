@@ -25,16 +25,6 @@ bundle_image="$(jq -er .bundle.image "$RESOLVED_LOCK")"
 bundle_digest="$(jq -er .bundle.imageDigest "$RESOLVED_LOCK")"
 [[ "$bundle_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "bundle digest is invalid" >&2; exit 1; }
 bundle_reference="${bundle_image%:*}@${bundle_digest}"
-source "$ROOT_DIR/scripts/release/dependency-cache.sh"
-catalog_image="$(image_ref "$REGISTRY" oadp-catalog "$release")"
-catalog_key="$(dependency_cache_key catalog "$bundle_reference|$OPM_IMAGE")"
-catalog_cache="$(image_ref "$REGISTRY" oadp-catalog "${release}-input-${catalog_key}")"
-if restore_dependency_cache catalog "$catalog_image" "$catalog_cache"; then
-  exit 0
-else
-  cache_status=$?
-  [[ "$cache_status" == 3 ]] || exit "$cache_status"
-fi
 catalog_dir="${WORK_DIR}/${release}/catalog"
 mkdir -p "$catalog_dir/configs"
 chmod a+rwx "$catalog_dir" "$catalog_dir/configs"
@@ -86,4 +76,3 @@ jq '.catalog={component:"oadp-catalog",version:$version,image:$image,imageDigest
   "$RESOLVED_LOCK" >"${RESOLVED_LOCK}.next"
 mv "${RESOLVED_LOCK}.next" "$RESOLVED_LOCK"
 echo "OADP catalog verified: ${catalog_image}@${catalog_digest}"
-mirror_release_image "$catalog_image" "$catalog_cache"
