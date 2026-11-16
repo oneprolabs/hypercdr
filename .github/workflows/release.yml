@@ -82,7 +82,7 @@ jobs:
           fi
 
   build-images:
-    name: build-images (${{ matrix.image_name }}${{ matrix.dependency_component && format(' / {0}', matrix.dependency_component) || '' }})
+    name: build-images (${{ matrix.image_name }})
     # Image publication and source tests run in parallel. The final publish
     # job waits for both, so a failed test still prevents a Release.
     needs: prepare-release
@@ -108,11 +108,6 @@ jobs:
             context: ./backend
             dockerfile: ./backend/cluster-registration-executor.Dockerfile
           - image_name: dependencies
-            dependency_component: runtime
-          - image_name: dependencies
-            dependency_component: plugins
-          - image_name: dependencies
-            dependency_component: oadp
     steps:
       - uses: actions/checkout@v4
       - name: Resolve image reference
@@ -161,7 +156,7 @@ jobs:
         env:
           HCDR_RUNTIME_ROOT: /tmp/hypercdr-runtime
           HCDR_RELEASE_PHASE: dependencies
-          HCDR_DEPENDENCY_COMPONENT: ${{ matrix.dependency_component }}
+          HCDR_DEPENDENCY_COMPONENT: all
           HCDR_FORCE_VELERO_BUILD: ${{ inputs.force_velero_build || 'false' }}
           HCDR_VELERO_CACHE_REGISTRY: 'true'
           HCDR_OADP_PARALLELISM: '3'
@@ -194,7 +189,7 @@ jobs:
           export HCDR_REGISTRY_PROFILE="${{ needs.prepare-release.outputs.registry_profile }}"
           ./scripts/release/release-all.sh --config "${RUNNER_TEMP}/release.conf"
       - uses: actions/upload-artifact@v4
-        if: ${{ matrix.image_name == 'dependencies' && matrix.dependency_component == 'oadp' }}
+        if: ${{ matrix.image_name == 'dependencies' }}
         with:
           name: hypercdr-oadp-lock-${{ needs.prepare-release.outputs.image_version }}
           path: /tmp/hypercdr-runtime/oadp-mirror/resolved-image-lock.json
