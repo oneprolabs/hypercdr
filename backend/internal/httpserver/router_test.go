@@ -440,6 +440,9 @@ func seedSchedulerApplication(t *testing.T, repo *store.PostgresStore, clusterID
 			Name:             namespace,
 			Status:           "healthy",
 			ProtectionStatus: "unprotected",
+			ResourceSummary: map[string]any{
+				"drSupport": map[string]any{"status": "supported"},
+			},
 		}},
 	})
 	if err != nil {
