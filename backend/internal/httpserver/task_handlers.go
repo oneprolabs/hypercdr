@@ -3,6 +3,7 @@ package httpserver
 import (
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"hypercdr-platform/platform/backend/internal/store"
 	"io"
 	"net/http"
@@ -17,6 +18,25 @@ func (r *Router) listTasks(w http.ResponseWriter, req *http.Request) {
 	query := req.URL.Query()
 	filter := store.TaskFilter{ClusterID: query.Get("clusterId"), ProtectionPlanID: query.Get("protectionPlanId")}
 	filter.Summary = query.Get("view") == "summary"
+	if query.Has("protectionPlanIds") {
+		seen := map[string]bool{}
+		for _, value := range strings.Split(query.Get("protectionPlanIds"), ",") {
+			value = strings.TrimSpace(value)
+			if _, err := uuid.Parse(value); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_protection_plan_ids"})
+				return
+			}
+			if !seen[value] {
+				seen[value] = true
+				filter.ProtectionPlanIDs = append(filter.ProtectionPlanIDs, value)
+			}
+		}
+	}
+	filter.LatestPerPlanType = query.Get("latestPerPlanType") == "true"
+	if filter.LatestPerPlanType && (len(filter.ProtectionPlanIDs) == 0 || !filter.Summary || query.Has("limit")) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_plan_task_summary_query"})
+		return
+	}
 	if user, ok := requestUser(req); ok {
 		filter.TenantID = user.TenantID
 	}

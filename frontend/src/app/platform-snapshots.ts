@@ -25,7 +25,7 @@ async function completePlanTasks(tasks: ApiTask[], plans: ApiProtectionPlan[], i
 
 // These loaders own dependency ordering and session checks. They return domain
 // data; mapping and React state commits belong to usePlatformResources.
-export async function loadPlatformSnapshot(isCurrent: CurrentScope, onClusters?: (clusters: ApiCluster[]) => void, completeHistory = false, onInventory?: (inventory: { clusters: ApiCluster[]; applications: ApiApplication[]; plans: ApiProtectionPlan[] }) => void) {
+export async function loadPlatformSnapshot(isCurrent: CurrentScope, onClusters?: (clusters: ApiCluster[]) => void, completeHistory = false, onInventory?: (inventory: { clusters: ApiCluster[]; applications: ApiApplication[]; plans: ApiProtectionPlan[] }) => void, planActivity = false) {
   if (!isCurrent()) return null;
   const clusterRequest = listClusters();
   void clusterRequest.then(response => { if (isCurrent()) onClusters?.(listItems(response)); }).catch(() => undefined);
@@ -36,12 +36,12 @@ export async function loadPlatformSnapshot(isCurrent: CurrentScope, onClusters?:
   });
   void inventoryRequest.catch(() => undefined);
   const [clusterRes, appRes, storageRes, policyRes, planRes, taskRes, tagRes, pointRes] = await Promise.all([
-    clusterRequest, appRequest, listStorageRepositories(), listPolicies(), planRequest, readActivityTasks(completeHistory), listTags(), listRestorePoints(true, completeHistory ? 0 : 500),
+    clusterRequest, appRequest, listStorageRepositories(), listPolicies(), planRequest, planActivity ? Promise.resolve({ items: [] }) : readActivityTasks(completeHistory), listTags(), listRestorePoints(true, completeHistory ? 0 : 500),
   ]);
   await inventoryRequest;
   if (!isCurrent()) return null;
   const plans = listItems(planRes);
-  const tasks = await completePlanTasks(listItems(taskRes), plans, isCurrent);
+  const tasks = planActivity ? listItems(taskRes) : await completePlanTasks(listItems(taskRes), plans, isCurrent);
   if (tasks === null) return null;
   return {
     clusters: listItems(clusterRes), applications: listItems(appRes), storage: listItems(storageRes), policies: listItems(policyRes),
@@ -49,12 +49,13 @@ export async function loadPlatformSnapshot(isCurrent: CurrentScope, onClusters?:
   };
 }
 
-export async function loadApplicationActivitySnapshot(isCurrent: CurrentScope, completeHistory = false) {
+export async function loadApplicationActivitySnapshot(isCurrent: CurrentScope, completeHistory = false, planActivity = false) {
   if (!isCurrent()) return null;
-  const [taskRes, pointRes, planRes] = await Promise.all([readActivityTasks(completeHistory), listRestorePoints(true, completeHistory ? 0 : 500), listProtectionPlans()]);
+  const planRequest = listProtectionPlans();
+  const [taskRes, pointRes, planRes] = await Promise.all([planActivity ? Promise.resolve({ items: [] }) : readActivityTasks(completeHistory), listRestorePoints(true, completeHistory ? 0 : 500), planRequest]);
   if (!isCurrent()) return null;
   const plans = listItems(planRes);
-  const tasks = await completePlanTasks(listItems(taskRes), plans, isCurrent);
+  const tasks = planActivity ? listItems(taskRes) : await completePlanTasks(listItems(taskRes), plans, isCurrent);
   return tasks === null ? null : { tasks, plans, restorePoints: listItems(pointRes) };
 }
 

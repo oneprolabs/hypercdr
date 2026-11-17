@@ -81,8 +81,11 @@ func applyTaskPayloadContract(pattern string, operation map[string]any) bool {
 	}
 	if pattern == "GET /api/v1/tasks" {
 		parameters := operation["parameters"].([]any)
-		for _, name := range []string{"clusterId", "protectionPlanId", "types", "statuses", "view", "limit"} {
+		for _, name := range []string{"clusterId", "protectionPlanId", "protectionPlanIds", "latestPerPlanType", "types", "statuses", "view", "limit"} {
 			schema := map[string]any{"type": "string"}
+			if name == "latestPerPlanType" {
+				schema = map[string]any{"type": "boolean"}
+			}
 			if name == "limit" {
 				schema = map[string]any{"type": "integer", "description": "Positive limit, capped at 1000 by the server"}
 			}

@@ -93,7 +93,8 @@ export default function ApplicationDrPage(props: {
   liveRestorePoints: ApiRestorePointView[];
   platformTasks: ApiTask[];
 }) {
-  const { apps, clusters, currentCluster, storage, policies, protectionPlans, setProtectionPlans, tags, stage, setStage, currentClusterId, updateAppTags, openStorage, openClusters, openPolicies, toast, refreshPlatformData, liveAppTasks, setLiveAppTasks, liveRecoveryTasks, setLiveRecoveryTasks, liveRestorePoints, platformTasks } = props;
+  const { apps, clusters, currentCluster, storage, policies, protectionPlans, setProtectionPlans, tags, stage, setStage, currentClusterId, updateAppTags, openStorage, openClusters, openPolicies, toast, refreshPlatformData, liveAppTasks, setLiveAppTasks, liveRecoveryTasks, setLiveRecoveryTasks, liveRestorePoints } = props;
+  const [platformTasks, setPlatformTasks] = useState<ApiTask[]>([]);
   useDialogPreload(drDialogModules);
   const [selectedSelectApps, setSelectedSelectApps] = useState<string[]>([]);
   const [selectedConfigApps, setSelectedConfigApps] = useState<string[]>([]);
@@ -101,6 +102,8 @@ export default function ApplicationDrPage(props: {
   const [submittedSyncTasks, setSubmittedSyncTasks] = useState<Record<string, ApiTask>>({});
   const [submittedRecoveryTasks, setSubmittedRecoveryTasks] = useState<Record<string, ApiTask>>({});
   const [syncSubmitting, setSyncSubmitting] = useState(false);
+  const [stageMoving, setStageMoving] = useState(false);
+  const stageMovingRef = useRef(false);
   const syncSubmittingRef = useRef(false);
   const [recoverySubmitting, setRecoverySubmitting] = useState(false);
   const [protectSubmitting, setProtectSubmitting] = useState(false);
@@ -417,16 +420,31 @@ export default function ApplicationDrPage(props: {
     });
   };
   const protectedRows = buildMergedProtectedRows(protectedAppRows);
+  const runPlanIds = [...new Set(protectedRows.map(app => app.protectionPlanId).filter((id): id is string => Boolean(id)))].sort();
+  const runPlanKey = runPlanIds.join('|');
+  const planRevisionKey = protectionPlans.filter(plan => runPlanIds.includes(plan.id)).map(plan => JSON.stringify([plan.id, plan.updatedAt, plan.latestSyncTaskId, plan.latestRecoveryTaskId, plan.status])).sort().join('|');
+  const submittedTaskKey = [...Object.values(submittedSyncTasks), ...Object.values(submittedRecoveryTasks)].map(task => task.id).sort().join('|');
+  useEffect(() => {
+    if (stage !== 'run' || !runPlanKey) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = async () => {
+      try {
+        const result = await listTasks({ protectionPlanIds: runPlanKey.split('|'), latestPerPlanType: true, view: 'summary', types: ['backup', 'restore', 'drill', 'takeover', 'storage-sync', 'schedule-sync', 'protection-cleanup', 'retention-cleanup', 'task-abort'] });
+        if (cancelled) return;
+        const tasks = listItems(result);
+        setPlatformTasks(tasks);
+        if (tasks.some(task => isActiveTaskStatus(task.status))) timer = setTimeout(load, 2000);
+      } catch {
+        if (!cancelled) timer = setTimeout(load, 5000);
+      }
+    };
+    void load();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+  }, [stage, runPlanKey, planRevisionKey, submittedTaskKey]);
   const namespaceRows = stage === 'select' ? selectRows : pendingRows;
   const protectedCount = protectedRows.length;
   const pendingCount = pendingRows.length;
-  const displayedDrTasks = [
-    ...Object.values(syncTasks),
-    ...Object.values(recoveryTasks),
-    ...platformTasks.filter(task => ['protection-cleanup', 'retention-cleanup', 'task-abort'].includes(task.type)),
-  ].filter(task => task?.id);
-  const displayedDrTaskKey = Array.from(new Set(displayedDrTasks.map(task => task.id))).sort().join('|');
-  const hasActiveDisplayedTask = displayedDrTasks.some(task => isActiveTaskStatus(task.status));
   const protectionPlanForApp = (app: AppItem) => {
     if (!app.protectionPlanId) return undefined;
 	const plan = protectionPlans.find(plan => plan.id === app.protectionPlanId);
@@ -547,7 +565,7 @@ export default function ApplicationDrPage(props: {
       toast('Failed to reconfigure storage: ' + (error instanceof Error ? error.message : 'unknown error'));
     }
   };
-  useDrTaskEvents({ displayedDrTaskKey, hasActiveDisplayedTask, refreshPlatformData, syncTaskDetail, setSyncTaskDetail, namespaceDetailTaskId, drTaskEvents, setDrTaskEvents, setRefreshedTasks: setRefreshedDrTasks, taskDetailLoader });
+  useDrTaskEvents({ syncTaskDetail, setSyncTaskDetail, namespaceDetailTaskId, drTaskEvents, setDrTaskEvents, setRefreshedTasks: setRefreshedDrTasks, taskDetailLoader });
   const unitMembers = (app: AppItem) => app.memberApps?.length ? app.memberApps : [app];
   const unitNamespaces = (app: AppItem) => unitMembers(app).map(item => item.namespace || item.name);
   const taskForUnit = (tasks: Record<string, ApiTask>, app: AppItem, allowedTypes: string[] = ['backup']) => {
@@ -1542,7 +1560,7 @@ export default function ApplicationDrPage(props: {
         size: 300,
         minSize: 280,
         maxSize: 520,
-        cell: info => <div className="hbdr-task-status-cell" onMouseEnter={() => { const task = submittedSyncTasks[info.row.original.name] || taskForUnit(syncTasks, info.row.original); if (task) taskDetailLoader.prefetch(task.id); }} onFocus={() => { const task = submittedSyncTasks[info.row.original.name] || taskForUnit(syncTasks, info.row.original); if (task) taskDetailLoader.prefetch(task.id); }}>{renderSyncTaskStatus(info.row.original)}</div>,
+        cell: info => <div className="hbdr-task-status-cell">{renderSyncTaskStatus(info.row.original)}</div>,
       });
     }
     if (visibleRunColumns.includes('recoveryTask')) {
@@ -1553,7 +1571,7 @@ export default function ApplicationDrPage(props: {
         size: 340,
         minSize: 300,
         maxSize: 580,
-        cell: info => <div className="hbdr-task-status-cell" onMouseEnter={() => { const task = recoveryTaskForUnit(info.row.original); if (task) taskDetailLoader.prefetch(task.id); }} onFocus={() => { const task = recoveryTaskForUnit(info.row.original); if (task) taskDetailLoader.prefetch(task.id); }}>{renderRecoveryTaskStatus(info.row.original)}</div>,
+        cell: info => <div className="hbdr-task-status-cell">{renderRecoveryTaskStatus(info.row.original)}</div>,
       });
     }
     if (visibleRunColumns.includes('resource')) {
@@ -1959,13 +1977,15 @@ export default function ApplicationDrPage(props: {
       onClick={event => { event.stopPropagation(); setSyncTaskDetail({ app, task, failure }); }} />;
   };
   const moveAppsToStage = async (names: string[], target: ApplicationStage) => {
-    if (names.length === 0) return false;
+    if (names.length === 0 || stageMovingRef.current) return false;
     const protection = target === 'run' ? 'protected' : target === 'config' ? 'pending_protection' : 'unprotected';
     const targetApps = apps.filter(app => names.includes(app.name) && app.apiId);
     if (targetApps.length === 0) {
       toast('No applications to update');
       return false;
     }
+    stageMovingRef.current = true;
+    setStageMoving(true);
     try {
       await Promise.all(targetApps.map(app => updateApplicationProtection(app.apiId, protection)));
       setAppUiOverrides(prev => {
@@ -1990,6 +2010,9 @@ export default function ApplicationDrPage(props: {
     } catch (error) {
       toast('Failed to update application stage: ' + (error instanceof Error ? error.message : 'unknown error'));
       return false;
+    } finally {
+      stageMovingRef.current = false;
+      setStageMoving(false);
     }
   };
   const handlePrimaryAction = async () => {
@@ -2781,11 +2804,11 @@ export default function ApplicationDrPage(props: {
               <button
                 type="button"
                 onClick={handlePrimaryAction}
-                disabled={primaryDisabled}
+                disabled={primaryDisabled || stageMoving}
                 title={selectedHasUnsupportedDR ? `${unsupportedDRSelectionMessage} Open View Details or check DR Support for details.` : undefined}
                 className="hbdr-dr-action-primary"
               >
-                <ChevronRight size={15} />Next
+                <ChevronRight size={15} />{stageMoving ? 'Moving…' : 'Next'}
               </button>
             )}
             {stage === 'config' && (
@@ -2802,10 +2825,10 @@ export default function ApplicationDrPage(props: {
                     setSelectedConfigApps([]);
                     setStage('select');
                   }}
-                  disabled={selectedConfigApps.length === 0}
+                  disabled={selectedConfigApps.length === 0 || stageMoving}
                   className="hbdr-dr-action-primary hbdr-dr-action-ghost"
                 >
-                  <ArrowLeft size={15} />Move Back
+                  <ArrowLeft size={15} />{stageMoving ? 'Moving…' : 'Move Back'}
                 </button>
                 <button onMouseEnter={() => preloadDialog(ProtectApplicationsWizard)} onFocus={() => preloadDialog(ProtectApplicationsWizard)} onClick={() => { setGuidedProtectWizard(true); void handlePrimaryAction(); }} disabled={primaryDisabled || resourceCatalogLoading || selectedConfigApps.length === 0 || selectedConfigApps.some(name => { const app = apps.find(item => item.name === name); return !app || isDRSupportUnknown(app) || isDRUnsupported(app); })} className="hbdr-dr-action-primary"><ShieldCheck size={15} />Protect applications</button>
               </>

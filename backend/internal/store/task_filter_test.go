@@ -2,6 +2,58 @@ package store
 
 import "testing"
 
+func TestPlanTaskBatchKeepsLatestPointersAndAllActiveTasks(t *testing.T) {
+	repo := newTestStore(t)
+	planIDs := []string{}
+	want := map[string]bool{}
+	activeIDs := []string{}
+	for planIndex := 0; planIndex < 3; planIndex++ {
+		cluster, app := seedPlanApplication(t, repo)
+		plan, err := repo.CreateProtectionPlan(ProtectionPlanInput{TenantID: DefaultTenantID, SourceClusterID: cluster.ID, AppID: app.ID, Status: "active"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if planIndex < 2 {
+			planIDs = append(planIDs, plan.ID)
+		}
+		for _, taskType := range []string{"backup", "drill"} {
+			for taskIndex := 0; taskIndex < 8; taskIndex++ {
+				task, err := repo.CreateTask(TaskInput{TenantID: DefaultTenantID, ProtectionPlanID: plan.ID, Type: taskType, Status: "succeeded", SuppressLatestPointer: taskIndex == 7})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if planIndex < 2 && (taskIndex < 2 || taskIndex >= 6) {
+					want[task.ID] = true
+				}
+				if taskIndex < 2 {
+					activeIDs = append(activeIDs, task.ID)
+				}
+			}
+		}
+	}
+	for _, taskID := range activeIDs {
+		if _, err := repo.db.Exec(`update tasks set status='running' where id=$1`, taskID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	items, err := repo.ListTasksFiltered(TaskFilter{TenantID: DefaultTenantID, ProtectionPlanIDs: planIDs, LatestPerPlanType: true, Summary: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != len(want) {
+		t.Fatalf("got %d tasks, want %d", len(items), len(want))
+	}
+	for _, item := range items {
+		if !want[item.ID] {
+			t.Fatalf("unexpected historical or unrelated task %s", item.ID)
+		}
+	}
+	items, err = repo.ListTasksFiltered(TaskFilter{TenantID: NewPublicID(), ProtectionPlanIDs: planIDs, LatestPerPlanType: true, Summary: true})
+	if err != nil || len(items) != 0 {
+		t.Fatalf("foreign tenant sees %d tasks: %v", len(items), err)
+	}
+}
+
 func TestPostgresStoreListTasksFilteredScopesBeforeLimit(t *testing.T) {
 	repo := newTestStore(t)
 	tenantA, err := repo.CreateTenant(TenantInput{Name: "A", Status: "active"})

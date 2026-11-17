@@ -186,7 +186,7 @@ export function usePlatformResources({ sessionToken, view, resourceSessionOwnerR
             return existing ? { ...existing, ...app, policy: existing.policy, storage: existing.storage, targetCluster: existing.targetCluster } : app;
           }),
         })));
-      });
+      }, targetView === 'applications');
       if (!snapshot || resourceSessionOwnerRef.current !== owner) return [];
       const { clusters: apiClusters, applications: apiApps, storage: apiStorage, policies: apiPolicies, plans: apiPlans, tasks: apiTasks } = snapshot;
       const apiRestorePoints = snapshot.restorePoints.map(mapRestorePoint);
@@ -266,7 +266,7 @@ export function usePlatformResources({ sessionToken, view, resourceSessionOwnerR
     if (!sessionToken || !PLATFORM_DATA_VIEWS.has(view)) return;
     let cancelled = false;
     const owner = sessionToken;
-    const realtimeViews = new Set<string>(['dashboard', 'applications', 'clusters']);
+    const realtimeViews = new Set<string>(['dashboard', 'clusters']);
     const loadPlatformData = async () => {
       if (document.visibilityState === 'hidden') return;
       try {
@@ -285,7 +285,7 @@ export function usePlatformResources({ sessionToken, view, resourceSessionOwnerR
         // poll the lightweight plan list in the same snapshot as tasks. Using
         // a stale latestRecoveryTaskId makes the row keep rendering the prior
         // drill until a full-page refresh.
-        const snapshot = await loadApplicationActivitySnapshot(() => !cancelled && resourceSessionOwnerRef.current === owner, view === 'dashboard');
+        const snapshot = await loadApplicationActivitySnapshot(() => !cancelled && resourceSessionOwnerRef.current === owner, view === 'dashboard', view === 'applications');
         if (!snapshot || cancelled || resourceSessionOwnerRef.current !== owner) return;
         const { tasks: apiTasks, plans: apiPlans, restorePoints: apiRestorePoints } = snapshot;
         const apiRestorePointViews = apiRestorePoints.map(mapRestorePoint);

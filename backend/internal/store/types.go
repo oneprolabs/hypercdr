@@ -284,6 +284,8 @@ type TaskFilter struct {
 	RegistrationSessionID string
 	ClusterID             string
 	ProtectionPlanID      string
+	ProtectionPlanIDs     []string
+	LatestPerPlanType     bool
 	Types                 []string
 	Statuses              []string
 	Limit                 int

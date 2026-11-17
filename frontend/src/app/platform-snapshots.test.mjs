@@ -9,6 +9,19 @@ import { listApplications, updateApplicationProtection } from '../api/applicatio
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 const response = body => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
 
+test('application inventory and activity do not fan out historical tasks', async t => {
+  setup(t);
+  const paths = [];
+  globalThis.fetch.mock.mockImplementation(async path => {
+    paths.push(path);
+    if (path === '/api/v1/protection-plans') return response({ items: [{ id: 'plan', latestSyncTaskId: 'historical-backup', latestRecoveryTaskId: 'historical-drill' }] });
+    return response({ items: [] });
+  });
+  await loadPlatformSnapshot(() => true, undefined, false, undefined, true);
+  await loadApplicationActivitySnapshot(() => true, false, true);
+  assert.equal(paths.filter(path => path.startsWith('/api/v1/tasks')).length, 0);
+});
+
 test('cluster namespace details read persisted inventory without requesting an agent scan', async t => {
   setup(t);
   const paths = [];

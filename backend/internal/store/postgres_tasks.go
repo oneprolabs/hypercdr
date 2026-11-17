@@ -330,7 +330,7 @@ func (s *PostgresStore) listTasks(filter TaskFilter) ([]Task, error) {
 			'sizeMetricsV2',payload->'sizeMetricsV2','restorePointChanges',payload->'restorePointChanges'))`
 	}
 	query := `
-		select id, tenant_id, coalesce(cluster_id::text, ''), coalesce(app_id::text, ''), coalesce(protection_plan_id::text, ''),
+		select id, tenant_id, coalesce(cluster_id::text, ''), coalesce(app_id::text, ''), coalesce(protection_plan_id::text, '') as protection_plan_id,
 		       coalesce(restore_point_id::text, ''), type, status, progress, coalesce(command_id::text, ''),
 		       coalesce(error_code, ''), coalesce(error_message, ''), ` + payloadExpr + `,
 		       created_at, coalesce(dispatched_at, '0001-01-01'::timestamptz),
@@ -374,6 +374,14 @@ func (s *PostgresStore) listTasks(filter TaskFilter) ([]Task, error) {
 		args = append(args, filter.ProtectionPlanID)
 		conditions = append(conditions, fmt.Sprintf("protection_plan_id = $%d", len(args)))
 	}
+	if len(filter.ProtectionPlanIDs) > 0 {
+		placeholders := make([]string, 0, len(filter.ProtectionPlanIDs))
+		for _, planID := range filter.ProtectionPlanIDs {
+			args = append(args, planID)
+			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+		}
+		conditions = append(conditions, "protection_plan_id in ("+strings.Join(placeholders, ",")+")")
+	}
 	if len(filter.Types) > 0 {
 		placeholders := make([]string, 0, len(filter.Types))
 		for _, value := range filter.Types {
@@ -393,7 +401,13 @@ func (s *PostgresStore) listTasks(filter TaskFilter) ([]Task, error) {
 	if len(conditions) > 0 {
 		query += " where " + strings.Join(conditions, " and ")
 	}
-	query += ` order by created_at desc`
+	if filter.LatestPerPlanType && len(filter.ProtectionPlanIDs) > 0 {
+		query = `select * from (` + query + `) scoped where id in (
+			select id from (select id, status, row_number() over (partition by protection_plan_id,type order by created_at desc,id desc) as task_rank from tasks where ` + strings.Join(conditions, " and ") + `) ranked
+			where task_rank=1 or status in ('queued','dispatched','accepted','running','syncing','finalizing','canceling'))
+			or exists (select 1 from protection_plans plan where plan.id=scoped.protection_plan_id::uuid and plan.tenant_id=scoped.tenant_id and (plan.latest_sync_task_id=scoped.id or plan.latest_recovery_task_id=scoped.id))`
+	}
+	query += ` order by created_at desc, id desc`
 	if filter.Limit > 0 {
 		args = append(args, filter.Limit)
 		query += fmt.Sprintf(" limit $%d", len(args))

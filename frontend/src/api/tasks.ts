@@ -4,6 +4,8 @@ import type { ApiList, ApiTask, ApiTaskCancelResponse, ApiTaskEvent, ApiTaskResp
 export interface TaskQuery {
   clusterId?: string;
   protectionPlanId?: string;
+  protectionPlanIds?: string[];
+  latestPerPlanType?: boolean;
   view?: 'summary';
   types?: string[];
   statuses?: string[];
@@ -14,6 +16,8 @@ export function listTasks(query: TaskQuery = {}) {
   const params = new URLSearchParams();
   if (query.clusterId) params.set('clusterId', query.clusterId);
   if (query.protectionPlanId) params.set('protectionPlanId', query.protectionPlanId);
+  if (query.protectionPlanIds?.length) params.set('protectionPlanIds', [...new Set(query.protectionPlanIds)].join(','));
+  if (query.latestPerPlanType) params.set('latestPerPlanType', 'true');
   if (query.view) params.set('view', query.view);
   if (query.types?.length) params.set('types', query.types.join(','));
   if (query.statuses?.length) params.set('statuses', query.statuses.join(','));

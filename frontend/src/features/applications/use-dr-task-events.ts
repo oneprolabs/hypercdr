@@ -1,101 +1,31 @@
-import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
+import { useEffect, type Dispatch, type SetStateAction } from 'react';
 import { listTaskEvents } from '../../api/tasks';
 import type { AppItem } from '../clusters/types';
 import { listItems, type ApiTask, type ApiTaskEvent } from '../recovery/types';
 import { taskFailureSummary } from '../recovery/task-ui';
 import { preferTaskSnapshot } from '../recovery/progress-snapshot';
+import { isActiveTaskStatus } from '../recovery/task-status';
 import type { createTaskDetailLoader } from '../recovery/task-detail-loader';
 
 type TaskDetail = { app: AppItem; task: ApiTask; failure?: ReturnType<typeof taskFailureSummary> } | null;
 
 // Own task-event refresh lifetime independently of the page's rendering and
 // mutations. Cleanup prevents delayed responses from updating a closed page.
-export function useDrTaskEvents({ displayedDrTaskKey, hasActiveDisplayedTask, refreshPlatformData, syncTaskDetail, setSyncTaskDetail, namespaceDetailTaskId, drTaskEvents, setDrTaskEvents, setRefreshedTasks, taskDetailLoader }: {
+export function useDrTaskEvents({ syncTaskDetail, setSyncTaskDetail, namespaceDetailTaskId, drTaskEvents, setDrTaskEvents, setRefreshedTasks, taskDetailLoader }: {
   taskDetailLoader: ReturnType<typeof createTaskDetailLoader<ApiTask, Awaited<ReturnType<typeof listTaskEvents>>>>;
   setRefreshedTasks: Dispatch<SetStateAction<Record<string, ApiTask>>>;
-  displayedDrTaskKey: string;
-  hasActiveDisplayedTask: boolean;
-  refreshPlatformData: () => Promise<unknown>;
   syncTaskDetail: TaskDetail;
   setSyncTaskDetail: Dispatch<SetStateAction<TaskDetail>>;
   namespaceDetailTaskId: string;
   drTaskEvents: Record<string, ApiTaskEvent[]>;
   setDrTaskEvents: Dispatch<SetStateAction<Record<string, ApiTaskEvent[]>>>;
 }) {
-  const refreshedTerminalEventIdsRef = useRef(new Set<string>());
-  useEffect(() => {
-    const ids = displayedDrTaskKey ? displayedDrTaskKey.split('|').filter(Boolean) : [];
-    if (ids.length === 0) return;
-    let cancelled = false;
-    let loading = false;
-    const loadEvents = async () => {
-      if (loading) return;
-      loading = true;
-      const entries = await Promise.all(ids.map(async taskId => {
-        try {
-          const [res, task] = await Promise.all([taskDetailLoader.events(taskId), taskDetailLoader.task(taskId)]);
-          return [taskId, listItems(res), task] as const;
-        } catch {
-          return [taskId, null, null] as const;
-        }
-      }));
-      loading = false;
-      if (cancelled) return;
-      setRefreshedTasks(prev => {
-        const next = { ...prev };
-        for (const [taskId, , task] of entries) if (task) next[taskId] = preferTaskSnapshot(prev[taskId], task);
-        return next;
-      });
-      setDrTaskEvents(prev => {
-        const next = { ...prev };
-        let changed = false;
-        for (const [taskId, events] of entries) {
-          if (!events) continue;
-          const current = prev[taskId] || [];
-          const unchanged = current.length === events.length && current.every((event, index) => (
-            event.id === events[index]?.id
-            && event.level === events[index]?.level
-            && event.message === events[index]?.message
-          ));
-          if (!unchanged) {
-            next[taskId] = events;
-            changed = true;
-          }
-        }
-        return changed ? next : prev;
-      });
-      let observedNewTerminalEvent = false;
-      for (const [taskId, events, task] of entries) {
-        if (task && ['failed', 'canceled', 'cancelled', 'succeeded'].includes(task.status)) {
-          const terminalKey = `${taskId}:${task.status}`;
-          if (!refreshedTerminalEventIdsRef.current.has(terminalKey)) {
-            refreshedTerminalEventIdsRef.current.add(terminalKey);
-            observedNewTerminalEvent = true;
-          }
-        }
-        for (const event of events || []) {
-          if (!['completed', 'backup_completed', 'velero-schedule'].includes(event.reason)) continue;
-          if (refreshedTerminalEventIdsRef.current.has(event.id)) continue;
-          refreshedTerminalEventIdsRef.current.add(event.id);
-          observedNewTerminalEvent = true;
-        }
-      }
-      if (observedNewTerminalEvent) {
-        void refreshPlatformData();
-      }
-    };
-    loadEvents();
-    const timer = hasActiveDisplayedTask ? window.setInterval(loadEvents, 2000) : undefined;
-    return () => {
-      cancelled = true;
-      if (timer) window.clearInterval(timer);
-    };
-  }, [displayedDrTaskKey, hasActiveDisplayedTask, refreshPlatformData]);
   useEffect(() => {
     const taskId = syncTaskDetail?.task.id;
     if (!taskId) return;
     let cancelled = false;
     let loading = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const refreshOpenTask = async () => {
       if (loading) return;
       loading = true;
@@ -119,17 +49,18 @@ export function useDrTaskEvents({ displayedDrTaskKey, hasActiveDisplayedTask, re
           const nextSignature = JSON.stringify([latest.status, latest.progress, latest.errorCode, latest.errorMessage, latest.payload]);
           return currentSignature === nextSignature ? prev : { ...prev, task: latest, failure: undefined };
         });
+        if (latest && isActiveTaskStatus(latest.status)) timer = setTimeout(refreshOpenTask, 2000);
       } catch {
+        if (!cancelled) timer = setTimeout(refreshOpenTask, 5000);
         // Keep the last successful snapshot visible while the next live refresh retries.
       } finally {
         loading = false;
       }
     };
     void refreshOpenTask();
-    const timer = window.setInterval(refreshOpenTask, 2000);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      if (timer) clearTimeout(timer);
     };
   }, [syncTaskDetail?.task.id]);
   useEffect(() => {
