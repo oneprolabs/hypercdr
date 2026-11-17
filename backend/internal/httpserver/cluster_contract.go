@@ -34,12 +34,12 @@ type clusterUnregisterQueuedResponse struct {
 	Warning string     `json:"warning"`
 }
 type clusterInventoryRequest struct {
-	RequestID                  string `json:"requestId"`
-	Scope                      string `json:"scope"`
-	Namespace                  string `json:"namespace"`
-	IncludeDetails             bool   `json:"includeDetails"`
-	Reason                     string `json:"reason"`
-	IncludeRecentVeleroObjects bool   `json:"includeRecentVeleroObjects"`
+	RequestID                  string   `json:"requestId"`
+	Scope                      string   `json:"scope"`
+	Namespace                  string   `json:"namespace"`
+	IncludeDetails             bool     `json:"includeDetails"`
+	Reason                     string   `json:"reason"`
+	IncludeRecentVeleroObjects bool     `json:"includeRecentVeleroObjects"`
 }
 type clusterInventorySentResponse struct {
 	Status    string `json:"status"`

@@ -1092,39 +1092,6 @@ export default function ApplicationDrPage(props: {
       toast('Failed to request inventory refresh: ' + (error instanceof Error ? error.message : 'unknown error'));
     }
   };
-  const checkDRSupportBeforeStageMove = async (targetApps: AppItem[]): Promise<ApiApplication[]> => {
-    const requests = await Promise.all(targetApps.map(app => {
-      const clusterId = app.clusterId || currentClusterId;
-      const namespace = app.namespace || app.name;
-      if (!clusterId) throw new Error(`Missing cluster for ${namespace}`);
-      return requestClusterInventory(clusterId, {
-        scope: 'capabilities',
-        namespace,
-        includeDetails: true,
-        reason: 'dr_support_precheck',
-        includeRecentVeleroObjects: false,
-      }).then(response => ({ clusterId, namespace, requestId: response.requestId }));
-    }));
-
-    const pending = new Map(requests.map(request => [request.requestId, request]));
-    for (let attempt = 0; attempt < 35 && pending.size > 0; attempt += 1) {
-      await new Promise(resolve => window.setTimeout(resolve, 1000));
-      for (const request of Array.from(pending.values())) {
-        const status = await getInventoryRequestStatus(request.clusterId, request.requestId);
-        if (status.status === 'succeeded') {
-          pending.delete(request.requestId);
-        } else if (status.status === 'failed' || status.status === 'timeout') {
-          throw new Error(`${request.namespace}: ${status.message || status.errorCode || 'DR support check failed'}`);
-        }
-      }
-    }
-    if (pending.size > 0) {
-      throw new Error('DR support check timed out. Please refresh inventory and try again.');
-    }
-    await refreshPlatformData();
-    const latest = await listApplications();
-    return latest.items;
-  };
   const requestResourceCatalog = async (app: AppItem) => {
     const clusterId = app.clusterId || currentClusterId;
     const namespace = app.namespace || app.name;
@@ -1333,7 +1300,7 @@ export default function ApplicationDrPage(props: {
         meta: { title: app => app.status || 'Unknown' },
       });
     }
-    if (stage === 'select' && visibleConfigColumns.includes('drSupport')) {
+    if (visibleConfigColumns.includes('drSupport')) {
       columns.push({
         id: 'drSupport',
         header: 'DR Support',
@@ -1341,7 +1308,10 @@ export default function ApplicationDrPage(props: {
         size: 150,
         minSize: appColumnMinWidth('drSupport'),
         maxSize: 240,
-        cell: info => renderDRSupportBadge(info.row.original),
+        cell: info => {
+          const app = info.row.original;
+          return renderDRSupportBadge(app);
+        },
         meta: { className: 'hbdr-dr-support-cell' },
       });
     }
@@ -1989,12 +1959,12 @@ export default function ApplicationDrPage(props: {
       onClick={event => { event.stopPropagation(); setSyncTaskDetail({ app, task, failure }); }} />;
   };
   const moveAppsToStage = async (names: string[], target: ApplicationStage) => {
-    if (names.length === 0) return;
+    if (names.length === 0) return false;
     const protection = target === 'run' ? 'protected' : target === 'config' ? 'pending_protection' : 'unprotected';
     const targetApps = apps.filter(app => names.includes(app.name) && app.apiId);
     if (targetApps.length === 0) {
       toast('No applications to update');
-      return;
+      return false;
     }
     try {
       await Promise.all(targetApps.map(app => updateApplicationProtection(app.apiId, protection)));
@@ -2016,8 +1986,10 @@ export default function ApplicationDrPage(props: {
         : target === 'select' ? `Moved ${targetApps.length} application${targetApps.length === 1 ? '' : 's'} back to Select`
         : `Marked ${targetApps.length} application${targetApps.length === 1 ? '' : 's'} as protected`);
       void refreshPlatformData();
+      return true;
     } catch (error) {
       toast('Failed to update application stage: ' + (error instanceof Error ? error.message : 'unknown error'));
+      return false;
     }
   };
   const handlePrimaryAction = async () => {
@@ -2029,33 +2001,6 @@ export default function ApplicationDrPage(props: {
       const selectedAppItems = selectedSelectApps
         .map(name => apps.find(app => app.name === name))
         .filter((app): app is AppItem => Boolean(app));
-      const unchecked = selectedAppItems.filter(isDRSupportUnknown);
-      if (unchecked.length > 0) {
-        toast(`Checking DR support for ${unchecked.length} namespace${unchecked.length === 1 ? '' : 's'}...`);
-        try {
-          const latestApps = await checkDRSupportBeforeStageMove(unchecked);
-          const latestByKey = new Map(latestApps.map(app => [`${app.clusterId}:${app.namespace || app.name}`, app]));
-          const unresolved = selectedAppItems.filter(app => {
-            const latest = latestByKey.get(`${app.clusterId || currentClusterId}:${app.namespace || app.name}`);
-            return !latest?.resourceSummary?.drSupport?.status;
-          });
-          if (unresolved.length > 0) {
-            toast(`${unresolved[0].namespace || unresolved[0].name} DR support is still not checked. Please refresh inventory and try again.`);
-            return;
-          }
-          const unsupported = selectedAppItems.filter(app => {
-            const latest = latestByKey.get(`${app.clusterId || currentClusterId}:${app.namespace || app.name}`);
-            return (latest?.resourceSummary?.drSupport?.status || '').toLowerCase() === 'unsupported';
-          });
-          if (unsupported.length > 0) {
-            setDrSupportErrorDetail(unsupported[0]);
-            return;
-          }
-        } catch (error) {
-          toast('DR support check failed: ' + (error instanceof Error ? error.message : 'unknown error'));
-          return;
-        }
-      }
       const blocked = selectedAppItems.filter(isDRUnsupported);
       if (blocked.length > 0) {
         setDrSupportErrorDetail(blocked[0]);
@@ -2065,18 +2010,10 @@ export default function ApplicationDrPage(props: {
         const app = apps.find(item => item.name === name);
         return !app || !isDRUnsupported(app);
       });
+      if (!await moveAppsToStage(names, 'config')) return;
       setSelectedSelectApps([]);
-      await moveAppsToStage(names, 'config');
+      setSelectedConfigApps(names);
       setStage('config');
-      if (names.length === 1) {
-        const app = apps.find(item => item.name === names[0]);
-        if (app) {
-          // Warm the persisted namespace resource catalog in the background.
-          // Stage navigation remains immediate and Custom can use the cached
-          // result later without starting another scan.
-          void requestResourceCatalog(app).catch(() => undefined);
-        }
-      }
       return;
     }
 
@@ -2861,8 +2798,8 @@ export default function ApplicationDrPage(props: {
                       return;
                     }
                     const names = [...selectedConfigApps];
+                    if (!await moveAppsToStage(names, 'select')) return;
                     setSelectedConfigApps([]);
-                    await moveAppsToStage(names, 'select');
                     setStage('select');
                   }}
                   disabled={selectedConfigApps.length === 0}
@@ -2870,7 +2807,7 @@ export default function ApplicationDrPage(props: {
                 >
                   <ArrowLeft size={15} />Move Back
                 </button>
-                <button onMouseEnter={() => preloadDialog(ProtectApplicationsWizard)} onFocus={() => preloadDialog(ProtectApplicationsWizard)} onClick={() => { setGuidedProtectWizard(true); void handlePrimaryAction(); }} disabled={primaryDisabled || resourceCatalogLoading} className="hbdr-dr-action-primary"><ShieldCheck size={15} />Protect applications</button>
+                <button onMouseEnter={() => preloadDialog(ProtectApplicationsWizard)} onFocus={() => preloadDialog(ProtectApplicationsWizard)} onClick={() => { setGuidedProtectWizard(true); void handlePrimaryAction(); }} disabled={primaryDisabled || resourceCatalogLoading || selectedConfigApps.length === 0 || selectedConfigApps.some(name => { const app = apps.find(item => item.name === name); return !app || isDRSupportUnknown(app) || isDRUnsupported(app); })} className="hbdr-dr-action-primary"><ShieldCheck size={15} />Protect applications</button>
               </>
             )}
             {isRunStage && (

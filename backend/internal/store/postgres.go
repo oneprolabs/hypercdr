@@ -807,16 +807,7 @@ func (s *PostgresStore) UpdateApplication(input ApplicationUpdateInput) (Applica
 	if affected == 0 {
 		return Application{}, false, nil
 	}
-	apps, err := s.ListApplications("")
-	if err != nil {
-		return Application{}, false, err
-	}
-	for _, app := range apps {
-		if app.ID == input.ID {
-			return app, true, nil
-		}
-	}
-	return Application{}, false, nil
+	return s.GetApplication(input.ID)
 }
 
 func (s *PostgresStore) DeleteCluster(clusterID string) (bool, error) {
@@ -1936,15 +1927,17 @@ func (s *PostgresStore) GetApplication(id string) (Application, bool, error) {
 	row := s.db.QueryRow(`
 		select id, cluster_id, namespace, name, status, labels,
 		       workload_count, service_count, ingress_count, configmap_count, secret_count,
-		       pvc_count, pv_capacity_bytes, resource_summary, coalesce(last_collected_at, created_at), protection_status
+		       pvc_count, pv_capacity_bytes, resource_summary, coalesce(last_collected_at, created_at), protection_status,
+		       coalesce((select jsonb_agg(at.tag_id::text) from application_tags at where at.application_id=applications.id),'[]'::jsonb)
 		from applications where id = $1
 	`, id)
 	var app Application
 	var labelsRaw []byte
 	var resourceSummaryRaw []byte
+	var tagsRaw []byte
 	if err := row.Scan(&app.ID, &app.ClusterID, &app.Namespace, &app.Name, &app.Status, &labelsRaw,
 		&app.WorkloadCount, &app.ServiceCount, &app.IngressCount, &app.ConfigMapCount, &app.SecretCount,
-		&app.PVCCount, &app.PVCapacityBytes, &resourceSummaryRaw, &app.LastCollectedAt, &app.ProtectionStatus); err != nil {
+		&app.PVCCount, &app.PVCapacityBytes, &resourceSummaryRaw, &app.LastCollectedAt, &app.ProtectionStatus, &tagsRaw); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Application{}, false, nil
 		}
@@ -1956,5 +1949,6 @@ func (s *PostgresStore) GetApplication(id string) (Application, bool, error) {
 	if len(resourceSummaryRaw) > 0 {
 		_ = json.Unmarshal(resourceSummaryRaw, &app.ResourceSummary)
 	}
+	_ = json.Unmarshal(tagsRaw, &app.Tags)
 	return app, true, nil
 }

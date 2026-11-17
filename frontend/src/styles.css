@@ -29909,3 +29909,6 @@ html[data-theme='dark'] #root .hbdr-dr-task-log-drawer .hbdr-task-final-result.i
  .hbdr-node-cache-refresh { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
  .hbdr-node-cache-refresh button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 1px solid currentColor; border-radius: 4px; }
  .hbdr-node-cache-refresh button:disabled { opacity: .4; cursor: not-allowed; }
+
+.hbdr-dr-support-status { display: inline-flex; align-items: center; gap: 8px; }
+.hbdr-dr-support-status button { color: var(--color-primary, #2563eb); font-weight: 600; }

@@ -172,24 +172,24 @@ func (r *Router) applicationDRSupportBlock(appID string, requestedStatus string)
 	if status != "pending_protection" && status != "protected" {
 		return false, ""
 	}
-	apps, err := r.store.ListApplications("")
+	app, found, err := r.store.GetApplication(appID)
 	if err != nil {
 		r.logger.Error("failed to validate application DR support", "error", err, "id", appID)
-		return false, ""
+		return true, "Unable to verify DR support. Try again before continuing."
 	}
-	for _, app := range apps {
-		if app.ID != appID {
-			continue
-		}
-		drSupport, _ := app.ResourceSummary["drSupport"].(map[string]any)
-		drSupportStatus := strings.TrimSpace(fmt.Sprint(drSupport["status"]))
-		if drSupport == nil || drSupportStatus == "" || drSupportStatus == "<nil>" {
-			return true, fmt.Sprintf("%s cannot enter DR setup. DR support has not been checked yet. Refresh namespace inventory and try again.", app.Namespace)
-		}
-		if strings.EqualFold(drSupportStatus, "unsupported") {
-			return true, fmt.Sprintf("%s cannot enter DR setup. %s", app.Namespace, formatUnsupportedDRStorageMessage(drSupport))
-		}
-		return false, ""
+	if !found {
+		return true, "The selected application was not found. Refresh the namespace list and try again."
+	}
+	drSupport, _ := app.ResourceSummary["drSupport"].(map[string]any)
+	drSupportStatus := strings.TrimSpace(fmt.Sprint(drSupport["status"]))
+	if drSupport == nil || drSupportStatus == "" || drSupportStatus == "<nil>" {
+		return true, fmt.Sprintf("%s cannot enter DR setup. DR support has not been checked yet. Refresh namespace inventory and try again.", app.Namespace)
+	}
+	if strings.EqualFold(drSupportStatus, "unsupported") {
+		return true, fmt.Sprintf("%s cannot enter DR setup. %s", app.Namespace, formatUnsupportedDRStorageMessage(drSupport))
+	}
+	if !strings.EqualFold(drSupportStatus, "supported") {
+		return true, fmt.Sprintf("%s cannot enter DR setup. Refresh DR support and try again.", app.Namespace)
 	}
 	return false, ""
 }

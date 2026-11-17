@@ -168,6 +168,12 @@ func (r *Router) createProtectionPlan(w http.ResponseWriter, req *http.Request) 
 	if input.AppID == "" && len(input.AppIDs) > 0 {
 		input.AppID = input.AppIDs[0]
 	}
+	for appID := range seenAppIDs {
+		if blocked, message := r.applicationDRSupportBlock(appID, "protected"); blocked {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "application_dr_unsupported", "message": message})
+			return
+		}
+	}
 	input.Status = "activating_storage"
 	var item store.ProtectionPlan
 	var err error

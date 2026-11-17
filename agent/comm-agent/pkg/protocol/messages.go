@@ -282,12 +282,12 @@ type VeleroInventory struct {
 }
 
 type InventoryRequestPayload struct {
-	RequestID                  string `json:"requestId,omitempty"`
-	Scope                      string `json:"scope,omitempty"`
-	Namespace                  string `json:"namespace,omitempty"`
-	IncludeDetails             bool   `json:"includeDetails,omitempty"`
-	Reason                     string `json:"reason,omitempty"`
-	IncludeRecentVeleroObjects bool   `json:"includeRecentVeleroObjects,omitempty"`
+	RequestID                  string   `json:"requestId,omitempty"`
+	Scope                      string   `json:"scope,omitempty"`
+	Namespace                  string   `json:"namespace,omitempty"`
+	IncludeDetails             bool     `json:"includeDetails,omitempty"`
+	Reason                     string   `json:"reason,omitempty"`
+	IncludeRecentVeleroObjects bool     `json:"includeRecentVeleroObjects,omitempty"`
 }
 
 type LogRequestPayload struct {

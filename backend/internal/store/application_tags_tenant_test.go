@@ -5,6 +5,25 @@ import (
 	"testing"
 )
 
+func TestUpdateApplicationRetainsTags(t *testing.T) {
+	repo := newTestStore(t)
+	_, app := seedPlanApplication(t, repo)
+	tag, err := repo.CreateTag(DefaultTenantID, "stage-tag")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := repo.SetApplicationTags(app.ID, []string{tag.ID}); err != nil || !found {
+		t.Fatalf("set tags: found=%v error=%v", found, err)
+	}
+	updated, found, err := repo.UpdateApplication(ApplicationUpdateInput{ID: app.ID, ProtectionStatus: "pending_protection"})
+	if err != nil || !found {
+		t.Fatalf("update: found=%v error=%v", found, err)
+	}
+	if len(updated.Tags) != 1 || updated.Tags[0] != tag.ID {
+		t.Fatalf("stage update lost tags: %#v", updated.Tags)
+	}
+}
+
 func TestApplicationTagReplacementRejectsForeignOrMissingTagAtomically(t *testing.T) {
 	repo := newTestStore(t)
 	_, app := seedPlanApplication(t, repo)
