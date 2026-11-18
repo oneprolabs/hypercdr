@@ -13,7 +13,8 @@ test('sync and recovery expose only server-created tasks and guard repeated subm
   assert.ok(recovery.indexOf('const createdTask = await createRecoveryTask') < recovery.indexOf('setSubmittedRecoveryTasks'));
   const wizard = readFileSync(new URL('../../recovery-wizard-modal.tsx', import.meta.url), 'utf8');
   assert.match(wizard, /if \(submitting \|\| submittingRef\.current\) return;/);
-  assert.match(wizard, /submittingRef\.current = true;\s*try \{\s*await onSubmit\(\)/);
+  assert.match(wizard, /submittingRef\.current = true;\s*try \{\s*await onSubmit\(submittedConfig\)/);
+  assert.match(wizard, /selectedAdvancedMappings\(advancedOptions, config\)/);
   assert.match(wizard, /finally \{\s*submittingRef\.current = false;/);
 });
 

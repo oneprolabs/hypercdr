@@ -285,10 +285,11 @@ export function usePlatformResources({ sessionToken, view, resourceSessionOwnerR
       try {
         // Task identity is owned by the persisted plan pointers. A recovery
         // can be submitted by another browser or directly through the API, so
-        // poll the lightweight plan list in the same snapshot as tasks. Using
-        // a stale latestRecoveryTaskId makes the row keep rendering the prior
-        // drill until a full-page refresh.
-        const snapshot = await loadApplicationActivitySnapshot(() => !cancelled && resourceSessionOwnerRef.current === owner, view === 'dashboard', view === 'applications', false);
+        // poll the plan and restore-point lists with tasks. A completed backup
+        // publishes its restore point asynchronously; keeping this list in
+        // the activity snapshot prevents rows from staying on “creating”
+        // until the user manually refreshes the page.
+        const snapshot = await loadApplicationActivitySnapshot(() => !cancelled && resourceSessionOwnerRef.current === owner, view === 'dashboard', view === 'applications', true);
         if (!snapshot || cancelled || resourceSessionOwnerRef.current !== owner) return;
         const { tasks: apiTasks, plans: apiPlans, restorePoints: apiRestorePoints } = snapshot;
         const apiRestorePointViews = apiRestorePoints ? apiRestorePoints.map(mapRestorePoint) : liveApiRestorePointViews;

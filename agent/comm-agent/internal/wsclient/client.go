@@ -2435,10 +2435,19 @@ func (c *Client) pollRestoreStatus(task protocol.TaskDispatchPayload, object kub
 				c.failRestoreTask(task, object, "RESTORE_SERVICE_MAPPING_UNAVAILABLE", "service NodePort mapping is not supported by this agent", nil)
 				return
 			}
-			updated, err := c.serviceMapper.ApplyServiceNodePortMappings(c.taskContext(task), restoreTargetNamespace(task), task.Restore.ServiceNodePortMappings)
+			groups, err := restoreServiceNodePortMappings(task)
 			if err != nil {
 				c.failRestoreTask(task, object, "RESTORE_SERVICE_MAPPING_FAILED", err.Error(), map[string]any{"velero": payload})
 				return
+			}
+			updated := 0
+			for namespace, mappings := range groups {
+				changed, err := c.serviceMapper.ApplyServiceNodePortMappings(c.taskContext(task), namespace, mappings)
+				if err != nil {
+					c.failRestoreTask(task, object, "RESTORE_SERVICE_MAPPING_FAILED", err.Error(), map[string]any{"velero": payload})
+					return
+				}
+				updated += changed
 			}
 			payload["serviceNodePortMapping"] = map[string]any{"updatedServices": updated, "namespace": restoreTargetNamespace(task)}
 		}

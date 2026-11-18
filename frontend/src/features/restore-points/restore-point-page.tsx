@@ -476,6 +476,8 @@ export default function RealRestorePointPage({
       forceStart: false,
       contentCatalogLoaded: false,
       persistentDataExpected: false,
+      restoreNamespaces: row.namespaces,
+      restorePackageNamespaces: row.namespaces,
     };
   };
   const startRestoreAction = (mode: 'drill' | 'takeover') => {
@@ -964,9 +966,12 @@ export default function RealRestorePointPage({
           }}
           onClose={() => setRestoreAction(null)}
           submitting={recoverySubmitting}
-          onSubmit={async () => {
-            const action = restoreAction;
-            const targetNamespace = action.config.namespaceMode === 'original' ? action.row.namespace : action.config.targetNamespace;
+          onSubmit={async submittedConfig => {
+            const action = { ...restoreAction, config: submittedConfig };
+            const sourceNamespaces = action.config.restoreNamespaces?.length ? action.config.restoreNamespaces : action.row.namespaces;
+            const mappings = recoveryNamespaceMappings(sourceNamespaces, action.config, action.mode === 'drill' ? 'drill' : 'restore');
+            const targetNamespace = mappings[0]?.target || action.config.targetNamespace;
+            const targetNamespaces = action.config.namespaceMode === 'original' ? {} : Object.fromEntries(mappings.map(mapping => [mapping.source, mapping.target]));
             const targetCluster = clusters.find(cluster => cluster.name === action.config.targetCluster);
             if (!targetCluster) {
               toast('Select a target cluster before starting recovery');
@@ -979,9 +984,10 @@ export default function RealRestorePointPage({
                 protectionPlanId: action.row.protectionPlanId,
                 restorePointId: action.row.id,
                 veleroBackupName: action.row.veleroBackupName,
-                sourceNamespace: action.row.namespace,
-                sourceNamespaces: action.row.namespaces,
+                sourceNamespace: sourceNamespaces[0] || action.row.namespace,
+                sourceNamespaces,
                 targetNamespace,
+                targetNamespaces,
                 targetMode: action.config.targetMode,
                 restoreMode: action.config.restoreMode,
                 artifactMode: action.config.artifactMode,
@@ -993,10 +999,11 @@ export default function RealRestorePointPage({
                 storageProfileMode: action.config.storageProfileMode,
                 alternateProfileId: action.config.alternateProfileId,
 				forceProceed: action.config.forceProceed,
-                includedResources: action.config.includedResources,
-                excludedResources: action.config.excludedResources,
+                includedResources: action.mode === 'drill' && (action.config.restorePackageNamespaces?.length || 0) > 1 ? [] : action.config.includedResources,
+                excludedResources: action.mode === 'drill' && (action.config.restorePackageNamespaces?.length || 0) > 1 ? [] : action.config.excludedResources,
                 storageClassMappings: action.config.storageClassMappings,
                 imageMappings: action.config.imageMappings,
+                serviceNodePortMappings: action.config.serviceNodePortMappings,
                 waitForWorkloads: action.config.waitForWorkloads,
                 runValidation: action.config.runValidation,
                 forceStart: action.config.forceStart,
@@ -1019,3 +1026,4 @@ export default function RealRestorePointPage({
     </motion.div>
   );
 }
+import { recoveryNamespaceMappings } from '../../lib/drill-wizard';

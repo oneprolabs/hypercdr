@@ -1,6 +1,41 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {drillNamespaceError,drillScopeError} from './drill-wizard.ts';
+import {drillSteps,drillNamespaceError,drillScopeError,recoveryNamespaceMappings,recoveryNamespaceMappingError} from './drill-wizard.ts';
 import { readFileSync } from 'node:fs';
+
+test('namespace mappings follow the selected sources in original and clone modes', () => {
+  const config = { namespaceMode: 'original', targetNamespace: 'first', restorePackageNamespaces: ['first', 'second'] };
+  assert.deepEqual(recoveryNamespaceMappings(['second'], config), [{ source: 'second', target: 'second' }]);
+  assert.deepEqual(recoveryNamespaceMappings(['first', 'second'], config), [{ source: 'first', target: 'first' }, { source: 'second', target: 'second' }]);
+  const clone = { ...config, namespaceMode: 'generated', targetNamespaces: { second: 'second-test' } };
+  assert.deepEqual(recoveryNamespaceMappings(['second'], clone), [{ source: 'second', target: 'second-test' }]);
+  assert.deepEqual(recoveryNamespaceMappings(['first', 'second'], clone), [{ source: 'first', target: 'first-drill' }, { source: 'second', target: 'second-test' }]);
+  assert.deepEqual(recoveryNamespaceMappings(['second'], { namespaceMode: 'generated', targetNamespace: 'first-drill' }), [{ source: 'second', target: 'second-drill' }]);
+  assert.deepEqual(recoveryNamespaceMappings(['second'], { namespaceMode: 'custom', targetNamespace: 'custom-target' }), [{ source: 'second', target: 'custom-target' }]);
+});
+
+test('namespace mapping validation rejects invalid or duplicate targets', () => {
+  assert.ok(recoveryNamespaceMappingError([{ source: 'one', target: '' }]));
+  assert.ok(recoveryNamespaceMappingError([{ source: 'one', target: 'same' }, { source: 'two', target: 'same' }]));
+  assert.equal(recoveryNamespaceMappingError([{ source: 'one', target: 'one-drill' }, { source: 'two', target: 'two-drill' }]), '');
+});
+
+test('drill keeps three steps and a compact restore screen without duplicate metadata', () => {
+  assert.deepEqual(drillSteps.map(step => step[0]), ['Restore', 'Target', 'Review']);
+  const wizard = readFileSync(new URL('../recovery-wizard-modal.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(wizard, /hbdr-drill-point-meta/);
+  assert.match(wizard, /hbdr-drill-namespace-choices/);
+  assert.match(wizard, /drillStep !== 0 && <div className="hbdr-drill-step-heading"/);
+  assert.match(wizard, /useState\(false\)/);
+  assert.match(wizard, /aria-expanded=\{advancedOpen\}/);
+  assert.match(wizard, /type="checkbox"\s+checked=\{advancedOpen\}/);
+  assert.match(wizard, /aria-label="Enable advanced options"/);
+  assert.doesNotMatch(wizard, /advancedOpen \? '−' : '\+'/);
+  const review = wizard.slice(wizard.indexOf('className="hbdr-protect-review-groups hbdr-drill-review"'), wizard.indexOf('{submitError &&'));
+  assert.deepEqual([...review.matchAll(/<h4><span>\d<\/span>([^<]+)<\/h4>/g)].map(match => match[1]), ['Restore', 'Target']);
+  assert.ok(review.indexOf('<dt>Restore scope</dt>') < review.indexOf('<span>2</span>Target'));
+  assert.ok(review.indexOf('<dt>Advanced options</dt>') < review.indexOf('<span>2</span>Target'));
+  assert.doesNotMatch(wizard, /<span><em className="hbdr-protect-target">\{app\.name\}<\/em><\/span>/);
+});
 
 test('stage transitions wait for persistence without refreshing the whole platform', () => {
   const page = readFileSync(new URL('../features/applications/application-dr-page.tsx', import.meta.url), 'utf8');
@@ -15,13 +50,15 @@ test('stage transitions wait for persistence without refreshing the whole platfo
   assert.doesNotMatch(page, /dr_support_auto_check|drSupportAutoRequestedRef/);
 });
 
-test('application activity polling defers restore points until the run stage', () => {
+test('application activity polling includes restore points for live row updates', () => {
   const snapshots = readFileSync(new URL('../app/platform-snapshots.ts', import.meta.url), 'utf8');
   assert.match(snapshots, /includeRestorePoints = true/);
   assert.match(snapshots, /includeRestorePoints \? listRestorePoints/);
   const resources = readFileSync(new URL('../app/use-platform-resources.ts', import.meta.url), 'utf8');
-  assert.match(resources, /loadApplicationActivitySnapshot\([^\n]+false\);/);
+  assert.match(resources, /loadApplicationActivitySnapshot\([^\n]+true\);/);
   assert.match(resources, /const loadApplicationRecoveryData = useCallback/);
+  const page = readFileSync(new URL('../features/applications/application-dr-page.tsx', import.meta.url), 'utf8');
+  assert.match(page, /const completedPoint = taskVisibleRestorePoint \|\| latestPoint/);
 });
 
 test('removed plans never fall back to configuring and cleanup clears activation hints', () => {

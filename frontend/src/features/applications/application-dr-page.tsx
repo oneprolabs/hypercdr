@@ -1,4 +1,5 @@
 import { useDrTaskEvents } from './use-dr-task-events';
+import { recoveryNamespaceMappings } from '../../lib/drill-wizard';
 import { getRestorePointContents } from '../../api/restore-points';
 import { RecoveryTaskContext } from '../recovery/recovery-task-context';
 import { getTask, listTaskEvents, listTasks, createBackupTask, createRecoveryTask, abortTask, cleanupDrillTask } from '../../api/tasks';
@@ -100,6 +101,7 @@ export default function ApplicationDrPage(props: {
   const [selectedSelectApps, setSelectedSelectApps] = useState<string[]>([]);
   const [selectedConfigApps, setSelectedConfigApps] = useState<string[]>([]);
   const [selectedRunApps, setSelectedRunApps] = useState<string[]>([]);
+  const [expandedPlanNamespaces, setExpandedPlanNamespaces] = useState<string[]>([]);
   const [submittedSyncTasks, setSubmittedSyncTasks] = useState<Record<string, ApiTask>>({});
   const [submittedRecoveryTasks, setSubmittedRecoveryTasks] = useState<Record<string, ApiTask>>({});
   const [syncSubmitting, setSyncSubmitting] = useState(false);
@@ -1203,7 +1205,7 @@ export default function ApplicationDrPage(props: {
   };
   const appNameColumn: HyperTableColumn<AppItem> = {
     id: 'name',
-    header: 'Namespace',
+    header: stage === 'run' ? 'Protection plan' : 'Namespace',
     accessorFn: app => unitNamespaces(app).join(' '),
     // Keep the namespace column readable across the three workflow stages.
     // The first two stages have spare horizontal space; the run stage gets a
@@ -1214,27 +1216,30 @@ export default function ApplicationDrPage(props: {
     cell: info => {
       const app = info.row.original;
       const namespaces = unitNamespaces(app);
+      const isExpanded = expandedPlanNamespaces.includes(app.name);
+      const isPlan = stage === 'run';
+      const planLabel = `plan: ${namespaces[0] || app.name}`;
       return (
-        <button
-          type="button"
-          className="hbdr-dr-name-cell hbdr-dr-namespace-link"
-          aria-label={`View details for ${namespaces.join(', ')}`}
-          onClick={event => {
-            event.stopPropagation();
-            openNamespaceDetail(app);
-          }}
-        >
-          <div className="hbdr-dr-namespace-icon"><Layers size={18} /></div>
-          <div>
-            {app.memberApps?.length ? (
-              <div className="hbdr-merged-namespace-list">
-                {namespaces.map(namespace => <p key={namespace} className="hbdr-dr-app-name">{namespace}</p>)}
-              </div>
-            ) : (
-              <p className="hbdr-dr-app-name">{app.name}</p>
-            )}
-          </div>
-        </button>
+        <div className="hbdr-dr-name-cell-wrap">
+          <button
+            type="button"
+            className="hbdr-dr-name-cell hbdr-dr-namespace-link"
+            aria-label={`View details for ${namespaces.join(', ')}`}
+            onClick={event => {
+              event.stopPropagation();
+              openNamespaceDetail(app);
+            }}
+          >
+            <div className="hbdr-dr-namespace-icon">{isPlan ? <ShieldCheck size={18} /> : <Layers size={18} />}</div>
+            <div className="hbdr-dr-plan-title">
+              <p className="hbdr-dr-app-name">{isPlan ? planLabel : (namespaces[0] || app.name)}</p>
+              {isPlan && namespaces.length > 1 && <small>{namespaces.length} namespaces</small>}
+              {!isPlan && app.memberApps?.length ? <div className="hbdr-merged-namespace-list">{namespaces.map(namespace => <p key={namespace} className="hbdr-dr-app-name">{namespace}</p>)}</div> : null}
+            </div>
+          </button>
+          {isPlan && namespaces.length > 1 && <button type="button" className="hbdr-dr-plan-expand" aria-label={isExpanded ? 'Collapse namespaces' : 'Expand namespaces'} aria-expanded={isExpanded} onClick={event => { event.stopPropagation(); setExpandedPlanNamespaces(previous => previous.includes(app.name) ? previous.filter(value => value !== app.name) : [...previous, app.name]); }}>{isExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</button>}
+          {isPlan && isExpanded && <div className="hbdr-dr-plan-members">{namespaces.map(namespace => <span key={namespace}>{namespace}</span>)}</div>}
+        </div>
       );
     },
     meta: { title: app => unitNamespaces(app).join(', ') },
@@ -1552,7 +1557,7 @@ export default function ApplicationDrPage(props: {
       });
     }
     return columns;
-  }, [allVisibleSelected, selectedNames, visibleRunColumns, tags, syncTasks, liveRecoveryTasks, liveRestorePoints, protectionPlans, platformTasks, refreshedDrTasks, drTaskEvents]);
+  }, [allVisibleSelected, selectedNames, visibleRunColumns, tags, syncTasks, liveRecoveryTasks, liveRestorePoints, protectionPlans, platformTasks, refreshedDrTasks, drTaskEvents, expandedPlanNamespaces]);
   const singleSelectedApp = selectedNames.length === 1 ? currentRows.find(app => app.name === selectedNames[0]) || apps.find(app => app.name === selectedNames[0]) || null : null;
   const selectedRunRows = selectedRunApps
     .map(name => protectedRows.find(app => app.name === name) || apps.find(app => app.name === name))
@@ -1658,6 +1663,8 @@ export default function ApplicationDrPage(props: {
       forceStart: false,
       contentCatalogLoaded: false,
       persistentDataExpected: false,
+      restoreNamespaces: unitNamespaces(app),
+      restorePackageNamespaces: unitNamespaces(app),
     };
   };
   const openRestoreAction = (mode: 'drill' | 'takeover') => {
@@ -1687,23 +1694,20 @@ export default function ApplicationDrPage(props: {
 		setRestoreAction({ mode, app, config: buildRecoveryDraft(mode, app, pointId) });
 		setSelectedDetailApp(null);
 	};
-  const confirmRestoreAction = async () => {
+  const confirmRestoreAction = async (submittedConfig: RecoveryWizardConfig) => {
     if (!restoreAction) return;
+    await submitRestoreAction({ ...restoreAction, config: submittedConfig });
+  };
+  const submitRestoreAction = async (restoreAction: { mode: 'drill' | 'takeover'; app: AppItem; config: RecoveryWizardConfig }) => {
     const point = restorePointsForApp(restoreAction.app).find(item => item.id === restoreAction.config.pointId);
     const livePoint = liveRestorePoints.find(item => item.id === restoreAction.config.pointId);
     if (!livePoint) {
       throw new Error('The selected restore point is no longer available. Refresh the restore point list and choose another point.');
     }
-    const sourceNamespaces = unitNamespaces(restoreAction.app);
-    const targetNamespaces = restoreAction.config.namespaceMode === 'original'
-      ? {}
-      : sourceNamespaces.reduce<Record<string, string>>((acc, namespace) => {
-          acc[namespace] = restoreAction.app.isMergedPlan ? `${namespace}-drill` : restoreAction.config.targetNamespace;
-          return acc;
-        }, {});
-    const targetNamespace = restoreAction.config.namespaceMode === 'original'
-      ? sourceNamespaces[0] || restoreAction.app.name
-      : restoreAction.app.isMergedPlan ? targetNamespaces[sourceNamespaces[0]] || restoreAction.config.targetNamespace : restoreAction.config.targetNamespace;
+    const sourceNamespaces = restoreAction.config.restoreNamespaces?.length ? restoreAction.config.restoreNamespaces : unitNamespaces(restoreAction.app);
+    const mappings = recoveryNamespaceMappings(sourceNamespaces, restoreAction.config, restoreAction.mode === 'drill' ? 'drill' : 'restore');
+    const targetNamespaces = restoreAction.config.namespaceMode === 'original' ? {} : Object.fromEntries(mappings.map(mapping => [mapping.source, mapping.target]));
+    const targetNamespace = mappings[0]?.target || restoreAction.config.targetNamespace;
     const targetCluster = clusters.find(cluster => cluster.name === restoreAction.config.targetCluster);
     if (!targetCluster) {
       throw new Error('Select a target cluster before starting recovery.');
@@ -1736,8 +1740,8 @@ export default function ApplicationDrPage(props: {
           storageProfileMode: action.config.storageProfileMode,
           alternateProfileId: action.config.alternateProfileId,
 		  forceProceed: action.config.forceProceed,
-          includedResources: action.config.includedResources,
-          excludedResources: action.config.excludedResources,
+          includedResources: action.config.restorePackageNamespaces && action.config.restorePackageNamespaces.length > 1 ? [] : action.config.includedResources,
+          excludedResources: action.config.restorePackageNamespaces && action.config.restorePackageNamespaces.length > 1 ? [] : action.config.excludedResources,
           storageClassMappings: action.config.storageClassMappings,
           imageMappings: action.config.imageMappings,
           serviceNodePortMappings: action.config.serviceNodePortMappings,
@@ -1860,7 +1864,12 @@ export default function ApplicationDrPage(props: {
         return <TaskErrorStatus code={warning.code} title={warning.title} description={warning.description} detail={warning.fullText}
           onClick={event => { event.stopPropagation(); setSyncTaskDetail({ app, task, failure: warning }); }} />;
       }
-      const completedPoint = taskVisibleRestorePoint;
+      // Restore-point publication and task completion are persisted separately.
+      // If the point has not received backupTaskId yet, use the newest point
+      // for this plan instead of showing a stale “creating” label. The list is
+      // already scoped to the app's protection plan, so the newest point is
+      // the authoritative fallback while the task association catches up.
+      const completedPoint = taskVisibleRestorePoint || latestPoint;
       const completedPointLabel = restorePointDisplayLabel(completedPoint) || 'Restore point creating...';
       return (
         <button type="button" className="hbdr-dr-last-snapshot is-inline hbdr-task-status-clickable" aria-label="View sync process" onPointerDown={event => { event.stopPropagation(); setSyncTaskDetail({ app, task }); }} onMouseDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}>

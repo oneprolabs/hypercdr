@@ -21,6 +21,21 @@ Velero owns:
 - Backup repository interaction.
 - Snapshot and pod volume backup mechanisms.
 
+## Drill advanced mappings
+
+The wizard derives advanced options from the selected namespaces in the loaded
+restore-point catalog. Deselected mappings remain in the local draft but are
+excluded from the submitted command; switching namespaces does not reload the
+catalog. StorageClass and image references are deduplicated across the selection.
+
+`serviceNodePortMappings` retains `service|port|protocol` keys for single-namespace
+packages. Multi-namespace packages use `sourceNamespace/service|port|protocol` so
+same-name Services cannot overwrite each other. The communication agent validates
+the source against the restore selection, resolves `targetNamespaces`, and applies
+each mapping only in the corresponding restored namespace. Legacy unqualified
+keys remain supported. Cluster agents must include this namespaced mapping support
+before using custom Service NodePorts for a multi-namespace package.
+
 ## Recommended Implementation Language
 
 Use Go for `comm-agent`.

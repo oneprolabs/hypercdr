@@ -52,6 +52,7 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 	var recoveryPlan store.ProtectionPlan
 	var recoveryAppID string
 	var recoveryStorageClasses []string
+	var restorePointNamespaces []string
 	if protectionPlanID != "" {
 		plan, found, err := r.store.GetProtectionPlan(protectionPlanID)
 		if err != nil {
@@ -130,6 +131,10 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 		if len(body.SourceNamespaces) == 0 {
 			body.SourceNamespaces = stringArrayFromAny(point.Metadata["includedNamespaces"])
 		}
+		restorePointNamespaces = uniqueNonEmptyStrings(stringArrayFromAny(point.Metadata["includedNamespaces"]))
+		if len(restorePointNamespaces) == 0 && point.SourceNamespace != "" {
+			restorePointNamespaces = []string{point.SourceNamespace}
+		}
 		if index, ready := restorePointContentIndex(point); ready && index.Status == "ready" && !index.Truncated {
 			body.ReadinessExpectationsKnown = true
 			body.RuntimeWorkloadsExpected, body.ExpectedPVCs = readinessExpectationsFromCatalog(index.Resources, body.SourceNamespaces)
@@ -143,6 +148,27 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 	if len(body.SourceNamespaces) == 0 && body.SourceNamespace != "" {
 		body.SourceNamespaces = []string{body.SourceNamespace}
 	}
+	if len(body.SourceNamespaces) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "source_namespace_required"})
+		return
+	}
+	if len(restorePointNamespaces) > 0 {
+		allowed := make(map[string]struct{}, len(restorePointNamespaces))
+		for _, namespace := range restorePointNamespaces {
+			allowed[namespace] = struct{}{}
+		}
+		for _, namespace := range body.SourceNamespaces {
+			if _, ok := allowed[namespace]; !ok {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "source_namespace_not_in_restore_point", "namespace": namespace})
+				return
+			}
+		}
+	}
+	if taskType == "drill" && (len(restorePointNamespaces) > 1 || len(body.SourceNamespaces) > 1) {
+		body.IncludedResources = nil
+		body.ExcludedResources = nil
+	}
+	body.SourceNamespace = body.SourceNamespaces[0]
 	recoverySourceClusterID := recoveryPlan.SourceClusterID
 	if recoverySourceClusterID == "" {
 		recoverySourceClusterID = storageSourceClusterID
