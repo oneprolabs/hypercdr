@@ -36,7 +36,7 @@ export async function loadPlatformSnapshot(isCurrent: CurrentScope, onClusters?:
   });
   void inventoryRequest.catch(() => undefined);
   const [clusterRes, appRes, storageRes, policyRes, planRes, taskRes, tagRes, pointRes] = await Promise.all([
-    clusterRequest, appRequest, listStorageRepositories(), listPolicies(), planRequest, planActivity ? Promise.resolve({ items: [] }) : readActivityTasks(completeHistory), listTags(), listRestorePoints(true, completeHistory ? 0 : 500),
+    clusterRequest, appRequest, listStorageRepositories(), listPolicies(), planRequest, planActivity ? Promise.resolve({ items: [] }) : readActivityTasks(completeHistory), listTags(), planActivity ? Promise.resolve({ items: [] }) : listRestorePoints(true, completeHistory ? 0 : 500),
   ]);
   await inventoryRequest;
   if (!isCurrent()) return null;
@@ -49,14 +49,18 @@ export async function loadPlatformSnapshot(isCurrent: CurrentScope, onClusters?:
   };
 }
 
-export async function loadApplicationActivitySnapshot(isCurrent: CurrentScope, completeHistory = false, planActivity = false) {
+export async function loadApplicationActivitySnapshot(isCurrent: CurrentScope, completeHistory = false, planActivity = false, includeRestorePoints = true) {
   if (!isCurrent()) return null;
   const planRequest = listProtectionPlans();
-  const [taskRes, pointRes, planRes] = await Promise.all([planActivity ? Promise.resolve({ items: [] }) : readActivityTasks(completeHistory), listRestorePoints(true, completeHistory ? 0 : 500), planRequest]);
+  const [taskRes, pointRes, planRes] = await Promise.all([
+    planActivity ? Promise.resolve({ items: [] }) : readActivityTasks(completeHistory),
+    includeRestorePoints ? listRestorePoints(true, completeHistory ? 0 : 500) : Promise.resolve({ items: [] }),
+    planRequest,
+  ]);
   if (!isCurrent()) return null;
   const plans = listItems(planRes);
   const tasks = planActivity ? listItems(taskRes) : await completePlanTasks(listItems(taskRes), plans, isCurrent);
-  return tasks === null ? null : { tasks, plans, restorePoints: listItems(pointRes) };
+  return tasks === null ? null : { tasks, plans, restorePoints: includeRestorePoints ? listItems(pointRes) : null };
 }
 
 export async function loadTopologySnapshot(isCurrent: CurrentScope) {

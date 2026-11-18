@@ -2,6 +2,28 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {drillNamespaceError,drillScopeError} from './drill-wizard.ts';
 import { readFileSync } from 'node:fs';
 
+test('stage transitions wait for persistence without refreshing the whole platform', () => {
+  const page = readFileSync(new URL('../features/applications/application-dr-page.tsx', import.meta.url), 'utf8');
+  const start = page.indexOf('const moveAppsToStage =');
+  const end = page.indexOf('const handlePrimaryAction =', start);
+  assert.ok(start >= 0 && end > start);
+  const transition = page.slice(start, end);
+  assert.match(transition, /await Promise\.all\(targetApps\.map/);
+  assert.match(transition, /updateApplicationProtection/);
+  assert.match(transition, /setAppUiOverrides/);
+  assert.doesNotMatch(transition, /refreshPlatformData|requestClusterInventory|listTasks/);
+  assert.doesNotMatch(page, /dr_support_auto_check|drSupportAutoRequestedRef/);
+});
+
+test('application activity polling defers restore points until the run stage', () => {
+  const snapshots = readFileSync(new URL('../app/platform-snapshots.ts', import.meta.url), 'utf8');
+  assert.match(snapshots, /includeRestorePoints = true/);
+  assert.match(snapshots, /includeRestorePoints \? listRestorePoints/);
+  const resources = readFileSync(new URL('../app/use-platform-resources.ts', import.meta.url), 'utf8');
+  assert.match(resources, /loadApplicationActivitySnapshot\([^\n]+false\);/);
+  assert.match(resources, /const loadApplicationRecoveryData = useCallback/);
+});
+
 test('removed plans never fall back to configuring and cleanup clears activation hints', () => {
   const page = readFileSync(new URL('../features/applications/application-dr-page.tsx', import.meta.url), 'utf8');
   assert.match(page, /if \(plan && \['pending_activation', 'configuring', 'activating_storage', 'activating_schedule'\]\.includes/);

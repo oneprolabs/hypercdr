@@ -37,6 +37,21 @@ test('cluster namespace details read persisted inventory without requesting an a
   assert.deepEqual(paths, ['/api/v1/applications']);
 });
 
+test('DR entry skips recovery history and lightweight activity preserves unloaded points', async t => {
+  setup(t);
+  const paths = [];
+  globalThis.fetch.mock.mockImplementation(async path => {
+    paths.push(path);
+    return response({ items: [] });
+  });
+  await loadPlatformSnapshot(() => true, undefined, false, undefined, true);
+  const activity = await loadApplicationActivitySnapshot(() => true, false, true, false);
+  assert.equal(activity.restorePoints, null);
+  assert.equal(paths.some(path => /\/tasks|\/restore-points|cache-settings|inventory-requests/.test(path)), false);
+  assert.ok(paths.includes('/api/v1/applications'));
+  assert.ok(paths.includes('/api/v1/protection-plans'));
+});
+
 test('namespace inventory is published before slow activity and restore-point history', async t => {
   setup(t);
   const pending = deferred();

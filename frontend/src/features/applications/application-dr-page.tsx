@@ -86,6 +86,7 @@ export default function ApplicationDrPage(props: {
   openTasks: (ids: string[]) => void;
   toast: (msg: string) => void;
   refreshPlatformData: () => Promise<unknown>;
+  loadApplicationRecoveryData: () => Promise<void>;
   liveAppTasks: Record<string, ApiTask>;
   setLiveAppTasks: React.Dispatch<React.SetStateAction<Record<string, ApiTask>>>;
   liveRecoveryTasks: Record<string, ApiTask>;
@@ -93,7 +94,7 @@ export default function ApplicationDrPage(props: {
   liveRestorePoints: ApiRestorePointView[];
   platformTasks: ApiTask[];
 }) {
-  const { apps, clusters, currentCluster, storage, policies, protectionPlans, setProtectionPlans, tags, stage, setStage, currentClusterId, updateAppTags, openStorage, openClusters, openPolicies, toast, refreshPlatformData, liveAppTasks, setLiveAppTasks, liveRecoveryTasks, setLiveRecoveryTasks, liveRestorePoints } = props;
+  const { apps, clusters, currentCluster, storage, policies, protectionPlans, setProtectionPlans, tags, stage, setStage, currentClusterId, updateAppTags, openStorage, openClusters, openPolicies, toast, refreshPlatformData, loadApplicationRecoveryData, liveAppTasks, setLiveAppTasks, liveRecoveryTasks, setLiveRecoveryTasks, liveRestorePoints } = props;
   const [platformTasks, setPlatformTasks] = useState<ApiTask[]>([]);
   useDialogPreload(drDialogModules);
   const [selectedSelectApps, setSelectedSelectApps] = useState<string[]>([]);
@@ -233,8 +234,6 @@ export default function ApplicationDrPage(props: {
   const [resourceDetail, setResourceDetail] = useState<{ app: AppItem } | null>(null);
   const [resourceRefreshKey, setResourceRefreshKey] = useState('');
   const [resourceRefreshStatus, setResourceRefreshStatus] = useState<{ key: string; status: string; message?: string } | null>(null);
-  const [drSupportCheckingKeys, setDrSupportCheckingKeys] = useState<string[]>([]);
-  const drSupportAutoRequestedRef = useRef<Set<string>>(new Set());
   const [appBulkMenuOpen, setAppBulkMenuOpen] = useState(false);
   const [drSupportErrorDetail, setDrSupportErrorDetail] = useState<AppItem | null>(null);
   const [operationConfirm, setOperationConfirm] = useState<'force-abort' | 'cleanup-drill' | 'remove-config' | null>(null);
@@ -292,8 +291,6 @@ export default function ApplicationDrPage(props: {
     setTagAction(null);
     setShowAddRuleForm(false);
     setEditingRuleIndex(null);
-    setDrSupportCheckingKeys([]);
-    drSupportAutoRequestedRef.current.clear();
     setSyncTasks({});
     setAppBulkMenuOpen(false);
     setOperationConfirm(null);
@@ -424,6 +421,10 @@ export default function ApplicationDrPage(props: {
   const runPlanKey = runPlanIds.join('|');
   const planRevisionKey = protectionPlans.filter(plan => runPlanIds.includes(plan.id)).map(plan => JSON.stringify([plan.id, plan.updatedAt, plan.latestSyncTaskId, plan.latestRecoveryTaskId, plan.status])).sort().join('|');
   const submittedTaskKey = [...Object.values(submittedSyncTasks), ...Object.values(submittedRecoveryTasks)].map(task => task.id).sort().join('|');
+  useEffect(() => {
+    if (stage !== 'run' || !runPlanKey) return;
+    void loadApplicationRecoveryData().catch(() => undefined);
+  }, [stage, runPlanKey, planRevisionKey, loadApplicationRecoveryData]);
   useEffect(() => {
     if (stage !== 'run' || !runPlanKey) return;
     let cancelled = false;
@@ -685,9 +686,7 @@ export default function ApplicationDrPage(props: {
   const resourceSummaryTotalForUnit = (app: AppItem) => unitMembers(app).reduce((sum, member) => sum + resourceSummaryTotal(member), 0);
   const drSupportForApp = (app: AppItem): DRSupportSummary | undefined => app.resourceSummary?.drSupport;
   const drSupportStatus = (app: AppItem): string => (drSupportForApp(app)?.status || '').toLowerCase();
-  const drSupportKeyForApp = (app: AppItem): string => `${app.clusterId || currentClusterId || ''}:${app.namespace || app.name}`;
   const isDRSupportUnknown = (app: AppItem): boolean => unitMembers(app).some(member => !drSupportStatus(member));
-  const isDRSupportChecking = (app: AppItem): boolean => unitMembers(app).some(member => drSupportCheckingKeys.includes(drSupportKeyForApp(member)));
   const isAgentNamespace = (app: AppItem): boolean => unitMembers(app).some(member => {
     const cluster = clusters.find(item => item.id === (member.clusterId || currentClusterId)) || currentCluster;
     const reservedNamespace = cluster?.clusterType === 'openshift' ? 'openshift-adp' : 'hypercdr-agent';
@@ -724,14 +723,6 @@ export default function ApplicationDrPage(props: {
     }
     const unknown = unitMembers(app).find(member => !drSupportStatus(member));
     if (unknown) {
-      if (isDRSupportChecking(app)) {
-        return {
-          label: 'Checking...',
-          tone: 'unknown' as const,
-          sort: 1,
-          title: 'Checking namespace storage compatibility for DR.',
-        };
-      }
       return {
         label: 'Not checked',
         tone: 'unknown' as const,
@@ -1173,59 +1164,6 @@ export default function ApplicationDrPage(props: {
       .then(() => setResourceCatalogLoaded(true))
       .catch(() => undefined);
   };
-  useEffect(() => {
-    if (stage !== 'select') return;
-    const unknownApps = selectRows.filter(app => isDRSupportUnknown(app));
-    if (unknownApps.length === 0) return;
-    const unknownKeys = Array.from(new Set(unknownApps.map(drSupportKeyForApp)));
-    if (unknownKeys.every(key => drSupportAutoRequestedRef.current.has(key))) return;
-    unknownKeys.forEach(key => drSupportAutoRequestedRef.current.add(key));
-    setDrSupportCheckingKeys(prev => Array.from(new Set([...prev, ...unknownKeys])));
-
-    const probe = unknownApps[0];
-    const clusterId = probe.clusterId || currentClusterId;
-    const namespace = probe.namespace || probe.name;
-    if (!clusterId) {
-      setDrSupportCheckingKeys(prev => prev.filter(key => !unknownKeys.includes(key)));
-      return;
-    }
-
-    let cancelled = false;
-    void (async () => {
-      try {
-        const submitted = await requestClusterInventory(clusterId, {
-          scope: 'namespaceResources',
-          namespace,
-          includeDetails: true,
-          reason: 'dr_support_auto_check',
-          includeRecentVeleroObjects: false,
-        });
-        for (let attempt = 0; attempt < 35; attempt += 1) {
-          await new Promise(resolve => window.setTimeout(resolve, 1000));
-          const status = await getInventoryRequestStatus(clusterId, submitted.requestId);
-          if (status.status === 'succeeded') {
-            if (!cancelled) await refreshPlatformData();
-            return;
-          }
-          if (status.status === 'failed' || status.status === 'timeout') {
-            if (!cancelled) toast('DR support check failed: ' + (status.message || status.errorCode || 'unknown error'));
-            return;
-          }
-        }
-        if (!cancelled) toast('DR support check timed out. Please refresh inventory and try again.');
-      } catch (error) {
-        if (!cancelled) toast('DR support check failed: ' + (error instanceof Error ? error.message : 'unknown error'));
-      } finally {
-        if (!cancelled) {
-          setDrSupportCheckingKeys(prev => prev.filter(key => !unknownKeys.includes(key)));
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [stage, selectRows, currentClusterId]);
   const allVisibleSelected = selectableCurrentRows.length > 0 && selectableCurrentRows.every(app => selectedNames.includes(app.name));
   const toggleVisibleRows = () => {
     setSelectedNames(allVisibleSelected ? [] : selectableCurrentRows.map(app => app.name));
@@ -2005,7 +1943,6 @@ export default function ApplicationDrPage(props: {
       toast(target === 'config' ? `Moved ${targetApps.length} application${targetApps.length === 1 ? '' : 's'} to Setup DR`
         : target === 'select' ? `Moved ${targetApps.length} application${targetApps.length === 1 ? '' : 's'} back to Select`
         : `Marked ${targetApps.length} application${targetApps.length === 1 ? '' : 's'} as protected`);
-      void refreshPlatformData();
       return true;
     } catch (error) {
       toast('Failed to update application stage: ' + (error instanceof Error ? error.message : 'unknown error'));

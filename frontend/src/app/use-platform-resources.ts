@@ -1,6 +1,7 @@
 import { scopedResourceSetter } from './resource-scope';
 import { loadPlatformSnapshot, loadApplicationActivitySnapshot, loadTopologySnapshot, loadClusterSummarySnapshot } from './platform-snapshots';
 import { listApplications, listTags } from '../api/applications';
+import { listRestorePoints } from '../api/restore-points';
 import { listPolicies } from '../api/policies';
 import { listStorageRepositories } from '../api/storage';
 import { listClusters } from '../api/clusters';
@@ -215,11 +216,13 @@ export function usePlatformResources({ sessionToken, view, resourceSessionOwnerR
       setClusters(nextClusters);
       setStorage(nextStorage);
       setPolicies(nextPolicies);
-      setRestorePointCount(apiRestorePoints.length);
-      setLiveRestorePoints(apiRestorePoints);
+      if (targetView !== 'applications') {
+        setRestorePointCount(apiRestorePoints.length);
+        setLiveRestorePoints(apiRestorePoints);
+        setLiveApiRestorePointViews(apiRestorePoints);
+        setLiveApiRestorePoints(snapshot.restorePoints);
+      }
       setLiveApiTasks(apiTasks);
-      setLiveApiRestorePointViews(apiRestorePoints);
-      setLiveApiRestorePoints(snapshot.restorePoints);
       setLiveApiPolicies(apiPolicies);
       setLiveApiPlans(apiPlans);
       setLiveApiApps(apiApps);
@@ -285,20 +288,22 @@ export function usePlatformResources({ sessionToken, view, resourceSessionOwnerR
         // poll the lightweight plan list in the same snapshot as tasks. Using
         // a stale latestRecoveryTaskId makes the row keep rendering the prior
         // drill until a full-page refresh.
-        const snapshot = await loadApplicationActivitySnapshot(() => !cancelled && resourceSessionOwnerRef.current === owner, view === 'dashboard', view === 'applications');
+        const snapshot = await loadApplicationActivitySnapshot(() => !cancelled && resourceSessionOwnerRef.current === owner, view === 'dashboard', view === 'applications', false);
         if (!snapshot || cancelled || resourceSessionOwnerRef.current !== owner) return;
         const { tasks: apiTasks, plans: apiPlans, restorePoints: apiRestorePoints } = snapshot;
-        const apiRestorePointViews = apiRestorePoints.map(mapRestorePoint);
+        const apiRestorePointViews = apiRestorePoints ? apiRestorePoints.map(mapRestorePoint) : liveApiRestorePointViews;
         setLiveApiTasks(apiTasks);
         setLiveApiPlans(apiPlans);
         const nextAppTasks = buildAppTaskMap(apiTasks, liveApiAppsRef.current, ['backup'], apiRestorePointViews, apiPlans);
         const nextRecoveryTasks = buildAppTaskMap(apiTasks, liveApiAppsRef.current, ['restore', 'drill', 'takeover'], apiRestorePointViews, apiPlans);
         setLiveAppTasks(previous => mergeTaskMapKeepingActive(previous, nextAppTasks));
         setLiveRecoveryTasks(previous => mergeTaskMapKeepingActive(previous, nextRecoveryTasks));
-        setRestorePointCount(apiRestorePointViews.length);
-        setLiveRestorePoints(apiRestorePointViews);
-        setLiveApiRestorePointViews(apiRestorePointViews);
-        setLiveApiRestorePoints(apiRestorePoints);
+        if (apiRestorePoints) {
+          setRestorePointCount(apiRestorePointViews.length);
+          setLiveRestorePoints(apiRestorePointViews);
+          setLiveApiRestorePointViews(apiRestorePointViews);
+          setLiveApiRestorePoints(apiRestorePoints);
+        }
       } catch {
         // Keep the current application state visible if a status poll fails.
       }
@@ -313,6 +318,19 @@ export function usePlatformResources({ sessionToken, view, resourceSessionOwnerR
       if (timer) window.clearInterval(timer);
     };
   }, [sessionToken, refreshPlatformData, view]);
+
+  const loadApplicationRecoveryData = useCallback(async () => {
+    const owner = sessionToken;
+    if (!owner || resourceSessionOwnerRef.current !== owner) return;
+    const response = await listRestorePoints(true, 500);
+    if (resourceSessionOwnerRef.current !== owner) return;
+    const points = listItems(response);
+    const views = points.map(mapRestorePoint);
+    setRestorePointCount(views.length);
+    setLiveRestorePoints(views);
+    setLiveApiRestorePointViews(views);
+    setLiveApiRestorePoints(points);
+  }, [sessionToken, resourceSessionOwnerRef]);
 
   const scopedSetters = useMemo(() => ({
     setClusters: scopedResourceSetter(resourceSessionOwnerRef, sessionToken, setClusters),
@@ -363,6 +381,7 @@ export function usePlatformResources({ sessionToken, view, resourceSessionOwnerR
     defaultClusterId,
     clearResources,
     refreshPlatformData,
-    loadClusterTopology
+    loadClusterTopology,
+    loadApplicationRecoveryData,
   };
 }

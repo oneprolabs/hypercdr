@@ -981,7 +981,8 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
     setDefaultClusterId,
     clearResources,
     refreshPlatformData,
-    loadClusterTopology
+    loadClusterTopology,
+    loadApplicationRecoveryData,
   } = usePlatformResources({ sessionToken: authSession?.session.token || '', view, resourceSessionOwnerRef, mapPolicy });
 
   useEffect(() => {
@@ -2073,6 +2074,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
                   openTasks={ids => { openView('dr_tasks', { preserveSelectedCluster: true }); setTaskOperationFocus(ids); }}
                   toast={setToast}
                   refreshPlatformData={refreshPlatformData}
+                  loadApplicationRecoveryData={loadApplicationRecoveryData}
                   liveAppTasks={liveAppTasks}
                   setLiveAppTasks={setLiveAppTasks}
                   liveRecoveryTasks={liveRecoveryTasks}
