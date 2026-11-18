@@ -33,7 +33,18 @@ jobs:
           version="${{ inputs.version }}"
           profile="${{ inputs.registry_profile }}"
           ref="${GITHUB_SHA}"
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then version="${GITHUB_REF_NAME#v}"; ref="${GITHUB_REF_NAME}"; profile="aliyun_acr"; fi
+          # Use the ref itself instead of GITHUB_REF_TYPE. The latter has
+          # occasionally been empty on tag-triggered runs, which made the
+          # release version empty and stopped the workflow before any build.
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            ref="${GITHUB_REF_NAME}"
+            profile="aliyun_acr"
+          fi
+          if [[ -z "${version}" ]]; then
+            echo "release version is empty; expected a tag or workflow_dispatch version" >&2
+            exit 2
+          fi
           [[ "${version}" =~ ^ce-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ || "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]{8}$ ]] || { echo "invalid release version: ${version}" >&2; exit 2; }
           if [[ "$version" == ce-v* ]]; then test "$(cat VERSION)" = "$version"; fi
           source scripts/lib/registry-config.sh
