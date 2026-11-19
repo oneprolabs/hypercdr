@@ -37,15 +37,22 @@ POSTGRES_DIGEST="$(jq -er '.runtime.postgres.targetDigest' "${ROOT_DIR}/packagin
 if dependency_target_matches_digest "${POSTGRES_TARGET}" "${POSTGRES_DIGEST}"; then
   log "Reusing unchanged PostgreSQL dependency: ${POSTGRES_TARGET}"
 else
+  status=$?
+  [[ "$status" == 1 ]] || die "PostgreSQL verification failed; refusing automatic republish"
   mirror_image "${POSTGRES_SOURCE}" "${POSTGRES_TARGET}"
 fi
 
 VELERO_TARGET="$(image_ref "${REGISTRY}" "velero" "${VELERO_TAG}")"
 VELERO_DIGEST="$(jq -er '.runtime.velero.targetDigest' "${ROOT_DIR}/packaging/dependencies/lock.json")"
-if [[ "${FORCE_VELERO_BUILD}" == "true" ]] || ! dependency_target_matches_digest "${VELERO_TARGET}" "${VELERO_DIGEST}"; then
+if [[ "${FORCE_VELERO_BUILD}" != "true" ]]; then
+  if dependency_target_matches_digest "${VELERO_TARGET}" "${VELERO_DIGEST}"; then
+    log "Velero image already published: ${VELERO_TARGET}"
+    exit 0
+  else
+    status=$?
+    [[ "$status" == 1 ]] || die "Velero verification failed; refusing automatic rebuild"
+  fi
+fi
   log "Building pinned HyperCDR Velero image from third_party/velero"
   "${SCRIPT_DIR}/build-velero.sh" \
     --registry "${REGISTRY}" --tag "${VELERO_TAG}" --push
-else
-  log "Velero image already published: ${VELERO_TARGET}"
-fi

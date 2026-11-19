@@ -75,9 +75,23 @@ docker_manifest_verify_or_warn() {
 }
 
 docker_manifest_digest() {
-  timeout --kill-after=10 "${HCDR_DOCKER_OPERATION_TIMEOUT_SECONDS:-60}" \
-    docker manifest inspect --verbose "$1" 2>/dev/null |
-    jq -r 'if type == "array" then .[0].Descriptor.digest else .Descriptor.digest end // empty'
+  local reference="$1" response status
+  if response="$(timeout --kill-after=10 "${HCDR_DOCKER_OPERATION_TIMEOUT_SECONDS:-60}" \
+    docker manifest inspect --verbose "$reference" 2>&1)"; then
+    printf '%s' "$response" | jq -er '
+      (if type == "array" then
+        map(select(.Descriptor.platform.os == "linux" and .Descriptor.platform.architecture == "amd64"))[0].Descriptor.digest
+      else .Descriptor.digest end) | select(test("^sha256:[0-9a-f]{64}$"))' || return 2
+  else
+    status=$?
+    if [[ "$status" != 124 && "$status" != 137 ]] &&
+      { [[ "$response" == *"$reference: not found"* ]] ||
+        printf '%s' "$response" | grep -Eiq 'manifest unknown|no such manifest'; }; then
+      return 1
+    fi
+    printf 'Dependency registry lookup failed for %s (status %s): %s\n' "$reference" "$status" "$response" >&2
+    return 2
+  fi
 }
 
 dependency_target_matches() {
@@ -88,9 +102,17 @@ dependency_target_matches() {
 }
 
 dependency_target_matches_digest() {
-  local target="$1" expected="$2" actual
-  actual="$(docker_manifest_digest "$target")" || return 1
-  [[ "$actual" == "$expected" ]]
+  local target="$1" expected="$2" actual status
+  if actual="$(docker_manifest_digest "$target")"; then
+    if [[ "$actual" == "$expected" && "$expected" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+      return 0
+    fi
+    printf 'Dependency digest mismatch for %s: expected %s, received %s\n' "$target" "$expected" "$actual" >&2
+    return 2
+  else
+    status=$?
+    return "$status"
+  fi
 }
 
 require_version() {

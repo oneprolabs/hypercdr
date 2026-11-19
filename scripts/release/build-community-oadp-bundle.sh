@@ -23,7 +23,12 @@ for command in curl jq docker; do command -v "$command" >/dev/null; done
 release="$(jq -er .release "$RESOLVED_LOCK")"
 commit="$(jq -er .sourceCommit "$RESOLVED_LOCK")"
 bundle_image="$(image_ref "${REGISTRY}" "oadp-bundle" "${release}")"
-bundle_digest="$(docker_manifest_digest "$bundle_image" || true)"
+if bundle_digest="$(docker_manifest_digest "$bundle_image")"; then
+  :
+else
+  status=$?
+  [[ "$status" == 1 ]] || die "Bundle registry verification failed; refusing automatic rebuild"
+fi
 if [[ "$bundle_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
   jq '.bundle={component:"oadp-bundle",version:$version,image:$image,imageDigest:$digest}' \
     --arg version "$release" --arg image "$bundle_image" --arg digest "$bundle_digest" \

@@ -26,7 +26,12 @@ bundle_digest="$(jq -er .bundle.imageDigest "$RESOLVED_LOCK")"
 [[ "$bundle_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "bundle digest is invalid" >&2; exit 1; }
 bundle_reference="${bundle_image%:*}@${bundle_digest}"
 catalog_image="$(image_ref "${REGISTRY}" "oadp-catalog" "${release}")"
-catalog_digest="$(docker_manifest_digest "$catalog_image" || true)"
+if catalog_digest="$(docker_manifest_digest "$catalog_image")"; then
+  :
+else
+  status=$?
+  [[ "$status" == 1 ]] || die "Catalog registry verification failed; refusing automatic rebuild"
+fi
 if [[ "$catalog_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
   jq '.catalog={component:"oadp-catalog",version:$version,image:$image,imageDigest:$digest}' \
     --arg version "$release" --arg image "$catalog_image" --arg digest "$catalog_digest" \

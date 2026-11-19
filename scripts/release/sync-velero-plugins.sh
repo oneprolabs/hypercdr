@@ -41,6 +41,8 @@ for entry in "${plugins[@]}"; do
   if dependency_target_matches_digest "${target_image}" "${target_digest}"; then
     log "Reusing unchanged Velero plugin: ${target_image}"
   else
+    status=$?
+    [[ "$status" == 1 ]] || die "Plugin verification failed: ${name}; refusing automatic republish"
     log "Mirroring ${source_image} to ${target_image}"
     docker pull "${source_image}"
     docker tag "${source_image}" "${target_image}"
