@@ -12,6 +12,7 @@ DEFAULT_GOPROXY="https://goproxy.cn,direct"
 DEFAULT_NPM_REGISTRY="https://registry.npmmirror.com"
 DEFAULT_BUILD_ROOT="${RUNTIME_ROOT}/build/platform"
 DEFAULT_CACHE_ROOT="${RUNTIME_ROOT}/cache"
+DOCKER_OPERATION_TIMEOUT="${HCDR_DOCKER_OPERATION_TIMEOUT_SECONDS:-900}"
 
 die() {
   echo "error: $*" >&2
@@ -24,7 +25,8 @@ log() {
 
 docker_push_with_retry() {
   local image="$1" attempt=1 max_attempts="${HCDR_DOCKER_PUSH_ATTEMPTS:-5}"
-  while ! docker push "${image}"; do
+  [[ "${DOCKER_OPERATION_TIMEOUT}" =~ ^[1-9][0-9]*$ ]] || die "HCDR_DOCKER_OPERATION_TIMEOUT_SECONDS must be a positive integer"
+  while ! timeout "${DOCKER_OPERATION_TIMEOUT}" docker push "${image}"; do
     if (( attempt >= max_attempts )); then
       echo "error: failed to push ${image} after ${max_attempts} attempts" >&2
       return 1
@@ -53,7 +55,8 @@ docker_build_with_retry() {
 
 docker_pull_with_retry() {
   local image="$1" attempt=1 max_attempts="${HCDR_DOCKER_PUSH_ATTEMPTS:-5}"
-  while ! docker pull --platform linux/amd64 "${image}"; do
+  [[ "${DOCKER_OPERATION_TIMEOUT}" =~ ^[1-9][0-9]*$ ]] || die "HCDR_DOCKER_OPERATION_TIMEOUT_SECONDS must be a positive integer"
+  while ! timeout "${DOCKER_OPERATION_TIMEOUT}" docker pull --platform linux/amd64 "${image}"; do
     if (( attempt >= max_attempts )); then return 1; fi
     local delay=$((5 * attempt)); log "Pull verification failed for ${image}; retrying in ${delay}s (${attempt}/${max_attempts})"; sleep "${delay}"; ((attempt++))
   done

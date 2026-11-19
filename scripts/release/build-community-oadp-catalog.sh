@@ -53,7 +53,7 @@ YAML
 opm validate /workspace/configs
 [[ ! -e "$catalog_dir/configs.Dockerfile" ]] || unlink "$catalog_dir/configs.Dockerfile"
 opm generate dockerfile /workspace/configs --builder-image "$OPM_IMAGE" --base-image "$OPM_IMAGE"
-catalog_image="$(image_ref "${REGISTRY}" "oadp-catalog" "${release}")"
+catalog_image="${HCDR_OADP_CATALOG_IMAGE:-$(image_ref "${REGISTRY}" "oadp-catalog" "${release}")}"
 docker build --platform linux/amd64 -f "$catalog_dir/configs.Dockerfile" -t "$catalog_image" "$catalog_dir"
 docker_push_with_retry "$catalog_image"
 docker_pull_with_retry "$catalog_image" >/dev/null

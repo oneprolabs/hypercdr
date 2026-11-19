@@ -89,7 +89,7 @@ if grep -R -E 'quay\.io/konveyor|registry\.redhat\.io' "$bundle_dir/manifests" "
 fi
 grep -q 'version: 1.3.10' "$csv" || { echo "CSV is not OADP 1.3.10" >&2; exit 1; }
 
-bundle_image="$(image_ref "${REGISTRY}" "oadp-bundle" "${release}")"
+bundle_image="${HCDR_OADP_BUNDLE_IMAGE:-$(image_ref "${REGISTRY}" "oadp-bundle" "${release}")}"
 docker build --platform linux/amd64 -t "$bundle_image" "$bundle_dir"
 docker_push_with_retry "$bundle_image"
 docker_pull_with_retry "$bundle_image" >/dev/null

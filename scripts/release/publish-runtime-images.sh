@@ -10,6 +10,7 @@ REGISTRY="${HCDR_IMAGE_REGISTRY:-}"
 POSTGRES_SOURCE="${HCDR_POSTGRES_SOURCE_IMAGE:-postgres:16}"
 VELERO_TAG="${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.7}"
 FORCE_VELERO_BUILD="false"
+IMAGE_TIMEOUT="${HCDR_RUNTIME_IMAGE_TIMEOUT_SECONDS:-900}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -23,11 +24,12 @@ done
 require_registry "${REGISTRY}"
 require_cmd docker
 REGISTRY="${REGISTRY%/}"
+[[ "${IMAGE_TIMEOUT}" =~ ^[1-9][0-9]*$ ]] || die "HCDR_RUNTIME_IMAGE_TIMEOUT_SECONDS must be a positive integer"
 
 mirror_image() {
   local source="$1" target="$2"
   log "Mirroring ${source} to ${target}"
-  docker pull "${source}"
+  timeout "${IMAGE_TIMEOUT}" docker pull "${source}"
   docker tag "${source}" "${target}"
   docker_push_with_retry "${target}"
 }
@@ -35,7 +37,7 @@ mirror_image() {
 mirror_image "${POSTGRES_SOURCE}" "$(image_ref "${REGISTRY}" "postgres" "16")"
 
 VELERO_TARGET="$(image_ref "${REGISTRY}" "velero" "${VELERO_TAG}")"
-if [[ "${FORCE_VELERO_BUILD}" == "true" ]] || ! docker manifest inspect "${VELERO_TARGET}" >/dev/null 2>&1; then
+if [[ "${FORCE_VELERO_BUILD}" == "true" ]] || ! timeout "${IMAGE_TIMEOUT}" docker manifest inspect "${VELERO_TARGET}" >/dev/null 2>&1; then
   log "Building pinned HyperCDR Velero image from third_party/velero"
   "${SCRIPT_DIR}/build-velero.sh" \
     --registry "${REGISTRY}" --tag "${VELERO_TAG}" --push
