@@ -5,12 +5,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # shellcheck source=common.sh
 source "${SCRIPT_DIR}/common.sh"
-source "${SCRIPT_DIR}/dependency-reuse.sh"
 
 REGISTRY="${HCDR_IMAGE_REGISTRY:-}"
-DEPENDENCY_LOCK="${HCDR_DEPENDENCY_LOCK:-${ROOT_DIR}/packaging/dependencies/lock.json}"
-POSTGRES_SOURCE="${HCDR_POSTGRES_SOURCE_IMAGE:-}"
-VELERO_TAG="${HCDR_VELERO_IMAGE_TAG:-}"
+POSTGRES_SOURCE="${HCDR_POSTGRES_SOURCE_IMAGE:-postgres:16}"
+VELERO_TAG="${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.7}"
 FORCE_VELERO_BUILD="false"
 
 while [[ $# -gt 0 ]]; do
@@ -25,8 +23,6 @@ done
 require_registry "${REGISTRY}"
 require_cmd docker
 REGISTRY="${REGISTRY%/}"
-POSTGRES_SOURCE="${POSTGRES_SOURCE:-$(jq -er '.runtime.postgres.source' "${DEPENDENCY_LOCK}")}"
-VELERO_TAG="${VELERO_TAG:-$(jq -er '.runtime.velero.version' "${DEPENDENCY_LOCK}")}"
 
 mirror_image() {
   local source="$1" target="$2"
@@ -36,12 +32,7 @@ mirror_image() {
   docker_push_with_retry "${target}"
 }
 
-POSTGRES_TARGET="$(image_ref "${REGISTRY}" "postgres" "16")"
-if dependency_target_matches "${POSTGRES_SOURCE}" "${POSTGRES_TARGET}"; then
-  log "PostgreSQL dependency unchanged: ${POSTGRES_TARGET}"
-else
-  mirror_image "${POSTGRES_SOURCE}" "${POSTGRES_TARGET}"
-fi
+mirror_image "${POSTGRES_SOURCE}" "$(image_ref "${REGISTRY}" "postgres" "16")"
 
 VELERO_TARGET="$(image_ref "${REGISTRY}" "velero" "${VELERO_TAG}")"
 if [[ "${FORCE_VELERO_BUILD}" == "true" ]] || ! docker manifest inspect "${VELERO_TARGET}" >/dev/null 2>&1; then
