@@ -61,7 +61,7 @@ retry_image_command() {
 
 mirror_image() {
   local component="$1" source="$2" source_digest="$3" required="$4"
-  local target target_digest target_repository part status
+  local target target_digest target_repository part status locked_platform_digest
   target="$(image_ref "${REGISTRY}" "${component}" "${release}")"
   [[ "$source_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "locked source digest is invalid: $component" >&2; exit 1; }
 
@@ -74,8 +74,22 @@ mirror_image() {
   if [[ "$target_digest" == "$source_digest" ]]; then
     echo "==> Reusing verified OADP image ${target}@${target_digest}"
   elif [[ -n "$target_digest" ]]; then
-    echo "OADP target digest mismatch: $component; update the dependency identity before publishing" >&2
-    return 2
+    target_repository="${target%:*}"
+    if locked_platform_digest="$(manifest_digest "${target_repository}@${source_digest}")"; then
+      :
+    else
+      status=$?
+      [[ "$status" == 1 ]] || return 2
+      locked_platform_digest="$(manifest_digest "${source%@*}@${source_digest}")" || {
+        echo "Cannot verify locked OADP platform manifest: $component; refusing copy" >&2
+        return 2
+      }
+    fi
+    [[ "$target_digest" == "$locked_platform_digest" ]] || {
+      echo "OADP target digest mismatch: $component; refusing overwrite" >&2
+      return 2
+    }
+    echo "==> Reusing verified OADP platform image ${target}@${target_digest}"
   else
     echo "==> Mirroring locked ${source%@*}@${source_digest} for ${platform}"
     retry_image_command "pull ${component}" docker pull --platform "$platform" "${source%@*}@${source_digest}" || return "$?"

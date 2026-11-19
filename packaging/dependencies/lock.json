@@ -9,7 +9,7 @@
     },
     "velero": {
       "version": "v1.18.2-hcdr.7",
-      "targetDigest": "sha256:d2fa0eab8207ba4f2a1d0a5d71de1d9cdcd77b14a74f040758782358c64fb900"
+      "targetDigest": "sha256:37cbd27986bdcdc62c419b999fd17383d46ef53c56e4b8a149036e441db4cb1f"
     },
     "plugins": {
       "version": "v1.13.0",

@@ -53,6 +53,6 @@ if [[ "${FORCE_VELERO_BUILD}" != "true" ]]; then
     [[ "$status" == 1 ]] || die "Velero verification failed; refusing automatic rebuild"
   fi
 fi
-  log "Building pinned HyperCDR Velero image from third_party/velero"
-  "${SCRIPT_DIR}/build-velero.sh" \
-    --registry "${REGISTRY}" --tag "${VELERO_TAG}" --push
+log "Building pinned HyperCDR Velero image from third_party/velero"
+"${SCRIPT_DIR}/build-velero.sh" \
+  --registry "${REGISTRY}" --tag "${VELERO_TAG}" --push
