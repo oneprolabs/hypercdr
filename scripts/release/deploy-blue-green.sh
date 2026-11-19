@@ -280,8 +280,11 @@ deploy_version() {
   if [[ -s "$manifest" ]]; then
     jq -e --arg version "$version" '.version == $version and (.componentManifest | type == "object")' "$manifest" >/dev/null || die "invalid release manifest for $version"
     set_env_value "$ENV_FILE" "HCDR_${candidate^^}_RELEASE_MANIFEST_PATH" "/deploy/releases/${version}/release-manifest.json"
-    postgres_from_manifest="$(jq -er '.componentManifest.postgres.image // empty' "$manifest")"
-    [[ -n "$postgres_from_manifest" ]] && set_env_value "$ENV_FILE" POSTGRES_IMAGE "$postgres_from_manifest"
+    local postgres_from_manifest
+    postgres_from_manifest="$(jq -r '.componentManifest.postgres.image // empty' "$manifest")"
+    if [[ -n "$postgres_from_manifest" ]]; then
+      set_env_value "$ENV_FILE" POSTGRES_IMAGE "$postgres_from_manifest"
+    fi
   elif [[ -n "${HCDR_RELEASE_MANIFEST_PATH:-}" ]]; then
     die "missing release manifest for $version"
   fi

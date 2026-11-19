@@ -13,7 +13,8 @@ dependency_remote_digest() {
   else
     status=$?
     if [[ "$status" != 124 && "$status" != 137 ]] &&
-       printf '%s' "$output" | grep -Eiq 'manifest unknown|MANIFEST_UNKNOWN|not found|name unknown'; then
+       { printf '%s' "$output" | grep -Eiq 'manifest unknown|MANIFEST_UNKNOWN|name unknown' ||
+         [[ "$output" == *"$reference: not found"* ]]; }; then
       return 3
     fi
     printf 'registry lookup failed for %s (status %s): %s\n' "$reference" "$status" "$output" >&2

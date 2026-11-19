@@ -206,6 +206,9 @@ jobs:
           else
             if [[ -n "$DEPENDENCY_RUN_ID" ]]; then
               [[ "$DEPENDENCY_RUN_ID" =~ ^[0-9]+$ ]] || exit 2
+              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$DEPENDENCY_RUN_ID" > "$RUNNER_TEMP/dependency-run.json"
+              jq -e '.conclusion == "success" and .path == ".github/workflows/dependency-release.yml"' \
+                "$RUNNER_TEMP/dependency-run.json" >/dev/null || { echo 'Expected a successful dependency workflow run' >&2; exit 2; }
               gh run download "$DEPENDENCY_RUN_ID" --repo "$GITHUB_REPOSITORY" \
                 --pattern 'hypercdr-dependencies-*' --dir "$RUNNER_TEMP/approved-dependencies"
               mapfile -t manifests < <(find "$RUNNER_TEMP/approved-dependencies" -name dependency-manifest.json -type f)
