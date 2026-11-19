@@ -219,24 +219,11 @@ if [[ "${PHASE}" == "core" ]]; then
   exit 0
 fi
 
-DEPENDENCY_MANIFEST="${HCDR_DEPENDENCY_MANIFEST:-}"
-if [[ -n "$DEPENDENCY_MANIFEST" ]]; then
-  python3 -B "${SCRIPT_DIR}/dependency-manifest.py" validate --registry "$REGISTRY" --manifest "$DEPENDENCY_MANIFEST"
-  source "${SCRIPT_DIR}/dependency-registry.sh"
-  references="$(python3 -B "${SCRIPT_DIR}/dependency-manifest.py" references --registry "$REGISTRY" --manifest "$DEPENDENCY_MANIFEST")"
-  while IFS=$'\t' read -r component image digest; do
-    dependency_verify_reference "${image%@*}@${digest}" "$digest" || die "dependency verification failed: $component"
-  done <<< "$references"
-  log "Verified approved dependency manifest without downloading image layers"
-fi
-
-if [[ -z "$DEPENDENCY_MANIFEST" && ( "${PHASE}" == "all" || "${PHASE}" == "dependencies" ) ]]; then
-  DEPENDENCY_STEP_TIMEOUT="${HCDR_DEPENDENCY_STEP_TIMEOUT_SECONDS:-1800}"
+if [[ "${PHASE}" == "all" || "${PHASE}" == "dependencies" ]]; then
+  DEPENDENCY_STEP_TIMEOUT="${HCDR_DEPENDENCY_STEP_TIMEOUT_SECONDS:-3600}"
   [[ "${DEPENDENCY_STEP_TIMEOUT}" =~ ^[1-9][0-9]*$ ]] || die "HCDR_DEPENDENCY_STEP_TIMEOUT_SECONDS must be a positive integer"
   log "Publishing required runtime images"
-  runtime_args=(--registry "${REGISTRY}")
-  [[ "${HCDR_FORCE_VELERO_BUILD:-false}" == "true" ]] && runtime_args+=(--force-velero-build)
-  timeout "${DEPENDENCY_STEP_TIMEOUT}" "${SCRIPT_DIR}/publish-runtime-images.sh" "${runtime_args[@]}"
+  timeout "${DEPENDENCY_STEP_TIMEOUT}" "${SCRIPT_DIR}/publish-runtime-images.sh" --registry "${REGISTRY}" --force-velero-build
 
   log "Mirroring Velero object-storage plugins"
   plugin_sync_args=(--registry "${REGISTRY}" --version "${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}")
@@ -261,16 +248,7 @@ if [[ "${PHASE}" == "dependencies" ]]; then
   exit 0
 fi
 
-if [[ -z "$DEPENDENCY_MANIFEST" ]]; then
-  [[ -r "${OADP_RESOLVED_LOCK}" ]] || die "resolved OADP image lock is missing: ${OADP_RESOLVED_LOCK}"
-else
-  OADP_RESOLVED_LOCK="$(release_work_dir "$VERSION")/approved-oadp-lock.json"
-  mkdir -p "$(dirname "$OADP_RESOLVED_LOCK")"
-  jq --slurpfile approved "$DEPENDENCY_MANIFEST" '
-    .images |= map(. as $entry | . + {target:$approved[0].images[$entry.component].image,targetDigest:$approved[0].images[$entry.component].imageDigest}) |
-    .bundle=$approved[0].images["oadp-bundle"] | .catalog=$approved[0].images["oadp-catalog"]' \
-    "${ROOT_DIR}/packaging/oadp/image-lock.json" > "$OADP_RESOLVED_LOCK"
-fi
+[[ -r "${OADP_RESOLVED_LOCK}" ]] || die "resolved OADP image lock is missing: ${OADP_RESOLVED_LOCK}"
 
 log "Verifying pushed image pulls"
 PULL_PARALLELISM="${HCDR_RELEASE_PULL_PARALLELISM:-4}"
@@ -289,9 +267,6 @@ release_images=( \
   "$(image_ref "${REGISTRY}" "velero-plugin-for-microsoft-azure" "${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}")" \
   "$(image_ref "${REGISTRY}" "velero-plugin-for-gcp" "${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}")" )
 while IFS= read -r image; do release_images+=("${image}"); done < <(jq -r '.images[].target,.bundle.image,.catalog.image' "${OADP_RESOLVED_LOCK}")
-if [[ -n "$DEPENDENCY_MANIFEST" ]]; then
-  release_images=("${release_images[@]:0:5}")
-fi
 
 pull_release_image() {
   local image="$1" attempt status
@@ -314,10 +289,6 @@ printf '%s\0' "${release_images[@]}" \
 
 remote_digest() {
   local image="$1" digest
-  if [[ -n "$DEPENDENCY_MANIFEST" ]]; then
-    digest="$(jq -r --arg image "$image" '.images[] | select(.image==$image) | .imageDigest' "$DEPENDENCY_MANIFEST")"
-    if [[ -n "$digest" ]]; then printf '%s' "$digest"; return; fi
-  fi
   digest="$(image_digest "${image}")"
   [[ -n "${digest}" ]] || die "remote digest is unavailable after pulling ${image}"
   printf '%s' "${digest}"
@@ -328,7 +299,6 @@ PLATFORM_FRONTEND_IMAGE="$(image_ref "${REGISTRY}" "platform-frontend" "${VERSIO
 REGISTRATION_EXECUTOR_IMAGE="$(image_ref "${REGISTRY}" "cluster-registration-executor" "${VERSION}")"
 COMM_AGENT_IMAGE="$(image_ref "${REGISTRY}" "comm-agent" "${VERSION}")"
 OADP_COMM_AGENT_IMAGE="$(image_ref "${REGISTRY}" "oadp-comm-agent" "${VERSION}")"
-POSTGRES_IMAGE="$(image_ref "${REGISTRY}" "postgres" "16")"
 OADP_RELEASE="$(jq -er .release "${OADP_RESOLVED_LOCK}")"
 oadp_image() { jq -er --arg component "$1" '.images[]|select(.component==$component)|.target' "${OADP_RESOLVED_LOCK}"; }
 OADP_OPERATOR_IMAGE="$(oadp_image oadp-operator)"
@@ -344,14 +314,6 @@ PLUGIN_VERSION="${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}"
 AWS_PLUGIN_IMAGE="$(image_ref "${REGISTRY}" "velero-plugin-for-aws" "${PLUGIN_VERSION}")"
 AZURE_PLUGIN_IMAGE="$(image_ref "${REGISTRY}" "velero-plugin-for-microsoft-azure" "${PLUGIN_VERSION}")"
 GCP_PLUGIN_IMAGE="$(image_ref "${REGISTRY}" "velero-plugin-for-gcp" "${PLUGIN_VERSION}")"
-if [[ -n "$DEPENDENCY_MANIFEST" ]]; then
-  POSTGRES_IMAGE="$(jq -er '.images.postgres.image' "$DEPENDENCY_MANIFEST")"
-  VELERO_IMAGE="$(jq -er '.images.velero.image' "$DEPENDENCY_MANIFEST")"
-  VELERO_VERSION="$(jq -er '.images.velero.version' "$DEPENDENCY_MANIFEST")"
-  AWS_PLUGIN_IMAGE="$(jq -er '.images["velero-plugin-for-aws"].image' "$DEPENDENCY_MANIFEST")"
-  AZURE_PLUGIN_IMAGE="$(jq -er '.images["velero-plugin-for-microsoft-azure"].image' "$DEPENDENCY_MANIFEST")"
-  GCP_PLUGIN_IMAGE="$(jq -er '.images["velero-plugin-for-gcp"].image' "$DEPENDENCY_MANIFEST")"
-fi
 
 RELEASE_MANIFEST="$(release_work_dir "${VERSION}")/release-manifest.json"
 mkdir -p "$(dirname "${RELEASE_MANIFEST}")"
@@ -361,7 +323,6 @@ cat >"${RELEASE_MANIFEST}" <<EOF
   "databaseSchemaVersion": "$(find "${ROOT_DIR}/backend/internal/migrations/sql" -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort | tail -n 1 | cut -d_ -f1)",
   "rollbackSupported": true,
   "componentManifest": {
-    "postgres": {"version":"$(jq -er '.images.postgres.version' "${DEPENDENCY_MANIFEST:-/dev/null}" 2>/dev/null || echo 16)","image":"${POSTGRES_IMAGE}","imageDigest":"$(remote_digest "${POSTGRES_IMAGE}")"},
     "platform-api": {"version":"${VERSION}","image":"${PLATFORM_API_IMAGE}","imageDigest":"$(remote_digest "${PLATFORM_API_IMAGE}")"},
     "platform-frontend": {"version":"${VERSION}","image":"${PLATFORM_FRONTEND_IMAGE}","imageDigest":"$(remote_digest "${PLATFORM_FRONTEND_IMAGE}")"},
     "cluster-registration-executor": {"version":"${VERSION}","image":"${REGISTRATION_EXECUTOR_IMAGE}","imageDigest":"$(remote_digest "${REGISTRATION_EXECUTOR_IMAGE}")"},

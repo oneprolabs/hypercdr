@@ -8,12 +8,10 @@ on:
       version: {description: 'Community release tag, for example ce-v0.0.0', required: true}
       registry_profile: {description: 'Profile from config/registries.conf', required: true, default: aliyun_acr}
       deploy: {description: 'Deploy the published version to the configured environment', required: true, default: false, type: boolean}
-      dependency_run_id: {description: 'Successful Publish Dependency Images run ID; empty uses packaging/dependencies/approved.json', required: false}
-      legacy_dependencies: {description: 'Explicit bootstrap fallback: build dependencies with the legacy release path', type: boolean, default: false}
 # A newer immutable release supersedes an older queued build. Keeping the
 # newest tag moving prevents a slow dependency mirror from blocking delivery.
 concurrency: {group: hypercdr-release, cancel-in-progress: true}
-permissions: {contents: write, actions: read}
+permissions: {contents: write}
 jobs:
   prepare-release:
     outputs:
@@ -163,19 +161,13 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.image_name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image_name }}
 
-      - name: Resolve approved dependencies or explicit legacy bootstrap
+      - name: Publish runtime, Velero, and OADP images
         if: ${{ matrix.image_name == 'dependencies' }}
         env:
           HCDR_RUNTIME_ROOT: /tmp/hypercdr-runtime
-          DEPENDENCY_RUN_ID: ${{ inputs.dependency_run_id }}
-          LEGACY_DEPENDENCIES: ${{ inputs.legacy_dependencies || false }}
-          GH_TOKEN: ${{ github.token }}
           HCDR_RELEASE_PHASE: dependencies
           HCDR_OADP_PARALLELISM: '3'
-          HCDR_OADP_IMAGE_TIMEOUT_SECONDS: '900'
-          HCDR_RUNTIME_IMAGE_TIMEOUT_SECONDS: '900'
-          HCDR_DOCKER_OPERATION_TIMEOUT_SECONDS: '900'
-          HCDR_DEPENDENCY_STEP_TIMEOUT_SECONDS: '1800'
+          HCDR_OADP_IMAGE_TIMEOUT_SECONDS: '3600'
           GITHUB_TOKEN: ${{ github.token }}
           HCDR_AUTH_CHALLENGE_MODE: ${{ vars.HCDR_AUTH_CHALLENGE_MODE || 'turnstile' }}
           HCDR_TURNSTILE_SITE_KEY: ${{ secrets.HCDR_TURNSTILE_SITE_KEY }}
@@ -201,34 +193,12 @@ jobs:
           )
           export HCDR_REGISTRY_CONFIG="${GITHUB_WORKSPACE}/config/registries.conf"
           export HCDR_REGISTRY_PROFILE="${{ needs.prepare-release.outputs.registry_profile }}"
-          if [[ "$LEGACY_DEPENDENCIES" == true ]]; then
-            ./scripts/release/release-all.sh --config "${RUNNER_TEMP}/release.conf"
-          else
-            if [[ -n "$DEPENDENCY_RUN_ID" ]]; then
-              [[ "$DEPENDENCY_RUN_ID" =~ ^[0-9]+$ ]] || exit 2
-              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$DEPENDENCY_RUN_ID" > "$RUNNER_TEMP/dependency-run.json"
-              jq -e '.conclusion == "success" and .path == ".github/workflows/dependency-release.yml"' \
-                "$RUNNER_TEMP/dependency-run.json" >/dev/null || { echo 'Expected a successful dependency workflow run' >&2; exit 2; }
-              gh run download "$DEPENDENCY_RUN_ID" --repo "$GITHUB_REPOSITORY" \
-                --pattern 'hypercdr-dependencies-*' --dir "$RUNNER_TEMP/approved-dependencies"
-              mapfile -t manifests < <(find "$RUNNER_TEMP/approved-dependencies" -name dependency-manifest.json -type f)
-              [[ "${#manifests[@]}" == 1 ]] || { echo 'Expected exactly one dependency manifest'; exit 2; }
-              manifest_source="${manifests[0]}"
-            else
-              manifest_source="${GITHUB_WORKSPACE}/packaging/dependencies/approved.json"
-            fi
-            test -s "$manifest_source" || { echo "Dependency manifest is missing: $manifest_source" >&2; exit 2; }
-            mkdir -p /tmp/hypercdr-runtime/oadp-mirror
-            cp "$manifest_source" /tmp/hypercdr-runtime/oadp-mirror/dependency-manifest.json
-            python3 -B scripts/release/dependency-manifest.py validate \
-              --registry '${{ needs.prepare-release.outputs.registry_prefix }}' \
-              --manifest /tmp/hypercdr-runtime/oadp-mirror/dependency-manifest.json
-          fi
+          ./scripts/release/release-all.sh --config "${RUNNER_TEMP}/release.conf"
       - uses: actions/upload-artifact@v4
         if: ${{ matrix.image_name == 'dependencies' }}
         with:
           name: hypercdr-oadp-lock-${{ needs.prepare-release.outputs.image_version }}
-          path: /tmp/hypercdr-runtime/oadp-mirror/*.json
+          path: /tmp/hypercdr-runtime/oadp-mirror/resolved-image-lock.json
           if-no-files-found: error
           overwrite: true
 
@@ -288,9 +258,6 @@ jobs:
           )
           export HCDR_REGISTRY_CONFIG="${GITHUB_WORKSPACE}/config/registries.conf"
           export HCDR_REGISTRY_PROFILE="${{ needs.prepare-release.outputs.registry_profile }}"
-          if [[ -f /tmp/hypercdr-runtime/oadp-mirror/dependency-manifest.json ]]; then
-            export HCDR_DEPENDENCY_MANIFEST=/tmp/hypercdr-runtime/oadp-mirror/dependency-manifest.json
-          fi
           ./scripts/release/release-all.sh --config "${RUNNER_TEMP}/release.conf"
       - uses: actions/upload-artifact@v4
         with:

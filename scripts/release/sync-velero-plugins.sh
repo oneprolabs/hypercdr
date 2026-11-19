@@ -4,11 +4,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
 source "${SCRIPT_DIR}/common.sh"
+source "${SCRIPT_DIR}/dependency-reuse.sh"
 
 REGISTRY="${HCDR_IMAGE_REGISTRY:-}"
-PLUGIN_VERSION="${HCDR_VELERO_PLUGIN_VERSION:-v1.13.0}"
-SOURCE_REGISTRY="${HCDR_VELERO_PLUGIN_SOURCE_REGISTRY:-docker.io/velero}"
-IMAGE_TIMEOUT="${HCDR_RUNTIME_IMAGE_TIMEOUT_SECONDS:-900}"
+DEPENDENCY_LOCK="${HCDR_DEPENDENCY_LOCK:-$(cd "${SCRIPT_DIR}/../.." && pwd)/packaging/dependencies/lock.json}"
+PLUGIN_VERSION="${HCDR_VELERO_PLUGIN_VERSION:-}"
+SOURCE_REGISTRY="${HCDR_VELERO_PLUGIN_SOURCE_REGISTRY:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -26,8 +27,9 @@ done
 require_registry "${REGISTRY}"
 require_cmd docker
 REGISTRY="${REGISTRY%/}"
+PLUGIN_VERSION="${PLUGIN_VERSION:-$(jq -er '.runtime.plugins.version' "${DEPENDENCY_LOCK}")}"
+SOURCE_REGISTRY="${SOURCE_REGISTRY:-$(jq -er '.runtime.plugins.sourceRegistry' "${DEPENDENCY_LOCK}")}"
 SOURCE_REGISTRY="${SOURCE_REGISTRY%/}"
-[[ "${IMAGE_TIMEOUT}" =~ ^[1-9][0-9]*$ ]] || die "HCDR_RUNTIME_IMAGE_TIMEOUT_SECONDS must be a positive integer"
 
 plugins=(
   "velero-plugin-for-aws|${SOURCE_REGISTRY}/velero-plugin-for-aws:${PLUGIN_VERSION}"
@@ -39,8 +41,12 @@ for entry in "${plugins[@]}"; do
   name="${entry%%|*}"
   source_image="${entry#*|}"
   target_image="$(image_ref "${REGISTRY}" "${name}" "${PLUGIN_VERSION}")"
-  log "Mirroring ${source_image} to ${target_image}"
-  timeout "${IMAGE_TIMEOUT}" docker pull "${source_image}"
-  docker tag "${source_image}" "${target_image}"
-  docker_push_with_retry "${target_image}"
+  if dependency_target_matches "${source_image}" "${target_image}"; then
+    log "Plugin dependency unchanged: ${target_image}"
+  else
+    log "Mirroring ${source_image} to ${target_image}"
+    docker pull "${source_image}"
+    docker tag "${source_image}" "${target_image}"
+    docker_push_with_retry "${target_image}"
+  fi
 done
