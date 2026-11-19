@@ -37,7 +37,8 @@ for entry in "${plugins[@]}"; do
   name="${entry%%|*}"
   source_image="${entry#*|}"
   target_image="$(image_ref "${REGISTRY}" "${name}" "${PLUGIN_VERSION}")"
-  if dependency_target_matches "${source_image}" "${target_image}"; then
+  target_digest="$(jq -er --arg name "${name}" '.runtime.plugins.targets[$name]' "${ROOT_DIR}/packaging/dependencies/lock.json")"
+  if dependency_target_matches_digest "${target_image}" "${target_digest}"; then
     log "Reusing unchanged Velero plugin: ${target_image}"
   else
     log "Mirroring ${source_image} to ${target_image}"

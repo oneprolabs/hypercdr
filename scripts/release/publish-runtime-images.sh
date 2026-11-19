@@ -33,14 +33,16 @@ mirror_image() {
 }
 
 POSTGRES_TARGET="$(image_ref "${REGISTRY}" "postgres" "16")"
-if dependency_target_matches "${POSTGRES_SOURCE}" "${POSTGRES_TARGET}"; then
+POSTGRES_DIGEST="$(jq -er '.runtime.postgres.targetDigest' "${ROOT_DIR}/packaging/dependencies/lock.json")"
+if dependency_target_matches_digest "${POSTGRES_TARGET}" "${POSTGRES_DIGEST}"; then
   log "Reusing unchanged PostgreSQL dependency: ${POSTGRES_TARGET}"
 else
   mirror_image "${POSTGRES_SOURCE}" "${POSTGRES_TARGET}"
 fi
 
 VELERO_TARGET="$(image_ref "${REGISTRY}" "velero" "${VELERO_TAG}")"
-if [[ "${FORCE_VELERO_BUILD}" == "true" ]] || ! docker manifest inspect "${VELERO_TARGET}" >/dev/null 2>&1; then
+VELERO_DIGEST="$(jq -er '.runtime.velero.targetDigest' "${ROOT_DIR}/packaging/dependencies/lock.json")"
+if [[ "${FORCE_VELERO_BUILD}" == "true" ]] || ! dependency_target_matches_digest "${VELERO_TARGET}" "${VELERO_DIGEST}"; then
   log "Building pinned HyperCDR Velero image from third_party/velero"
   "${SCRIPT_DIR}/build-velero.sh" \
     --registry "${REGISTRY}" --tag "${VELERO_TAG}" --push

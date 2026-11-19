@@ -87,6 +87,12 @@ dependency_target_matches() {
   [[ "$source_digest" =~ ^sha256:[0-9a-f]{64}$ && "$source_digest" == "$target_digest" ]]
 }
 
+dependency_target_matches_digest() {
+  local target="$1" expected="$2" actual
+  actual="$(docker_manifest_digest "$target")" || return 1
+  [[ "$actual" == "$expected" ]]
+}
+
 require_version() {
   local version="${1:-}"
   [[ -n "${version}" ]] || die "version is required, for example ce-v0.0.0"

@@ -2,9 +2,24 @@
   "schemaVersion": 1,
   "platform": "linux/amd64",
   "runtime": {
-    "postgres": {"version": "16", "source": "postgres:16"},
-    "velero": {"version": "v1.18.2-hcdr.7", "source": "build"},
-    "plugins": {"version": "v1.13.0", "sourceRegistry": "docker.io/velero"}
+    "postgres": {
+      "version": "16",
+      "source": "postgres:16",
+      "targetDigest": "sha256:72d22ce26d04fe56a5384e9f6b026152d1cf05db602a7a3524a3ed337d5f5752"
+    },
+    "velero": {
+      "version": "v1.18.2-hcdr.7",
+      "targetDigest": "sha256:d2fa0eab8207ba4f2a1d0a5d71de1d9cdcd77b14a74f040758782358c64fb900"
+    },
+    "plugins": {
+      "version": "v1.13.0",
+      "sourceRegistry": "docker.io/velero",
+      "targets": {
+        "velero-plugin-for-aws": "sha256:cc92351bb99535c7998df4073a3aaebe3697d9095df3727791204970001afd8a",
+        "velero-plugin-for-microsoft-azure": "sha256:3961198bb2386cedf34f3850c6447531a96db1f0ae9a9818af6d9295399eb512",
+        "velero-plugin-for-gcp": "sha256:2e70be689cac327f8a9e22977c41b9f378a5fb1dff0580dc25dc6919965dd01b"
+      }
+    }
   },
   "oadpLock": "packaging/oadp/image-lock.json"
 }
