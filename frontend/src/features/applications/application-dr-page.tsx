@@ -234,6 +234,7 @@ export default function ApplicationDrPage(props: {
   };
   const [drTaskEvents, setDrTaskEvents] = useState<Record<string, ApiTaskEvent[]>>({});
   const [resourceDetail, setResourceDetail] = useState<{ app: AppItem } | null>(null);
+  const [expandedResourceCells, setExpandedResourceCells] = useState<string[]>([]);
   const [resourceRefreshKey, setResourceRefreshKey] = useState('');
   const [resourceRefreshStatus, setResourceRefreshStatus] = useState<{ key: string; status: string; message?: string } | null>(null);
   const [appBulkMenuOpen, setAppBulkMenuOpen] = useState(false);
@@ -318,8 +319,8 @@ export default function ApplicationDrPage(props: {
   const [queryField, setQueryField] = useState('name');
   const [activeTags, setActiveTags] = useState<string[]>([]);
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
-  const [visibleConfigColumns, setVisibleConfigColumns] = useState(['drSupport', 'resource', 'tags']);
-  const [visibleRunColumns, setVisibleRunColumns] = useState(['resource', 'drStatus', 'scope', 'policy', 'repository', 'targetCluster', 'task', 'recoveryTask', 'tags', 'createdAt']);
+  const [visibleConfigColumns, setVisibleConfigColumns] = useState(['drSupport', 'resource', 'workloads', 'network', 'storage', 'config', 'security', 'tags']);
+  const [visibleRunColumns, setVisibleRunColumns] = useState(['drStatus', 'scope', 'policy', 'repository', 'targetCluster', 'task', 'recoveryTask', 'resource', 'workloads', 'network', 'storage', 'config', 'security', 'tags', 'createdAt']);
   const [wizardPolicySearchQuery, setWizardPolicySearchQuery] = useState('');
   const [wizardPolicyPage, setWizardPolicyPage] = useState(1);
   const preScriptRef = useRef<HTMLInputElement>(null);
@@ -863,13 +864,21 @@ export default function ApplicationDrPage(props: {
   const activeStage = stageCards.find(card => card.key === stage) || stageCards[0];
   const isRunStage = stage === 'run';
   const currentRows = isRunStage ? visibleProtectedRows : visibleNamespaceRows;
+  const resourceColumns = [
+    { value: 'workloads', label: 'Workloads' },
+    { value: 'network', label: 'Network' },
+    { value: 'storage', label: 'Storage' },
+    { value: 'config', label: 'Config' },
+    { value: 'security', label: 'Security' },
+  ];
   const appConfigColumns = [
     { value: 'drSupport', label: 'DR Support' },
-    { value: 'resource', label: 'Resource' },
+    ...resourceColumns,
+    { value: 'resource', label: 'Namespace / Resource Summary' },
     { value: 'tags', label: 'Tags' },
   ];
   const appRunColumns = [
-    { value: 'resource', label: 'Resource' },
+    { value: 'resource', label: 'Namespace / Resource Summary' },
     { value: 'drStatus', label: 'DR Config' },
     { value: 'scope', label: 'Scope' },
     { value: 'policy', label: 'Policy' },
@@ -877,6 +886,7 @@ export default function ApplicationDrPage(props: {
     { value: 'targetCluster', label: 'DR Pair' },
     { value: 'task', label: 'Sync Status' },
     { value: 'recoveryTask', label: 'Recovery Status' },
+    ...resourceColumns,
     { value: 'tags', label: 'Tags' },
     { value: 'createdAt', label: 'Create Time' },
   ];
@@ -937,50 +947,55 @@ export default function ApplicationDrPage(props: {
     }
     return [category.label, ...items.map(item => `${item.kind}: ${item.count}`)].join('\n');
   };
-  const renderResourceSummaryCell = (app: AppItem) => {
+  const renderResourceSummaryCell = (app: AppItem, showNamespace = true) => {
     if (app.memberApps?.length) {
       return (
         <div className="hbdr-merged-resource-list">
           {app.memberApps.map(member => (
             <div key={member.name} className="hbdr-merged-resource-row">
               <strong>{member.namespace || member.name}</strong>
-              {renderResourceSummaryCell(member)}
+              {renderResourceSummaryCell(member, false)}
             </div>
           ))}
         </div>
       );
     }
     const categories = normalizeResourceCategories(app).filter(category => category.total > 0);
+    const namespace = app.namespace || app.name;
+    const summary = categories.length === 0
+      ? <span className="hbdr-dr-resource-empty" aria-label="No namespaced resources found" />
+      : (
+        <div className="hbdr-dr-resource-summary">
+          {categories.slice(0, 8).map(category => {
+            const Icon = resourceCategoryIconMap[category.key as ResourceCategoryKey] || MoreVertical;
+            const capacity = app.pvCapacityBytes || app.resourceSummary?.pvCapacityBytes || 0;
+            const capacityLabel = category.key === 'storage' && capacity > 0 ? formatBytes(capacity) : '';
+            return (
+            <button
+              key={category.key}
+              type="button"
+              className={`hbdr-dr-resource-summary-chip hbdr-dr-resource-summary-${category.key}`}
+              title={resourceCategoryTitle(app, category)}
+              aria-label={resourceCategoryTitle(app, category)}
+              onClick={event => {
+                event.stopPropagation();
+                setResourceRefreshStatus(null);
+                setResourceDetail({ app });
+              }}
+            >
+              <Icon size={13} />
+              <strong>{category.total}</strong>
+              {capacityLabel && <em>{capacityLabel}</em>}
+            </button>
+            );
+          })}
+        </div>
+      );
+    if (!showNamespace) return summary;
     if (categories.length === 0) {
-      return <span className="hbdr-dr-resource-empty" aria-label="No namespaced resources found" />;
+      return <div className="hbdr-resource-summary-unit"><strong>{namespace}</strong>{summary}</div>;
     }
-    return (
-      <div className="hbdr-dr-resource-summary">
-        {categories.slice(0, 8).map(category => {
-          const Icon = resourceCategoryIconMap[category.key as ResourceCategoryKey] || MoreVertical;
-          const capacity = app.pvCapacityBytes || app.resourceSummary?.pvCapacityBytes || 0;
-          const capacityLabel = category.key === 'storage' && capacity > 0 ? formatBytes(capacity) : '';
-          return (
-          <button
-            key={category.key}
-            type="button"
-            className={`hbdr-dr-resource-summary-chip hbdr-dr-resource-summary-${category.key}`}
-            title={resourceCategoryTitle(app, category)}
-            aria-label={resourceCategoryTitle(app, category)}
-            onClick={event => {
-              event.stopPropagation();
-              setResourceRefreshStatus(null);
-              setResourceDetail({ app });
-            }}
-          >
-            <Icon size={13} />
-            <strong>{category.total}</strong>
-            {capacityLabel && <em>{capacityLabel}</em>}
-          </button>
-          );
-        })}
-      </div>
-    );
+    return <div className="hbdr-resource-summary-unit"><strong>{namespace}</strong>{summary}</div>;
   };
   const resourceDetailGroups = resourceDetail
     ? normalizeResourceCategories(resourceDetail.app)
@@ -1244,6 +1259,82 @@ export default function ApplicationDrPage(props: {
     },
     meta: { title: app => unitNamespaces(app).join(', ') },
   };
+  const resourceColumnsFor = (visible: string[]): HyperTableColumn<AppItem>[] => resourceColumns.filter(column => visible.includes(column.value)).map(column => {
+    const inventory = (app: AppItem) => {
+      const kinds = new Set({
+        workloads: ['Deployment', 'StatefulSet', 'DaemonSet', 'ReplicationController'],
+        network: ['Service', 'Ingress', 'NetworkPolicy'],
+        storage: ['PersistentVolumeClaim', 'PersistentVolume', 'VolumeSnapshot'],
+        config: ['ConfigMap', 'Secret', 'HorizontalPodAutoscaler'],
+        security: ['ServiceAccount', 'Role', 'RoleBinding', 'ResourceQuota', 'LimitRange'],
+      }[column.value] || []);
+      const counts = new Map<string, number>();
+      const resources: Array<{ kind: string; name: string; namespace: string; networkDetails?: string }> = [];
+      let capacity = 0;
+      for (const member of unitMembers(app)) {
+        capacity += member.pvCapacityBytes ?? member.resourceSummary?.pvCapacityBytes ?? 0;
+        for (const category of normalizeResourceCategories(member)) {
+          for (const item of category.items || []) {
+            if ((column.value === 'security' ? category.key === 'access' || category.key === 'policy' : true) && kinds.has(item.kind)) {
+              counts.set(item.kind, (counts.get(item.kind) || 0) + item.count);
+              for (const resource of item.resources || []) {
+                const fields = resource.fields || {};
+                const ports = item.kind === 'Service' ? fields['PORT(S)'] : item.kind === 'Ingress' ? fields.PORTS : undefined;
+                const portLabel = ports && ports !== '<none>' ? ports.replace(/(\d+):(\d+)\/(TCP|UDP|SCTP)/g, '$1/$3 · NodePort $2').replace(/,/g, ', ') : '';
+                const networkDetails = [portLabel, item.kind === 'Ingress' && fields.HOSTS !== '<none>' ? fields.HOSTS : ''].filter(Boolean).join(' · ');
+                resources.push({ kind: item.kind, name: resource.name, namespace: member.namespace || member.name, networkDetails });
+              }
+            }
+          }
+        }
+      }
+      return { total: [...counts.values()].reduce((sum, count) => sum + count, 0), counts, capacity, resources };
+    };
+    return {
+      id: column.value,
+      header: column.label,
+      accessorFn: app => inventory(app).total,
+      size: ({ workloads: 280, network: 340, storage: 286, config: 260, security: 232 } as Record<string, number>)[column.value] || 180,
+      minSize: ({ workloads: 248, network: 300, storage: 256, config: 232, security: 208 } as Record<string, number>)[column.value] || 156,
+      maxSize: column.value === 'network' ? 640 : 320,
+      cell: info => {
+        const summary = inventory(info.row.original);
+        const count = summary.total;
+        const firstResource = summary.resources[0];
+        const label = firstResource ? `${firstResource.kind} · ${firstResource.name}${firstResource.networkDetails ? ` · ${firstResource.networkDetails}` : ''}` : count > 0 ? 'Resource names unavailable' : '—';
+        const canExpand = summary.resources.length > 1;
+        const title = summary.resources.length > 0
+          ? summary.resources.map(resource => `${resource.namespace}: ${resource.kind} · ${resource.name}${resource.networkDetails ? ` · ${resource.networkDetails}` : ''}`).join('\n')
+          : count > 0 ? 'Resource names unavailable' : `No ${column.label.toLowerCase()}`;
+        const cellKey = `${info.row.original.name}:${column.value}`;
+        const isExpanded = expandedResourceCells.includes(cellKey);
+        const resourceNames = summary.resources;
+        return <div className={`hbdr-dr-resource-metric-wrap${isExpanded ? ' is-expanded' : ''}`}>
+          <button
+            type="button"
+            className={`hbdr-dr-resource-metric hbdr-dr-resource-metric-${column.value}${count === 0 ? ' is-empty' : ''}`}
+            title={title}
+            aria-label={`${column.label}: ${label}`}
+            aria-expanded={isExpanded}
+            onClick={event => {
+              event.stopPropagation();
+              if (!canExpand) return;
+              setExpandedResourceCells(previous => previous.includes(cellKey) ? previous.filter(key => key !== cellKey) : [...previous, cellKey]);
+            }}
+          >
+            <span className="hbdr-dr-resource-preview">
+              <span className="hbdr-dr-resource-metric-text">{label}</span>
+              {count > 1 && <small>{count} {column.label.toLowerCase()}{column.value === 'storage' ? ` · ${formatBytes(summary.capacity)}` : ''}</small>}
+            </span>
+            {canExpand && <ChevronRight size={12} className="hbdr-dr-resource-metric-chevron" aria-hidden="true" />}
+          </button>
+          {isExpanded && canExpand && <div className="hbdr-dr-plan-members hbdr-dr-resource-members">
+            {resourceNames.length > 0 ? resourceNames.map(resource => <span key={`${resource.namespace}:${resource.kind}:${resource.name}`} title={`${resource.namespace}: ${resource.kind} · ${resource.name}${resource.networkDetails ? ` · ${resource.networkDetails}` : ''}`}>{resource.kind} · {resource.name}{resource.networkDetails && <em className="hbdr-dr-network-ports"> · {resource.networkDetails}</em>}</span>) : <span>Resource names unavailable</span>}
+          </div>}
+        </div>;
+      },
+    };
+  });
   const appConfigTableColumns = useMemo<HyperTableColumn<AppItem>[]>(() => {
     const columns: HyperTableColumn<AppItem>[] = [appSelectColumn, appNameColumn];
     if (visibleConfigColumns.includes('status')) {
@@ -1276,14 +1367,15 @@ export default function ApplicationDrPage(props: {
         meta: { className: 'hbdr-dr-support-cell' },
       });
     }
+    columns.push(...resourceColumnsFor(visibleConfigColumns));
     if (visibleConfigColumns.includes('resource')) {
       columns.push({
         id: 'resource',
-        header: 'Resource',
+        header: 'Namespace / Resource Summary',
         accessorFn: app => appSortValue(app, 'resource'),
-        size: 480,
-        minSize: appColumnMinWidth('resource'),
-        maxSize: 760,
+        size: 520,
+        minSize: 460,
+        maxSize: 820,
         cell: info => renderResourceSummaryCell(info.row.original),
         meta: { title: app => `${resourceSummaryTotalForUnit(app)} namespaced resources` },
       });
@@ -1301,7 +1393,7 @@ export default function ApplicationDrPage(props: {
       });
     }
     return columns;
-  }, [allVisibleSelected, selectableCurrentRows, selectedNames, visibleConfigColumns, tags, syncTasks, liveRecoveryTasks, stage]);
+  }, [allVisibleSelected, selectableCurrentRows, selectedNames, visibleConfigColumns, tags, syncTasks, liveRecoveryTasks, stage, expandedResourceCells]);
   const appRunTableColumns = useMemo<HyperTableColumn<AppItem>[]>(() => {
     const columns: HyperTableColumn<AppItem>[] = [appSelectColumn, appNameColumn];
     if (visibleRunColumns.includes('drStatus')) {
@@ -1517,14 +1609,15 @@ export default function ApplicationDrPage(props: {
         cell: info => <div className="hbdr-task-status-cell">{renderRecoveryTaskStatus(info.row.original)}</div>,
       });
     }
+    columns.push(...resourceColumnsFor(visibleRunColumns));
     if (visibleRunColumns.includes('resource')) {
       columns.push({
         id: 'resource',
-        header: 'Resource',
+        header: 'Namespace / Resource Summary',
         accessorFn: app => appSortValue(app, 'resource'),
-        size: 480,
-        minSize: appColumnMinWidth('resource'),
-        maxSize: 760,
+        size: 520,
+        minSize: 460,
+        maxSize: 820,
         cell: info => renderResourceSummaryCell(info.row.original),
         meta: { title: app => `${resourceSummaryTotalForUnit(app)} namespaced resources` },
       });
@@ -1557,7 +1650,7 @@ export default function ApplicationDrPage(props: {
       });
     }
     return columns;
-  }, [allVisibleSelected, selectedNames, visibleRunColumns, tags, syncTasks, liveRecoveryTasks, liveRestorePoints, protectionPlans, platformTasks, refreshedDrTasks, drTaskEvents, expandedPlanNamespaces]);
+  }, [allVisibleSelected, selectedNames, visibleRunColumns, tags, syncTasks, liveRecoveryTasks, liveRestorePoints, protectionPlans, platformTasks, refreshedDrTasks, drTaskEvents, expandedPlanNamespaces, expandedResourceCells]);
   const singleSelectedApp = selectedNames.length === 1 ? currentRows.find(app => app.name === selectedNames[0]) || apps.find(app => app.name === selectedNames[0]) || null : null;
   const selectedRunRows = selectedRunApps
     .map(name => protectedRows.find(app => app.name === name) || apps.find(app => app.name === name))
