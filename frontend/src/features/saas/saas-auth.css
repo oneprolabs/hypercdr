@@ -30,8 +30,10 @@
 .ee-auth-primary:disabled { opacity: .5; cursor: not-allowed; }
 .ee-auth-back { display: flex; justify-content: center; align-items: center; gap: 6px; margin-top: 24px; font-size: 13px; color: #bcb3ed; text-decoration: none; }
 .ee-auth-back:hover { color: #e0d9ff; }
+.ee-auth-actions { display: flex; gap: 20px; margin: -4px 0 20px; font-size: 13px; }
+.ee-auth-actions a { color: #d4caff; text-decoration: underline; text-underline-offset: 3px; }
 .ee-auth-notice { display: flex; align-items: flex-start; gap: 10px; padding: 12px; margin: 16px 0; border: 1px solid rgba(153,135,224,.35); border-radius: 6px; background: rgba(141,116,215,.08); color: #d4ccea; font-size: 13px; line-height: 1.6; }
-.ee-auth-notice p { margin: 0; }.ee-auth-notice svg { flex-shrink: 0; margin-top: 3px; }
+.ee-auth-notice p { margin: 0; min-width: 0; overflow-wrap: anywhere; }.ee-auth-notice svg { flex-shrink: 0; margin-top: 3px; }
 .ee-auth-card .hbdr-login-error { margin: 16px 0; padding: 12px; font-size: 13px; line-height: 1.6; }
 .ee-auth-card :focus-visible, .ee-login-supplement :focus-visible { outline: 2px solid #b5a3ff; outline-offset: 3px; }
 @media(max-width:480px) { .ee-public-auth { padding: 24px 16px; }.ee-auth-card { padding: 24px 20px; }.ee-auth-card h1 { font-size: 20px; } }

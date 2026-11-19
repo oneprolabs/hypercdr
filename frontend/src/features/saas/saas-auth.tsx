@@ -1,8 +1,9 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Mail, LockKeyhole, Building2, UserRound, ArrowLeft, Eye, EyeOff } from 'lucide-react';
-import { HyperCDRMark, writeStoredAuthSession, type ApiLoginResponse } from '../../public';
+import { HyperCDRMark, readStoredAuthSession, writeStoredAuthSession, type ApiLoginResponse } from '../../public';
 import './saas-auth.css';
 import { organizationRole } from './organization-terms';
+import { PublicAuthError, signupCooldownSeconds, signupFeedback } from './signup-feedback';
 let base = '/api/v1/saas/auth';
 let editionLabel = 'Community';
 export function configureSaaSAuth(apiBase: string, edition: string) { base=apiBase;editionLabel=edition; }
@@ -11,8 +12,8 @@ export async function publicRequest<T>(path: string, body?: unknown): Promise<T>
   // Public onboarding intentionally uses fetch because no session exists yet.
   // eslint-disable-next-line no-restricted-globals
   const response = await fetch(`${base}${path}`, { method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin', headers: body === undefined ? {} : { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.message || 'The request could not be completed. Please try again.');
+  const data = await response.json().catch(() => { throw new PublicAuthError('The platform returned an unexpected response. Please try again.', 'invalid_response'); });
+  if (!response.ok) throw new PublicAuthError(data.message || 'The request could not be completed. Please try again.', data.error, Number(data.retryAfterSeconds || response.headers.get('Retry-After')));
   return data as T;
 }
 function useAuthConfig() {
@@ -23,6 +24,7 @@ function useAuthConfig() {
 }
 function finishLogin(value: ApiLoginResponse) {
   writeStoredAuthSession({ ...value, signedInAt: new Date().toISOString() });
+  if (readStoredAuthSession()?.session.token !== value.session.token) throw new Error('Your browser could not save the sign-in session. Allow site storage and sign in again.');
   sessionStorage.removeItem('hypercdr.invitation');
   window.location.replace('/');
 }
@@ -83,8 +85,24 @@ export function PublicAuthPage() {
   const [verified, setVerified] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-  const [cooldown, setCooldown] = useState(0);
-  useEffect(() => { if (cooldown <= 0) return; const timer = window.setTimeout(() => setCooldown(v => v - 1), 1000); return () => window.clearTimeout(timer); }, [cooldown]);
+  const [failure, setFailure] = useState<ReturnType<typeof signupFeedback> | null>(null);
+  const [sent, setSent] = useState(false);
+  const submitting = useRef(false);
+  const [cooldownUntil, setCooldownUntil] = useState(0);
+  const [clockNow, setClockNow] = useState(Date.now);
+  const cooldown = signupCooldownSeconds(cooldownUntil, clockNow);
+  function setCooldown(seconds: number) {
+    const now = Date.now();
+    setClockNow(now);
+    setCooldownUntil(now + seconds * 1000);
+  }
+  useEffect(() => {
+    if (cooldownUntil <= Date.now()) return;
+    const tick = () => { const now = Date.now(); setClockNow(now); if (now >= cooldownUntil) window.clearInterval(timer); };
+    const timer = window.setInterval(tick, 1000);
+    window.addEventListener('focus', tick);
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', tick); };
+  }, [cooldownUntil]);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(exchanging || google || Boolean(token));
   const [role, setRole] = useState('');
@@ -107,37 +125,40 @@ export function PublicAuthPage() {
       if (!active) return;
       if ('session' in value) { finishLogin(value); return; }
       setEmail(value.email); setOrganization(value.organizationName || ''); if ('role' in value) setRole(organizationRole({ name: value.role || '', roleType: value.roleType }).name); setVerified(true);
-    }).catch(e => { if (active) setError(e.message); }).finally(() => { if (active) setLoading(false); });
+    }).catch(e => { if (active) { setError(e.message); setFailure(signupFeedback(e)); } }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [initial, joining, token]);
   async function submit(event: FormEvent) {
-    event.preventDefault(); if (busy) return; setError(''); setMessage('');
+    event.preventDefault(); if (submitting.current || busy || (!verified && cooldown > 0) || failure?.accountCreated) return; setError(''); setMessage(''); setFailure(null);
     if (verified && !google && (Array.from(password).length < 8 || new TextEncoder().encode(password).length > 72)) { setError('Use at least 8 characters; the password must fit within 72 UTF-8 bytes.'); return; }
     if (verified && !google && password !== confirmation) { setError('Passwords do not match.'); return; }
+    submitting.current = true;
     setBusy(true);
     try {
       if (!verified) {
         if (joining || token || google) { setError('Open a valid invitation or verification link.'); return; }
-        const result = await publicRequest<{ message: string }>('/signup/request', { email }); setMessage(result.message); setCooldown(60);
+        const result = await publicRequest<{ message: string; retryAfterSeconds?: number }>('/signup/request', { email }); setMessage(result.message); setCooldown(result.retryAfterSeconds || 60); setSent(true);
       } else {
         const value = await publicRequest<ApiLoginResponse>('/complete', { token: google ? '' : token, organizationName: joining ? '' : organization, displayName, password: google ? '' : password, invitation: google && joining ? sessionStorage.getItem('hypercdr.invitation') || '' : '' });
-        finishLogin(value);
+        try { finishLogin(value); } catch { throw new PublicAuthError('Your account was created, but automatic sign-in could not be completed. Sign in to continue.', 'account_created_login_failed'); }
       }
-    } catch (e) { setError(e instanceof Error ? e.message : 'The request could not be completed.'); }
-    finally { setBusy(false); }
+    } catch (e) { const next = signupFeedback(e); setError(next.message); setFailure(next); if (!verified) setCooldown(next.cooldown); }
+    finally { submitting.current = false; setBusy(false); }
   }
   const addressMismatch=!!config?.publicUrl && config.publicUrl!==window.location.origin;
   const unavailable = !joining && !exchanging && config && !config.signupEnabled;
-  const title = exchanging ? 'Signing you in' : joining ? 'Join your organization' : verified ? 'Create your organization' : 'Create your account';
+  const title = failure?.accountCreated ? 'Account created' : exchanging ? 'Signing you in' : joining ? 'Join your organization' : verified ? 'Create your organization' : 'Create your account';
   return <main className="ee-public-auth"><div className="ee-auth-container">
     <a className="ee-auth-brand" href="/login" aria-label="HyperCDR sign in"><HyperCDRMark className="ee-auth-brand-mark" /><span>Hyper<strong>CDR</strong></span></a>
     <section className="ee-auth-card" aria-labelledby="ee-auth-title">
       <span className="ee-auth-eyebrow">HyperCDR {editionLabel}</span><h1 id="ee-auth-title">{title}</h1>
-      <p className="ee-auth-description">{joining ? 'Accept your invitation to collaborate on application protection and recovery.' : exchanging ? 'Completing your secure sign-in…' : verified ? 'Your email is verified. Set up your organization to get started.' : 'Verify your email to start protecting your applications.'}</p>
+      <p className="ee-auth-description">{failure?.accountCreated ? 'Your account is ready. Sign in to continue.' : joining ? 'Accept your invitation to collaborate on application protection and recovery.' : exchanging ? 'Completing your secure sign-in…' : verified ? 'Your email is verified. Set up your organization to get started.' : 'Verify your email to start protecting your applications.'}</p>
       {(error || configError) && <div className="hbdr-login-error" role="alert">{error || configError}</div>}
+      {failure?.showAccountLinks && <div className="ee-auth-actions"><a href="/login">Sign in</a><a href="/login?auth=forgot">Reset password</a></div>}
+      {failure?.showNewLink && !joining && !google && <a className="ee-auth-back" href="/signup">Request a new link</a>}
       {message && <div className="ee-auth-notice" role="status"><Mail size={18} /><p>{message}</p></div>}
-      {loading ? <p role="status">Checking your secure link…</p> : unavailable ? <p className="ee-auth-notice">Public registration is disabled. Contact your administrator for an invitation.</p> : !exchanging && (!(joining || token || google) || verified) && <form className="ee-auth-form" onSubmit={e => void submit(e)}>
-        <label>Email address<div className="ee-auth-input"><Mail size={16} /><input type="email" autoComplete="email" required value={email} readOnly={verified} onChange={e => { setEmail(e.target.value); setMessage(''); }} placeholder="you@company.com" /></div></label>
+      {loading ? <p role="status">Checking your secure link…</p> : unavailable ? <p className="ee-auth-notice">Public registration is disabled. Contact your administrator for an invitation.</p> : !failure?.accountCreated && !exchanging && (!(joining || token || google) || verified) && <form className="ee-auth-form" onSubmit={e => void submit(e)}>
+        <label>Email address<div className="ee-auth-input"><Mail size={16} /><input type="email" autoComplete="email" required value={email} readOnly={verified || busy} onChange={e => { setEmail(e.target.value); setMessage(''); setError(''); setFailure(null); setSent(false); setCooldown(0); }} placeholder="you@company.com" /></div></label>
         {verified && <>
           <label>Organization<div className="ee-auth-input"><Building2 size={16} /><input value={organization} onChange={e => setOrganization(e.target.value)} required={!joining} readOnly={joining} maxLength={100} placeholder="Your organization name" /></div></label>
           {role && <p className="ee-auth-description">Your role: {role}</p>}
@@ -147,7 +168,7 @@ export function PublicAuthPage() {
             <label>Confirm password<div className="ee-auth-input"><LockKeyhole size={16} /><input type={visible ? 'text' : 'password'} required autoComplete="new-password" value={confirmation} onChange={e => setConfirmation(e.target.value)} minLength={8} maxLength={72} placeholder="Re-enter your password" /></div></label>
           </>}
         </>}
-        <button className="ee-auth-primary" type="submit" disabled={addressMismatch || busy || (!verified && cooldown > 0) || Boolean(!verified && !config?.emailConfigured) || Boolean((joining || token || google) && !verified)}>{busy ? (verified ? 'Please wait…' : 'Sending verification email…') : !verified && cooldown > 0 ? `Resend in ${cooldown}s` : verified ? joining ? 'Accept invitation' : 'Create organization' : 'Send verification email'}</button>
+        <button className="ee-auth-primary" type="submit" disabled={addressMismatch || busy || (!verified && cooldown > 0) || Boolean(!verified && !config?.emailConfigured) || Boolean((joining || token || google) && !verified)}>{busy ? (verified ? 'Please wait…' : 'Sending verification email…') : !verified && cooldown > 0 ? failure?.code === 'too_many_attempts' ? `Try again in ${Math.ceil(cooldown / 60)} min` : `Resend in ${cooldown}s` : verified ? joining ? 'Accept invitation' : 'Create organization' : sent ? 'Resend email' : 'Send verification email'}</button>
         {addressMismatch && <p className="ee-auth-description" role="status">This address differs from the configured platform address. <a href={config.publicUrl+'/signup'}>Open the official registration page</a>, or ask the platform administrator to update Settings → Access &amp; Login.</p>}
         {!verified && !joining && config && !config.emailConfigured && <p className="ee-auth-description">Email registration is not configured. Contact the platform administrator.</p>}
       </form>}

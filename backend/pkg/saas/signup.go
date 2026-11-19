@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -36,8 +37,8 @@ func (s *Service) requestSignup(w http.ResponseWriter, r *http.Request) {
 		problem(w, 400, "invalid_email", "Enter a valid email address.")
 		return
 	}
-	if !s.allow(r.Context(), "signup:"+email, 3, time.Hour) {
-		problem(w, 429, "too_many_attempts", "Please wait before requesting another email.")
+	if !s.allow(r.Context(), "signup-attempt:"+email, 10, time.Hour) {
+		s.signupLimited(w, r, "signup-attempt:"+email)
 		return
 	}
 	var exists bool
@@ -45,25 +46,56 @@ func (s *Service) requestSignup(w http.ResponseWriter, r *http.Request) {
 		internal(w)
 		return
 	}
-	if !exists {
-		token := randomToken()
-		_, e := s.db.ExecContext(r.Context(), `insert into saas_onboarding_tokens(token_hash,kind,email,expires_at) values($1,'signup',$2,now()+interval '30 minutes')`, digest(token), email)
-		if e != nil {
-			internal(w)
-			return
-		}
-		if e = s.cfg.Mailer.Send(r.Context(), email, "Verify your HyperCDR email", "Verify your email and create your organization:\n\n"+s.cfg.Origin+"/signup?token="+token+"\n\nThis link expires in 30 minutes. If you did not request it, ignore this email."); e != nil {
-			// Failed delivery must not consume the recipient's successful-send quota.
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer cancel()
-			_, _ = s.db.ExecContext(cleanupCtx, `delete from saas_onboarding_tokens where token_hash=$1`, digest(token))
-			_, _ = s.db.ExecContext(cleanupCtx, `update saas_auth_rate_limits set count=greatest(count-1,0) where bucket=$1`, digest("signup:"+email))
-			slog.Warn("signup email delivery failed")
-			problem(w, 503, "email_delivery_failed", "The email could not be sent. Please try again later.")
-			return
-		}
+	if exists {
+		problem(w, 409, "email_already_registered", "This email is already registered. Sign in or reset your password.")
+		return
 	}
-	respond(w, 202, map[string]string{"message": "If this email can register, a verification link has been sent. Already registered? Sign in or reset your password."})
+	if !s.allow(r.Context(), "signup-resend:"+email, 1, time.Minute) {
+		s.signupLimited(w, r, "signup-resend:"+email)
+		return
+	}
+	if !s.allow(r.Context(), "signup:"+email, 3, time.Hour) {
+		_, _ = s.db.ExecContext(r.Context(), `delete from saas_auth_rate_limits where bucket=$1`, digest("signup-resend:"+email))
+		s.signupLimited(w, r, "signup:"+email)
+		return
+	}
+	token := randomToken()
+	_, e := s.db.ExecContext(r.Context(), `insert into saas_onboarding_tokens(token_hash,kind,email,expires_at) values($1,'signup',$2,now()+interval '30 minutes')`, digest(token), email)
+	if e != nil {
+		s.releaseSignupSend(email, token)
+		internal(w)
+		return
+	}
+	if e = s.cfg.Mailer.Send(r.Context(), email, "Verify your HyperCDR email", "Verify your email and create your organization:\n\n"+s.cfg.Origin+"/signup?token="+token+"\n\nThis link expires in 30 minutes. If you did not request it, ignore this email."); e != nil {
+		s.releaseSignupSend(email, token)
+		slog.Warn("signup email delivery failed")
+		problem(w, 503, "email_delivery_failed", "The email could not be sent. Please try again later.")
+		return
+	}
+	respond(w, 202, map[string]any{"message": "Verification email sent to " + email + ". This link expires in 30 minutes. Check your inbox and spam folder.", "email": email, "retryAfterSeconds": 60})
+}
+
+func (s *Service) releaseSignupSend(email, token string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, _ = s.db.ExecContext(ctx, `delete from saas_onboarding_tokens where token_hash=$1`, digest(token))
+	_, _ = s.db.ExecContext(ctx, `update saas_auth_rate_limits set count=greatest(count-1,0) where bucket=$1`, digest("signup:"+email))
+	_, _ = s.db.ExecContext(ctx, `delete from saas_auth_rate_limits where bucket=$1`, digest("signup-resend:"+email))
+}
+
+func (s *Service) signupLimited(w http.ResponseWriter, r *http.Request, key string) {
+	var seconds int
+	if err := s.db.QueryRowContext(r.Context(), `select greatest(1,ceil(extract(epoch from (expires_at-now()))))::int from saas_auth_rate_limits where bucket=$1`, digest(key)).Scan(&seconds); err != nil {
+		internal(w)
+		return
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(seconds))
+	minutes := (seconds + 59) / 60
+	unit := "minute"
+	if minutes != 1 {
+		unit = "minutes"
+	}
+	respond(w, 429, map[string]any{"error": "too_many_attempts", "message": "Too many registration requests. Try again in " + strconv.Itoa(minutes) + " " + unit + ".", "retryAfterSeconds": seconds})
 }
 
 type onboardingToken struct {
@@ -205,17 +237,31 @@ func (s *Service) complete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setCookie(w, "hcdr_onboarding", "", -1)
-	s.session(w, r, user)
+	s.startSession(w, r, user, true)
 }
 func (s *Service) session(w http.ResponseWriter, r *http.Request, user string) {
+	s.startSession(w, r, user, false)
+}
+func (s *Service) startSession(w http.ResponseWriter, r *http.Request, user string, accountCreated bool) {
+	failed := func() {
+		if accountCreated {
+			problem(w, 503, "account_created_login_failed", "Your account was created, but automatic sign-in could not be completed. Sign in to continue.")
+			return
+		}
+		internal(w)
+	}
 	sess, e := s.identity.CreateSession(r.Context(), user, 8*time.Hour)
 	if e != nil {
-		internal(w)
+		failed()
 		return
 	}
 	identity, ok, e := s.identity.AuthenticateSession(r.Context(), sess.Token)
 	if e != nil || !ok {
 		_ = s.identity.DeleteSession(r.Context(), sess.Token)
+		if accountCreated {
+			failed()
+			return
+		}
 		problem(w, 403, "account_unavailable", "Your account is not available. Contact the platform administrator.")
 		return
 	}
