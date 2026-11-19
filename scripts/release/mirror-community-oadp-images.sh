@@ -60,7 +60,7 @@ retry_image_command() {
 }
 
 mirror_image() {
-  local component="$1" source="$2" source_digest="$3" required="$4"
+  local component="$1" source="$2" source_digest="$3" required="$4" expected_target="$5"
   local target target_digest target_repository part status locked_platform_digest
   target="$(image_ref "${REGISTRY}" "${component}" "${release}")"
   [[ "$source_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "locked source digest is invalid: $component" >&2; exit 1; }
@@ -71,7 +71,8 @@ mirror_image() {
     status=$?
     [[ "$status" == 1 ]] || { echo "OADP lookup failed: $component; refusing automatic copy" >&2; return 2; }
   fi
-  if [[ "$target_digest" == "$source_digest" ]]; then
+  [[ "$expected_target" =~ ^sha256:[0-9a-f]{64}$ ]] || return 2
+  if [[ "$target_digest" == "$expected_target" ]]; then
     echo "==> Reusing verified OADP image ${target}@${target_digest}"
   elif [[ -n "$target_digest" ]]; then
     target_repository="${target%:*}"
@@ -111,8 +112,8 @@ mirror_image() {
 
 export REGISTRY release platform IMAGE_TIMEOUT parts_dir
 export -f image_ref docker_manifest_digest manifest_digest retry_image_command mirror_image
-jq -r '.images[] | [.component,.source,.sourceDigest,(.required|tostring)] | @tsv' "$LOCK_FILE" \
-  | xargs -P "$PARALLELISM" -n 4 bash -c 'mirror_image "$@"' _
+jq -r '.images[] | [.component,.source,.sourceDigest,(.required|tostring),(.targetDigest // .sourceDigest)] | @tsv' "$LOCK_FILE" \
+  | xargs -P "$PARALLELISM" -n 5 bash -c 'mirror_image "$@"' _
 
 jq -s '.[0] + {images:(.[1:] | sort_by(.component))}' "$tmp" "$parts_dir"/*.json >"${tmp}.resolved"
 mv "${tmp}.resolved" "$tmp"
