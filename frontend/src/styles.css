@@ -30069,3 +30069,111 @@ html[data-theme='dark'] #root .hbdr-dr-task-log-drawer .hbdr-task-final-result.i
 .hbdr-recovery-namespace-mapping input:focus-visible { outline:2px solid var(--hc-primary, #337ab7); outline-offset:1px; }
 .hbdr-review-mappings { display:grid; gap:7px; }
 .hbdr-review-namespace-mapping + .hbdr-review-namespace-mapping { margin-top:0; }
+
+#root .hbdr-resource-summary-list {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  color: var(--hc-text-2);
+  font-size: 11.5px;
+  line-height: 16px;
+}
+#root .hbdr-resource-summary-primary {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  min-width: 0;
+  gap: 8px;
+}
+#root .hbdr-resource-summary-unit {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  gap: 5px;
+  width: 100%;
+  flex: 1 1 auto;
+}
+#root .hbdr-resource-summary-unit > strong {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 150px;
+  overflow: hidden;
+  color: var(--hc-text);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#root .hbdr-resource-summary-unit > strong::after { content: ':'; margin-left: 2px; color: var(--hc-text-2); font-weight: 400; }
+#root .hbdr-resource-summary-unit > span {
+  display: block;
+  flex: 1 1 auto;
+  width: auto;
+  max-width: none;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: 11.5px;
+  font-weight: 400;
+  line-height: 16px;
+  overflow: hidden;
+  color: var(--hc-text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#root .hbdr-resource-summary-toggle {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  margin-left: auto;
+  margin-top: 1px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--hc-text-2);
+  line-height: 16px;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+#root .hbdr-resource-summary-toggle svg { transition: transform .15s ease; }
+#root .hbdr-resource-summary-list.is-expanded .hbdr-resource-summary-toggle svg { transform: rotate(90deg); }
+#root .hbdr-resource-summary-count {
+  display: block;
+  margin-left: 2px;
+  color: var(--hc-text-2);
+  font-size: 10.5px;
+  font-weight: 400;
+}
+#root .hbdr-resource-summary-members {
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
+  padding-left: 12px;
+}
+#root .hbdr-resource-summary-members > div { min-width: 0; }
+#root .hbdr-resource-summary-members > div { display: flex; align-items: baseline; gap: 4px; }
+#root .hbdr-resource-summary-members > div::before { content: '·'; flex: 0 0 auto; color: var(--hc-text-2); }
+#root .hbdr-resource-summary-namespace {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 150px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--hc-text);
+  font: inherit;
+  font-weight: 500;
+  line-height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+#root .hbdr-resource-summary-namespace::after { content: ':'; margin-left: 2px; }
+#root .hbdr-resource-summary-namespace:hover { color: var(--hc-accent, #2563eb); text-decoration: underline; }
+#root .hbdr-resource-summary-namespace:focus-visible { outline: 2px solid var(--hc-accent, #2563eb); outline-offset: 2px; }

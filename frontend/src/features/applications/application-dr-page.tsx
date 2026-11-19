@@ -235,6 +235,7 @@ export default function ApplicationDrPage(props: {
   const [drTaskEvents, setDrTaskEvents] = useState<Record<string, ApiTaskEvent[]>>({});
   const [resourceDetail, setResourceDetail] = useState<{ app: AppItem } | null>(null);
   const [expandedResourceCells, setExpandedResourceCells] = useState<string[]>([]);
+  const [expandedResourceSummaries, setExpandedResourceSummaries] = useState<string[]>([]);
   const [resourceRefreshKey, setResourceRefreshKey] = useState('');
   const [resourceRefreshStatus, setResourceRefreshStatus] = useState<{ key: string; status: string; message?: string } | null>(null);
   const [appBulkMenuOpen, setAppBulkMenuOpen] = useState(false);
@@ -947,55 +948,32 @@ export default function ApplicationDrPage(props: {
     }
     return [category.label, ...items.map(item => `${item.kind}: ${item.count}`)].join('\n');
   };
-  const renderResourceSummaryCell = (app: AppItem, showNamespace = true) => {
-    if (app.memberApps?.length) {
-      return (
-        <div className="hbdr-merged-resource-list">
-          {app.memberApps.map(member => (
-            <div key={member.name} className="hbdr-merged-resource-row">
-              <strong>{member.namespace || member.name}</strong>
-              {renderResourceSummaryCell(member, false)}
-            </div>
-          ))}
-        </div>
-      );
-    }
+  const resourceSummaryText = (app: AppItem) => {
     const categories = normalizeResourceCategories(app).filter(category => category.total > 0);
+    if (categories.length === 0) return 'No resources';
+    return categories.map(category => {
+      const capacity = category.key === 'storage' ? (app.pvCapacityBytes || app.resourceSummary?.pvCapacityBytes || 0) : 0;
+      return `${category.label} ${category.total}${capacity > 0 ? ` · ${formatBytes(capacity)}` : ''}`;
+    }).join(' · ');
+  };
+  const renderResourceSummaryUnit = (app: AppItem) => {
     const namespace = app.namespace || app.name;
-    const summary = categories.length === 0
-      ? <span className="hbdr-dr-resource-empty" aria-label="No namespaced resources found" />
-      : (
-        <div className="hbdr-dr-resource-summary">
-          {categories.slice(0, 8).map(category => {
-            const Icon = resourceCategoryIconMap[category.key as ResourceCategoryKey] || MoreVertical;
-            const capacity = app.pvCapacityBytes || app.resourceSummary?.pvCapacityBytes || 0;
-            const capacityLabel = category.key === 'storage' && capacity > 0 ? formatBytes(capacity) : '';
-            return (
-            <button
-              key={category.key}
-              type="button"
-              className={`hbdr-dr-resource-summary-chip hbdr-dr-resource-summary-${category.key}`}
-              title={resourceCategoryTitle(app, category)}
-              aria-label={resourceCategoryTitle(app, category)}
-              onClick={event => {
-                event.stopPropagation();
-                setResourceRefreshStatus(null);
-                setResourceDetail({ app });
-              }}
-            >
-              <Icon size={13} />
-              <strong>{category.total}</strong>
-              {capacityLabel && <em>{capacityLabel}</em>}
-            </button>
-            );
-          })}
-        </div>
-      );
-    if (!showNamespace) return summary;
-    if (categories.length === 0) {
-      return <div className="hbdr-resource-summary-unit"><strong>{namespace}</strong>{summary}</div>;
-    }
-    return <div className="hbdr-resource-summary-unit"><strong>{namespace}</strong>{summary}</div>;
+    const text = resourceSummaryText(app);
+    return <div className="hbdr-resource-summary-unit" title={`${namespace}: ${text}`}><button type="button" className="hbdr-resource-summary-namespace" title={`View resource details for ${namespace}`} aria-label={`View resource details for ${namespace}`} onClick={event => { event.stopPropagation(); setResourceRefreshStatus(null); setResourceDetail({ app }); }}>{namespace}</button><span>{text}</span></div>;
+  };
+  const renderResourceSummaryCell = (app: AppItem) => {
+    const members = app.memberApps?.length ? app.memberApps : [app];
+    const isMerged = members.length > 1;
+    const summaryKey = `summary:${app.name}`;
+    const isExpanded = expandedResourceSummaries.includes(summaryKey);
+    return <div className={`hbdr-merged-resource-list hbdr-resource-summary-list${isExpanded ? ' is-expanded' : ''}`}>
+      <div className="hbdr-resource-summary-primary">
+        {renderResourceSummaryUnit(members[0])}
+        {isMerged && <button type="button" className="hbdr-resource-summary-toggle" aria-label={isExpanded ? 'Collapse resource summary' : 'Expand resource summary'} aria-expanded={isExpanded} onClick={event => { event.stopPropagation(); setExpandedResourceSummaries(previous => previous.includes(summaryKey) ? previous.filter(key => key !== summaryKey) : [...previous, summaryKey]); }}><ChevronRight size={13} /></button>}
+      </div>
+      {isMerged && <small className="hbdr-resource-summary-count">{members.length} namespaces</small>}
+      {isExpanded && isMerged && <div className="hbdr-merged-resource-list hbdr-resource-summary-members">{members.map(member => <div key={member.name}>{renderResourceSummaryUnit(member)}</div>)}</div>}
+    </div>;
   };
   const resourceDetailGroups = resourceDetail
     ? normalizeResourceCategories(resourceDetail.app)
@@ -1393,7 +1371,7 @@ export default function ApplicationDrPage(props: {
       });
     }
     return columns;
-  }, [allVisibleSelected, selectableCurrentRows, selectedNames, visibleConfigColumns, tags, syncTasks, liveRecoveryTasks, stage, expandedResourceCells]);
+  }, [allVisibleSelected, selectableCurrentRows, selectedNames, visibleConfigColumns, tags, syncTasks, liveRecoveryTasks, stage, expandedResourceCells, expandedResourceSummaries]);
   const appRunTableColumns = useMemo<HyperTableColumn<AppItem>[]>(() => {
     const columns: HyperTableColumn<AppItem>[] = [appSelectColumn, appNameColumn];
     if (visibleRunColumns.includes('drStatus')) {
@@ -1650,7 +1628,7 @@ export default function ApplicationDrPage(props: {
       });
     }
     return columns;
-  }, [allVisibleSelected, selectedNames, visibleRunColumns, tags, syncTasks, liveRecoveryTasks, liveRestorePoints, protectionPlans, platformTasks, refreshedDrTasks, drTaskEvents, expandedPlanNamespaces, expandedResourceCells]);
+  }, [allVisibleSelected, selectedNames, visibleRunColumns, tags, syncTasks, liveRecoveryTasks, liveRestorePoints, protectionPlans, platformTasks, refreshedDrTasks, drTaskEvents, expandedPlanNamespaces, expandedResourceCells, expandedResourceSummaries]);
   const singleSelectedApp = selectedNames.length === 1 ? currentRows.find(app => app.name === selectedNames[0]) || apps.find(app => app.name === selectedNames[0]) || null : null;
   const selectedRunRows = selectedRunApps
     .map(name => protectedRows.find(app => app.name === name) || apps.find(app => app.name === name))
