@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 
 
@@ -19,15 +20,20 @@ def execute(arguments, env=None):
 
 
 def remote_digest(image):
-    result = subprocess.run(
-        ["bash", "-c", 'source "$1"; dependency_remote_digest "$2"', "_", str(ROOT / "scripts/release/dependency-registry.sh"), image],
-        capture_output=True, text=True, timeout=90,
-    )
-    if result.returncode == 3:
-        return None
-    if result.returncode:
-        raise RuntimeError(result.stderr)
-    return result.stdout.strip()
+    last_error = ""
+    for attempt in range(3):
+        result = subprocess.run(
+            ["bash", "-c", 'source "$1"; dependency_remote_digest "$2"', "_", str(ROOT / "scripts/release/dependency-registry.sh"), image],
+            capture_output=True, text=True, timeout=90,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+        if result.returncode == 3:
+            return None
+        last_error = result.stderr
+        if attempt < 2:
+            time.sleep(5 * (attempt + 1))
+    raise RuntimeError(last_error)
 
 
 def image_ref(registry, component, version):
