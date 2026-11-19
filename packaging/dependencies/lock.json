@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "platform": "linux/amd64",
+  "runtime": {
+    "postgres": {"version": "16", "source": "postgres:16"},
+    "velero": {"version": "v1.18.2-hcdr.7", "source": "build"},
+    "plugins": {"version": "v1.13.0", "sourceRegistry": "docker.io/velero"}
+  },
+  "oadpLock": "packaging/oadp/image-lock.json"
+}

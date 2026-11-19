@@ -25,6 +25,16 @@ bundle_image="$(jq -er .bundle.image "$RESOLVED_LOCK")"
 bundle_digest="$(jq -er .bundle.imageDigest "$RESOLVED_LOCK")"
 [[ "$bundle_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "bundle digest is invalid" >&2; exit 1; }
 bundle_reference="${bundle_image%:*}@${bundle_digest}"
+catalog_image="$(image_ref "${REGISTRY}" "oadp-catalog" "${release}")"
+catalog_digest="$(docker_manifest_digest "$catalog_image" || true)"
+if [[ "$catalog_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+  jq '.catalog={component:"oadp-catalog",version:$version,image:$image,imageDigest:$digest}' \
+    --arg version "$release" --arg image "$catalog_image" --arg digest "$catalog_digest" \
+    "$RESOLVED_LOCK" >"${RESOLVED_LOCK}.next"
+  mv "${RESOLVED_LOCK}.next" "$RESOLVED_LOCK"
+  echo "Reusing unchanged OADP catalog: ${catalog_image}@${catalog_digest}"
+  exit 0
+fi
 catalog_dir="${WORK_DIR}/${release}/catalog"
 mkdir -p "$catalog_dir/configs"
 chmod a+rwx "$catalog_dir" "$catalog_dir/configs"
@@ -53,7 +63,6 @@ YAML
 opm validate /workspace/configs
 [[ ! -e "$catalog_dir/configs.Dockerfile" ]] || unlink "$catalog_dir/configs.Dockerfile"
 opm generate dockerfile /workspace/configs --builder-image "$OPM_IMAGE" --base-image "$OPM_IMAGE"
-catalog_image="$(image_ref "${REGISTRY}" "oadp-catalog" "${release}")"
 docker build --platform linux/amd64 -f "$catalog_dir/configs.Dockerfile" -t "$catalog_image" "$catalog_dir"
 docker_push_with_retry "$catalog_image"
 docker_pull_with_retry "$catalog_image" >/dev/null

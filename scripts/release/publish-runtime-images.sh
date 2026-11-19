@@ -32,7 +32,12 @@ mirror_image() {
   docker_push_with_retry "${target}"
 }
 
-mirror_image "${POSTGRES_SOURCE}" "$(image_ref "${REGISTRY}" "postgres" "16")"
+POSTGRES_TARGET="$(image_ref "${REGISTRY}" "postgres" "16")"
+if dependency_target_matches "${POSTGRES_SOURCE}" "${POSTGRES_TARGET}"; then
+  log "Reusing unchanged PostgreSQL dependency: ${POSTGRES_TARGET}"
+else
+  mirror_image "${POSTGRES_SOURCE}" "${POSTGRES_TARGET}"
+fi
 
 VELERO_TARGET="$(image_ref "${REGISTRY}" "velero" "${VELERO_TAG}")"
 if [[ "${FORCE_VELERO_BUILD}" == "true" ]] || ! docker manifest inspect "${VELERO_TARGET}" >/dev/null 2>&1; then

@@ -37,8 +37,12 @@ for entry in "${plugins[@]}"; do
   name="${entry%%|*}"
   source_image="${entry#*|}"
   target_image="$(image_ref "${REGISTRY}" "${name}" "${PLUGIN_VERSION}")"
-  log "Mirroring ${source_image} to ${target_image}"
-  docker pull "${source_image}"
-  docker tag "${source_image}" "${target_image}"
-  docker_push_with_retry "${target_image}"
+  if dependency_target_matches "${source_image}" "${target_image}"; then
+    log "Reusing unchanged Velero plugin: ${target_image}"
+  else
+    log "Mirroring ${source_image} to ${target_image}"
+    docker pull "${source_image}"
+    docker tag "${source_image}" "${target_image}"
+    docker_push_with_retry "${target_image}"
+  fi
 done
