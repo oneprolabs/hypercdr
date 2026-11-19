@@ -75,7 +75,8 @@ docker_manifest_verify_or_warn() {
 }
 
 docker_manifest_digest() {
-  docker manifest inspect --verbose "$1" 2>/dev/null |
+  timeout --kill-after=10 "${HCDR_DOCKER_OPERATION_TIMEOUT_SECONDS:-60}" \
+    docker manifest inspect --verbose "$1" 2>/dev/null |
     jq -r 'if type == "array" then .[0].Descriptor.digest else .Descriptor.digest end // empty'
 }
 
