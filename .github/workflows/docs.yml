@@ -89,7 +89,7 @@ jobs:
                  && tar -xzf - -C /tmp/hypercdr-docs-payload'
 
       - name: Activate docs site
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@v1.2.5
         env:
           DOCS_SITE_DIR: ${{ vars.DOCS_SITE_DIR || '/var/lib/hypercdr-docs-site/site' }}
           DOCS_CONF: ${{ vars.DOCS_CONF || '/var/lib/hypercdr-docs-site/nginx.conf' }}
