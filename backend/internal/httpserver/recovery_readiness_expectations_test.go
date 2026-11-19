@@ -24,3 +24,17 @@ func TestReadinessExpectationsFromCatalog(t *testing.T) {
 		t.Fatal("OpenShift DeploymentConfig must require workload readiness")
 	}
 }
+
+func TestNamespaceReadinessPreservesPVCOwnership(t *testing.T) {
+	actual := namespaceReadinessFromCatalog([]protocol.BackupResourceSummary{
+		{Kind: "Deployment", Namespace: "mysql", Name: "mysql"},
+		{Kind: "PersistentVolumeClaim", Namespace: "mysql", Name: "data"},
+		{Kind: "PersistentVolumeClaim", Namespace: "nextcloud", Name: "data"},
+		{Kind: "PersistentVolumeClaim", Namespace: "nextcloud", Name: "postgres"},
+		{Kind: "ConfigMap", Namespace: "config", Name: "settings"},
+		{Kind: "PersistentVolumeClaim", Namespace: "unselected", Name: "ignored"},
+	}, []string{"mysql", "nextcloud", "config"})
+	if len(actual) != 3 || !actual["mysql"].RuntimeWorkloadsExpected || actual["config"].RuntimeWorkloadsExpected || !reflect.DeepEqual(actual["mysql"].ExpectedPVCs, []string{"data"}) || !reflect.DeepEqual(actual["nextcloud"].ExpectedPVCs, []string{"data", "postgres"}) || len(actual["config"].ExpectedPVCs) != 0 {
+		t.Fatalf("incorrect namespace expectations: %+v", actual)
+	}
+}

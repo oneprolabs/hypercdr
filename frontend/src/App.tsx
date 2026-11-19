@@ -8,6 +8,8 @@ import { lazyWithUpgradeRecovery } from './app/lazy-page';
 import { warmPageModules } from './app/module-loader';
 
 import ClusterContextCard from './components/cluster-context-card';
+import ClusterRegistrationDrawer from './features/clusters/cluster-registration-drawer';
+import { ClusterRegistrationEmptyState } from './features/clusters/cluster-registration-empty-state';
 import { RequiredPasswordChange, PasswordChangeSuccess, PasswordRecoveryPage } from './auth/password-pages';
 import PageTitleBar from './components/page-title-bar';
 ﻿import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -682,7 +684,6 @@ function labelConditionsToSelector(conditions: Array<{ key: string; operator: 'E
 const topNav: Array<{ key: TopModule; view: View }> = [
   { key: 'overview', view: 'dashboard' },
   { key: 'dr', view: 'applications' },
-  { key: 'config', view: 'clusters' },
   { key: 'ops', view: 'activity' },
   { key: 'settings', view: 'profile' },
 ];
@@ -690,7 +691,7 @@ const topNav: Array<{ key: TopModule; view: View }> = [
 function moduleForView(view: View): TopModule {
   if (view === 'dashboard') return 'overview';
   if (view === 'applications' || view === 'restore_points' || view === 'dr_tasks' || view === 'failback') return 'dr';
-  if (view === 'clusters' || view === 'storage' || view === 'policies' || view === 'tags') return 'config';
+  if (view === 'clusters' || view === 'storage' || view === 'policies' || view === 'tags') return 'dr';
   if (view === 'operations' || view === 'activity' || view === 'logs' || view === 'support_bundle') return 'ops';
   return 'settings';
 }
@@ -793,7 +794,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
   const [productCapabilities, setProductCapabilities] = useState<Record<string, { enabled?: boolean }>>({});
   const clusterRegistrationAllowed = !hasEnterpriseAuditModule || productInfo?.license?.status === 'active';
   const [passwordChangeCompleted, setPasswordChangeCompleted] = useState(false);
-  const [view, setView] = useState<View>(() => { const restored=readStoredView(); const session=readStoredAuthSession(); return session ? (restored==='users'&&modules.some(m=>m.id==='platform-users') ? (session.user.systemAdmin?'extension:platform-users':'extension:members') : restored||'dashboard') : 'login'; });
+  const [view, setView] = useState<View>(() => { const restored=readStoredView(); const session=readStoredAuthSession(); return session ? (restored==='users'&&modules.some(m=>m.id==='platform-users') ? (session.user.systemAdmin?'extension:platform-users':'extension:members') : restored||'applications') : 'login'; });
   const [timeZonePreference, setTimeZonePreference] = useState(() => authSession?.user.timeZone || '');
   const [timeZoneDrawerOpen, setTimeZoneDrawerOpen] = useState(false);
   const [draftTimeZone, setDraftTimeZone] = useState(() => authSession?.user.timeZone || '');
@@ -919,6 +920,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
     setReleaseNotesUnread(hasUnreadReleaseNotes(releaseNotesAdminAudience));
   }, [authSession, releaseNotesAdminAudience]);
   const [clusterRegistrationState, setClusterRegistrationState] = useState<'loading' | 'register' | 'default' | 'ready' | 'error'>('loading');
+  const [registrationRequested, setRegistrationRequested] = useState(false);
   const resourceSessionOwnerRef = useRef(authSession?.session.token || '');
   useEffect(() => {
     if (!authSession) return;
@@ -940,6 +942,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
     clusters,
     setClusters,
     liveClusters,
+    resourceLoadError,
     setLiveClusters,
     storage,
     setStorage,
@@ -1254,10 +1257,10 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
       setAuthSession(nextSession);
       writeStoredAuthSession(nextSession);
       setTheme(nextSession.user.theme === 'dark' ? 'dark' : 'light');
-      clearStoredView();
       if (!nextSession.user.mustChangePassword) {
-        writeStoredView('dashboard');
-        setView('dashboard');
+        const nextView = readStoredView() || 'applications';
+        writeStoredView(nextView);
+        setView(nextView);
       }
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : 'Login failed');
@@ -1355,6 +1358,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
     if (resourceSessionOwnerRef.current === owner) return;
     resourceSessionOwnerRef.current = owner;
     clearTenantResourceState();
+    setRegistrationRequested(false);
     setSavingTheme(false);
     setSavingTimeZone(false);
     setTimeZoneDrawerOpen(false);
@@ -1541,19 +1545,11 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
         title: 'DR',
         items: [
           { label: 'Application DR', desc: 'Select applications, configure policies, and start DR', view: 'applications' as View, icon: Layers },
-          { label: 'Restore Points', desc: 'Browse recovery points and launch drill or takeover', view: 'restore_points' as View, icon: DatabaseBackup },
           { label: 'Backup & Recovery Tasks', desc: 'Audit backup, drill, takeover, and restore task records', view: 'dr_tasks' as View, icon: ListChecks },
-        ],
-      };
-    }
-    if (activeModule === 'config') {
-      return {
-        title: 'Configuration',
-        items: [
           { label: 'Clusters', desc: 'Registration, default cluster, and agent status', view: 'clusters' as View, icon: Server },
-          { label: 'Storage', desc: 'Maintain shared restore-point repositories across clusters', view: 'storage' as View, icon: HardDrive },
-          { label: 'Policies', desc: 'Maintain application protection plans and recovery targets', view: 'policies' as View, icon: ShieldCheck },
-          { label: 'Tag Management', desc: 'Create tags and reuse them in DR lists', view: 'tags' as View, icon: Tags },
+          { label: 'Object Storage', desc: 'Maintain shared restore-point repositories across clusters', view: 'storage' as View, icon: HardDrive },
+          { label: 'Protection Policies', desc: 'Maintain application protection plans and recovery targets', view: 'policies' as View, icon: ShieldCheck },
+          { label: 'Tags', desc: 'Create tags and reuse them in DR lists', view: 'tags' as View, icon: Tags },
         ],
       };
     }
@@ -1586,6 +1582,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
   }, [activeModule, authSession?.user.systemAdmin, hasEnterpriseAuditModule, productCapabilities.advancedAudit?.enabled, productCapabilities.advancedIdentity?.enabled, visibleExtensionModules, view, modules]);
 
   const openView = (nextView: View, options: { preserveSelectedCluster?: boolean; diagnosticTaskId?: string } = {}) => {
+    setClusterPickerOpen(false);
     setTaskOperationFocus([]);
     prefetchView(nextView);
     if (!options.preserveSelectedCluster && (nextView === 'dashboard' || nextView === 'applications' || nextView === 'failback')) {
@@ -1657,6 +1654,24 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
   const onboardingGate = (
     <div className="p-6">
       <OnboardingGate onboarding={onboarding} openClusters={() => openView('clusters')} />
+    </div>
+  );
+  const applicationOnboarding = (
+    <div className="hbdr-app-page">
+      <PageTitleBar><div><h3 className="hbdr-app-workspace-title">Application DR</h3><p className="hbdr-app-workspace-desc">Select applications, configure policies, and start DR.</p></div></PageTitleBar>
+      {resourceLoadError ? (
+        <div role="alert" className="hbdr-cluster-load-error rounded-xl border border-slate-200 bg-white p-10 text-center">
+          <p className="text-sm text-slate-600">{resourceLoadError}</p>
+          <button type="button" className="hbdr-dr-action-primary mt-4" onClick={() => { void refreshPlatformData().catch(() => undefined); }}>Retry</button>
+        </div>
+      ) : liveClusters === null ? (
+        <div role="status" className="p-10 text-center text-sm text-slate-500">Loading clusters…</div>
+      ) : liveClusters.length === 0 ? (
+        <ClusterRegistrationEmptyState onRegister={() => {
+          if (!clusterRegistrationAllowed) { setToast('An active license is required to register a cluster. Open Settings > License Management.'); return; }
+          setRegistrationRequested(true);
+        }} />
+      ) : onboardingGate}
     </div>
   );
 
@@ -1862,9 +1877,9 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
                 ? (visibleExtensionModules.find(module => module.navigation.group === 'operations')?.view as View | undefined) || 'operations'
                 : item.view;
               const requiresOnboarding = ['dr', 'ops', 'config'].includes(item.key) && onboarding !== 'ready';
-              const isConfig = item.key === 'config';
-              const showBadge = isConfig && onboarding === 'register';
-              const showCounter = isConfig && onboarding === 'default';
+              const isDr = item.key === 'dr';
+              const showBadge = isDr && onboarding === 'register';
+              const showCounter = isDr && onboarding === 'default';
               return (
                 <button
                   key={item.key}
@@ -1967,16 +1982,21 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
                 <ChevronDown size={14} />
               </button>
             </div>
+            {activeModule === 'dr' && <div className="hbdr-sidebar-cluster">
+              <div className="hbdr-sidebar-cluster-heading"><span>Current Cluster</span>{clusterRegistrationAllowed && <button type="button" disabled={view === 'applications' && liveClusters === null} aria-label="Register cluster" title="Register cluster" onClick={() => { setClusterPickerOpen(false); setRegistrationRequested(true); }}><Plus size={16} /></button>}</div>
+              <ClusterContextCard sidebar cluster={drWorkspaceCluster} clusters={clusters} defaultClusterId={defaultClusterId} pickerOpen={clusterPickerOpen} setPickerOpen={setClusterPickerOpen} setSelectedCluster={setSelectedCluster} setDefaultCluster={setDefaultCluster} openClusters={() => openView('clusters')} />
+            </div>}
             <div className="hbdr-secondary-menu">
               {secondaryNav.items.map((item, index) => {
                 const sectionFor=(v:string)=>v==='profile'||v==='extension:signin-security'?'Personal settings':v==='extension:organization'||v==='extension:members'?'Organization management':'Platform management';
-                const section=sectionFor(item.view);
-                const showSection=activeModule==='settings'&&modules.some(m=>m.id==='platform-users')&&(index===0||sectionFor(secondaryNav.items[index-1].view)!==section);
+                const drSectionFor=(v:string)=>v==='clusters'?'Source':v==='storage'?'Target':v==='policies'||v==='tags'?'Policy':'DR';
+                const section=activeModule==='dr'?drSectionFor(item.view):sectionFor(item.view);
+                const showSection=activeModule==='dr'?(index===0||drSectionFor(secondaryNav.items[index-1].view)!==section):activeModule==='settings'&&modules.some(m=>m.id==='platform-users')&&(index===0||sectionFor(secondaryNav.items[index-1].view)!==section);
                 const availableBeforeClusterRegistration = onboarding === 'register' && (item.view === 'storage' || item.view === 'policies');
-                const blocked = navBlockedViews.has(item.view) && onboarding !== 'ready' && item.view !== 'clusters' && !availableBeforeClusterRegistration;
+                const blocked = navBlockedViews.has(item.view) && onboarding !== 'ready' && item.view !== 'clusters' && item.view !== 'applications' && !availableBeforeClusterRegistration;
                 const disabled = blocked;
                 return (
-                  <React.Fragment key={item.view}>{showSection&&<div className="hc-settings-nav-group">{section}</div>}<button
+                  <React.Fragment key={item.view}>{showSection&&<div className={activeModule==='dr'?'hbdr-dr-nav-group':'hc-settings-nav-group'}>{section}</div>}<button
                     data-view={item.view}
                     onMouseEnter={() => prefetchView(item.view)}
                     onFocus={() => prefetchView(item.view)}
@@ -1998,6 +2018,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
         )}
 
         <section className="premium-content flex-1 overflow-y-auto">
+          {registrationRequested && <ClusterRegistrationDrawer clusters={liveClusters ?? clusters} onClose={() => setRegistrationRequested(false)} onRefreshRegistration={refreshPlatformData} setSelectedCluster={setSelectedCluster} getAgentTokenForRegistration={getAgentTokenForRegistration} prefetchAgentToken={prefetchAgentToken} toast={setToast} />}
           <AnimatePresence mode={activeModule === 'settings' ? 'sync' : 'wait'}>
             {view === 'dashboard' && (
               <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -2033,25 +2054,12 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
               </motion.div>
             )}
 
-            {view === 'applications' && (onboarding !== 'ready' ? onboardingGate : (
+            {view === 'applications' && (liveClusters === null || onboarding !== 'ready' ? applicationOnboarding : (
               <motion.div key="applications" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="hbdr-app-page">
                 <PageTitleBar>
                   <div className="min-w-0">
                     <h3 className="hbdr-app-workspace-title">Application DR</h3>
                     <p className="hbdr-app-workspace-desc">Select applications, configure policies, and start DR.</p>
-                  </div>
-                  <div className="hbdr-dashboard-design-cluster">
-                    <ClusterContextCard
-                      compact
-                      cluster={drWorkspaceCluster}
-                      clusters={clusters}
-                      defaultClusterId={defaultClusterId}
-                      pickerOpen={clusterPickerOpen}
-                      setPickerOpen={setClusterPickerOpen}
-                      setSelectedCluster={setSelectedCluster}
-                      setDefaultCluster={setDefaultCluster}
-                      openClusters={() => openView('clusters')}
-                    />
                   </div>
                 </PageTitleBar>
                 <React.Suspense fallback={<PageLoadFallback />}><LazyApplicationDrPage
@@ -2159,19 +2167,6 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
                 initialPlans={liveApiPlans}
                 initialTasks={liveApiTasks}
                 namespaceFilter={restorePointNamespaceFilter}
-                clusterContext={(
-                  <ClusterContextCard
-                    compact
-                    cluster={drWorkspaceCluster}
-                    clusters={clusters}
-                    defaultClusterId={defaultClusterId}
-                    pickerOpen={clusterPickerOpen}
-                    setPickerOpen={setClusterPickerOpen}
-                    setSelectedCluster={setSelectedCluster}
-                    setDefaultCluster={setDefaultCluster}
-                    openClusters={() => openView('clusters')}
-                  />
-                )}
               /></React.Suspense>
             ))}
             {view === 'dr_tasks' && (onboarding !== 'ready' ? onboardingGate : (
@@ -2185,19 +2180,6 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
                 initialClusters={liveApiClusters}
                 initialApps={liveApiApps}
                 initialStorageRepos={liveApiStorageRepos}
-                clusterContext={(
-                  <ClusterContextCard
-                    compact
-                    cluster={drWorkspaceCluster}
-                    clusters={clusters}
-                    defaultClusterId={defaultClusterId}
-                    pickerOpen={clusterPickerOpen}
-                    setPickerOpen={setClusterPickerOpen}
-                    setSelectedCluster={setSelectedCluster}
-                    setDefaultCluster={setDefaultCluster}
-                    openClusters={() => openView('clusters')}
-                  />
-                )}
               /></React.Suspense>
             ))}
             {view === 'operations' && <React.Suspense fallback={<PageLoadFallback />}><LazyOperationsCenterPage toast={setToast} openLogs={(taskId) => openView('logs', { diagnosticTaskId: taskId })} openClusters={() => openView('clusters')} /></React.Suspense>}

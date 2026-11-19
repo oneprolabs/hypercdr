@@ -419,11 +419,12 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 			RuntimeWorkloadsExpected:   boolPayload(task.Payload, "runtimeWorkloadsExpected"),
 			ExpectedPVCs:               stringSlicePayload(task.Payload, "expectedPvcs"),
 		}
-		if !payload.Restore.ReadinessExpectationsKnown && task.RestorePointID != "" {
+		if task.RestorePointID != "" {
 			if point, ok, err := r.store.GetRestorePoint(task.RestorePointID); err == nil && ok {
 				if index, ready := restorePointContentIndex(point); ready && index.Status == "ready" && !index.Truncated {
 					payload.Restore.ReadinessExpectationsKnown = true
 					payload.Restore.RuntimeWorkloadsExpected, payload.Restore.ExpectedPVCs = readinessExpectationsFromCatalog(index.Resources, sourceNamespaces)
+					payload.Restore.NamespaceReadiness = namespaceReadinessFromCatalog(index.Resources, sourceNamespaces)
 					payload.Restore.ContentCatalogLoaded = true
 				}
 			}

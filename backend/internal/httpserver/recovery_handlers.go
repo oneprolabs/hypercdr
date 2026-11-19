@@ -128,12 +128,9 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 		if body.SourceNamespace == "" {
 			body.SourceNamespace = point.SourceNamespace
 		}
+		restorePointNamespaces = recoveryPointNamespaces(point)
 		if len(body.SourceNamespaces) == 0 {
-			body.SourceNamespaces = stringArrayFromAny(point.Metadata["includedNamespaces"])
-		}
-		restorePointNamespaces = uniqueNonEmptyStrings(stringArrayFromAny(point.Metadata["includedNamespaces"]))
-		if len(restorePointNamespaces) == 0 && point.SourceNamespace != "" {
-			restorePointNamespaces = []string{point.SourceNamespace}
+			body.SourceNamespaces = restorePointNamespaces
 		}
 		if index, ready := restorePointContentIndex(point); ready && index.Status == "ready" && !index.Truncated {
 			body.ReadinessExpectationsKnown = true
@@ -159,7 +156,7 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 		}
 		for _, namespace := range body.SourceNamespaces {
 			if _, ok := allowed[namespace]; !ok {
-				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "source_namespace_not_in_restore_point", "namespace": namespace})
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "source_namespace_not_in_restore_point", "namespace": namespace, "message": "A selected namespace is not included in this restore point. Refresh the restore point and select namespaces contained in that backup."})
 				return
 			}
 		}

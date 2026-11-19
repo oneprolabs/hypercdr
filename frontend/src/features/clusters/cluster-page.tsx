@@ -1,13 +1,9 @@
+import ClusterRegistrationDrawer from './cluster-registration-drawer';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ClusterRegistrationChoices } from './cluster-registration-choices';
 import { NodeCacheCell, NodeCacheRefresh, type NodeCacheReport } from './node-cache-usage';
 import { listApplications } from '../../api/applications';
 import { lazyWithUpgradeRecovery } from '../../app/lazy-page';
 import { DialogModuleFrame, preloadDialog, useDialogPreload } from '../../app/dialog-module';
-import { ResourceCreateDrawer } from '../../components/resource-create-drawer';
-import { ClusterPlatformRegistrationFields } from './cluster-platform-registration-fields';
-import { ClusterCommandRegistrationFields } from './cluster-command-registration-fields';
-import { uploadRegistrationKubeconfig, inspectRegistrationCluster, startRegistrationTask, cancelRegistrationTask } from './cluster-registration-service';
 import { AlertTriangle, Check, CheckCircle2, ChevronRight, Cloud, Edit2, Eye, GitBranch, MoreVertical, Plus, PlusCircle, RefreshCw, Server, Settings2, Star, Trash2, Upload, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { ApiRequestError, apiGet, apiDelete, apiPatch, apiPost } from '../../api/client';
@@ -16,6 +12,7 @@ import { HyperTable, type HyperTableColumn } from '../../components/table';
 import ClusterActivityPanel from './cluster-activity-panel';
 import { Metric, getProtectedAppCount, isClusterProtected } from './cluster-presentation';
 import type { Cluster, ClusterNamespaceRow, ClusterNodeRow, ClusterStorageClassRow } from './types';
+import { ClusterRegistrationEmptyState } from './cluster-registration-empty-state';
 import type { ApiProtectionPlan } from '../recovery/types';
 import { buildDRTopology, type DRRelationship } from './dr-topology';
 const ClusterCacheSettingsDrawer = lazyWithUpgradeRecovery(() => import('./cluster-cache-settings-drawer').then(module => ({ default: module.ClusterCacheSettingsDrawer })));
@@ -24,11 +21,6 @@ const clusterDialogModules = [ClusterCacheSettingsDrawer, DRTopologyView];
 
 type ApiList<T>={items:T[]};
 type ClusterRegistrationType='native-kubernetes'|'huaweicloud-cce'|'openshift';
-type CCERegistrationMode='platform-direct'|'command';
-type CCEKubeconfigContext={name:string;cluster:string;user:string;apiServer:string;isCurrent:boolean};
-type CCEKubeconfigUpload={id:string;fingerprint:string;currentContext:string;contexts:CCEKubeconfigContext[];expiresAt:string};
-type CCEInspectionGate={id:string;label:string;status:'passed'|'warning'|'deferred';detail:string};
-type CCEInspection={context:string;clusterName:string;clusterId:string;region?:string;serverVersion:string;nodeCount:number;storageClasses:string[];defaultStorageClass?:string;gates:CCEInspectionGate[]};
 type ApiAgentToken={installCommand:string;prepareNodeCommand?:string;clusterType?:ClusterRegistrationType};
 type ApiCluster={id:string;name:string};
 type ApiTask={id:string;clusterId:string;type:string;status:string;progress:number;errorCode?:string;errorMessage?:string;payload?:Record<string,any>;createdAt?:string;completedAt?:string};
@@ -110,25 +102,6 @@ export default function ClusterPage(props: {
   useDialogPreload(clusterDialogModules);
   const [cacheCluster, setCacheCluster] = useState<Cluster | null>(null);
   const [licenseGuideOpen, setLicenseGuideOpen] = useState(false);
-  const [registrationType, setRegistrationType] = useState<ClusterRegistrationType>('native-kubernetes');
-  const [cceRegistrationMode, setCCERegistrationMode] = useState<CCERegistrationMode>('command');
-  const [cceUpload, setCCEUpload] = useState<CCEKubeconfigUpload | null>(null);
-  const [cceContext, setCCEContext] = useState('');
-  const [cceUploadLoading, setCCEUploadLoading] = useState(false);
-  const [cceUploadError, setCCEUploadError] = useState('');
-  const [cceInspection, setCCEInspection] = useState<CCEInspection | null>(null);
-  const [cceInspectionLoading, setCCEInspectionLoading] = useState(false);
-  const [cceStorageClass, setCCEStorageClass] = useState('');
-  const [cceRegistrationTask, setCCERegistrationTask] = useState<ApiTask | null>(null);
-  const [cceIdempotencyKey, setCCEIdempotencyKey] = useState('');
-  const [registerStep, setRegisterStep] = useState<1 | 2 | 3>(1);
-  const [copied, setCopied] = useState(false);
-  const [caCopied, setCaCopied] = useState(false);
-  const [prepareNodeCommand, setPrepareNodeCommand] = useState('');
-  const [installCommand, setInstallCommand] = useState('');
-  const [installLoading, setInstallLoading] = useState(false);
-  const [installError, setInstallError] = useState<string | null>(null);
-  const [registrationBaseline, setRegistrationBaseline] = useState<string[]>([]);
   const [upgradeTarget, setUpgradeTarget] = useState<Cluster | null>(null);
   const [veleroUpgradeTarget, setVeleroUpgradeTarget] = useState<Cluster | null>(null);
   const [unregisterTarget, setUnregisterTarget] = useState<Cluster | null>(null);
@@ -193,8 +166,6 @@ export default function ClusterPage(props: {
       setTopologyLoading(false);
     }
   };
-  const registryCACommandRef = useRef<HTMLTextAreaElement | null>(null);
-  const installCommandRef = useRef<HTMLTextAreaElement | null>(null);
   const actionCommandRef = useRef<HTMLTextAreaElement | null>(null);
   const namespaceRowsForCluster = (cluster: Cluster): ClusterNamespaceRow[] => [...cluster.apps]
     .sort((a, b) => a.namespace.localeCompare(b.namespace))
@@ -378,150 +349,9 @@ export default function ClusterPage(props: {
     return () => window.removeEventListener('click', closeMenu, true);
   }, [clusterMenuId, setClusterMenuId]);
 
-  const loadRegistrationCommand = async (clusterType: ClusterRegistrationType) => {
-    setRegistrationType(clusterType);
-    setRegisterStep(1);
-    setCopied(false);
-    setInstallLoading(true);
-    setInstallError(null);
-    setInstallCommand('');
-    setPrepareNodeCommand('');
-    try {
-      const token = await getAgentTokenForRegistration(clusterType);
-      setPrepareNodeCommand(token.prepareNodeCommand || '');
-      setInstallCommand(token.installCommand);
-      if (clusterType === 'native-kubernetes') void prefetchAgentToken();
-    } catch (error) {
-      setInstallCommand('');
-      setPrepareNodeCommand('');
-      const message = error instanceof ApiRequestError && error.code === 'LICENSE_NOT_ACTIVE'
-        ? 'License required: start a trial or import a formal license in Settings > License Management before registering a cluster.'
-        : error instanceof Error ? error.message : 'Install command generation failed.';
-      setInstallError(message);
-      toast(message);
-    } finally { setInstallLoading(false); }
-  };
-
-  const openRegister = async () => {
-    if (!registrationAllowed) {
-      setLicenseGuideOpen(true);
-      return;
-    }
-    setRegisterStep(1);
-    setCCERegistrationMode('command');
-    setCopied(false);
-    setInstallError(null);
-    setRegistrationBaseline(clusters.map(cluster => cluster.id));
+  const openRegister = () => {
+    if (!registrationAllowed) { setLicenseGuideOpen(true); return; }
     setRegisterOpen(true);
-    await loadRegistrationCommand('native-kubernetes');
-  };
-
-  const resetDirectRegistration = () => {
-    if (cceUpload?.id) void apiDelete(`/api/v1/cluster-registrations/kubeconfigs/${encodeURIComponent(cceUpload.id)}`).catch(() => { /* Temporary uploads also expire server-side. */ });
-    setCCEUpload(null);
-    setCCEContext('');
-    setCCEUploadError('');
-    setCCEInspection(null);
-    setCCEStorageClass('');
-    setCCERegistrationTask(null);
-    setCCEIdempotencyKey('');
-  };
-
-  const closeRegister = () => {
-	if (cceRegistrationTask && ['queued', 'running', 'accepted', 'dispatched', 'canceling'].includes(cceRegistrationTask.status)) {
-	  toast('Registration is still running. Cancel it explicitly before closing this panel.');
-	  return;
-	}
-    setRegisterOpen(false);
-    setRegisterStep(1);
-    setCopied(false);
-    setCaCopied(false);
-    resetDirectRegistration();
-  };
-
-  const inspectCCECluster = async () => {
-    if (!cceUpload || !cceContext) return;
-    setCCEInspectionLoading(true);
-    setCCEUploadError('');
-    try {
-      const inspection = await inspectRegistrationCluster<CCEInspection>(cceUpload.id, cceContext, registrationType);
-      setCCEInspection(inspection);
-      setCCEStorageClass(inspection.defaultStorageClass || (inspection.storageClasses.length === 1 ? inspection.storageClasses[0] : ''));
-    } catch (error) {
-      setCCEInspection(null);
-      setCCEUploadError(error instanceof Error ? error.message : 'Cluster inspection failed.');
-    } finally { setCCEInspectionLoading(false); }
-  };
-
-  const startCCEDirectRegistration = async () => {
-    if (!cceUpload || !cceContext || !cceInspection) return;
-    setCCEUploadError('');
-    setCCEInspectionLoading(true);
-    try {
-      const key = cceIdempotencyKey || `cce-${crypto.randomUUID()}`;
-      setCCEIdempotencyKey(key);
-      setCCERegistrationTask(await startRegistrationTask<ApiTask>(cceUpload.id, cceContext, cceStorageClass, registrationType, key));
-    } catch (error) {
-      setCCEUploadError(error instanceof Error ? error.message : 'Cluster registration could not be started.');
-    } finally { setCCEInspectionLoading(false); }
-  };
-
-  const cancelCCEDirectRegistration = async () => {
-    if (!cceRegistrationTask) return;
-    setCCEInspectionLoading(true);
-    try {
-      setCCERegistrationTask(await cancelRegistrationTask<ApiTask>(cceRegistrationTask.id));
-    } catch (error) {
-      setCCEUploadError(error instanceof Error ? error.message : 'Registration cancellation failed.');
-    } finally { setCCEInspectionLoading(false); }
-  };
-
-  useEffect(() => {
-    const task = cceRegistrationTask;
-    if (!task || !['queued', 'running', 'accepted', 'dispatched'].includes(task.status)) return;
-    const timer = window.setInterval(() => {
-      void apiGet<ApiTask>(`/api/v1/tasks/${encodeURIComponent(task.id)}`).then(updated => setCCERegistrationTask(updated)).catch(() => undefined);
-    }, 2000);
-    return () => window.clearInterval(timer);
-  }, [cceRegistrationTask?.id, cceRegistrationTask?.status]);
-
-  // A direct registration changes the cluster list (and may assign the first
-  // cluster as the platform default).  Refresh the canonical list as soon as
-  // the task reaches a terminal state so the card and Default badge never
-  // remain stale after the drawer is closed or the page is refreshed.
-  useEffect(() => {
-    if (!cceRegistrationTask || cceRegistrationTask.status !== 'succeeded') return;
-    let cancelled = false;
-    void onRefreshRegistration().then(nextClusters => {
-      if (cancelled) return;
-      const latest = nextClusters.find(cluster => cluster.id === cceRegistrationTask.clusterId)
-        || nextClusters.find(cluster => !registrationBaseline.includes(cluster.id));
-      if (latest) setSelectedCluster(latest);
-    }).catch(() => undefined);
-    return () => { cancelled = true; };
-  }, [cceRegistrationTask?.id, cceRegistrationTask?.status, cceRegistrationTask?.clusterId, onRefreshRegistration, registrationBaseline, setSelectedCluster]);
-
-  const uploadCCEKubeconfig = async (file: File | undefined) => {
-    if (!file) return;
-    setCCEUploadLoading(true);
-    setCCEUploadError('');
-    setCCEInspection(null);
-    setCCEStorageClass('');
-    setCCERegistrationTask(null);
-    setCCEIdempotencyKey('');
-    try {
-      const upload = await uploadRegistrationKubeconfig<CCEKubeconfigUpload>(file, registrationType);
-      if (cceUpload?.id && cceUpload.id !== upload.id) void apiDelete(`/api/v1/cluster-registrations/kubeconfigs/${encodeURIComponent(cceUpload.id)}`).catch(() => { /* Temporary uploads also expire server-side. */ });
-      setCCEUpload(upload);
-      const current = upload.contexts.find(context => context.isCurrent)?.name || (upload.contexts.length === 1 ? upload.contexts[0].name : '');
-      setCCEContext(current);
-    } catch (error) {
-      setCCEUpload(null);
-      setCCEContext('');
-      setCCEUploadError(error instanceof Error ? error.message : 'Kubeconfig validation failed.');
-    } finally {
-      setCCEUploadLoading(false);
-    }
   };
 
   const openUpgrade = (cluster: Cluster, event: React.MouseEvent) => {
@@ -605,31 +435,6 @@ export default function ClusterPage(props: {
     setActionCopied(false);
   };
 
-  const copyInstallCommand = async (command: string) => {
-    if (await copyTextToClipboard(command, installCommandRef.current)) {
-      setCopied(true);
-      setRegisterStep(3);
-      toast('Install command copied');
-      window.setTimeout(() => setCopied(false), 1800);
-    } else {
-      installCommandRef.current?.focus();
-      installCommandRef.current?.select();
-      toast('Clipboard is unavailable. The install command is selected; press Ctrl+C to copy it.');
-    }
-  };
-
-  const copyRegistryCACommand = async () => {
-    if (await copyTextToClipboard(prepareNodeCommand, registryCACommandRef.current)) {
-      setCaCopied(true);
-      toast('Node prepare command copied');
-      window.setTimeout(() => setCaCopied(false), 1800);
-    } else {
-      registryCACommandRef.current?.focus();
-      registryCACommandRef.current?.select();
-      toast('Clipboard is unavailable. The node prepare command is selected; press Ctrl+C to copy it.');
-    }
-  };
-
   const copyActionCommand = async (command: string) => {
     if (await copyTextToClipboard(command, actionCommandRef.current)) {
       setActionCopied(true);
@@ -641,36 +446,6 @@ export default function ClusterPage(props: {
       toast('Clipboard is unavailable. The command is selected; press Ctrl+C to copy it.');
     }
   };
-
-  const finishRegisterCluster = () => {
-    toast('Waiting for the agent to connect. The cluster card appears after registration succeeds.');
-    closeRegister();
-  };
-
-  useEffect(() => {
-    if (!registerOpen || registerStep !== 3) return;
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const nextClusters = await onRefreshRegistration();
-        if (cancelled) return;
-        const latest = nextClusters.find(cluster => !registrationBaseline.includes(cluster.id));
-        if (latest) {
-          setSelectedCluster(latest);
-          toast(`${latest?.name || 'Cluster'} registered and connected`);
-          closeRegister();
-        }
-      } catch {
-        if (!cancelled) setInstallError('Waiting for agent connection. The platform API is temporarily unreachable.');
-      }
-    };
-    poll();
-    const timer = window.setInterval(poll, 3000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [registerOpen, registerStep, registrationBaseline, onRefreshRegistration, setSelectedCluster, toast]);
 
   useEffect(() => {
     if (!unregisterTaskId) return;
@@ -1012,12 +787,7 @@ export default function ClusterPage(props: {
         </div>
       ) : (
 
-        <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-14 text-center shadow-sm">
-          <Server size={36} className="mx-auto mb-3 text-slate-300" />
-          <h3 className="text-sm font-bold text-slate-800">No registered clusters yet</h3>
-          <p className="mt-1 text-xs text-slate-400">Register your first Kubernetes cluster. The DR workspace becomes available after the Agent connects.</p>
-          <button onClick={openRegister} className="mt-5 inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-100 transition-all hover:bg-blue-700"><Plus size={15} />Register Cluster</button>
-        </div>
+        <ClusterRegistrationEmptyState onRegister={openRegister} />
       )}
 
       <ClusterActivityPanel logs={clusterTaskLogs} clusters={clusters} highlightedTaskId={highlightedTaskId} onHighlightComplete={() => setHighlightedTaskId(null)} />
@@ -1196,11 +966,8 @@ export default function ClusterPage(props: {
         )}
       </AnimatePresence>
 
-      {registerOpen && <ResourceCreateDrawer title="Register New Cluster" kind="cluster" onClose={closeRegister} actions={cceRegistrationMode === 'command' ? <><button type="button" className="is-primary" onClick={finishRegisterCluster}>Continue in Background</button><button type="button" onClick={closeRegister}>Cancel</button></> : <button type="button" onClick={closeRegister}>{cceRegistrationTask && ['succeeded', 'failed', 'canceled'].includes(cceRegistrationTask.status) ? 'Done' : 'Cancel'}</button>}>
-        <ClusterRegistrationChoices registrationType={registrationType} registrationMode={cceRegistrationMode} installLoading={installLoading} onTypeChange={value => { resetDirectRegistration(); void loadRegistrationCommand(value); }} onModeChange={value => { setRegisterStep(1); setCopied(false); setCCERegistrationMode(value); }} />
-        {cceRegistrationMode === 'platform-direct' && <ClusterPlatformRegistrationFields registrationType={registrationType} cceUpload={cceUpload} cceContext={cceContext} cceUploadLoading={cceUploadLoading} cceUploadError={cceUploadError} cceInspection={cceInspection} cceInspectionLoading={cceInspectionLoading} cceStorageClass={cceStorageClass} cceRegistrationTask={cceRegistrationTask} onUpload={file => void uploadCCEKubeconfig(file)} onContextChange={setCCEContext} onInspect={() => void inspectCCECluster()} onStorageClassChange={setCCEStorageClass} onRegister={() => void startCCEDirectRegistration()} onCancel={() => void cancelCCEDirectRegistration()} />}
-        {cceRegistrationMode === 'command' && <ClusterCommandRegistrationFields registrationType={registrationType} prepareNodeCommand={prepareNodeCommand} installCommand={installCommand} installLoading={installLoading} installError={installError} copied={copied} caCopied={caCopied} registryCACommandRef={registryCACommandRef} installCommandRef={installCommandRef} onCopyCA={() => void copyRegistryCACommand()} onCopyInstall={command => void copyInstallCommand(command)} onRegenerate={() => void loadRegistrationCommand(registrationType)} />}
-      </ResourceCreateDrawer>}
+
+      {registerOpen && <ClusterRegistrationDrawer clusters={clusters} onClose={() => setRegisterOpen(false)} onRefreshRegistration={onRefreshRegistration} setSelectedCluster={setSelectedCluster} getAgentTokenForRegistration={getAgentTokenForRegistration} prefetchAgentToken={prefetchAgentToken} toast={toast} />}
 
       <AnimatePresence>
         {upgradeTarget && (

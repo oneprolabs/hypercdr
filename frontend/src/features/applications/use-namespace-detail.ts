@@ -44,6 +44,11 @@ export function useNamespaceDetail(protectionPlans: ApiProtectionPlan[]) {
     || (namespaceDetailTab === 'tasks' && namespaceDetailTasks === null)));
   useEffect(() => {
     if (!selectedDetailApp || (!selectedDetailPlanId && !selectedDetailApp.apiId)) return;
+    if ((selectedDetailApp.stage || (selectedDetailApp.isProtected ? 'run' : 'select')) !== 'run') {
+      setNamespaceDetailRestorePoints([]);
+      setNamespaceDetailTasks([]);
+      return;
+    }
     let cancelled = false;
     setTabErrors({ restorePoints: '', tasks: '' });
     const fail = (tab: 'restorePoints' | 'tasks', error: unknown) => {

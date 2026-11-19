@@ -14,7 +14,7 @@ export function workloadReadinessSnapshot(task: ApiTask, events: ApiTaskEvent[])
   const error = String(payload.readinessObservationError || '');
   const observedAt = payload.readinessObservedAt || ('observedAt' in candidate ? candidate.observedAt : undefined);
   const stale = isActiveTaskStatus(task.status) && !readiness.Ready && Date.now() - Date.parse(observedAt || '') > 90_000;
-  const summary = error || (stale ? 'Readiness observation is stale; showing last known state.' : `${readiness.ReadyWorkloads || 0}/${readiness.WorkloadCount || 0} workloads ready · ${blocker ? `${blocker.Name}: ${blocker.Reason || blocker.EventReason || blocker.State}` : readiness.Message || 'Checking readiness'}`);
+  const summary = error || (stale ? 'Readiness observation is stale; showing last known state.' : `${readiness.ReadyWorkloads || 0}/${readiness.WorkloadCount || 0} workloads ready · ${blocker ? `${blocker.Namespace ? `${blocker.Namespace}/` : ''}${blocker.Name}: ${blocker.Reason || blocker.EventReason || blocker.State}` : readiness.Message || 'Checking readiness'}`);
   return { readiness, objects, summary, error, startedAt: payload.readinessStartedAt, observedAt, deadline: payload.readinessDeadline };
 }
 
@@ -59,7 +59,7 @@ export function workloadReadinessEvents(task: ApiTask, events: ApiTaskEvent[]): 
       const startedAt = prior?.startedAt || (image.Reason === 'Pulling' ? image.FirstAt : undefined);
       if (prior && (observed < prior.at || observed === prior.at && rank < prior.rank)) continue;
       imageStates.set(key, { at: observed, rank, startedAt });
-      const subject = `${image.DisplayName || image.Pod}${image.Container ? ` / ${image.Container}` : ''}`;
+      const subject = `${image.Namespace ? `${image.Namespace} / ` : ''}${image.DisplayName || image.Pod}${image.Container ? ` / ${image.Container}` : ''}`;
       const message = String(image.Message || '').toLowerCase();
       const cause = /timeout|timed out/.test(message) ? 'registry connection timed out' : /unauthorized|authentication required|pull access denied/.test(message) ? 'registry access denied' : /manifest unknown|not found/.test(message) ? 'image not found' : /certificate|tls/.test(message) ? 'registry TLS error' : '';
       const elapsed = startedAt ? Math.floor((Date.parse(at) - Date.parse(startedAt)) / 1000) : 0;
@@ -68,8 +68,17 @@ export function workloadReadinessEvents(task: ApiTask, events: ApiTaskEvent[]): 
       rows.set(id, { id, at: previous?.at || image.FirstAt || at, summary: `${subject}: ${action}.`, status: failure ? 'warning' : image.Reason === 'Pulling' ? 'waiting' : 'completed', image: image.Image, detail: failure ? `${image.Pod}${image.Node ? ` · Node ${image.Node}` : ''}\n${String(image.Message || '').split(String(image.Image)).join('[image]')}` : undefined, count: failure ? Math.max(previous?.count || 1, image.Count || 1) : undefined, lastAt: image.LastAt });
     }
     const pods = (payload.readiness?.Objects || []).filter(object => object.Kind === 'Pod');
+    for (const object of (payload.readiness?.Objects || []).filter(object => object.Kind === 'PersistentVolumeClaim')) {
+      const key = `pvc-${object.Namespace || ''}/${object.Name}`;
+      if (states.get(key) === object.State) continue;
+      states.set(key, object.State);
+      const missing = object.State === 'Missing';
+      const ready = object.State === 'Bound';
+      const id = `${key}-${at}`;
+      rows.set(id, { id, at: object.Since || at, summary: `${object.Namespace ? `${object.Namespace} / ` : ''}PVC ${object.Name}: ${missing ? 'Missing after restore' : ready ? 'Bound' : object.State || 'Pending'}.`, status: missing ? 'warning' : ready ? 'completed' : 'waiting', detail: object.Message || (missing ? 'An expected persistent volume claim was not found in its restored namespace.' : undefined) });
+    }
     for (const object of pods) {
-      const key = object.UID || `${object.Kind}/${object.Name}`;
+      const key = object.UID || `${object.Namespace || ''}/${object.Kind}/${object.Name}`;
       const state = `${object.State}/${object.Reason || ''}/${object.Container || ''}`;
       if (states.get(key) === state) continue;
       const previous = states.get(key);
@@ -77,7 +86,7 @@ export function workloadReadinessEvents(task: ApiTask, events: ApiTaskEvent[]): 
       if (/imagepull|errimage|backoff/i.test(object.Reason || '') && (payload.readiness?.ImageEvents || []).some(image => image.PodUID === object.UID && ['Failed', 'BackOff'].includes(image.Reason))) continue;
       const matchingWorkload = (payload.readiness?.Objects || []).filter(candidate => ['deployment', 'statefulset', 'daemonset'].includes(candidate.Kind) && object.Name.startsWith(`${candidate.Name}-`)).sort((left, right) => right.Name.length - left.Name.length)[0];
       const displayName = object.DisplayName || matchingWorkload?.Name || object.Name;
-      const subject = `${displayName}${object.Container && object.Container !== displayName ? ` / ${object.Container}` : ''}`;
+      const subject = `${object.Namespace ? `${object.Namespace} / ` : ''}${displayName}${object.Container && object.Container !== displayName ? ` / ${object.Container}` : ''}`;
       const ready = object.State === 'Ready';
       const action = /imagepull|errimage|backoff/i.test(object.Reason || '') ? 'Image pull failed' : ready ? 'Ready' : object.State === 'Scheduling' ? 'Waiting for scheduling' : object.State === 'Initializing' ? 'Initializing' : object.State === 'Waiting for readiness' ? 'Started; waiting for readiness checks' : 'Starting';
       const warning = /failed|error|backoff|unschedulable|unhealthy/i.test(object.Reason || '') || (previous?.startsWith('Ready/') && !ready);

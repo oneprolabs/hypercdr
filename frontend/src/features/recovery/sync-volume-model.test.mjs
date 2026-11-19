@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { syncVolumeSummary } from './sync-volume-model.ts';
+import { syncVolumeSummary, syncVolumeDisplay } from './sync-volume-model.ts';
 
 const task = { id: 'sync', createdAt: '2026-11-05T02:00:00Z', payload: {} };
 const event = (items, at = '2026-11-05T02:00:01Z') => ({ taskId: 'sync', createdAt: at, payload: { velero: { volumeProgress: { bytesDone: items.reduce((sum, item) => sum + (item.bytesDone || 0), 0), items } } } });
@@ -10,6 +10,24 @@ const items = [
   { name: 'c', phase: 'Completed', bytesDone: 128 },
   { name: 'd', phase: 'New', knownTotal: true, totalBytes: 500 },
 ];
+
+test('list and details hide transfer until discovery closes even when bytes are moving', () => {
+  const sample = event([{ name: 'a', phase: 'InProgress', bytesDone: 40, totalBytes: 100, knownTotal: true }]);
+  Object.assign(sample.payload.velero.volumeProgress, { discoveryComplete: false, discoveryCount: 0, knownTotal: true, allTotalsKnown: true });
+  const summary = syncVolumeSummary(task, [sample]);
+  assert.equal(summary.discoveryComplete, false);
+  assert.equal(summary.percent, undefined);
+  assert.equal(syncVolumeDisplay(task, [sample]).showTransfer, false);
+  assert.equal(summary.transferStartedAt, '2026-11-05T02:00:01.000Z');
+  sample.payload.velero.volumeProgress.allTotalsKnown = false;
+  assert.equal(syncVolumeDisplay(task, [sample]).percent, undefined);
+  Object.assign(sample.payload.velero.volumeProgress, { discoveryComplete: true, discoveryCount: 1 });
+  assert.equal(syncVolumeDisplay(task, [sample]).showTransfer, true);
+  assert.equal(syncVolumeDisplay(task, [sample]).percent, 40);
+  sample.payload.velero.volumeProgress.items[0].knownTotal = false;
+  assert.equal(syncVolumeDisplay(task, [sample]).showTransfer, true);
+  assert.equal(syncVolumeDisplay(task, [sample]).percent, undefined);
+});
 
 test('parallel volumes count actual starts, not queued objects or known totals', () => {
   const summary = syncVolumeSummary(task, [event(items)]);
@@ -95,6 +113,12 @@ test('a count mismatch never claims discovery complete', () => {
   assert.equal(syncVolumeSummary(task, [sample]).discoveryComplete, false);
 });
 
+test('completion of an early subset is not the completion time of all volumes', () => {
+  const early = event([{ name: 'a', phase: 'Completed', bytesDone: 100 }]);
+  const allDone = event([{ name: 'a', phase: 'Completed', bytesDone: 100 }, { name: 'b', phase: 'Completed', bytesDone: 200 }], '2026-11-05T02:00:03Z');
+  assert.equal(syncVolumeSummary(task, [early, allDone]).transferCompletedAt, '2026-11-05T02:00:03.000Z');
+});
+
 test('a newly observed volume invalidates an older discovery scope', () => {
   const first = event([{ name: 'a', phase: 'InProgress', knownTotal: true, bytesDone: 50, totalBytes: 100 }]);
   Object.assign(first.payload.velero.volumeProgress, { discoveryComplete: true, discoveryCount: 1 });
@@ -104,6 +128,7 @@ test('a newly observed volume invalidates an older discovery scope', () => {
   assert.equal(summary.progressStarted, false);
   assert.equal(summary.percent, undefined);
   assert.equal(summary.discoveryCompletedAt, '');
+  assert.equal(syncVolumeDisplay(task, [first, later]).showTransfer, false);
 });
 
 test('unknown size blocks overall percentage even after discovery completes', () => {

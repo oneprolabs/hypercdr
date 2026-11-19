@@ -33,12 +33,13 @@ export default function ClusterContextCard(props: {
   defaultClusterId: string | null;
   pickerOpen: boolean;
   compact?: boolean;
+  sidebar?: boolean;
   setPickerOpen: (open: boolean) => void;
   setSelectedCluster: (cluster: Cluster) => void;
   setDefaultCluster: (cluster: Cluster, event?: React.MouseEvent) => void;
   openClusters: () => void;
 }) {
-  const { cluster, clusters, defaultClusterId, pickerOpen, compact, setPickerOpen, setSelectedCluster, setDefaultCluster, openClusters } = props;
+  const { cluster, clusters, defaultClusterId, pickerOpen, compact, sidebar, setPickerOpen, setSelectedCluster, setDefaultCluster, openClusters } = props;
   const isClusterOffline = Boolean(cluster && cluster.connectionStatus !== 'online');
   const clusterMeta = cluster
     ? isClusterOffline
@@ -46,24 +47,26 @@ export default function ClusterContextCard(props: {
       : `${agentReadiness(cluster).label} · ${cluster.version} · ${cluster.applications} namespaces`
     : 'Select a cluster to activate the DR workspace';
   return (
-    <div className={`relative hbdr-cluster-context-wrap ${pickerOpen ? 'z-[110]' : ''}`}>
+    <div className={`relative hbdr-cluster-context-wrap ${sidebar ? 'hbdr-cluster-context-sidebar' : ''} ${pickerOpen ? 'z-[110]' : ''}`} onKeyDown={event => { if (event.key === 'Escape') setPickerOpen(false); }}>
       <button
         type="button"
         aria-expanded={pickerOpen}
+        aria-label={sidebar ? `Current cluster: ${cluster?.name || 'Select a cluster'}` : undefined}
+        title={sidebar ? `Switch cluster · ${cluster?.name || 'Select a cluster'} · ${clusterMeta}` : undefined}
         onClick={() => setPickerOpen(!pickerOpen)}
         className={`hbdr-cluster-context ${compact ? 'hbdr-cluster-context-compact' : ''} ${cluster ? 'hbdr-cluster-context-active' : 'hbdr-cluster-context-empty'} ${isClusterOffline ? 'hbdr-cluster-context-offline' : ''}`}
       >
         <div className="hbdr-cluster-context-icon"><DashboardClusterIcon /></div>
         <div className="min-w-0 flex-1 text-left">
           <p className="hbdr-cluster-context-kicker">DR Workspace</p>
-          <h4 className="hbdr-cluster-context-title">{cluster ? cluster.name : 'No default cluster selected'}</h4>
+          <h4 className="hbdr-cluster-context-title">{cluster ? cluster.name : sidebar ? 'No cluster' : 'No default cluster selected'}</h4>
           <p className="hbdr-cluster-context-meta">
-            {clusterMeta}
+            {sidebar && cluster ? `${agentReadiness(cluster).label} · ${cluster.version}` : clusterMeta}
           </p>
         </div>
         {isClusterOffline && <span className="hbdr-cluster-offline-pill">Offline</span>}
         {cluster?.id === defaultClusterId && <span className="hbdr-cluster-default-pill">Default</span>}
-        <ChevronDown size={14} className={`hbdr-cluster-context-chevron ${pickerOpen ? 'rotate-180' : ''}`} />
+        {sidebar ? <span className="hbdr-cluster-switch-action"><span>Switch</span><ChevronDown size={16} className={`hbdr-cluster-context-chevron ${pickerOpen ? 'rotate-180' : ''}`} /></span> : <ChevronDown size={14} className={`hbdr-cluster-context-chevron ${pickerOpen ? 'rotate-180' : ''}`} />}
       </button>
       <AnimatePresence>
         {pickerOpen && (

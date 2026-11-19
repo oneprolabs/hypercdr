@@ -57,8 +57,10 @@ test('application activity polling includes restore points for live row updates'
   const resources = readFileSync(new URL('../app/use-platform-resources.ts', import.meta.url), 'utf8');
   assert.match(resources, /loadApplicationActivitySnapshot\([^\n]+true\);/);
   assert.match(resources, /const loadApplicationRecoveryData = useCallback/);
+  assert.match(resources, /const realtimeViews = new Set<string>\(\[[^\]]*'applications'/);
   const page = readFileSync(new URL('../features/applications/application-dr-page.tsx', import.meta.url), 'utf8');
   assert.match(page, /const completedPoint = taskVisibleRestorePoint \|\| latestPoint/);
+  assert.match(page, /completedSyncTaskKey, loadApplicationRecoveryData/);
 });
 
 test('removed plans never fall back to configuring and cleanup clears activation hints', () => {
@@ -119,7 +121,10 @@ test('protection configuration requires an explicit policy or manual-only choice
   const wizard = readFileSync(new URL('../protect-applications-wizard.tsx', import.meta.url), 'utf8');
   assert.match(wizard, /props\.step === 4 && \(props\.protectConfig\.policy === 'manual' \|\| Boolean\(selectedPolicy\)\)/);
   assert.match(wizard, /checked=\{props\.protectConfig\.policy === 'manual'\}/);
-  assert.match(wizard, /No policy \(manual only\)/);
+  assert.match(wizard, /<strong>No policy<\/strong>/);
+  assert.match(wizard, /Run backups manually\. You can assign a policy later\./);
+  assert.match(wizard, /<strong>No target<\/strong>/);
+  assert.match(wizard, /Select a target cluster when running a Drill\./);
   assert.match(wizard, /policy: 'manual'/);
   const page = readFileSync(new URL('../features/applications/application-dr-page.tsx', import.meta.url), 'utf8');
   assert.match(page, /policyId = policies\.some/);

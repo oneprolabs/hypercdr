@@ -298,6 +298,23 @@ Agent 创建的 Velero Backup 必须携带关键 labels：
 
 ## 4. `restore`
 
+### 多 namespace 就绪检查
+
+`restore.namespaceReadiness` 是可选的增量字段，按选中的**源 namespace**保存恢复点目录中的就绪预期：
+
+```json
+{
+  "namespaceReadiness": {
+    "demo-mysql-csi": { "runtimeWorkloadsExpected": true, "expectedPvcs": ["demo-mysql-data"] },
+    "demo-nextcloud": { "runtimeWorkloadsExpected": true, "expectedPvcs": ["nextcloud-data", "postgres-data"] }
+  }
+}
+```
+
+Agent 按 `sourceNamespaces` 和 `targetNamespaces` 计算实际目标，在每个目标 namespace 内检查其自己的 PVC、Pod 和工作负载，然后汇总结果；未选中的 namespace 不参与。旧的 `expectedPvcs` 和 `runtimeWorkloadsExpected` 字段继续保留，以兼容已有 Agent。旧任务没有分 namespace 预期时，Agent 在所选目标范围内解析旧 PVC 名称，不再把全部 PVC 都要求存在于第一个 namespace。旧格式无法区分多个 namespace 中同名 PVC 的完整归属，新任务以分 namespace 字段为准。
+
+就绪对象及镜像事件增加 `Namespace` 字段，便于界面区分同名资源。资源恢复完成后，预期 PVC 连续缺失超过 15 秒返回 `RESTORE_EXPECTED_PVC_MISSING`，不再等待整个任务超时；PVC `Pending`、Pod 初始化等暂态继续受原任务期限约束。
+
 用途：从一个恢复点恢复应用。
 
 执行集群：目标恢复集群，可以是源集群，也可以是其他集群。

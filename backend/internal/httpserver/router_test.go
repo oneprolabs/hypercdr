@@ -1809,7 +1809,7 @@ func TestCleanupClusterObjectStorageUsesOnlyAssociatedRepositories(t *testing.T)
 	}
 }
 
-func TestUnregisterAuditUsesHistoricalStorageBinding(t *testing.T) {
+func TestUnregisterAuditDoesNotCleanHistoricalStorageBinding(t *testing.T) {
 	repo := newTestStore(t)
 	clusterID := seedSchedulerCluster(t, repo)
 	storage, err := repo.CreateStorageRepository(store.StorageRepositoryInput{Name: "historical", Type: "S3", Endpoint: "http://minio", Bucket: "bucket"})
@@ -1828,8 +1828,8 @@ func TestUnregisterAuditUsesHistoricalStorageBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if audit.RestorePointCount != 0 || !audit.ObjectStorageNeeded || len(audit.StorageRepositoryIDs) != 1 || audit.StorageRepositoryIDs[0] != storage.ID {
-		t.Fatalf("expected historical binding to require cluster-prefix cleanup: %#v", audit)
+	if audit.RestorePointCount != 0 || audit.ObjectStorageNeeded || len(audit.StorageRepositoryIDs) != 0 {
+		t.Fatalf("historical binding must not expand cleanup scope: %#v", audit)
 	}
 }
 

@@ -2790,6 +2790,7 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, o
 	var lastObserved *kube.NamespaceReadiness
 	var lastObservedAt time.Time
 	previousObjects := map[string]kube.ReadinessObject{}
+	missingPVCObservedAt := time.Time{}
 	if err := c.sendTaskProgress(task, startPayload, 0, "Resource and volume data restoration completed; restored application readiness validation started."); err != nil {
 		c.logger.Warn("failed to send restore readiness start event; continuing readiness checks", "task_id", task.TaskID, "error", err)
 	}
@@ -2798,11 +2799,7 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, o
 			return
 		}
 		readContext, cancelRead := context.WithTimeout(c.taskContext(task), 20*time.Second)
-		readiness, err := c.readiness.GetNamespaceReadiness(readContext, namespace, kube.ReadinessExpectations{
-			Known:                    task.Restore.ReadinessExpectationsKnown,
-			RuntimeWorkloadsExpected: task.Restore.RuntimeWorkloadsExpected,
-			PVCNames:                 task.Restore.ExpectedPVCs,
-		})
+		readiness, err := c.restoredNamespacesReadiness(readContext, task)
 		cancelRead()
 		payload := cloneVeleroPayload(basePayload)
 		payload["readinessStartedAt"] = startedAt
@@ -2814,7 +2811,7 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, o
 		if err == nil {
 			for index := range readiness.Objects {
 				object := &readiness.Objects[index]
-				key := object.Kind + "/" + object.Name + "/" + object.UID
+				key := object.Namespace + "/" + object.Kind + "/" + object.Name + "/" + object.UID
 				previous, exists := previousObjects[key]
 				object.Since = time.Now().UTC()
 				if exists && previous.State == object.State && previous.Reason == object.Reason && previous.Container == object.Container {
@@ -2827,8 +2824,15 @@ func (c *Client) pollRestoredNamespaceReady(task protocol.TaskDispatchPayload, o
 			payload["readinessObservedAt"] = lastObservedAt
 			payload["readiness"] = readiness
 			if readiness.FailureCode != "" {
-				c.failRestoreTask(task, object, readiness.FailureCode, readiness.FailureMessage, map[string]any{"velero": payload})
-				return
+				if readiness.FailureCode == "RESTORE_EXPECTED_PVC_MISSING" && missingPVCObservedAt.IsZero() {
+					missingPVCObservedAt = time.Now()
+				}
+				if readiness.FailureCode != "RESTORE_EXPECTED_PVC_MISSING" || time.Since(missingPVCObservedAt) >= 15*time.Second {
+					c.failRestoreTask(task, object, readiness.FailureCode, readiness.FailureMessage, map[string]any{"velero": payload})
+					return
+				}
+			} else {
+				missingPVCObservedAt = time.Time{}
 			}
 			if readiness.Ready {
 				payload["readinessStage"] = "succeeded"

@@ -23,6 +23,9 @@ func TestUnregisterCleanupShutdownAndRestartCannotSkipPreflight(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{TenantID: cluster.TenantID, SourceClusterID: cluster.ID, AppID: testApplicationID(t, repo, cluster.ID), StorageRepoID: repository.ID, Status: "active"}); err != nil {
+		t.Fatal(err)
+	}
 	task, err := repo.CreateTask(store.TaskInput{ClusterID: cluster.ID, Type: "unregister", Status: "queued", CommandID: store.NewPublicID(), Payload: map[string]any{"cleanupObjectStorage": true, "storageRepositoryIds": []string{repository.ID}, "namespace": "hypercdr-agent"}})
 	if err != nil {
 		t.Fatal(err)
@@ -129,6 +132,9 @@ func TestUnregisterCleanupFailureNeverDispatchesUninstall(t *testing.T) {
 	cluster := testTenantCluster(t, repo, store.DefaultTenantID, "cleanup-failure")
 	repository, err := repo.CreateStorageRepository(store.StorageRepositoryInput{TenantID: cluster.TenantID, Name: "failed-storage", Type: "S3", Bucket: "test"})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.CreateProtectionPlan(store.ProtectionPlanInput{TenantID: cluster.TenantID, SourceClusterID: cluster.ID, AppID: testApplicationID(t, repo, cluster.ID), StorageRepoID: repository.ID, Status: "active"}); err != nil {
 		t.Fatal(err)
 	}
 	task, err := repo.CreateTask(store.TaskInput{ClusterID: cluster.ID, Type: "unregister", Status: "queued", Payload: map[string]any{"cleanupObjectStorage": true, "storageRepositoryIds": []string{repository.ID}}})

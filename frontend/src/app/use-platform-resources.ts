@@ -4,7 +4,7 @@ import { listApplications, listTags } from '../api/applications';
 import { listRestorePoints } from '../api/restore-points';
 import { listPolicies } from '../api/policies';
 import { listStorageRepositories } from '../api/storage';
-import { listClusters } from '../api/clusters';
+import { listClusters, listClusterIdentities } from '../api/clusters';
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { Cluster } from '../features/clusters/types';
 import { listItems, type ApiApplication, type ApiList, type ApiPolicy, type ApiProtectionPlan, type ApiRestorePoint, type ApiRestorePointView, type ApiTask, type PolicyItem, type StorageRepo, type TagItem } from '../features/recovery/types';
@@ -40,6 +40,7 @@ const PLATFORM_DATA_VIEWS = new Set<string>([
 export function usePlatformResources({ sessionToken, view, resourceSessionOwnerRef, mapPolicy }: { sessionToken: string; view: string; resourceSessionOwnerRef: RefObject<string>; mapPolicy: (policy: ApiPolicy) => PolicyItem }) {
   const [clusters, setClusters] = useState<Cluster[]>([]);
   const [liveClusters, setLiveClusters] = useState<Cluster[] | null>(null);
+  const [resourceLoadError, setResourceLoadError] = useState('');
   const [storage, setStorage] = useState<StorageRepo[]>([]);
   const [liveStorage, setLiveStorage] = useState<StorageRepo[] | null>(null);
   const [policies, setPolicies] = useState<PolicyItem[]>([]);
@@ -73,6 +74,7 @@ export function usePlatformResources({ sessionToken, view, resourceSessionOwnerR
     refreshLastResultRef.current = [];
     setClusters([]);
     setLiveClusters(null);
+    setResourceLoadError('');
     setStorage([]);
     setLiveStorage(null);
     setPolicies([]);
@@ -103,6 +105,7 @@ export function usePlatformResources({ sessionToken, view, resourceSessionOwnerR
       return Promise.resolve(refreshLastResultRef.current);
     }
     refreshLastStartedAtRef.current = now;
+    setResourceLoadError('');
     const request = (async () => {
       if (targetView === 'clusters' || targetView === 'dr_tasks' || targetView === 'restore_points' || targetView === 'failback') {
         const summary = targetView === 'clusters'
@@ -234,7 +237,13 @@ export function usePlatformResources({ sessionToken, view, resourceSessionOwnerR
         return apiDefault?.id || null;
       });
       return nextClusters;
-    })().finally(() => {
+    })().then(result => {
+      if (resourceSessionOwnerRef.current === owner) setResourceLoadError('');
+      return result;
+    }).catch(error => {
+      if (resourceSessionOwnerRef.current === owner) setResourceLoadError('Cluster data could not be loaded. Check the connection and retry.');
+      throw error;
+    }).finally(() => {
       if (refreshInFlightRef.current === request) {
         refreshInFlightRef.current = null;
         refreshInFlightViewRef.current = null;
@@ -265,11 +274,16 @@ export function usePlatformResources({ sessionToken, view, resourceSessionOwnerR
     liveApiAppsRef.current = liveApiApps;
   }, [liveApiApps]);
 
+  const awaitingFirstCluster = view === 'applications' && liveClusters?.length === 0;
+  const inventoryCluster = liveClusters?.find(cluster => cluster.id === selectedCluster?.id)
+    || liveClusters?.find(cluster => cluster.isDefault) || liveClusters?.[0];
+  const awaitingInitialInventory = view === 'applications' && inventoryCluster?.connectionStatus === 'online'
+    && inventoryCluster.namespaces === 0 && inventoryCluster.apps.length === 0;
   useEffect(() => {
     if (!sessionToken || !PLATFORM_DATA_VIEWS.has(view)) return;
     let cancelled = false;
     const owner = sessionToken;
-    const realtimeViews = new Set<string>(['dashboard', 'clusters']);
+    const realtimeViews = new Set<string>(['dashboard', 'clusters', 'applications']);
     const loadPlatformData = async () => {
       if (document.visibilityState === 'hidden') return;
       try {
@@ -310,15 +324,27 @@ export function usePlatformResources({ sessionToken, view, resourceSessionOwnerR
       }
     };
     loadPlatformData();
-    const shouldPoll = realtimeViews.has(view);
-    const pollIntervalMs = view === 'applications' ? 3000 : 10000;
-    const poll = view === 'applications' ? loadApplicationActivity : loadPlatformData;
+    const shouldPoll = realtimeViews.has(view) || awaitingFirstCluster || awaitingInitialInventory;
+    const pollIntervalMs = awaitingFirstCluster ? 3000 : 10000;
+    let checkingRegistration = false;
+    const poll = awaitingFirstCluster ? async () => {
+      if (checkingRegistration || document.visibilityState === 'hidden') return;
+      checkingRegistration = true;
+      try {
+        const response = await listClusterIdentities();
+        if (!cancelled && resourceSessionOwnerRef.current === owner && listItems(response).length > 0) await loadPlatformData();
+      } catch {
+        if (!cancelled && resourceSessionOwnerRef.current === owner) setResourceLoadError('Cluster data could not be loaded. Check the connection and retry.');
+      } finally {
+        checkingRegistration = false;
+      }
+    } : view === 'applications' && !awaitingInitialInventory ? loadApplicationActivity : loadPlatformData;
     const timer = shouldPoll ? window.setInterval(poll, pollIntervalMs) : undefined;
     return () => {
       cancelled = true;
       if (timer) window.clearInterval(timer);
     };
-  }, [sessionToken, refreshPlatformData, view]);
+  }, [sessionToken, refreshPlatformData, view, awaitingFirstCluster, awaitingInitialInventory]);
 
   const loadApplicationRecoveryData = useCallback(async () => {
     const owner = sessionToken;
@@ -361,6 +387,7 @@ export function usePlatformResources({ sessionToken, view, resourceSessionOwnerR
     ...scopedSetters,
     clusters,
     liveClusters,
+    resourceLoadError,
     storage,
     liveStorage,
     policies,

@@ -3,6 +3,15 @@ import test from 'node:test';
 import { backupRestorePointChanges, recoveryDuration, recoveryNamespaces } from './recovery-detail-model.ts';
 import { setUserTimeZone } from '../../lib/date-time.ts';
 
+test('target namespace summary includes every selected original namespace and only selected mappings', () => {
+  const payload = { sourceNamespace: 'mysql', sourceNamespaces: ['mysql', 'nextcloud'], targetNamespace: 'mysql', targetNamespaces: {} };
+  assert.deepEqual(recoveryNamespaces({ payload }, 'target'), ['mysql', 'nextcloud']);
+  assert.deepEqual(recoveryNamespaces({ payload: { ...payload, targetNamespaces: { mysql: 'mysql-copy', nextcloud: 'nextcloud-copy', unselected: 'other-copy' } } }, 'target'), ['mysql-copy', 'nextcloud-copy']);
+  assert.deepEqual(recoveryNamespaces({ payload: { ...payload, sourceNamespaces: ['nextcloud'], targetNamespace: 'nextcloud' } }, 'source'), ['nextcloud']);
+  assert.deepEqual(recoveryNamespaces({ payload: { ...payload, sourceNamespaces: ['nextcloud'], targetNamespace: 'nextcloud' } }, 'target'), ['nextcloud']);
+  assert.deepEqual(recoveryNamespaces({ payload: { sourceNamespace: 'app', targetNamespace: 'app-copy' } }, 'target'), ['app-copy']);
+});
+
 test('successful backups show created and only actually deleted restore points in the user timezone', () => {
   setUserTimeZone('UTC');
   const created = { id: 'new', taskCreatedAt: '2026-11-13T00:00:00Z' };

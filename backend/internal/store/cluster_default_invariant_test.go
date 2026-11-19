@@ -46,6 +46,22 @@ func TestDefaultClusterCannotBeCleared(t *testing.T) {
 	}
 }
 
+func TestFirstRegistrationPersistsDefaultAndLaterRegistrationPreservesIt(t *testing.T) {
+	repo := newTestStore(t)
+	first := registerDefaultInvariantCluster(t, repo, "first-registration")
+	if !first.IsDefault {
+		t.Fatal("first registered cluster must become default")
+	}
+	second := registerDefaultInvariantCluster(t, repo, "second-registration")
+	if second.IsDefault {
+		t.Fatal("later registration must not replace the existing default")
+	}
+	stored, found := findDefaultInvariantCluster(t, repo, first.ID)
+	if !found || !stored.IsDefault {
+		t.Fatal("first cluster default was not persisted")
+	}
+}
+
 func TestRegistrationRepairsMissingDefault(t *testing.T) {
 	repo := newTestStore(t)
 	first := registerDefaultInvariantCluster(t, repo, "first")

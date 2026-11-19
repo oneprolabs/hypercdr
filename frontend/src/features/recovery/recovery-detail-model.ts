@@ -22,8 +22,17 @@ export function backupRestorePointChanges(task: ApiTask): Array<{ label: string;
 export function recoveryNamespaces(task: ApiTask, side: 'source' | 'target'): string[] {
   const payload = task.payload || {};
   const multiple = payload[`${side}Namespaces`];
+  const names = (values: unknown[]) => [...new Set(values.filter((value): value is string => typeof value === 'string' && Boolean(value.trim())).map(value => value.trim()))];
+  if (Array.isArray(multiple) && names(multiple).length) return names(multiple);
+  if (side === 'target') {
+    const sources = recoveryNamespaces(task, 'source');
+    if (sources.length) {
+      const mapping = multiple && typeof multiple === 'object' && !Array.isArray(multiple) ? multiple : {};
+      return names(sources.map((source, index) => mapping[source] || (index === 0 && Object.keys(mapping).length === 0 ? payload.targetNamespace : '') || source));
+    }
+  }
   const values = [payload[`${side}Namespace`], ...(Array.isArray(multiple) ? multiple : multiple && typeof multiple === 'object' ? (side === 'source' ? Object.keys(multiple) : Object.values(multiple)) : [])];
-  return [...new Set(values.filter((value): value is string => typeof value === 'string' && Boolean(value.trim())).map(value => value.trim()))];
+  return names(values);
 }
 
 export function recoveryDuration(task: ApiTask, now = Date.now()): string {

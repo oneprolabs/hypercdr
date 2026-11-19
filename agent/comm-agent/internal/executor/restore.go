@@ -91,27 +91,27 @@ func (e KubernetesRestoreExecutor) SubmitRestore(ctx context.Context, manifest v
 		return fmt.Errorf("velero backup is not available for restore: %w", err)
 	}
 	if manifest.Metadata.Labels["hypercdr.io/conflict-policy"] == "replace" {
-		targetNamespace := manifest.Metadata.Labels["hypercdr.io/target-namespace"]
-		if targetNamespace == "" {
-			return errors.New("target namespace is required for namespace replacement")
-		}
-		if targetNamespace == manifest.Metadata.Namespace || targetNamespace == e.agentNamespace {
-			return fmt.Errorf("refusing to replace agent namespace %q", targetNamespace)
+		replacements, err := restoreNamespaceReplacements(manifest, e.agentNamespace)
+		if err != nil {
+			return err
 		}
 		cleaner, ok := e.applier.(kube.RestoreStateCleaner)
 		if !ok {
 			return errors.New("kubernetes restore state cleanup is not supported by this executor")
 		}
-		sourceNamespace := firstIncludedNamespace(manifest)
-		if err := cleaner.CleanupStaleRestoreState(ctx, manifest.Metadata.Namespace, sourceNamespace, targetNamespace, manifest.Metadata.Name); err != nil {
-			return err
-		}
 		replacer, ok := e.applier.(kube.NamespaceReplacer)
 		if !ok {
 			return errors.New("kubernetes namespace replacement is not supported by this executor")
 		}
-		if err := replacer.ReplaceNamespaceAndWait(ctx, targetNamespace); err != nil {
-			return fmt.Errorf("failed to replace target namespace %q: %w", targetNamespace, err)
+		for _, replacement := range replacements {
+			if err := cleaner.CleanupStaleRestoreState(ctx, manifest.Metadata.Namespace, replacement.source, replacement.target, manifest.Metadata.Name); err != nil {
+				return fmt.Errorf("failed to clean restore state for target namespace %q: %w", replacement.target, err)
+			}
+		}
+		for _, replacement := range replacements {
+			if err := replacer.ReplaceNamespaceAndWait(ctx, replacement.target); err != nil {
+				return fmt.Errorf("failed to replace target namespace %q: %w", replacement.target, err)
+			}
 		}
 	}
 	modifier, err := kube.ManifestFromStruct(velero.BuildRestoreResourceModifierConfigMap(manifest))
@@ -137,11 +137,35 @@ func (e KubernetesRestoreExecutor) SubmitRestore(ctx context.Context, manifest v
 	return err
 }
 
-func firstIncludedNamespace(manifest velero.RestoreManifest) string {
+type namespaceReplacement struct {
+	source string
+	target string
+}
+
+func restoreNamespaceReplacements(manifest velero.RestoreManifest, agentNamespace string) ([]namespaceReplacement, error) {
 	if len(manifest.Spec.IncludedNamespaces) == 0 {
-		return ""
+		return nil, errors.New("source namespaces are required for namespace replacement")
 	}
-	return manifest.Spec.IncludedNamespaces[0]
+	replacements := make([]namespaceReplacement, 0, len(manifest.Spec.IncludedNamespaces))
+	targets := map[string]bool{}
+	for _, source := range manifest.Spec.IncludedNamespaces {
+		target := source
+		if mapped, exists := manifest.Spec.NamespaceMapping[source]; exists {
+			target = mapped
+		}
+		if strings.TrimSpace(source) == "" || strings.TrimSpace(target) == "" {
+			return nil, errors.New("source and target namespaces are required for namespace replacement")
+		}
+		if target == manifest.Metadata.Namespace || target == agentNamespace {
+			return nil, fmt.Errorf("refusing to replace agent namespace %q", target)
+		}
+		if targets[target] {
+			return nil, fmt.Errorf("multiple source namespaces map to target namespace %q", target)
+		}
+		targets[target] = true
+		replacements = append(replacements, namespaceReplacement{source: source, target: target})
+	}
+	return replacements, nil
 }
 
 type UnsupportedRestoreExecutor struct {

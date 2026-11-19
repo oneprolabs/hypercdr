@@ -99,6 +99,7 @@ func TestPostgresStoreTaskSummaryKeepsListFieldsAndGetTaskKeepsFullPayload(t *te
 		Type:     "drill",
 		Payload: map[string]any{
 			"namespace":         "demo",
+			"sourceNamespaces":  []string{"demo", "database"},
 			"targetNamespace":   "demo-drill",
 			"targetNamespaces":  map[string]any{"demo": "demo-drill"},
 			"targetClusterName": "cluster-b",
@@ -127,6 +128,9 @@ func TestPostgresStoreTaskSummaryKeepsListFieldsAndGetTaskKeepsFullPayload(t *te
 	}
 	if targets, ok := items[0].Payload["targetNamespaces"].(map[string]any); !ok || targets["demo"] != "demo-drill" {
 		t.Fatalf("summary payload=%v, target namespace mapping must be retained", items[0].Payload)
+	}
+	if sources, ok := items[0].Payload["sourceNamespaces"].([]any); !ok || len(sources) != 2 || sources[1] != "database" {
+		t.Fatalf("summary payload=%v, selected source namespaces must be retained", items[0].Payload)
 	}
 	if _, ok := items[0].Payload["recoveryStages"]; !ok {
 		t.Fatalf("summary payload=%v, authoritative recovery stage snapshot must be retained", items[0].Payload)

@@ -59,12 +59,22 @@ export function syncVolumeSummary(task: ApiTask, events: ApiTaskEvent[]) {
     discoveryStartedAt: timestamp(observed[0]?.at),
     discoveryCompletedAt: timestamp(observed.find(sample => completeScope(sample.progress) && coversCurrentScope(sample.progress))?.at),
     transferStartedAt: timestamp(observed.find(sample => Number(sample.progress.bytesDone) > 0 || Array.isArray(sample.progress.items) && sample.progress.items.some((item: Record<string, unknown>) => item && (item.startedAt || ['InProgress', 'Completed'].includes(String(item.phase)))))?.at),
-    transferCompletedAt: timestamp(observed.find(sample => Array.isArray(sample.progress.items) && sample.progress.items.length > 0 && sample.progress.items.every((item: Record<string, unknown>) => item?.phase === 'Completed'))?.at),
+    transferCompletedAt: timestamp(observed.find(sample => coversCurrentScope(sample.progress) && Array.isArray(sample.progress.items) && sample.progress.items.length > 0 && sample.progress.items.every((item: Record<string, unknown>) => item?.phase === 'Completed'))?.at),
     lastObservedAt: timestamp(observed.at(-1)?.at),
     volumes,
     bytesDone, totalBytes, discoveryComplete, progressStarted,
+    speedBytesPerSecond: nonnegative(progress?.speedBytesPerSecond),
     percent: totalsReady && totalBytes > 0 ? Math.min(100, bytesDone * 100 / totalBytes) : undefined,
     started: volumes.filter(volume => volume.started).length,
     waiting: count('Waiting'), scanning: count('Scanning'), syncing: count('Syncing'), completed: count('Completed'), failed: count('Failed'), canceled: count('Canceled'),
+  };
+}
+
+export function syncVolumeDisplay(task: ApiTask, events: ApiTaskEvent[], completed = false) {
+  const summary = syncVolumeSummary(task, events);
+  return {
+    ...summary,
+    showTransfer: completed || summary.discoveryComplete,
+    percent: completed ? 100 : summary.percent,
   };
 }

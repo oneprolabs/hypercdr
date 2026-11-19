@@ -952,17 +952,6 @@ func (r *Router) auditClusterUnregister(clusterID string) (unregisterAudit, erro
 			audit.TargetPlanCount++
 		}
 	}
-	repositories, err := r.store.ListStorageRepositories()
-	if err != nil {
-		return audit, err
-	}
-	for _, repository := range repositories {
-		if _, ok, bindingErr := r.store.GetClusterStorageBinding(clusterID, repository.ID, clusterID); bindingErr != nil {
-			return audit, bindingErr
-		} else if ok {
-			repositoryIDs[repository.ID] = struct{}{}
-		}
-	}
 	points, err := r.store.ListRestorePoints(store.RestorePointFilter{ClusterID: clusterID, IncludeDeleted: true})
 	if err != nil {
 		return audit, err
@@ -972,9 +961,6 @@ func (r *Router) auditClusterUnregister(clusterID string) (unregisterAudit, erro
 			continue
 		}
 		audit.RestorePointCount++
-		if point.StorageRepoID != "" {
-			repositoryIDs[point.StorageRepoID] = struct{}{}
-		}
 	}
 	for id := range repositoryIDs {
 		audit.StorageRepositoryIDs = append(audit.StorageRepositoryIDs, id)
@@ -1222,7 +1208,27 @@ func (r *Router) cleanupAndDispatchUnregister(task store.Task, repositoryIDs []s
 	_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "running", Progress: 10})
 	_ = r.store.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "info", Reason: "cleaning_object_storage", Message: "cleaning backup data before cluster-side uninstall"})
 	ctx, cancel := context.WithTimeout(r.backgroundContext(), 10*time.Minute)
-	cleanupResults, cleanupErr := r.cleanupClusterObjectStorageRepositories(ctx, task.ClusterID, repositoryIDs)
+	var cleanupResults []objectStorageCleanupResult
+	plans, cleanupErr := r.store.ListProtectionPlans("")
+	if cleanupErr == nil {
+		currentRepositories := map[string]bool{}
+		for _, plan := range plans {
+			if plan.SourceClusterID == task.ClusterID && plan.StorageRepoID != "" {
+				currentRepositories[plan.StorageRepoID] = true
+			}
+		}
+		selectedRepositories := []string{}
+		for _, repositoryID := range repositoryIDs {
+			if currentRepositories[repositoryID] {
+				selectedRepositories = append(selectedRepositories, repositoryID)
+			} else {
+				_ = r.store.AddTaskEvent(store.TaskEventInput{TaskID: task.ID, Level: "info", Reason: "object_storage_cleanup_skipped", Message: "Storage is no longer associated with a current source protection plan; no objects were accessed or deleted.", Payload: map[string]any{"storageRepositoryId": repositoryID}})
+			}
+		}
+		if len(selectedRepositories) > 0 {
+			cleanupResults, cleanupErr = r.cleanupClusterObjectStorageRepositories(ctx, task.ClusterID, selectedRepositories)
+		}
+	}
 	cancel()
 	if r.backgroundContext().Err() != nil {
 		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "queued", Progress: 10})

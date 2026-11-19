@@ -271,6 +271,7 @@ type NamespaceReadiness struct {
 }
 
 type ReadinessObject struct {
+	Namespace    string
 	DisplayName  string
 	Images       map[string]string
 	EventReason  string

@@ -54,6 +54,15 @@ type restorePointIndex struct {
 	RetryAt          time.Time                        `json:"retryAt,omitempty"`
 }
 
+func namespaceReadinessFromCatalog(resources []protocol.BackupResourceSummary, sourceNamespaces []string) map[string]protocol.RestoreNamespaceReadiness {
+	result := map[string]protocol.RestoreNamespaceReadiness{}
+	for _, namespace := range sourceNamespaces {
+		runtimeExpected, pvcs := readinessExpectationsFromCatalog(resources, []string{namespace})
+		result[namespace] = protocol.RestoreNamespaceReadiness{RuntimeWorkloadsExpected: runtimeExpected, ExpectedPVCs: pvcs}
+	}
+	return result
+}
+
 func readinessExpectationsFromCatalog(resources []protocol.BackupResourceSummary, sourceNamespaces []string) (bool, []string) {
 	namespaces := map[string]struct{}{}
 	for _, namespace := range sourceNamespaces {

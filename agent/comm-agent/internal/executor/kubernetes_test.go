@@ -354,9 +354,19 @@ type fakeNamespaceReplacingApplier struct {
 	cleanedSourceNamespace string
 	cleanedTargetNamespace string
 	cleanedCurrentRestore  string
+	cleanedNamespaces      [][2]string
+	replacedNamespaces     []string
+	replaceNamespaceErr    error
+	failNamespace          string
+	cleanupNamespaceErr    error
+	failedCleanupNamespace string
 }
 
 func (a *fakeNamespaceReplacingApplier) CleanupStaleRestoreState(ctx context.Context, agentNamespace string, sourceNamespace string, targetNamespace string, currentRestoreName string) error {
+	a.cleanedNamespaces = append(a.cleanedNamespaces, [2]string{sourceNamespace, targetNamespace})
+	if targetNamespace == a.failedCleanupNamespace {
+		return a.cleanupNamespaceErr
+	}
 	a.cleanedAgentNamespace = agentNamespace
 	a.cleanedSourceNamespace = sourceNamespace
 	a.cleanedTargetNamespace = targetNamespace
@@ -365,6 +375,10 @@ func (a *fakeNamespaceReplacingApplier) CleanupStaleRestoreState(ctx context.Con
 }
 
 func (a *fakeNamespaceReplacingApplier) ReplaceNamespaceAndWait(ctx context.Context, namespace string) error {
+	a.replacedNamespaces = append(a.replacedNamespaces, namespace)
+	if namespace == a.failNamespace {
+		return a.replaceNamespaceErr
+	}
 	a.deletedNamespace = namespace
 	a.replacedNamespace = namespace
 	return nil

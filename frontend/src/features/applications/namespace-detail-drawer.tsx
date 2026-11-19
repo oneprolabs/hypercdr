@@ -163,8 +163,8 @@ export default function NamespaceDetailDrawer({detail, catalog, presentation, on
   const pagedDetailTasks = detailTasks.slice((activeTaskPage - 1) * namespaceDetailPageSize, activeTaskPage * namespaceDetailPageSize);
   const detailTabs = [
       { id: 'overview' as const, label: 'Overview' },
-      { id: 'restorePoints' as const, label: 'Restore Points', count: namespaceDetailRestorePoints === null ? restorePointSummaryCount : detailRestorePoints.length },
       ...(detailStage === 'run' ? [
+      { id: 'restorePoints' as const, label: 'Restore Points', count: namespaceDetailRestorePoints === null ? restorePointSummaryCount : detailRestorePoints.length },
       { id: 'tasks' as const, label: 'Tasks', count: namespaceDetailTasks === null ? taskSummaryCount : detailTasks.length },
       { id: 'storage' as const, label: 'Storage' },
       ] : []),

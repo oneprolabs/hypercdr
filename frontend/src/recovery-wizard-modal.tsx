@@ -169,6 +169,8 @@ function recoverySubmissionError(error: unknown): string {
         return 'A selected NodePort is already in use on the target cluster. Open Advanced options and choose a different port, or leave it automatic.';
       case 'restore_point_not_available':
         return 'The selected restore point is no longer available. Refresh the restore point list and choose another point.';
+      case 'source_namespace_not_in_restore_point':
+        return 'A selected namespace is not included in this restore point. Refresh the restore point and select namespaces contained in that backup.';
       case 'active_drill_task_exists':
       case 'active_recovery_task_exists':
         return 'A recovery task is already running for this protection plan. Wait for it to finish before starting another task.';

@@ -6,6 +6,7 @@ import type { ApiRestorePoint, ApiTask, ApiTaskEvent, VolumeProgressInfo } from 
 import { isActiveTaskStatus, isFailedStatus, taskHasWarning } from './task-status';
 import { transferPercent } from './progress-snapshot';
 import { SyncVolumeProgress } from './sync-volume-progress';
+import { syncVolumeDisplay } from './sync-volume-model';
 import { TransferProgress } from './transfer-progress';
 import { backupRestorePointChanges } from './recovery-detail-model';
 import { TimelineItem } from './timeline-item';
@@ -824,6 +825,17 @@ export function taskStatusDisplay(task: ApiTask, events: ApiTaskEvent[]): TaskSt
   const recovery = ['drill', 'restore', 'takeover'].includes(String(task.type || '').toLowerCase());
   const dataStage = recovery ? 'restoring_data' : 'backing_up_data';
   const dataTransfer = current?.id === dataStage;
+  if (task.type === 'backup' && dataTransfer) {
+    const summary = syncVolumeDisplay(task, events);
+    return {
+      stage: summary.showTransfer ? 'Backing Up Data' : 'Discovering volume data',
+      detail: !summary.showTransfer ? `Volumes discovered: ${summary.volumes.length}`
+        : summary.percent !== undefined ? `${formatBytes(summary.bytesDone)} / ${formatBytes(summary.totalBytes)}${summary.speedBytesPerSecond > 0 ? ` · ${formatBytesPerSecond(summary.speedBytesPerSecond)}` : ''} · Estimated`
+        : `Processed ${formatBytes(summary.bytesDone)} · Updating volume statistics`,
+      progress: summary.showTransfer ? summary.percent : undefined,
+      dataTransfer: summary.showTransfer,
+    };
+  }
   const progress = dataTransfer ? taskProgressInfo(task, visible) : null;
   const detail = dataTransfer && progress?.knownTotal && progress.totalBytes > 0
     ? `${formatBytes(progress.bytesDone)} / ${formatBytes(progress.totalBytes)}${progress.speedBytesPerSecond > 0 ? ` · ${formatBytesPerSecond(progress.speedBytesPerSecond)}` : ''}`

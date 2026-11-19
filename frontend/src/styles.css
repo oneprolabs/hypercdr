@@ -30177,3 +30177,39 @@ html[data-theme='dark'] #root .hbdr-dr-task-log-drawer .hbdr-task-final-result.i
 #root .hbdr-resource-summary-namespace::after { content: ':'; margin-left: 2px; }
 #root .hbdr-resource-summary-namespace:hover { color: var(--hc-accent, #2563eb); text-decoration: underline; }
 #root .hbdr-resource-summary-namespace:focus-visible { outline: 2px solid var(--hc-accent, #2563eb); outline-offset: 2px; }
+#root .hbdr-sidebar-cluster { margin:12px 10px 8px; padding:0 0 14px; border:0; border-bottom:1px solid var(--hc-border); border-radius:0; background:transparent; box-shadow:none; }
+#root .hbdr-sidebar-cluster-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:7px; color:var(--hc-accent); font-size:10.5px; font-weight:650; letter-spacing:.05em; text-transform:uppercase; }
+#root .hbdr-sidebar-cluster-heading button { display:grid; place-items:center; width:26px; height:26px; border:1px solid color-mix(in srgb,var(--hc-accent) 25%,var(--hc-border)); border-radius:5px; color:var(--hc-accent); background:var(--hc-surface); cursor:pointer; }
+#root .hbdr-sidebar-cluster-heading button:hover { background:color-mix(in srgb,var(--hc-accent) 12%,var(--hc-surface)); }
+#root .hbdr-cluster-context-sidebar .hbdr-cluster-context { display:flex !important; width:100% !important; min-width:0 !important; min-height:62px !important; padding:8px !important; gap:8px !important; background:var(--hc-surface) !important; border:1px solid color-mix(in srgb,var(--hc-accent) 45%,var(--hc-border)) !important; border-radius:6px !important; box-shadow:0 2px 5px rgb(33 73 140 / 8%) !important; cursor:pointer; }
+#root .hbdr-cluster-context-sidebar .hbdr-cluster-context:hover, #root .hbdr-cluster-context-sidebar .hbdr-cluster-context[aria-expanded='true'] { border-color:var(--hc-accent) !important; background:color-mix(in srgb,var(--hc-accent) 4%,var(--hc-surface)) !important; }
+#root .hbdr-cluster-context-sidebar .hbdr-cluster-context:focus-visible { outline:2px solid var(--hc-accent); outline-offset:2px; }
+#root .hbdr-cluster-switch-action { display:flex; flex:0 0 38px; align-self:stretch; flex-direction:column; align-items:center; justify-content:center; gap:3px; margin:-8px -8px -8px 0; border-left:1px solid color-mix(in srgb,var(--hc-accent) 25%,var(--hc-border)); border-radius:0 5px 5px 0; background:color-mix(in srgb,var(--hc-accent) 9%,var(--hc-surface)); color:var(--hc-accent); font-size:10px; font-weight:600; }
+#root .hbdr-cluster-context-sidebar .hbdr-cluster-context-kicker, #root .hbdr-cluster-context-sidebar .hbdr-cluster-default-pill, #root .hbdr-cluster-context-sidebar .hbdr-cluster-offline-pill { display:none !important; }
+#root .hbdr-cluster-context-sidebar .hbdr-cluster-context-title { font:600 13px/1.5 'IBM Plex Sans',sans-serif !important; color:var(--hc-text) !important; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#root .hbdr-cluster-context-sidebar .hbdr-cluster-context-meta { display:block !important; margin:2px 0 0 !important; font-size:10.5px !important; color:var(--hc-text-2) !important; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#root .hbdr-cluster-context-sidebar .hbdr-cluster-context-icon { flex:0 0 28px !important; width:28px !important; height:28px !important; color:var(--hc-accent) !important; }
+#root .hbdr-cluster-context-sidebar .hbdr-cluster-context-chevron { flex:0 0 14px; }
+#root .hbdr-cluster-context-sidebar .hbdr-cluster-context { position:relative; z-index:91; }
+#root .hbdr-cluster-context-sidebar .hbdr-cluster-context::before, #root .hbdr-cluster-context-sidebar .hbdr-cluster-context::after { display:none !important; }
+#root .hbdr-cluster-context-sidebar .hbdr-cluster-context-icon { background:color-mix(in srgb,var(--hc-accent) 10%,var(--hc-surface)) !important; border:0 !important; box-shadow:none !important; border-radius:5px !important; }
+#root .hbdr-cluster-context-sidebar .hbdr-cluster-picker { left:0; right:auto; width:360px; max-width:calc(100vw - 80px); }
+#root .hbdr-secondary-sidebar.is-collapsed .hbdr-sidebar-cluster { margin:10px 0 0; padding:3px; border-left-width:1px; }
+#root .hbdr-secondary-sidebar.is-collapsed .hbdr-sidebar-cluster-heading { display:none; }
+#root .hbdr-secondary-sidebar.is-collapsed .hbdr-cluster-context-sidebar .hbdr-cluster-context { min-height:34px !important; padding:2px !important; justify-content:center; }
+#root .hbdr-secondary-sidebar.is-collapsed .hbdr-cluster-context-sidebar .hbdr-cluster-context > :not(.hbdr-cluster-context-icon) { display:none !important; }
+#root .hbdr-secondary-sidebar.is-collapsed:has(.hbdr-cluster-picker) { overflow:visible !important; }
+#root .premium-app.hbdr-workspace > main.flex > .hbdr-secondary-sidebar:has(.hbdr-cluster-picker) { overflow:visible !important; position:relative; z-index:120; }
+#root .hbdr-dr-nav-group { margin:12px 10px 4px; color:var(--hc-text-3); font-size:10.5px; font-weight:600; line-height:18px; letter-spacing:.07em; text-transform:uppercase; }
+#root .hbdr-dr-nav-group:first-child { margin-top:0; }
+#root .premium-app.hbdr-workspace .hbdr-dr-sidebar:not(.is-collapsed) .hbdr-secondary-menu button {
+  padding-left:22px !important;
+}
+#root .hbdr-secondary-sidebar.is-collapsed .hbdr-dr-nav-group { height:1px; margin:10px 4px 6px; overflow:hidden; border-top:1px solid var(--hc-border); color:transparent; font-size:0; line-height:0; }
+#root .hbdr-cluster-registration-empty { padding:56px 24px; text-align:center; border:1px dashed var(--hc-border); border-radius:6px; background:var(--hc-surface); }
+#root .hbdr-cluster-registration-empty > h3 { color:var(--hc-text) !important; font-size:14px; font-weight:600; }
+#root .hbdr-cluster-registration-empty > p, #root .hbdr-cluster-load-error > p { color:var(--hc-text-2) !important; font-size:12px; line-height:1.5; }
+#root .hbdr-cluster-registration-empty > svg { color:var(--hc-text-3); }
+#root .hbdr-cluster-registration-empty > button, #root .hbdr-cluster-load-error > button { border:1px solid var(--hc-accent) !important; background:var(--hc-accent) !important; color:#fff !important; }
+#root .hbdr-cluster-registration-empty > button:hover, #root .hbdr-cluster-load-error > button:hover { background:color-mix(in srgb,var(--hc-accent) 85%,#000) !important; color:#fff !important; }
+#root .hbdr-cluster-load-error { background:var(--hc-surface) !important; border-color:var(--hc-border) !important; }

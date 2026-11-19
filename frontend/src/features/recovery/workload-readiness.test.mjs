@@ -2,6 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { workloadReadinessSnapshot, workloadReadinessEvents } from './workload-readiness.ts';
 
+test('PVC blockers appear in both the summary and detailed events with namespace ownership', () => {
+  const task = { status: 'running', payload: { readinessObservedAt: new Date().toISOString(), readiness: { WorkloadCount: 4, ReadyWorkloads: 4, Objects: [{ Namespace: 'nextcloud', Kind: 'PersistentVolumeClaim', Name: 'data', State: 'Missing' }] } } };
+  assert.match(workloadReadinessSnapshot(task, []).summary, /nextcloud\/data: Missing/);
+  const row = workloadReadinessEvents(task, []).find(row => row.summary.includes('PVC data'));
+  assert.match(row.summary, /nextcloud \/ PVC data: Missing after restore/);
+  assert.equal(row.status, 'warning');
+});
+
 test('old agents have no structured snapshot', () => {
   assert.equal(workloadReadinessSnapshot({ payload: {} }, []), null);
 });

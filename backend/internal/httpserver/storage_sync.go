@@ -142,6 +142,9 @@ func deleteObjectStoragePrefix(ctx context.Context, repo store.StorageRepository
 	}
 	for object := range client.ListObjects(ctx, repo.Bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
 		if object.Err != nil {
+			if minio.ToErrorResponse(object.Err).Code == "NoSuchBucket" {
+				return result, nil
+			}
 			return result, object.Err
 		}
 		if err := client.RemoveObject(ctx, repo.Bucket, object.Key, minio.RemoveObjectOptions{}); err != nil {

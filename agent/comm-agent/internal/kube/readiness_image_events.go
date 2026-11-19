@@ -9,6 +9,7 @@ import (
 )
 
 type ReadinessImageEvent struct {
+	Namespace   string
 	ID          string
 	PodUID      string
 	Pod         string

@@ -2,6 +2,7 @@ import { useDrTaskEvents } from './use-dr-task-events';
 import { recoveryNamespaceMappings } from '../../lib/drill-wizard';
 import { getRestorePointContents } from '../../api/restore-points';
 import { RecoveryTaskContext } from '../recovery/recovery-task-context';
+import { recoveryNamespaces } from '../recovery/recovery-detail-model';
 import { getTask, listTaskEvents, listTasks, createBackupTask, createRecoveryTask, abortTask, cleanupDrillTask } from '../../api/tasks';
 import { createTaskDetailLoader } from '../recovery/task-detail-loader';
 import { listProtectionPlans, createProtectionPlan, updateProtectionPlan, activateProtectionPlan, reconfigureProtectionPlanStorage, deleteProtectionPlan } from '../../api/protection-plans';
@@ -425,10 +426,11 @@ export default function ApplicationDrPage(props: {
   const runPlanKey = runPlanIds.join('|');
   const planRevisionKey = protectionPlans.filter(plan => runPlanIds.includes(plan.id)).map(plan => JSON.stringify([plan.id, plan.updatedAt, plan.latestSyncTaskId, plan.latestRecoveryTaskId, plan.status])).sort().join('|');
   const submittedTaskKey = [...Object.values(submittedSyncTasks), ...Object.values(submittedRecoveryTasks)].map(task => task.id).sort().join('|');
+  const completedSyncTaskKey = [...new Set([...platformTasks, ...Object.values(refreshedDrTasks)].filter(task => task.type === 'backup' && isCompletedTaskStatus(task.status) && runPlanIds.includes(task.protectionPlanId || '')).map(task => task.id))].sort().join('|');
   useEffect(() => {
     if (stage !== 'run' || !runPlanKey) return;
     void loadApplicationRecoveryData().catch(() => undefined);
-  }, [stage, runPlanKey, planRevisionKey, loadApplicationRecoveryData]);
+  }, [stage, runPlanKey, planRevisionKey, completedSyncTaskKey, loadApplicationRecoveryData]);
   useEffect(() => {
     if (stage !== 'run' || !runPlanKey) return;
     let cancelled = false;
@@ -622,7 +624,7 @@ export default function ApplicationDrPage(props: {
       const task = taskForUnit(syncTasks, app);
       return task ? `${task.type} ${task.status} ${task.progress || 0}` : app.lastBackup || '';
     }
-    if (field === 'recoveryTask') return recoveryTask ? `${recoveryTask.type} ${recoveryTask.status} ${recoveryTask.payload?.targetNamespace || ''}` : '';
+    if (field === 'recoveryTask') return recoveryTask ? `${recoveryTask.type} ${recoveryTask.status} ${recoveryNamespaces(recoveryTask, 'target').join(', ')}` : '';
     if (field === 'createdAt') return app.protectionPlanCreatedAt ? formatDateTime(app.protectionPlanCreatedAt) : '';
     if (field === 'tags') return (app.tags || []).join(' ');
     return app.name;
@@ -1959,7 +1961,7 @@ export default function ApplicationDrPage(props: {
     if (!task) return <span className="hbdr-dr-task-neutral">No recovery task</span>;
 
     const actionText = recoveryActionText(task.type);
-    const targetNamespace = String(task.payload?.targetNamespace || app.namespace || app.name);
+    const targetNamespace = recoveryNamespaces(task, 'target').join(', ') || app.namespace || app.name;
     const targetClusterId = String(task.clusterId || task.payload?.targetClusterId || '');
     const targetClusterName = clusters.find(cluster => cluster.id === targetClusterId)?.name
       || String(task.payload?.targetCluster || app.targetCluster || '');
@@ -2999,7 +3001,12 @@ export default function ApplicationDrPage(props: {
             stage === 'select' && isDRUnsupported(row) ? 'hbdr-dr-row-unsupported' : '',
           ].filter(Boolean).join(' ')}
           selectedCount={selectedNames.length}
-          emptyMessage={query ? 'No applications match the current search.' : 'No applications in the current stage. Switch to another stage to view data.'}
+          emptyMessage={query ? 'No applications match the current search.'
+            : stage === 'select' && apps.length === 0 && currentCluster?.connectionStatus !== 'online'
+              ? 'Waiting for the cluster agent to connect and report namespaces.'
+              : stage === 'select' && apps.length === 0 && currentCluster?.namespaces === 0
+                ? 'Waiting for the first namespace inventory from the agent. This list updates automatically.'
+                : 'No applications in the current stage. Switch to another stage to view data.'}
           className="hbdr-dr-main-table"
         />
       </div>
