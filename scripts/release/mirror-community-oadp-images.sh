@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source "$ROOT_DIR/scripts/lib/registry-config.sh"
+source "$ROOT_DIR/scripts/release/common.sh"
 LOCK_FILE="${ROOT_DIR}/packaging/oadp/image-lock.json"
 REGISTRY="${HCDR_IMAGE_REGISTRY:-}"
 OUTPUT="${HCDR_OADP_RESOLVED_LOCK:-${HCDR_RUNTIME_ROOT:-/data/hypercdr-runtime}/oadp-mirror/resolved-image-lock.json}"
@@ -41,8 +41,7 @@ jq '. + {resolvedAt:(now|todateiso8601), registry:$registry, images:[]}' \
   --arg registry "$REGISTRY" "$LOCK_FILE" >"$tmp"
 
 manifest_digest() {
-  docker manifest inspect --verbose "$1" 2>/dev/null \
-    | jq -r 'if type == "array" then .[0].Descriptor.digest else .Descriptor.digest end // empty'
+  docker_manifest_digest "$1"
 }
 
 retry_image_command() {
@@ -62,24 +61,32 @@ retry_image_command() {
 
 mirror_image() {
   local component="$1" source="$2" source_digest="$3" required="$4"
-  local target target_digest target_repository part
+  local target target_digest target_repository part status
   target="$(image_ref "${REGISTRY}" "${component}" "${release}")"
   [[ "$source_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "locked source digest is invalid: $component" >&2; exit 1; }
 
-  target_digest="$(manifest_digest "$target" || true)"
+  if target_digest="$(manifest_digest "$target")"; then
+    :
+  else
+    status=$?
+    [[ "$status" == 1 ]] || { echo "OADP lookup failed: $component; refusing automatic copy" >&2; return 2; }
+  fi
   if [[ "$target_digest" == "$source_digest" ]]; then
     echo "==> Reusing verified OADP image ${target}@${target_digest}"
+  elif [[ -n "$target_digest" ]]; then
+    echo "OADP target digest mismatch: $component; update the dependency identity before publishing" >&2
+    return 2
   else
     echo "==> Mirroring locked ${source%@*}@${source_digest} for ${platform}"
-    retry_image_command "pull ${component}" docker pull --platform "$platform" "${source%@*}@${source_digest}"
-    docker tag "${source%@*}@${source_digest}" "$target"
-    retry_image_command "push ${component}" docker push "$target"
-    target_digest="$(manifest_digest "$target")"
+    retry_image_command "pull ${component}" docker pull --platform "$platform" "${source%@*}@${source_digest}" || return "$?"
+    docker tag "${source%@*}@${source_digest}" "$target" || return "$?"
+    retry_image_command "push ${component}" docker push "$target" || return "$?"
+    target_digest="$(manifest_digest "$target")" || return "$?"
   fi
 
   [[ "$target_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "target digest unavailable: $target" >&2; exit 1; }
   target_repository="${target%:*}"
-  docker manifest inspect "${target_repository}@${target_digest}" >/dev/null
+  manifest_digest "${target_repository}@${target_digest}" >/dev/null || return "$?"
 
   part="${parts_dir}/${component}.json"
   jq -n '{component:$component,source:$source,sourceDigest:$sourceDigest,target:$target,targetDigest:$targetDigest,required:($required=="true")}' \
@@ -89,7 +96,7 @@ mirror_image() {
 }
 
 export REGISTRY release platform IMAGE_TIMEOUT parts_dir
-export -f image_ref manifest_digest retry_image_command mirror_image
+export -f image_ref docker_manifest_digest manifest_digest retry_image_command mirror_image
 jq -r '.images[] | [.component,.source,.sourceDigest,(.required|tostring)] | @tsv' "$LOCK_FILE" \
   | xargs -P "$PARALLELISM" -n 4 bash -c 'mirror_image "$@"' _
 

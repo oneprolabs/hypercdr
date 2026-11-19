@@ -2,7 +2,9 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-tmp="$(mktemp -d)"
+runtime="${HCDR_RUNTIME_ROOT:-$(dirname "$root")/hypercdr-runtime}"
+mkdir -p "$runtime/validation"
+tmp="$(mktemp -d "$runtime/validation/oadp-test.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/runtime"
 
@@ -10,13 +12,14 @@ cat >"$tmp/bin/docker" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >>"${FAKE_DOCKER_LOG}"
-if [[ "$1 $2 $3" == "buildx imagetools inspect" ]]; then
+if [[ "$1 $2 $3" == "manifest inspect --verbose" ]]; then
+  if [[ "${FAKE_DENIED:-false}" == true ]]; then echo unauthorized >&2; exit 1; fi
   case "$4" in
     *oadp-operator*) digest="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ;;
     *oadp-velero*) digest="sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ;;
     *) exit 1 ;;
   esac
-  jq -cn --arg digest "$digest" '{digest:$digest}'
+  jq -cn --arg digest "$digest" '{Descriptor:{digest:$digest}}'
 fi
 EOF
 chmod +x "$tmp/bin/docker"
@@ -54,3 +57,14 @@ PATH="$tmp/bin:$PATH" HCDR_RUNTIME_ROOT="$tmp/runtime" HCDR_OADP_PARALLELISM=2 \
 ! grep -Eq '^(pull|push) ' "$tmp/docker.log"
 
 echo "OADP mirror reuse and parallel aggregation passed"
+export FAKE_DENIED=true
+: >"$tmp/docker.log"
+if PATH="$tmp/bin:$PATH" HCDR_OADP_PARALLELISM=1 \
+  "$root/scripts/release/mirror-community-oadp-images.sh" \
+  --registry registry.example.com/hypercdr --lock "$tmp/lock.json" --output "$tmp/denied.json"; then
+  echo 'Expected registry authentication failure' >&2
+  exit 1
+fi
+! grep -Eq '^(pull|push|tag) ' "$tmp/docker.log"
+test ! -e "$tmp/denied.json"
+echo 'OADP authentication failure cannot trigger copies'

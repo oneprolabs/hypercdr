@@ -11,6 +11,21 @@ trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/bin"
 cat >"$work/bin/docker" <<'EOF'
 #!/usr/bin/env bash
+if [[ "${MOCK_MODE}" == locked ]]; then
+  printf '%s\n' "$*" >>"$MOCK_CALLS"
+  [[ "$1 $2 $3" == 'manifest inspect --verbose' ]] || exit 77
+  case "$4" in
+    *postgres-16) query='.runtime.postgres.targetDigest' ;;
+    *velero-v1.18.2-hcdr.7) query='.runtime.velero.targetDigest' ;;
+    *velero-plugin-for-aws-v1.13.0) query='.runtime.plugins.targets["velero-plugin-for-aws"]' ;;
+    *velero-plugin-for-microsoft-azure-v1.13.0) query='.runtime.plugins.targets["velero-plugin-for-microsoft-azure"]' ;;
+    *velero-plugin-for-gcp-v1.13.0) query='.runtime.plugins.targets["velero-plugin-for-gcp"]' ;;
+    *) exit 78 ;;
+  esac
+  digest="$(jq -er "$query" "$MOCK_LOCK")" || exit 79
+  jq -n --arg digest "$digest" '{Descriptor:{digest:$digest}}'
+  exit 0
+fi
 case "$MOCK_MODE" in
   present) printf '{"Descriptor":{"digest":"sha256:%064d"}}\n' 0 ;;
   missing) echo 'no such manifest' >&2; exit 1 ;;
@@ -37,3 +52,9 @@ for mode in missing denied malformed slow; do
   fi
 done
 echo 'Reuse, mismatch, absence, auth, malformed response and timeout tests passed'
+export MOCK_MODE=locked MOCK_CALLS="$work/calls.log" MOCK_LOCK="$root/packaging/dependencies/lock.json"
+bash "$root/scripts/release/publish-runtime-images.sh" --registry registry.cn-beijing.aliyuncs.com/example/hypercdr
+bash "$root/scripts/release/sync-velero-plugins.sh" --registry registry.cn-beijing.aliyuncs.com/example/hypercdr
+[[ "$(wc -l <"$MOCK_CALLS")" == 5 ]]
+! grep -Eq '^(pull|build|push|tag) ' "$MOCK_CALLS"
+echo 'Actual runtime and plugin entry points: five target metadata queries, zero layer transfers or builds'
