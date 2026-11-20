@@ -60,7 +60,7 @@ export function SaaSLoginSupplement() {
     {(error || configError) && <p className="hbdr-login-error" role="alert">{error || configError}</p>}
     {config?.googleEnabled && <><div className="ee-auth-divider"><span>or</span></div><GoogleButton onError={setError} /></>}
     {config?.publicUrl && config.publicUrl!==window.location.origin && <p className="ee-auth-description">Use the <a href={config.publicUrl+'/login'}>official platform entry</a> for registration and Google sign-in. Platform administrators can update Settings → Access &amp; Login.</p>}
-    {config?.signupEnabled && <div className="hbdr-login-signup">New to HyperCDR? <a href="/signup">Create an account</a></div>}
+    {config?.signupEnabled && <div className="hbdr-login-signup">Don't have an account? <a href="/signup">Sign Up</a></div>}
   </div>;
 }
 const initialRequests = new Map<string, Promise<unknown>>();
