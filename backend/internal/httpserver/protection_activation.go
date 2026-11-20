@@ -671,6 +671,7 @@ func mapInventoryNodes(nodes []protocol.NodeInventory) []store.ClusterNode {
 			status = "unknown"
 		}
 		items = append(items, store.ClusterNode{
+			ResourceUsage:  node.ResourceUsage,
 			Name:           node.Name,
 			Status:         status,
 			Roles:          role,

@@ -179,6 +179,7 @@ type APIResourceInventory struct {
 }
 
 type NodeInventory struct {
+	ResourceUsage  map[string]string `json:"resourceUsage,omitempty"`
 	Name           string            `json:"name"`
 	Role           string            `json:"role,omitempty"`
 	Status         string            `json:"status"`

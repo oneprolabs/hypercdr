@@ -594,6 +594,7 @@ func applyClusterConnectionFreshness(cluster *Cluster) {
 }
 
 type ClusterNode struct {
+	ResourceUsage  map[string]string `json:"resourceUsage,omitempty"`
 	Name           string            `json:"name"`
 	Status         string            `json:"status"`
 	Roles          string            `json:"roles,omitempty"`

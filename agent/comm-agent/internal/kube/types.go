@@ -94,6 +94,7 @@ type APIResource struct {
 }
 
 type Node struct {
+	ResourceUsage  map[string]string
 	Name           string
 	Labels         map[string]string
 	Ready          bool

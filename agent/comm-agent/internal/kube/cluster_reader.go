@@ -152,6 +152,7 @@ func (r *KubernetesClusterReader) readClusterInventory(ctx context.Context, forc
 		state.Nodes = append(state.Nodes, nodeState(node))
 	}
 	if !force && !staticDue && !state.CollectedAt.IsZero() && now.Sub(state.CollectedAt) < resourceInterval {
+		r.collectNodeResources(ctx, state.Nodes)
 		r.inventoryState = state
 		return state, nil
 	}
@@ -197,6 +198,7 @@ func (r *KubernetesClusterReader) readClusterInventory(ctx context.Context, forc
 		return ClusterState{}, err
 	}
 	state.Velero = r.readVeleroState(ctx)
+	r.collectNodeResources(ctx, state.Nodes)
 	r.inventoryState = state
 	if staticDue {
 		r.staticInventoryAt = now

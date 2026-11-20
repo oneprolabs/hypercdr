@@ -138,6 +138,7 @@ func buildNodeInventory(nodes []kube.Node) []protocol.NodeInventory {
 			status = "ready"
 		}
 		items = append(items, protocol.NodeInventory{
+			ResourceUsage:  cloneStringMap(node.ResourceUsage),
 			Name:           node.Name,
 			Role:           nodeRole(node.Labels),
 			Status:         status,

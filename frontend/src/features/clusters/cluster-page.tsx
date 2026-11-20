@@ -1,4 +1,6 @@
 import ClusterRegistrationDrawer from './cluster-registration-drawer';
+import { NodeResourceCell, NodeResourceRefresh } from './node-resource-cell';
+import { nodeResource, type NodeResourceKind } from './node-resources';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { NodeCacheCell, NodeCacheRefresh, type NodeCacheReport } from './node-cache-usage';
 import { listApplications } from '../../api/applications';
@@ -179,6 +181,8 @@ export default function ClusterPage(props: {
     return [...details]
       .sort((a, b) => a.name.localeCompare(b.name))
       .map(node => ({
+        capacity: node.capacity,
+        resourceUsage: node.resourceUsage,
         name: node.name,
         status: normalizeNodeStatus(node.status),
         roles: node.roles || '<none>',
@@ -247,6 +251,15 @@ export default function ClusterPage(props: {
       cell: info => <span className="hbdr-cluster-status-pill">{String(info.getValue() || '-')}</span>,
       meta: { kind: 'status', title: row => row.status },
     },
+    ...(['cpu', 'memory', 'storage'] as NodeResourceKind[]).map(kind => ({
+      id: `${kind}Resources`,
+      header: kind === 'cpu' ? 'CPU' : kind === 'memory' ? 'MEMORY' : 'LOCAL STORAGE',
+      size: kind === 'cpu' ? 160 : 185,
+      minSize: 155,
+      accessorFn: (row: ClusterNodeRow) => nodeResource(kind, row.capacity, row.resourceUsage).percent,
+      sortUndefined: 'last' as const,
+      cell: (info: { row: { original: ClusterNodeRow } }) => <NodeResourceCell kind={kind} node={info.row.original} offline={nodeCacheOffline} />,
+    })),
     {
       accessorKey: 'roles',
       header: 'ROLES',
@@ -832,7 +845,7 @@ export default function ClusterPage(props: {
           return (
             <>
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="hbdr-filter-drawer-backdrop" onClick={() => setClusterResourceDetail(null)} />
-              <motion.div initial={{ opacity: 0, x: 34 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 34 }} transition={{ duration: 0.18, ease: 'easeOut' }} className="hbdr-filter-drawer hbdr-cluster-detail-drawer">
+              <motion.div initial={{ opacity: 0, x: 34 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 34 }} transition={{ duration: 0.18, ease: 'easeOut' }} className={`hbdr-filter-drawer hbdr-cluster-detail-drawer ${isNodes ? 'has-node-resources' : ''}`}>
                 <div className="hbdr-filter-drawer-head hbdr-cluster-detail-drawer-head">
                   <div>
                     <strong>Cluster Details</strong>
@@ -869,7 +882,10 @@ export default function ClusterPage(props: {
                         <h4>Nodes</h4>
                         <p>{nodeRows.length || cluster.nodes} total</p>
                       </div>
-                      <NodeCacheRefresh clusterId={cluster.id} onReport={(report, offline) => { setNodeCacheReport(report); setNodeCacheOffline(offline); }} />
+                      <div className="hbdr-node-resource-actions">
+                        <NodeResourceRefresh cluster={cluster} onRefresh={nodes => setClusterResourceDetail(current => current?.cluster.id === cluster.id ? { ...current, cluster: { ...current.cluster, nodeDetails: nodes } } : current)} />
+                        <NodeCacheRefresh clusterId={cluster.id} onReport={(report, offline) => { setNodeCacheReport(report); setNodeCacheOffline(offline); }} />
+                      </div>
                     </div>
                     <HyperTable
                       variant="modal"

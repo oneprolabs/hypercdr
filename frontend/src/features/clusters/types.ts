@@ -194,6 +194,7 @@ export type ClusterNamespaceAPI = {
 };
 
 export type ClusterNode = {
+  resourceUsage?: Record<string, string>;
   name: string;
   status: string;
   roles?: string;
@@ -219,6 +220,8 @@ export type ClusterNamespaceRow = {
 };
 
 export type ClusterNodeRow = {
+  capacity?: Record<string, string>;
+  resourceUsage?: Record<string, string>;
   name: string;
   status: string;
   roles: string;
