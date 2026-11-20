@@ -1,6 +1,6 @@
 import PageTitleBar from '../../components/page-title-bar';
 import { useEffect, useState } from 'react';
-import { History, X } from 'lucide-react';
+import { History, RefreshCw, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { apiGet } from '../../api/client';
 import { HyperTable, type HyperTableColumn } from '../../components/table';
@@ -17,23 +17,30 @@ const listItems = <T,>(response: ApiList<T>) => response.items || [];
 export default function ActivityLogPage() {
   const [selectedJob, setSelectedJob] = useState<string | null>(null);
   const [auditLogs, setAuditLogs] = useState<ApiAuditLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [refreshKey, setRefreshKey] = useState(0);
   const [query,setQuery]=useState(''); const [statusFilter,setStatusFilter]=useState('all'); const [typeFilter,setTypeFilter]=useState('all'); const [dateFrom,setDateFrom]=useState(''); const [dateTo,setDateTo]=useState('');
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
+      setLoading(true);
+      setLoadError('');
       try {
         const response = await apiGet<ApiList<ApiAuditLog>>('/api/v1/audit-logs?limit=500');
         if (!cancelled) setAuditLogs(listItems(response));
-      } catch {
-        // Keep the current audit list visible if one refresh fails.
+      } catch (error) {
+        if (!cancelled) setLoadError(error instanceof Error ? error.message : 'Activity log could not be loaded.');
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     };
     load();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshKey]);
 
   const selectedAudit = auditLogs.find(item => item.id === selectedJob) || null;
   const jobs = auditLogs.map(item => ({
@@ -65,15 +72,17 @@ export default function ActivityLogPage() {
               <p className="mt-0.5 text-[11px] font-medium text-slate-400">Review administrator actions, affected resources, and results.</p>
             </div>
           </div>
-          <div />
+          <button type="button" className="hbdr-dr-action-secondary" disabled={loading} onClick={() => setRefreshKey(value => value + 1)}><RefreshCw size={14} />{loading ? 'Refreshing…' : 'Refresh'}</button>
         </div>
       </PageTitleBar>
+
+      {loadError && <div role="alert" className="hbdr-management-notice is-error"><span>{loadError} Existing records remain visible.</span><button type="button" className="hbdr-dr-action-secondary" disabled={loading} onClick={() => setRefreshKey(value => value + 1)}>Retry</button></div>}
 
       <div className="hbdr-dr-table-card hbdr-history-table-list">
         <div className="hbdr-dr-table-head">
           <div className="hbdr-dr-toolbar">
             <div className="hbdr-dr-action-group">
-              <button type="button" onClick={exportAudit} className="hbdr-dr-action-secondary">Export CSV</button>
+              <button type="button" onClick={exportAudit} disabled={loading || jobs.length === 0} className="hbdr-dr-action-secondary">Export CSV</button>
             </div>
             <div className="hbdr-dr-query-group hbdr-history-query-group">
               <select aria-label="Filter by type" value={typeFilter} onChange={event => setTypeFilter(event.target.value)}>
@@ -108,7 +117,7 @@ export default function ActivityLogPage() {
           getRowId={row => row.id}
           onRowClick={row => setSelectedJob(row.id)}
           getRowClassName={row => selectedJob === row.id ? 'hbdr-dr-row-selected' : ''}
-          emptyMessage="No user operation records available."
+          emptyMessage={loading ? 'Loading activity log…' : loadError ? 'Activity log could not be loaded. Use Retry to try again.' : 'No activity matches the selected filters.'}
           className="hbdr-history-hyper-table"
         />
       </div>

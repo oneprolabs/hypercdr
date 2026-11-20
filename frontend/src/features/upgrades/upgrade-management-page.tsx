@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { apiGet, apiPost } from '../../api/client';
 import { compareReleaseVersions } from './release-version';
-import { SearchBar } from '../../components/search-bar';
+import PageTitleBar from '../../components/page-title-bar';
+import { RefreshCw } from 'lucide-react';
 
 type ApiList<T> = { items: T[] };
 type ApiReleaseComponent = { version:string; image:string; imageDigest:string };
@@ -137,7 +138,7 @@ export default function UpgradeManagementPage({ isAdmin, toast, refreshPlatformD
 
   return (
     <motion.div key="upgrades" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="upgrade-management-page space-y-5">
-      <SearchBar title="Upgrade" desc="Check versions, start upgrades, and follow their progress." action="Refresh" onAction={() => void load()} />
+      <PageTitleBar><div><h3>Platform Upgrade</h3><p>Check versions, start upgrades, and follow their progress.</p></div><button type="button" className="hbdr-dr-action-secondary" disabled={loading} onClick={() => void load()}><RefreshCw size={14} />{loading ? 'Refreshing…' : 'Refresh'}</button></PageTitleBar>
       {catalogError && <p role="status" className="text-sm text-slate-500">Available releases could not be loaded. Local version and upgrade history remain available. <button type="button" className="hbdr-dr-action-secondary" disabled={loading} onClick={() => void loadCatalog()}>Retry release catalog</button></p>}
       <section className="hbdr-section-card overflow-hidden">
         <div className="hbdr-section-toolbar"><div><h3>Platform</h3><p>HyperCDR management platform</p></div>{isAdmin && <button type="button" className="hbdr-dr-action-secondary" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen(value => !value)}>{advancedOpen ? 'Hide Release Management' : 'Release Management'}</button>}</div>
@@ -149,7 +150,7 @@ export default function UpgradeManagementPage({ isAdmin, toast, refreshPlatformD
             ? <span className="justify-self-start rounded-full bg-blue-50 px-3 py-1.5 text-[10px] font-black text-blue-700 md:justify-self-end">Upgrading...</span>
             : isAdmin && latestPlatformRelease && platformUpdateAvailable
               ? <button type="button" disabled={busy===`upgrade-${latestPlatformRelease.id}`} onClick={()=>void startPlatformUpgrade(latestPlatformRelease)} className="justify-self-start rounded bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50 md:justify-self-end">{busy===`upgrade-${latestPlatformRelease.id}` ? 'Starting...' : 'Upgrade'}</button>
-              : <span className={`justify-self-start rounded-full px-3 py-1.5 text-[10px] font-black md:justify-self-end ${loading || catalogError ? 'bg-slate-50 text-slate-500' : 'bg-emerald-50 text-emerald-700'}`}>{loading ? 'Checking…' : catalogError ? 'Check unavailable' : 'Up to date'}</span>}
+              : <span className={`justify-self-start rounded-full px-3 py-1.5 text-[10px] font-black md:justify-self-end ${loading || catalogError || !latestPlatformRelease ? 'bg-slate-50 text-slate-500' : 'bg-emerald-50 text-emerald-700'}`}>{loading ? 'Checking…' : catalogError ? 'Check unavailable' : !latestPlatformRelease ? 'No release available' : 'Up to date'}</span>}
         </div>
         {activePlatformUpgrade && <div className="border-t border-slate-100 px-5 py-4"><div className="flex items-center justify-between text-xs"><strong>{activePlatformUpgrade.fromVersion} → {activePlatformUpgrade.targetVersion}</strong><span className="text-slate-500">{activePlatformUpgrade.progress}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-blue-600 transition-all" style={{width:`${activePlatformUpgrade.progress}%`}} /></div><p className="mt-2 text-xs text-slate-500">{activePlatformUpgrade.step}</p></div>}
         {advancedOpen && <div className="border-t border-slate-100 px-5 py-4"><div className="mb-3"><h4 className="text-xs font-black text-slate-800">Registered HyperCDR releases</h4><p className="mt-1 text-xs text-slate-500">Release packages are registered by the build pipeline with a complete immutable component manifest.</p></div><div className="space-y-2">{platformReleases.map(release=><div key={release.id} className="rounded-lg border border-slate-100 bg-white px-3 py-3"><div className="flex items-center justify-between"><strong className="text-xs text-slate-800">HyperCDR {release.version}</strong><span className={`rounded-full px-2 py-0.5 text-[9px] font-black uppercase ${release.status === 'active' ? 'bg-emerald-50 text-emerald-700' : release.status === 'candidate' ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>{release.status}</span></div><div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{Object.entries(release.componentManifest || {}).map(([name, component])=><div key={name} className="min-w-0 rounded-md bg-slate-50 px-2.5 py-2"><span className="block truncate text-[10px] font-bold text-slate-600">{name}</span><span className="mt-0.5 block truncate text-[10px] text-slate-500">{component.version}</span><span className="mt-0.5 block font-mono text-[9px] text-slate-400">sha256:{shortDigest(component.imageDigest)}</span></div>)}</div></div>)}{!platformReleases.length&&<p className="py-4 text-center text-xs text-slate-400">{loading ? 'Loading releases…' : 'No complete release package has been registered.'}</p>}</div></div>}

@@ -1,0 +1,522 @@
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface {
+  --management-radius: 6px;
+  color: var(--hc-text);
+  font-family: var(--font-sans);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-page-title-bar {
+  height: auto;
+  min-height: 66px;
+  gap: 24px;
+  margin-bottom: 12px;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-page-title-bar > div:first-child {
+  flex: 1;
+  min-width: 0;
+  align-self: center;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-page-title-bar > div:only-child {
+  width: 100%;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface :is(.hbdr-dr-table-card, .hbdr-section-card, .ee-settings-panel, .ee-connected-card) {
+  border: 1px solid var(--hc-border);
+  border-radius: var(--management-radius);
+  background: var(--hc-surface);
+  box-shadow: none;
+  color: var(--hc-text);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface :is(.hbdr-dr-table-head, .hbdr-section-toolbar) {
+  padding: 14px 18px;
+  border-color: var(--hc-border);
+  background: var(--hc-surface);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface :is(.hbdr-dr-table-head, .hbdr-section-toolbar) h3 {
+  margin: 0;
+  font: 600 13px/20px var(--font-sans);
+  color: var(--hc-text);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface :is(.hbdr-dr-table-head, .hbdr-section-toolbar) p {
+  margin: 3px 0 0;
+  font: 400 12px/18px var(--font-sans);
+  color: var(--hc-text-2);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-management-preview {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface :is(button, a):focus-visible {
+  outline: 2px solid var(--hc-accent);
+  outline-offset: 3px;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface :is(input:not([type='checkbox']):not([type='radio']):not([type='file']), select, textarea) {
+  border-color: var(--hc-border-strong);
+  border-radius: 4px;
+  background-color: var(--hc-surface);
+  color: var(--hc-text);
+  font: 400 12px/18px var(--font-sans);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface :is(input, select, textarea):focus-visible {
+  border-color: var(--hc-accent);
+  outline: 2px solid color-mix(in srgb, var(--hc-accent) 22%, transparent);
+  outline-offset: 1px;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface :is(input, textarea)::placeholder {
+  color: var(--hc-text-3);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface :is(.hbdr-dr-action-primary, .hbdr-dr-action-secondary) {
+  min-height: 32px;
+  border-radius: 4px;
+  font: 500 12.5px/18px var(--font-sans);
+  white-space: nowrap;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .operations-center-page > .grid > button {
+  border-radius: var(--management-radius);
+  border-color: var(--hc-border);
+  padding: 16px 18px;
+  background: var(--hc-surface);
+  box-shadow: none;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .operations-center-page > .grid > button:hover {
+  border-color: var(--hc-accent);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .operations-center-page > .grid > button > span {
+  font: 400 12px/18px var(--font-sans);
+  color: var(--hc-text-2);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .operations-center-page > .grid > button > strong {
+  font: 500 24px/32px var(--font-mono);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-task-ledger-summary {
+  gap: 0;
+  border: 1px solid var(--hc-border);
+  border-radius: var(--management-radius);
+  overflow: hidden;
+  background: var(--hc-surface);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-task-ledger-summary section {
+  padding: 14px 18px;
+  border: 0;
+  border-right: 1px solid var(--hc-border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-task-ledger-summary section:last-child {
+  border-right: 0;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-task-ledger-summary strong {
+  font: 500 22px/30px var(--font-mono);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-task-ledger-summary span {
+  font: 400 11.5px/18px var(--font-sans);
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--hc-text-2);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface :is(.ee-settings-panel, .ee-connected-card) {
+  padding: 20px;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface :is(.ee-settings-panel, .ee-connected-card) :is(h3, h4) {
+  font: 600 13px/20px var(--font-sans);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .ee-settings-panel header {
+  padding-bottom: 16px;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface :is(.ee-settings-panel header p, .ee-invite-description) {
+  font: 400 12px/19px var(--font-sans);
+  color: var(--hc-text-2);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .ee-settings-details {
+  margin-top: 20px;
+  gap: 20px 32px;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .ee-settings-detail dt {
+  font: 400 11.5px/18px var(--font-sans);
+  color: var(--hc-text-2);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .ee-settings-detail dd {
+  font: 400 12.5px/20px var(--font-sans);
+  overflow-wrap: anywhere;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-support-bundle-page > section:first-of-type {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px 24px;
+  padding: 20px;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-support-bundle-page > section:first-of-type > * {
+  margin: 0;
+  min-width: 0;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-support-bundle-page > section:first-of-type > :is(:first-child, p) {
+  grid-column: 1 / -1;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-support-bundle-page > section:first-of-type > button {
+  justify-self: start;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-support-bundle-page label {
+  font: 500 12px/18px var(--font-sans);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-support-bundle-page textarea {
+  resize: vertical;
+  min-height: 100px;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-support-bundle-page h4 {
+  font: 600 13px/20px var(--font-sans);
+}
+
+@media (max-width: 1200px) {
+  #root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-support-bundle-page > section:first-of-type {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-management-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--hc-border);
+  border-radius: 4px;
+  font: 400 12px/19px var(--font-sans);
+  overflow-wrap: anywhere;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-management-notice.is-error {
+  border-color: color-mix(in srgb, var(--hc-crit) 30%, var(--hc-border));
+  background: color-mix(in srgb, var(--hc-crit) 5%, var(--hc-surface));
+  color: var(--hc-crit);
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface > :is(.ee-organization-access, .hc-directory) {
+  margin: 0;
+  padding: 10px 20px 14px !important;
+  min-width: 0;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface :is(.font-black, .font-bold) {
+  font-weight: 500;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-hyper-table-head-cell {
+  color: var(--hc-text-2);
+  background: var(--hc-sunken);
+  font: 600 10.5px/16px var(--font-sans);
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-table-other-data,
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-table-other-data :where(span, strong, p) {
+  font-size: 11.5px;
+  font-weight: 400;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-hyper-table-body-cell {
+  line-height: 18px;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-task-ledger-summary strong {
+  color: var(--hc-text);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-task-ledger-summary section:nth-child(4) strong {
+  color: var(--hc-accent);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-task-ledger-summary section:nth-child(5) strong {
+  color: var(--hc-ok);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-task-ledger-summary section:nth-child(6) strong {
+  color: var(--hc-crit);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hc-directory-search input {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hc-directory .hbdr-dr-table-head {
+  padding: 14px 18px;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .diagnostic-logs-page [role='tablist'] {
+  gap: 20px;
+  padding: 0 18px;
+  border-color: var(--hc-border);
+  background: var(--hc-surface);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .diagnostic-logs-page [role='tab'] {
+  padding: 14px 0 12px;
+  font: 500 12.5px/18px var(--font-sans);
+  color: var(--hc-text-2);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .diagnostic-logs-page [role='tab'][aria-selected='true'] {
+  color: var(--hc-accent);
+  border-color: var(--hc-accent);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .diagnostic-logs-page .hbdr-dr-table-head label {
+  font: 400 11.5px/18px var(--font-sans);
+  color: var(--hc-text-2);
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface .hbdr-filter-drawer :is(h3, strong) {
+  font-weight: 600;
+}
+
+#root .premium-app.hbdr-workspace .hbdr-management-surface :is(.hc-access-callback, .hc-access-current dd) {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-hyper-table-head-cell :is(button, .hbdr-hyper-table-static-head) {
+  font: 600 10.5px/16px var(--font-sans) !important;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface :is(.hbdr-dr-table-card, .hbdr-section-card) {
+  border-radius: var(--management-radius) !important;
+  box-shadow: none !important;
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface :is(.hbdr-dr-table-head, .hbdr-section-toolbar) h3 {
+  font: 600 13px/20px var(--font-sans) !important;
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-page-title-bar h3 {
+  color: var(--hc-text);
+  font: 600 20px/30px var(--font-sans) !important;
+  letter-spacing: -.022em !important;
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-dr-action-primary {
+  border-color: var(--hc-accent) !important;
+  background: var(--hc-accent) !important;
+  color: #fff !important;
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-dr-action-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--hc-accent) 88%, var(--hc-text)) !important;
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface :is(.hbdr-dr-action-primary, .hbdr-dr-action-secondary) {
+  border-radius: 4px !important;
+  font-size: 12.5px !important;
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-management-severity {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 400 11.5px/18px var(--font-sans);
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-management-severity::before {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  content: '';
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-management-severity.is-critical {
+  color: var(--hc-crit);
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-management-severity.is-warning {
+  color: var(--hc-warn);
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-query-field-trigger {
+  width: auto !important;
+  min-width: 150px;
+  white-space: nowrap;
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-query-field-trigger > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface :is(.ee-settings-panel, .ee-connected-card) :is(h3, h4) {
+  color: var(--hc-text) !important;
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface :is(.font-mono, .hbdr-hyper-table-cell-code) {
+  font-family: var(--font-mono) !important;
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-management-single-line {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface :is(.hbdr-task-detail-hero, .hbdr-task-detail-section, .hbdr-task-detail-raw) {
+  border: 1px solid var(--hc-border);
+  border-radius: 4px;
+  background: var(--hc-surface);
+  color: var(--hc-text);
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-task-detail-hero > div:first-child > strong {
+  color: var(--hc-text);
+  font: 600 14px/22px var(--font-sans);
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-task-detail-hero em {
+  color: var(--hc-text-2);
+  font: 400 11px/18px var(--font-mono);
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface :is(.hbdr-task-detail-section-title, .hbdr-task-detail-list > *) {
+  border-color: var(--hc-border);
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-task-detail-section-title {
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-task-detail-section-title strong {
+  color: var(--hc-text);
+  font: 600 12.5px/20px var(--font-sans);
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-task-detail-section-title span {
+  color: var(--hc-text-2);
+  font: 400 11px/18px var(--font-sans);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-task-detail-list strong {
+  color: var(--hc-text);
+  font: 400 11.5px/19px var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-task-detail-list > span {
+  color: var(--hc-text-2);
+  font: 400 11.5px/19px var(--font-sans);
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-task-detail-events {
+  padding: 4px 16px;
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-task-detail-events > section {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--hc-border);
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-task-detail-events > section:last-child {
+  border-bottom: 0;
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-task-detail-events > section > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-task-detail-events > section strong {
+  color: var(--hc-text);
+  font: 500 11.5px/18px var(--font-sans);
+  text-transform: capitalize;
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-task-detail-events > section strong.is-error {
+  color: var(--hc-crit);
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-task-detail-events > section span {
+  color: var(--hc-text-3);
+  font: 400 10.5px/18px var(--font-mono);
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-task-detail-events > section p {
+  margin: 4px 0 0;
+  color: var(--hc-text-2);
+  font: 400 11.5px/19px var(--font-sans);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-task-detail-grid p:last-child {
+  color: var(--hc-text) !important;
+  font: 400 12px/18px var(--font-sans);
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-task-detail-events::after {
+  display: none;
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .hbdr-management-log-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .diagnostic-logs-page .hbdr-dr-query-group {
+  flex: 1;
+  justify-content: flex-start;
+  margin-left: 0 !important;
+}
+
+#root .premium-app.hbdr-workspace .premium-content.hbdr-management-surface .diagnostic-logs-page .hbdr-dr-search {
+  width: min(420px, 100%) !important;
+}

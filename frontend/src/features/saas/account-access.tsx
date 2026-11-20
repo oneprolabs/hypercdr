@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { KeyRound, LockKeyhole } from 'lucide-react';
 import { apiGet, apiPost } from '../../api/client';
 import { clearStoredAuthSession } from '../../auth/session';
@@ -13,13 +13,26 @@ export function AccountAccess(context: FrontendModuleContext) {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  useEffect(() => { void apiGet<{ linked: boolean; enabled: boolean; passwordConfigured: boolean }>('/api/v1/saas/google/identity').then(setState).catch(e => toast(e.message)); }, [toast]);
+  const [loadError, setLoadError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError('');
+    try {
+      setState(await apiGet<{ linked: boolean; enabled: boolean; passwordConfigured: boolean }>('/api/v1/saas/google/identity'));
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Sign-in settings could not be loaded.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
   async function link(event: React.FormEvent) {
     event.preventDefault(); if (busy) return; setBusy(true); setError('');
     try { const result = await apiPost<{ url: string }>('/api/v1/saas/google/link', { password }); setPassword(''); window.location.assign(result.url); }
     catch (e) { setError(e instanceof Error ? e.message : 'Could not connect Google'); setBusy(false); }
   }
-  return <section className="space-y-5 ee-organization-access"><SettingsHeader title="Sign-in & Security" description="Manage your password and connected sign-in methods." icon={<KeyRound size={18}/>}/><div className="ee-account-body"><PasswordAccess passwordConfigured={state?.passwordConfigured} toast={toast}/>
+  return <section className="space-y-5 ee-organization-access"><SettingsHeader title="Sign-in & Security" description="Manage your password and connected sign-in methods." icon={<KeyRound size={18}/>}/>{loadError && <div className="hbdr-management-notice is-error" role="alert"><span>{loadError}</span><button type="button" className="hbdr-dr-action-secondary" disabled={loading} onClick={() => void load()}>Retry</button></div>}<div className="ee-account-body"><PasswordAccess passwordConfigured={state?.passwordConfigured} toast={toast}/>
 <div className="ee-connected-card"><h3>Google sign-in</h3><p className="ee-invite-description">{!state ? 'Loading connected account…' : state.linked ? 'Google is connected. You can use it to sign in to this account.' : state.enabled ? 'Connect your Google account as another way to sign in. Your organization and permissions stay the same.' : 'Google sign-in is not configured by the platform administrator.'}</p>{state?.enabled && !state.linked && <button className="hbdr-dr-action-primary mt-4" onClick={() => { setError(''); setPassword(''); setShow(true); }}><KeyRound size={15} />Connect Google</button>}</div></div>
     {show && <ModalFrame title="Connect Google" subtitle="Verify your password before connecting an external account." onClose={() => { if (!busy) setShow(false); }}><form className="ee-invite-form" onSubmit={e => void link(e)}><label>Current password<input type="password" autoComplete="current-password" required value={password} onChange={e => setPassword(e.target.value)} /></label>{error && <p role="alert" className="ee-settings-error">{error}</p>}<div className="ee-invite-actions"><button type="button" className="hbdr-dr-action-secondary" disabled={busy} onClick={() => setShow(false)}>Cancel</button><button type="submit" className="hbdr-dr-action-primary" disabled={busy}>{busy ? 'Connecting…' : 'Continue with Google'}</button></div></form></ModalFrame>}
   </section>;

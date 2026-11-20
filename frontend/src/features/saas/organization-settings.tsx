@@ -4,9 +4,10 @@ import { apiGet, apiPatch, formatLocalDateTime, ModalFrame, type ApiLoginRespons
 import './saas-auth.css';
 import { BoundEmail } from './bound-email';
 import { organizationRole } from './organization-terms';
+import PageTitleBar from '../../components/page-title-bar';
 
 export function SettingsHeader({ title, description, icon }: { title: string; description: string; icon: ReactNode }) {
- return <div className="hbdr-page-hero"><div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between"><div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-blue-600 shadow-sm">{icon}</div><div><h3>{title}</h3><p>{description}</p></div></div><div/></div></div>;
+ return <PageTitleBar><div className="flex items-center gap-3"><span className="sr-only">{icon}</span><div><h3>{title}</h3><p>{description}</p></div></div></PageTitleBar>;
 }
 function Detail({ label, children }: { label: string; children: ReactNode }) {
  return <div className="ee-settings-detail"><dt>{label}</dt><dd>{children}</dd></div>;

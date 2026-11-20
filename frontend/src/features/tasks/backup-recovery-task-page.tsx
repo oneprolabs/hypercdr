@@ -361,7 +361,7 @@ export default function BackupRecoveryTaskPage({
             : '-';
     const primary = row.point ? row.restorePointLabel : label;
     const secondary = row.point ? label : row.restorePointLabel;
-    return <span className={`hbdr-task-ledger-point is-${row.restorePointState}`}><strong>{primary}</strong><em>{secondary}</em></span>;
+    return <span className={`hbdr-task-ledger-point is-${row.restorePointState}`}><strong>{primary}</strong>{secondary && secondary !== primary && <em>{secondary}</em>}</span>;
   };
 
   const renderTaskType = (row: Row) => {
@@ -396,7 +396,7 @@ export default function BackupRecoveryTaskPage({
     { id: 'operation', header: 'Task Type', accessorFn: row => row.operation, size: 145, minSize: 125, cell: info => <span onMouseEnter={() => taskDetailLoader.prefetch(info.row.original.id)} onFocus={() => taskDetailLoader.prefetch(info.row.original.id)}>{renderTaskType(info.row.original)}</span>, meta: { title: row => row.id } },
     ...(visibleColumns.includes('namespace') ? [{ id: 'namespace', header: 'Namespace', accessorFn: (row: Row) => row.namespace, size: 190, minSize: 150, maxSize: 320, cell: (info: any) => <span>{info.row.original.namespace}</span>, meta: { kind: 'primary', title: (row: Row) => row.namespace } }] : []),
     ...(visibleColumns.includes('cluster') ? [{ id: 'cluster', header: 'Cluster', accessorFn: (row: Row) => row.cluster, size: 160, minSize: 130, maxSize: 260, cell: (info: any) => <span>{info.row.original.cluster}</span>, meta: { kind: 'secondary', title: (row: Row) => row.cluster } }] : []),
-    ...(visibleColumns.includes('repository') ? [{ id: 'repository', header: 'Repository', accessorFn: (row: Row) => row.repository, size: 145, minSize: 120, maxSize: 240, cell: (info: any) => <span>{info.row.original.repository}</span>, meta: { kind: 'secondary', title: (row: Row) => row.repository } }] : []),
+    ...(visibleColumns.includes('repository') ? [{ id: 'repository', header: 'Repository', accessorFn: (row: Row) => row.repository, size: 180, minSize: 140, maxSize: 280, cell: (info: any) => <span className="hbdr-management-single-line">{info.row.original.repository}</span>, meta: { kind: 'secondary', title: (row: Row) => row.repository } }] : []),
     { id: 'status', header: 'Task Status', accessorFn: row => taskStatusLabel(row.status), size: 130, minSize: 110, cell: info => renderTaskStatus(info.row.original), meta: { title: row => isFailedStatus(row.status) ? (row.task.errorMessage || row.task.errorCode || 'Task failed') : taskStatusLabel(row.status) } },
     ...(visibleColumns.includes('restorePoint') ? [{ id: 'restorePoint', header: 'Restore Point', accessorFn: (row: Row) => row.restorePointLabel, size: 220, minSize: 170, maxSize: 360, cell: (info: any) => renderPointState(info.row.original), meta: { title: (row: Row) => row.point ? `${row.restorePointLabel} / ${row.restorePointName}` : row.restorePointLabel } }] : []),
     ...(visibleColumns.includes('createdAt') ? [{ id: 'createdAt', header: 'Started', accessorFn: (row: Row) => row.createdAt, size: 170, minSize: 140, maxSize: 230, cell: (info: any) => <span>{info.row.original.createdAt || '-'}</span>, meta: { kind: 'secondary', title: (row: Row) => row.createdAt } }] : []),

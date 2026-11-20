@@ -84,10 +84,10 @@ export default function OperationsCenterPage({ toast, openLogs, openClusters }: 
   const offlineCount = clusters.filter(cluster => cluster.connectionStatus !== 'online').length;
 
   const issueColumns: HyperTableColumn<Issue>[] = [
-    { id: 'severity', header: 'Severity', accessorFn: row => row.severity, size: 110, cell: info => <span className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${info.row.original.severity === 'Critical' ? 'border-rose-100 bg-rose-50 text-rose-700' : 'border-amber-100 bg-amber-50 text-amber-700'}`}>{info.row.original.severity}</span>, meta: { kind: 'status' } },
+    { id: 'severity', header: 'Severity', accessorFn: row => row.severity, size: 110, cell: info => <span className={`hbdr-management-severity ${info.row.original.severity === 'Critical' ? 'is-critical' : 'is-warning'}`}>{info.row.original.severity}</span>, meta: { kind: 'status' } },
     { id: 'issue', header: 'Issue', accessorFn: row => row.issue, size: 230, minSize: 180, cell: info => info.row.original.issue, meta: { kind: 'primary', title: row => row.issue } },
     { id: 'resource', header: 'Affected Resource', accessorFn: row => row.resource, size: 180, cell: info => info.row.original.resource, meta: { kind: 'secondary', title: row => row.resource } },
-    { id: 'impact', header: 'Impact', accessorFn: row => row.impact, size: 360, minSize: 220, cell: info => info.row.original.impact, meta: { kind: 'secondary', title: row => row.impact } },
+    { id: 'impact', header: 'Impact', accessorFn: row => row.impact, size: 360, minSize: 220, cell: info => <span className="hbdr-management-preview">{info.row.original.impact}</span>, meta: { kind: 'secondary', title: row => row.impact } },
     { id: 'detected', header: 'Detected', accessorFn: row => row.detectedAt, size: 180, cell: info => info.row.original.detectedAt ? formatLocalDateTime(info.row.original.detectedAt) : 'Current', meta: { kind: 'secondary' } },
   ];
   const operationColumns: HyperTableColumn<Operation>[] = [

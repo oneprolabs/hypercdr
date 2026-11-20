@@ -12,6 +12,7 @@ import ClusterRegistrationDrawer from './features/clusters/cluster-registration-
 import { ClusterRegistrationEmptyState } from './features/clusters/cluster-registration-empty-state';
 import { RequiredPasswordChange, PasswordChangeSuccess, PasswordRecoveryPage } from './auth/password-pages';
 import PageTitleBar from './components/page-title-bar';
+import './features/management/management-surfaces.css';
 ﻿import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { DrConfigurationModal } from './dr-configuration-modal';
 import { RecoveryWizardModal, type RecoveryWizardConfig } from './recovery-wizard-modal';
@@ -2017,7 +2018,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
           </aside>
         )}
 
-        <section className="premium-content flex-1 overflow-y-auto">
+        <section className={`premium-content flex-1 overflow-y-auto ${activeModule === 'ops' || activeModule === 'settings' || view === 'dr_tasks' ? 'hbdr-management-surface' : ''}`}>
           {registrationRequested && <ClusterRegistrationDrawer clusters={liveClusters ?? clusters} onClose={() => setRegistrationRequested(false)} onRefreshRegistration={refreshPlatformData} setSelectedCluster={setSelectedCluster} getAgentTokenForRegistration={getAgentTokenForRegistration} prefetchAgentToken={prefetchAgentToken} toast={setToast} />}
           <AnimatePresence mode={activeModule === 'settings' ? 'sync' : 'wait'}>
             {view === 'dashboard' && (
