@@ -31,6 +31,14 @@ func (r *Router) createAgentToken(w http.ResponseWriter, req *http.Request) {
 	clusterType := storeClusterType(body.ClusterType)
 	token, err := r.store.CreateAgentToken(tenantID, actor.ID, body.Description, ttl, clusterType)
 	if err != nil {
+		if errors.Is(err, store.ErrClusterCapacity) || errors.Is(err, store.ErrRegistrationPermission) {
+			code := "license_cluster_capacity_exceeded"
+			if errors.Is(err, store.ErrRegistrationPermission) {
+				code = "organization_permission_required"
+			}
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": code, "message": err.Error()})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"error": "token_create_failed",
 		})
@@ -99,6 +107,10 @@ func (r *Router) validateAgentToken(w http.ResponseWriter, req *http.Request) {
 		status, code = http.StatusGone, "TOKEN_EXPIRED"
 	} else if errors.Is(err, store.ErrTokenUsed) {
 		status, code = http.StatusConflict, "TOKEN_USED"
+	} else if errors.Is(err, store.ErrClusterCapacity) {
+		status, code = http.StatusForbidden, "LICENSE_CLUSTER_CAPACITY_EXCEEDED"
+	} else if errors.Is(err, store.ErrRegistrationPermission) {
+		status, code = http.StatusForbidden, "REGISTRATION_PERMISSION_REQUIRED"
 	} else if !errors.Is(err, store.ErrTokenInvalid) {
 		r.logger.Error("failed to validate agent token", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"valid": false, "error": "TOKEN_CHECK_FAILED", "message": "install token could not be validated"})

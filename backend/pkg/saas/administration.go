@@ -186,10 +186,11 @@ func (s *Service) mutateMember(w http.ResponseWriter, r *http.Request, p platfor
 	var in struct {
 		DisplayName *string `json:"displayName"`
 		Role        string  `json:"role"`
+		RoleID      string  `json:"roleId"`
 		Status      string  `json:"status"`
 	}
 	deleting := r.Method == http.MethodDelete
-	if !deleting && (!decode(r, &in) || (in.Role != "admin" && in.Role != "operator") || (in.Status != "active" && in.Status != "disabled") || (in.DisplayName != nil && len([]rune(*in.DisplayName)) > 100)) {
+	if !deleting && (!decode(r, &in) || (in.Role == "" && in.RoleID == "") || (in.Status != "active" && in.Status != "disabled") || (in.DisplayName != nil && len([]rune(*in.DisplayName)) > 100)) {
 		problem(w, 400, "invalid_member", "Enter a name of up to 100 characters and select a valid role and status.")
 		return
 	}
@@ -207,6 +208,22 @@ func (s *Service) mutateMember(w http.ResponseWriter, r *http.Request, p platfor
 	if status != "active" && !p.SystemAdmin {
 		problem(w, 403, "organization_disabled", "This organization is disabled.")
 		return
+	}
+	var customRoleID any
+	if !deleting {
+		requested := in.RoleID
+		if requested == "" {
+			requested = in.Role
+		}
+		in.Role, customRoleID, e = resolveRole(tx, scope, requested)
+		if errors.Is(e, sql.ErrNoRows) {
+			problem(w, 400, "invalid_member_role", "Select a role belonging to this organization.")
+			return
+		}
+		if e != nil {
+			internal(w)
+			return
+		}
 	}
 	var role, oldStatus string
 	var sys bool
@@ -247,9 +264,9 @@ func (s *Service) mutateMember(w http.ResponseWriter, r *http.Request, p platfor
 			_, e = tx.ExecContext(r.Context(), `delete from users where id=$1 and tenant_id=$2`, r.PathValue("id"), scope)
 		}
 	} else {
-		_, e = tx.ExecContext(r.Context(), `update users set role=$1,status=$2,display_name=coalesce($3,display_name),updated_at=now() where id=$4 and tenant_id=$5`, in.Role, in.Status, in.DisplayName, r.PathValue("id"), scope)
+		_, e = tx.ExecContext(r.Context(), `update users set role=$1,status=$2,display_name=coalesce($3,display_name),custom_role_id=$6,updated_at=now() where id=$4 and tenant_id=$5`, in.Role, in.Status, in.DisplayName, r.PathValue("id"), scope, customRoleID)
 	}
-	if e == nil {
+	if e == nil && (deleting || in.Status == "disabled") {
 		_, e = tx.ExecContext(r.Context(), `delete from platform_sessions where user_id=$1`, r.PathValue("id"))
 	}
 	if e == nil {

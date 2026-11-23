@@ -1,4 +1,5 @@
 import { HyperCDRMark } from './components/hypercdr-mark';
+import { BusinessAccessProvider, userHasBusinessPermission } from './auth/business-access';
 import { sessionMutationScope } from './app/session-mutation';
 import { replaceApplicationTags } from './api/applications';
 import { listTasks, listTaskEvents } from './api/tasks';
@@ -793,7 +794,8 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
   }, [authSession?.session.token]);
   const [productInfo, setProductInfo] = useState<ApiProductInfo | null>(null);
   const [productCapabilities, setProductCapabilities] = useState<Record<string, { enabled?: boolean }>>({});
-  const clusterRegistrationAllowed = !hasEnterpriseAuditModule || productInfo?.license?.status === 'active';
+  const canViewResources = hasEnterpriseAuditModule || userHasBusinessPermission(authSession?.user, 'resources.view');
+  const clusterRegistrationAllowed = (!hasEnterpriseAuditModule || productInfo?.license?.status === 'active') && (hasEnterpriseAuditModule || userHasBusinessPermission(authSession?.user, 'cluster.register'));
   const [passwordChangeCompleted, setPasswordChangeCompleted] = useState(false);
   const [view, setView] = useState<View>(() => { const restored=readStoredView(); const session=readStoredAuthSession(); return session ? (restored==='users'&&modules.some(m=>m.id==='platform-users') ? (session.user.systemAdmin?'extension:platform-users':'extension:members') : restored||'applications') : 'login'; });
   const [timeZonePreference, setTimeZonePreference] = useState(() => authSession?.user.timeZone || '');
@@ -987,16 +989,17 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
     refreshPlatformData,
     loadClusterTopology,
     loadApplicationRecoveryData,
-  } = usePlatformResources({ sessionToken: authSession?.session.token || '', view, resourceSessionOwnerRef, mapPolicy });
+  } = usePlatformResources({ sessionToken: canViewResources ? authSession?.session.token || '' : '', view, resourceSessionOwnerRef, mapPolicy });
 
   useEffect(() => {
     const token = authSession?.session.token;
     if (!token) return;
     let cancelled = false;
-    void apiGet<AuthSession['user']>('/api/v1/auth/me').then(user => {
+    const refreshIdentity = () => { void apiGet<AuthSession['user']>('/api/v1/auth/me').then(user => {
       if (cancelled || resourceSessionOwnerRef.current !== token) return;
       setAuthSession(current => {
         if (!current || current.session.token !== token) return current;
+        if (JSON.stringify(current.user) === JSON.stringify(user)) return current;
         const next = { ...current, user };
         writeStoredAuthSession(next);
         return next;
@@ -1007,8 +1010,11 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
     }).catch(() => {
       // The shared API client handles expired sessions. Keep the cached session
       // for transient network failures and refresh it on the next page load.
-    });
-    return () => { cancelled = true; };
+    }); };
+    refreshIdentity();
+    const timer = window.setInterval(refreshIdentity, 60000);
+    window.addEventListener('focus', refreshIdentity);
+    return () => { cancelled = true; window.clearInterval(timer); window.removeEventListener('focus', refreshIdentity); };
   }, [authSession?.session.token]);
   const [restorePointNamespaceFilter, setRestorePointNamespaceFilter] = useState<string[]>([]);
   const [secondaryCollapsed, setSecondaryCollapsed] = useState(false);
@@ -1023,7 +1029,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
 
   useEffect(() => {
     const owner = authSession?.session.token || '';
-    if (!owner) {
+    if (!owner || !canViewResources) {
       setClusterRegistrationState('loading');
       return;
     }
@@ -1041,7 +1047,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
         if (!cancelled && resourceSessionOwnerRef.current === owner) setClusterRegistrationState('error');
       });
     return () => { cancelled = true; };
-  }, [authSession?.session.token]);
+  }, [authSession?.session.token, canViewResources]);
 
   const [appStage, setAppStage] = useState<'select' | 'config' | 'run'>('select');
   const [search, setSearch] = useState('');
@@ -1288,6 +1294,10 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
 
   useEffect(() => {
     const initialParams = new URLSearchParams(window.location.search);
+	if (authSession && ['success', 'canceled', 'return'].includes(initialParams.get('billing') || '') && modules.some(module => module.id === 'license')) {
+	  writeStoredView('extension:license');
+	  setView('extension:license');
+	}
     const flowFromURL = initialParams.get('auth');
     const tokenFromURL = initialParams.get('reset_token');
     if (tokenFromURL) setResetToken(tokenFromURL);
@@ -1669,7 +1679,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
         <div role="status" className="p-10 text-center text-sm text-slate-500">Loading clusters…</div>
       ) : liveClusters.length === 0 ? (
         <ClusterRegistrationEmptyState onRegister={() => {
-          if (!clusterRegistrationAllowed) { setToast('An active license is required to register a cluster. Open Settings > License Management.'); return; }
+          if (!clusterRegistrationAllowed) { setToast(hasEnterpriseAuditModule ? 'An active license is required to register a cluster. Open Settings > License Management.' : 'Your role cannot register clusters. Contact your organization administrator.'); return; }
           setRegistrationRequested(true);
         }} />
       ) : onboardingGate}
@@ -1865,6 +1875,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
   }
 
   return (
+    <BusinessAccessProvider user={hasEnterpriseAuditModule ? undefined : authSession?.user}>
     <div className="premium-app hbdr-workspace min-h-screen flex bg-slate-50 text-slate-900">
       <aside className={`premium-sidebar w-64 bg-white border-r border-slate-200 flex flex-col ${accountMenuOpen ? 'z-[200]' : 'z-20'}`}>
         <div>
@@ -1934,7 +1945,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
                   <span><User size={18} /></span>
                   <div>
                     <strong>{authSession?.user.username || 'Account'}</strong>
-                    <small>{authSession?.user.systemAdmin?'Platform administrator':authSession?.user.role==='admin'?'Organization administrator':'Member'}</small>
+                    <small>{authSession?.user.systemAdmin?'Platform administrator':authSession?.user.roleName||(authSession?.user.role==='admin'?'Organization administrator':'Operator')}</small>
                   </div>
                 </div>
                 <button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); openView('profile'); }}>
@@ -1989,7 +2000,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
             </div>}
             <div className="hbdr-secondary-menu">
               {secondaryNav.items.map((item, index) => {
-                const sectionFor=(v:string)=>v==='profile'||v==='extension:signin-security'?'Personal settings':v==='extension:organization'||v==='extension:members'?'Organization management':'Platform management';
+                const sectionFor=(v:string)=>v==='profile'||v==='extension:signin-security'?'Personal settings':['extension:organization','extension:members','extension:roles','extension:license'].includes(v)?'Organization management':'Platform management';
                 const drSectionFor=(v:string)=>v==='clusters'?'Source':v==='storage'?'Target':v==='policies'||v==='tags'?'Policy':'DR';
                 const section=activeModule==='dr'?drSectionFor(item.view):sectionFor(item.view);
                 const showSection=activeModule==='dr'?(index===0||drSectionFor(secondaryNav.items[index-1].view)!==section):activeModule==='settings'&&modules.some(m=>m.id==='platform-users')&&(index===0||sectionFor(secondaryNav.items[index-1].view)!==section);
@@ -2020,7 +2031,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
 
         <section className={`premium-content flex-1 overflow-y-auto ${activeModule === 'ops' || activeModule === 'settings' || view === 'dr_tasks' ? 'hbdr-management-surface' : ''}`}>
           {registrationRequested && <ClusterRegistrationDrawer clusters={liveClusters ?? clusters} onClose={() => setRegistrationRequested(false)} onRefreshRegistration={refreshPlatformData} setSelectedCluster={setSelectedCluster} getAgentTokenForRegistration={getAgentTokenForRegistration} prefetchAgentToken={prefetchAgentToken} toast={setToast} />}
-          <AnimatePresence mode={activeModule === 'settings' ? 'sync' : 'wait'}>
+          {!canViewResources && activeModule !== 'settings' ? <div className="ee-settings-panel" role="status"><h3>Business access not assigned</h3><p>Your role does not include permission to view organization resources. Contact your organization administrator. Personal settings and license information remain available.</p></div> : <AnimatePresence mode={activeModule === 'settings' ? 'sync' : 'wait'}>
             {view === 'dashboard' && (
               <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                 <React.Suspense fallback={<PageLoadFallback />}><LazyOverviewPage
@@ -2101,7 +2112,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
                 loading={liveClusters === null}
                 protectionPlans={liveApiPlans}
                 onLoadTopology={loadClusterTopology}
-                canUpgrade={authSession?.user.role === 'admin'}
+                canUpgrade={hasEnterpriseAuditModule ? authSession?.user.role === 'admin' : userHasBusinessPermission(authSession?.user, 'cluster.manage')}
                 defaultClusterId={defaultClusterId}
                 clusterMenuId={clusterMenuId}
                 setClusterMenuId={setClusterMenuId}
@@ -2194,7 +2205,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
             {view === 'profile' && authSession && ProfileComponent && <ProfileComponent currentUser={authSession.user} clusters={liveApiClusters} toast={setToast} onCurrentUserChange={user => { sessionMutationScope(resourceSessionOwnerRef, authSession.session.token)(() => { const next = { ...authSession, user }; setAuthSession(next); writeStoredAuthSession(next); }); }} />}
             {view === 'profile' && authSession && !ProfileComponent && <React.Suspense fallback={<PageLoadFallback />}><LazyProfilePage session={authSession} setSession={next => { sessionMutationScope(resourceSessionOwnerRef, next.session.token)(() => { setAuthSession(next); writeStoredAuthSession(next); }); }} toast={message => { sessionMutationScope(resourceSessionOwnerRef, authSession.session.token)(() => setToast(message)); }} /></React.Suspense>}
             {authSession && visibleExtensionModules.map(module => view === module.view ? <React.Suspense key={module.id} fallback={<PageLoadFallback />}><module.component key={authSession.session.token} currentUser={authSession.user} clusters={liveApiClusters} toast={setToast} onCurrentUserChange={user => { sessionMutationScope(resourceSessionOwnerRef, authSession.session.token)(() => { const next = { ...authSession, user }; setAuthSession(next); writeStoredAuthSession(next); }); }} /></React.Suspense> : null)}
-          </AnimatePresence>
+          </AnimatePresence>}
         </section>
       </main>
 
@@ -2226,6 +2237,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
         </div>
       )}
     </div>
+    </BusinessAccessProvider>
   );
 }
 

@@ -143,6 +143,9 @@ type EditionIdentity struct {
 	Email              string     `json:"email"`
 	DisplayName        string     `json:"displayName,omitempty"`
 	Role               string     `json:"role"`
+	RoleID             string     `json:"roleId,omitempty"`
+	RoleName           string     `json:"roleName,omitempty"`
+	Permissions        []string   `json:"permissions,omitempty"`
 	Status             string     `json:"status"`
 	AuthProvider       string     `json:"authProvider"`
 	TimeZone           string     `json:"timeZone,omitempty"`
@@ -322,7 +325,8 @@ func (r *Router) mountExtensionRoutes() {
 		scope := "edition-policy"
 		if route.Public {
 			parts := strings.Split(route.Pattern, " ")
-			if len(parts) != 2 || (parts[0] != "GET" && parts[0] != "POST") || !(strings.HasPrefix(parts[1], "/api/v1/enterprise/auth/") || strings.HasPrefix(parts[1], "/api/v1/saas/auth/")) || strings.ContainsAny(parts[1], "{}?*\t\r\n") {
+			webhook := route.Pattern == "POST /api/v1/saas/subscription/webhook"
+			if len(parts) != 2 || (parts[0] != "GET" && parts[0] != "POST") || !(webhook || strings.HasPrefix(parts[1], "/api/v1/enterprise/auth/") || strings.HasPrefix(parts[1], "/api/v1/saas/auth/")) || strings.ContainsAny(parts[1], "{}?*\t\r\n") {
 				panic("public edition routes must be exact GET/POST identity auth endpoints")
 			}
 			scope = "public"

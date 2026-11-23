@@ -3,6 +3,7 @@ package saas
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -20,6 +21,8 @@ import (
 	"strings"
 	"time"
 
+	"hypercdr-platform/platform/backend/pkg/billing"
+	"hypercdr-platform/platform/backend/pkg/licensing"
 	"hypercdr-platform/platform/backend/pkg/platform"
 )
 
@@ -36,6 +39,9 @@ type Config struct {
 	SaaS, Signup                               bool
 	Origin, GoogleClientID, GoogleClientSecret string
 	Mailer                                     Mailer
+	LicensePublicKeys                          map[string]ed25519.PublicKey
+	SubscriptionPlans                          []billing.Plan
+	Stripe                                     billing.StripeConfig
 }
 type Service struct {
 	db              *sql.DB
@@ -43,6 +49,12 @@ type Service struct {
 	identity        IdentityProvider
 	google          *googleProvider
 	emailConfigured func() bool
+	stripe          stripeProvider
+}
+
+type stripeProvider interface {
+	Request(context.Context, string, string, string, url.Values, any) error
+	ValidatePrices(context.Context, []billing.Plan) error
 }
 
 func ConfigFromEnvironment() (Config, error) {
@@ -74,10 +86,32 @@ func ConfigFromEnvironment() (Config, error) {
 		return c, errors.New("configure both Google client ID and secret")
 	}
 
+	keys, err := licensing.ParsePublicKeys(os.Getenv("HCDR_LICENSE_PUBLIC_KEYS"))
+	if err != nil {
+		return c, err
+	}
+	c.LicensePublicKeys = keys
+	c.SubscriptionPlans, err = billing.ParsePlans(os.Getenv("HCDR_SUBSCRIPTION_PLANS_JSON"))
+	if err != nil {
+		return c, err
+	}
+	if strings.TrimSpace(os.Getenv("HCDR_SUBSCRIPTION_PLANS_JSON")) == "" {
+		c.SubscriptionPlans = billing.DefaultPlans()
+	}
+	c.Stripe, err = billing.LoadStripeConfig(os.Getenv("HCDR_STRIPE_CONFIG_FILE"))
+	if err != nil {
+		return c, err
+	}
+	if !c.SaaS && c.Stripe.SecretKey != "" {
+		return c, errors.New("Stripe sandbox is only available in SaaS mode")
+	}
 	return c, nil
 }
 func New(db *sql.DB, cfg Config, identity IdentityProvider) *Service {
 	s := &Service{db: db, cfg: cfg, identity: identity}
+	if cfg.Stripe.SecretKey != "" {
+		s.stripe = billing.NewStripeClient(cfg.Stripe)
+	}
 	if cfg.GoogleClientID != "" {
 		s.google = newGoogleProvider(cfg)
 	}
@@ -86,6 +120,7 @@ func New(db *sql.DB, cfg Config, identity IdentityProvider) *Service {
 func (s *Service) Routes() []platform.Route {
 	const auth = "/api/v1/saas/auth"
 	routes := []platform.Route{}
+	routes = append(routes, platform.Route{Pattern: "POST /api/v1/saas/subscription/webhook", Public: true, Handler: func(w http.ResponseWriter, r *http.Request, _ platform.Principal) { s.stripeWebhook(w, r) }})
 	public := func(pattern string, h func(*Service, http.ResponseWriter, *http.Request)) {
 		routes = append(routes, platform.Route{Pattern: pattern, Public: true, Handler: func(w http.ResponseWriter, r *http.Request, _ platform.Principal) {
 			s.withCurrentOrigin(w, r, func(current *Service) {
@@ -130,6 +165,7 @@ func (s *Service) Routes() []platform.Route {
 	private("PATCH /api/v1/saas/admin/organizations/{organization}", (*Service).administrationOrganization)
 	private("GET /api/v1/saas/admin/users", (*Service).administrationUsers)
 	private("GET /api/v1/saas/admin/organizations/{organization}/members", (*Service).administrationMembers)
+	private("GET /api/v1/saas/admin/organizations/{organization}/roles", (*Service).administrationRoles)
 	private("PATCH /api/v1/saas/admin/organizations/{organization}/members/{id}", (*Service).administrationMember)
 	private("DELETE /api/v1/saas/admin/organizations/{organization}/members/{id}", (*Service).administrationMember)
 	private("GET /api/v1/saas/admin/organizations/{organization}/invitations", (*Service).administrationInvitation)
@@ -139,6 +175,15 @@ func (s *Service) Routes() []platform.Route {
 	private("GET /api/v1/saas/organization", (*Service).organization)
 	private("PATCH /api/v1/saas/organization", (*Service).organization)
 	private("GET /api/v1/saas/members", (*Service).members)
+	private("GET /api/v1/saas/roles", (*Service).roles)
+	private("GET /api/v1/saas/license", (*Service).license)
+	private("POST /api/v1/saas/license", (*Service).license)
+	private("GET /api/v1/saas/subscription", (*Service).subscription)
+	private("POST /api/v1/saas/subscription/checkout", (*Service).subscriptionCheckout)
+	private("POST /api/v1/saas/subscription/portal", (*Service).subscriptionPortal)
+	private("POST /api/v1/saas/roles", (*Service).roles)
+	private("PATCH /api/v1/saas/roles/{id}", (*Service).roles)
+	private("DELETE /api/v1/saas/roles/{id}", (*Service).roles)
 	private("PATCH /api/v1/saas/members/{id}", (*Service).updateMember)
 	private("GET /api/v1/saas/invitations", (*Service).listInvitations)
 	private("POST /api/v1/saas/invitations", (*Service).invite)

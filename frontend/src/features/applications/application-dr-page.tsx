@@ -6,6 +6,7 @@ import { recoveryNamespaces } from '../recovery/recovery-detail-model';
 import { getTask, listTaskEvents, listTasks, createBackupTask, createRecoveryTask, abortTask, cleanupDrillTask } from '../../api/tasks';
 import { createTaskDetailLoader } from '../recovery/task-detail-loader';
 import { listProtectionPlans, createProtectionPlan, updateProtectionPlan, activateProtectionPlan, reconfigureProtectionPlanStorage, deleteProtectionPlan } from '../../api/protection-plans';
+import { useBusinessPermission } from '../../auth/business-access';
 import { listApplications, updateApplicationProtection } from '../../api/applications';
 import { requestClusterInventory, getInventoryRequestStatus } from '../../api/inventory';
 import NamespaceDetailDrawer from './namespace-detail-drawer';
@@ -98,6 +99,11 @@ export default function ApplicationDrPage(props: {
 }) {
   const { apps, clusters, currentCluster, storage, policies, protectionPlans, setProtectionPlans, tags, stage, setStage, currentClusterId, updateAppTags, openStorage, openClusters, openPolicies, toast, refreshPlatformData, loadApplicationRecoveryData, liveAppTasks, setLiveAppTasks, liveRecoveryTasks, setLiveRecoveryTasks, liveRestorePoints } = props;
   const [platformTasks, setPlatformTasks] = useState<ApiTask[]>([]);
+  const canManageSync = useBusinessPermission('sync.manage');
+  const canExecuteDrill = useBusinessPermission('drill.execute');
+  const canExecuteRecovery = useBusinessPermission('recovery.execute');
+  const canAbortTasks = useBusinessPermission('task.abort');
+  const canDeleteBackups = useBusinessPermission('backup.delete');
   useDialogPreload(drDialogModules);
   const [selectedSelectApps, setSelectedSelectApps] = useState<string[]>([]);
   const [selectedConfigApps, setSelectedConfigApps] = useState<string[]>([]);
@@ -1008,7 +1014,7 @@ export default function ApplicationDrPage(props: {
   const unsupportedDRSelectionMessage = selectedUnsupportedDRApp
     ? `[100201] Unsupported DR Storage. ${selectedUnsupportedDRApp.namespace || selectedUnsupportedDRApp.name} contains storage that is not eligible for DR.`
     : '';
-  const primaryDisabled = selectedNames.length === 0 || selectedHasUnsupportedDR;
+  const primaryDisabled = !canManageSync || selectedNames.length === 0 || selectedHasUnsupportedDR;
   const selectedAttachedTagIds = Array.from(new Set(selectedApps.flatMap(app => app.tags || [])));
   const attachTagToSelected = (tagId: string) => {
     updateAppTags(currentClusterId, selectedNames, currentTags => Array.from(new Set([...currentTags, tagId])));
@@ -1651,7 +1657,7 @@ export default function ApplicationDrPage(props: {
     [...platformTasks, ...Object.values(syncTasks), ...Object.values(recoveryTasks), ...Object.values(submittedSyncTasks), ...Object.values(refreshedDrTasks)],
   );
   const selectedRunHasRunningSync = selectedRunActiveSyncTasks.length > 0;
-  const canStartSync = selectedRunApps.length > 0 && !syncSubmitting && !selectedRunHasRunningSync && !selectedRunHasCleanupRunning && selectedRunNotReadyRows.length === 0;
+  const canStartSync = canManageSync && selectedRunApps.length > 0 && !syncSubmitting && !selectedRunHasRunningSync && !selectedRunHasCleanupRunning && selectedRunNotReadyRows.length === 0;
   const canForceAbort = selectedRunRows.length > 0 && !abortSubmitting;
   const abortTaskSnapshots = [...platformTasks, ...Object.values(syncTasks), ...Object.values(recoveryTasks), ...Object.values(refreshedDrTasks)];
   const abortStarted = Object.keys(abortResults).length > 0;
@@ -2844,7 +2850,7 @@ export default function ApplicationDrPage(props: {
                     setSelectedConfigApps([]);
                     setStage('select');
                   }}
-                  disabled={selectedConfigApps.length === 0 || stageMoving}
+                  disabled={!canManageSync || selectedConfigApps.length === 0 || stageMoving}
                   className="hbdr-dr-action-primary hbdr-dr-action-ghost"
                 >
                   <ArrowLeft size={15} />{stageMoving ? 'Moving…' : 'Move Back'}
@@ -2855,8 +2861,8 @@ export default function ApplicationDrPage(props: {
             {isRunStage && (
               <>
                 <button onClick={handlePrimaryAction} disabled={!canStartSync} className="hbdr-dr-action-primary"><Play size={14} />{syncSubmitting ? 'Submitting…' : 'Start Sync'}</button>
-                <button onMouseEnter={() => preloadDialog(RecoveryWizardModal)} onFocus={() => preloadDialog(RecoveryWizardModal)} disabled={!canRestoreAction} title={hasSelectedRunActiveRecoveryTask ? 'A recovery task is already running' : undefined} onClick={() => openRestoreAction('drill')} className="hbdr-dr-action-primary hbdr-dr-action-ghost"><History size={14} />Drill</button>
-                <button onMouseEnter={() => preloadDialog(RecoveryWizardModal)} onFocus={() => preloadDialog(RecoveryWizardModal)} disabled={!canRestoreAction} title={hasSelectedRunActiveRecoveryTask ? 'A recovery task is already running' : undefined} onClick={() => openRestoreAction('takeover')} className="hbdr-dr-action-danger"><AlertTriangle size={14} />Takeover</button>
+                <button onMouseEnter={() => preloadDialog(RecoveryWizardModal)} onFocus={() => preloadDialog(RecoveryWizardModal)} disabled={!canExecuteDrill || !canRestoreAction} title={hasSelectedRunActiveRecoveryTask ? 'A recovery task is already running' : undefined} onClick={() => openRestoreAction('drill')} className="hbdr-dr-action-primary hbdr-dr-action-ghost"><History size={14} />Drill</button>
+                <button onMouseEnter={() => preloadDialog(RecoveryWizardModal)} onFocus={() => preloadDialog(RecoveryWizardModal)} disabled={!canExecuteRecovery || !canRestoreAction} title={hasSelectedRunActiveRecoveryTask ? 'A recovery task is already running' : undefined} onClick={() => openRestoreAction('takeover')} className="hbdr-dr-action-danger"><AlertTriangle size={14} />Takeover</button>
               </>
             )}
             <div className="relative">
@@ -2888,7 +2894,7 @@ export default function ApplicationDrPage(props: {
                       {isRunStage && (
                         <>
                           <button
-                            disabled={selectedRunApps.length !== 1 || selectedRunHasCleanupRunning || resourceCatalogLoading}
+                            disabled={!canManageSync || selectedRunApps.length !== 1 || selectedRunHasCleanupRunning || resourceCatalogLoading}
                             title="Edit protection configuration"
                             onClick={() => {
                               setAppBulkMenuOpen(false);
@@ -2900,7 +2906,7 @@ export default function ApplicationDrPage(props: {
                             {selectedRunApps.length !== 1 && <em className="rounded bg-slate-100 px-1 py-0.5 text-[9px] not-italic text-slate-400">Single</em>}
                           </button>
                           <button
-                            disabled={!canForceAbort}
+                            disabled={!canAbortTasks || !canForceAbort}
                             onClick={() => {
                               void openForceAbort();
                             }}
@@ -2909,7 +2915,7 @@ export default function ApplicationDrPage(props: {
                             <AlertCircle size={14} />Force Abort
                           </button>
                           <button
-                            disabled={!canCleanupDrill}
+                            disabled={!canExecuteDrill || !canCleanupDrill}
                             onClick={() => {
                               void openDrillCleanup();
                             }}
@@ -2918,7 +2924,7 @@ export default function ApplicationDrPage(props: {
                             <Trash2 size={14} className="text-amber-500" />Cleanup Drill
                           </button>
                           <button
-                            disabled={selectedRunApps.length === 0 || selectedRunHasCleanupRunning || selectedRunHasActiveTasks}
+                            disabled={!canManageSync || !canDeleteBackups || selectedRunApps.length === 0 || selectedRunHasCleanupRunning || selectedRunHasActiveTasks}
                             onClick={() => {
                               setAppBulkMenuOpen(false);
                               setOperationConfirm('remove-config');

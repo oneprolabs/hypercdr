@@ -1,0 +1,61 @@
+.hc-access-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.hc-role-name { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.hc-role-name > span, .hc-role-name > small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hc-role-name > small { color: var(--hc-text-3); font-size: 11.5px; font-weight: 400; }
+.hc-permission-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12.5px; }
+.hc-permission-heading > span { color: var(--hc-text-3); font-size: 11.5px; }
+.hc-permission-groups { display: grid; gap: 14px; }
+.hc-permission-groups fieldset { padding: 12px; border: 1px solid var(--hc-border); border-radius: 6px; }
+.hc-permission-groups legend { padding: 0 5px; color: var(--hc-text-2); font-size: 11.5px; font-weight: 600; }
+.ee-invite-form .hc-permission-option { display: flex; flex-direction: row; align-items: flex-start; gap: 10px; margin-top: 8px; cursor: pointer; }
+.ee-invite-form .hc-permission-option input { width: 15px; height: 15px; min-height: 0; margin-top: 2px; flex-shrink: 0; accent-color: var(--hc-accent); }
+.hc-permission-option > span { display: grid; gap: 3px; }
+.hc-permission-option strong { font-size: 12.5px; font-weight: 500; }
+.hc-permission-option small { font-size: 11.5px; line-height: 1.45; font-weight: 400; color: var(--hc-text-3); }
+.hc-access-note { margin: 0; padding: 10px 12px; border: 1px solid var(--hc-border); border-radius: 6px; color: var(--hc-text-2); font-size: 12px; line-height: 1.5; background: var(--hc-bg); }
+.hc-access-note-warning { color: var(--hc-warn); }
+.hc-license-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; padding: 16px 0; }
+.hc-license-summary > div { display: grid; align-content: start; gap: 6px; }
+.hc-license-summary dt { font-size: 11.5px; color: var(--hc-text-3); }
+.hc-license-summary dd { margin: 0; font-size: 14px; font-weight: 500; }
+.hc-license-summary small { font-size: 11.5px; font-weight: 400; color: var(--hc-text-3); }
+.hc-license-file { display: grid; gap: 8px; }
+.hc-license-code { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11.5px; overflow-wrap: anywhere; }
+.hc-subscription-page { display: flex; flex-direction: column; gap: 10px; }
+#root .premium-app.hbdr-workspace .hc-subscription-page.ee-organization-access .ee-settings-panel { padding: 12px; }
+#root .premium-app.hbdr-workspace .hc-subscription-page.ee-organization-access .ee-settings-panel > header { padding-bottom: 8px; gap: 12px; }
+.hc-subscription-overview { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(0, 3fr); align-items: start; gap: 16px; padding: 10px 0; }
+.hc-subscription-overview .hc-license-summary { margin: 0; padding: 0; gap: 16px; }
+.hc-subscription-current { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+.hc-subscription-current > strong { font-size: 18px; font-weight: 600; }
+.hc-subscription-current > span:last-child { color: var(--hc-text-3); font-size: 11.5px; }
+.hc-subscription-label { display: inline-flex; align-items: center; padding: 3px 8px; border: 1px solid var(--hc-border); border-radius: 4px; color: var(--hc-text-2); background: var(--hc-bg); font-size: 11.5px; font-weight: 500; }
+.hc-subscription-label.is-commercial { color: var(--hc-accent); }
+.hc-subscription-muted { color: var(--hc-text-3); }
+.hc-subscription-plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin: 10px 0; }
+.hc-subscription-plan { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid var(--hc-border); border-radius: 6px; overflow-wrap: anywhere; }
+.hc-subscription-plan.is-current { border-color: var(--hc-accent); }
+.hc-subscription-plan-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 24px; flex-wrap: wrap; }
+.hc-subscription-plan h5 { margin: 0; font-size: 14px; font-weight: 600; }
+.hc-subscription-plan p { margin: 0; font-size: 12px; line-height: 1.5; }
+.hc-subscription-plan .hc-subscription-price { font-size: 20px; font-weight: 600; color: var(--hc-text); }
+.hc-subscription-plan footer { margin-top: auto; color: var(--hc-text-3); font-size: 11.5px; }
+.hc-subscription-plan-pending { justify-content: center; background: var(--hc-bg); }
+.hc-subscription-payment { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 10px; border-top: 1px solid var(--hc-border); font-size: 11.5px; color: var(--hc-text-3); }
+.hc-subscription-payment strong { font-size: 12.5px; font-weight: 500; }
+.hc-subscription-payment strong { color: var(--hc-text-2); font-size: 11.5px; }
+.hc-subscription-page .hc-access-note + .hc-access-note { margin-top: 10px; }
+.hc-subscription-price small { color: var(--hc-text-3); font-size: 11.5px; font-weight: 400; }
+.hc-subscription-capacity { display: flex; align-items: baseline; gap: 6px; padding: 6px 0; border-top: 1px solid var(--hc-border); font-size: 12px; }
+.hc-subscription-capacity > strong { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 17px; font-weight: 500; }
+.hc-subscription-capacity > strong.is-unlimited { font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif; font-size: 15px; font-weight: 600; }
+.hc-subscription-plan footer > button { width: 100%; min-height: 28px; height: 28px; justify-content: center; }
+.hc-subscription-plan footer > button:disabled { background: var(--hc-bg); color: var(--hc-text-3); border: 1px solid var(--hc-border); cursor: not-allowed; box-shadow: none; }
+.hc-subscription-terms { margin: 0 0 10px; font-size: 11.5px; }
+.hc-subscription-caption { font-size: 11.5px; }
+.hc-subscription-rules { margin-top: 10px; font-size: 11.5px; }
+.hc-subscription-rules > summary { width: fit-content; color: var(--hc-text-2); cursor: pointer; }
+.hc-subscription-rules > summary:focus-visible { outline: 2px solid var(--hc-accent); outline-offset: 3px; }
+.hc-subscription-rules > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin-top: 10px; }
+.hc-subscription-rules h5 { margin: 0 0 6px; font-size: 12px; font-weight: 500; }
+.hc-subscription-rules p { margin: 0; font-size: 11.5px; line-height: 1.65; color: var(--hc-text-3); }

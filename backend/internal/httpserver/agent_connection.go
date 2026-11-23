@@ -88,6 +88,12 @@ func (r *Router) agentWebSocket(w http.ResponseWriter, req *http.Request) {
 			if errors.Is(err, store.ErrTokenUsed) {
 				reason = "TOKEN_USED"
 			}
+			if errors.Is(err, store.ErrClusterCapacity) {
+				reason = "LICENSE_CLUSTER_CAPACITY_EXCEEDED"
+			}
+			if errors.Is(err, store.ErrRegistrationPermission) {
+				reason = "REGISTRATION_PERMISSION_REQUIRED"
+			}
 			_ = conn.WriteJSON(newRejectedMessage(reason, err.Error()))
 			return
 		}

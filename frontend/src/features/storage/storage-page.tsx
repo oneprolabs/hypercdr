@@ -1,4 +1,5 @@
 import PageTitleBar from '../../components/page-title-bar';
+import { useBusinessPermission } from '../../auth/business-access';
 import { StorageFormFields } from './storage-form-fields';
 import { StorageCreateFields } from './storage-create-fields';
 import { ResourceCreateDrawer } from '../../components/resource-create-drawer';
@@ -22,6 +23,7 @@ const mapStorageRepo=(repo:ApiStorageRepo):StorageRepo=>{const raw=(repo.status|
 function Info({label,value}:{label:string;value:string}){return <div className="rounded bg-slate-50 p-3"><p className="text-[10px] font-black uppercase tracking-wider text-slate-400">{label}</p><p className="mt-1 truncate text-xs font-bold text-slate-700">{value}</p></div>}
 
 export default function StoragePage({ storage, clusters, onStorageCreated }: { storage: StorageRepo[]; clusters: Cluster[]; onStorageCreated?: (repo: StorageRepo) => void }) {
+  const canManage = useBusinessPermission('storage.manage');
 	const [repos, setRepos] = useState(storage.map(repo => normalizeStorageRepo(repo)));
   const [query, setQuery] = useState('');
   const [queryField, setQueryField] = useState('name');
@@ -464,7 +466,7 @@ export default function StoragePage({ storage, clusters, onStorageCreated }: { s
         <div className="hbdr-dr-table-head">
             <div className="hbdr-dr-toolbar">
               <div className="hbdr-dr-action-group">
-                <button aria-label="Create storage repository" title="Create storage repository" onClick={() => { setEditingRepo(createStorageDraft('S3-Compatible')); setStorageTestMessage(null); setStorageError(null); setStorageTypeOpen(true); }} className="hbdr-dr-action-primary"><Plus size={14} />New</button>
+                <button disabled={!canManage} aria-label="Create storage repository" title="Create storage repository" onClick={() => { setEditingRepo(createStorageDraft('S3-Compatible')); setStorageTestMessage(null); setStorageError(null); setStorageTypeOpen(true); }} className="hbdr-dr-action-primary"><Plus size={14} />New</button>
               <div className="relative">
                 <button disabled={selectedRepos.length === 0} onClick={() => setStorageBulkMenuOpen(prev => !prev)} className="hbdr-dr-more">
                   More <ChevronDown size={15} className={storageBulkMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
@@ -475,8 +477,8 @@ export default function StoragePage({ storage, clusters, onStorageCreated }: { s
                       <div className="fixed inset-0 z-30" onClick={() => setStorageBulkMenuOpen(false)} />
                       <motion.div initial={{ opacity: 0, y: 8, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8, scale: 0.96 }} className="absolute left-0 top-11 z-40 w-48 overflow-hidden rounded-2xl border border-slate-100 bg-white py-1 shadow-2xl shadow-slate-200/80 ring-1 ring-slate-950/5">
                         <button disabled={!singleSelectedRepo} onClick={() => { if (!singleSelectedRepo) return; setDetailRepo(normalizeStorageRepo(singleSelectedRepo)); setStorageBulkMenuOpen(false); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"><Eye size={14} />View</button>
-                        <button disabled={!singleSelectedRepo} onClick={() => { if (!singleSelectedRepo) return; setStorageTestMessage(null); setStorageError(null); setEditingRepo(normalizeStorageRepo(singleSelectedRepo)); setStorageBulkMenuOpen(false); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"><Settings size={14} />Edit</button>
-                        <button disabled={!singleSelectedRepo} onClick={() => { if (!singleSelectedRepo) return; setDeleteRepo(singleSelectedRepo); setStorageBulkMenuOpen(false); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"><Trash2 size={14} />Delete</button>
+                        <button disabled={!canManage || !singleSelectedRepo} onClick={() => { if (!singleSelectedRepo) return; setStorageTestMessage(null); setStorageError(null); setEditingRepo(normalizeStorageRepo(singleSelectedRepo)); setStorageBulkMenuOpen(false); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"><Settings size={14} />Edit</button>
+                        <button disabled={!canManage || !singleSelectedRepo} onClick={() => { if (!singleSelectedRepo) return; setDeleteRepo(singleSelectedRepo); setStorageBulkMenuOpen(false); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"><Trash2 size={14} />Delete</button>
                       </motion.div>
                     </>
                   )}
@@ -569,8 +571,8 @@ export default function StoragePage({ storage, clusters, onStorageCreated }: { s
                       <div className="fixed inset-0 z-30" onClick={() => setMenuId(null)} />
                       <motion.div onClick={(event) => event.stopPropagation()} initial={{ opacity: 0, y: 8, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8, scale: 0.96 }} className="absolute right-0 top-10 z-50 w-40 overflow-hidden rounded-xl border border-slate-100 bg-white py-1 shadow-2xl shadow-slate-200/70 ring-1 ring-slate-950/5">
                         <button onClick={() => { setDetailRepo(normalizeStorageRepo(repo)); setMenuId(null); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50"><Eye size={14} />View Details</button>
-                        <button onClick={() => { setStorageTestMessage(null); setStorageError(null); setEditingRepo(normalizeStorageRepo(repo)); setMenuId(null); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50"><Settings size={14} />Edit</button>
-                        <button onClick={() => { setDeleteRepo(repo); setMenuId(null); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-rose-600 hover:bg-rose-50"><Trash2 size={14} />Delete</button>
+                        <button disabled={!canManage} onClick={() => { setStorageTestMessage(null); setStorageError(null); setEditingRepo(normalizeStorageRepo(repo)); setMenuId(null); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50"><Settings size={14} />Edit</button>
+                        <button disabled={!canManage} onClick={() => { setDeleteRepo(repo); setMenuId(null); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-rose-600 hover:bg-rose-50"><Trash2 size={14} />Delete</button>
                       </motion.div>
                     </>
                   )}
@@ -598,7 +600,7 @@ export default function StoragePage({ storage, clusters, onStorageCreated }: { s
             </div>
             <div className="mt-5 flex justify-end gap-3">
               <button onClick={() => setDetailRepo(null)} className="rounded-xl px-5 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50">Close</button>
-              <button onClick={() => { setStorageTestMessage(null); setStorageError(null); setEditingRepo(normalizeStorageRepo(detailRepo)); setDetailRepo(null); }} className="rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-100 transition-all hover:bg-blue-700">Edit Storage Repository</button>
+              <button disabled={!canManage} onClick={() => { setStorageTestMessage(null); setStorageError(null); setEditingRepo(normalizeStorageRepo(detailRepo)); setDetailRepo(null); }} className="rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-100 transition-all hover:bg-blue-700">Edit Storage Repository</button>
             </div>
           </ModalFrame>
         )}

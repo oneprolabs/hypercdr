@@ -18,9 +18,10 @@ import (
 )
 
 type PostgresStore struct {
-	db               *sql.DB
-	diagnosticWriter DiagnosticLogWriter
-	secretKey        string
+	db                    *sql.DB
+	diagnosticWriter      DiagnosticLogWriter
+	secretKey             string
+	communityEntitlements bool
 }
 
 type DiagnosticLogWriter interface {
@@ -317,6 +318,11 @@ func (s *PostgresStore) ensureDefaultAdmin(ctx context.Context) error {
 }
 
 func (s *PostgresStore) CreateAgentToken(tenantID, createdBy, description string, ttl time.Duration, requestedType ...string) (AgentToken, error) {
+	if s.communityEntitlements && createdBy != "" {
+		if err := s.checkNewClusterAdmission(context.Background(), s.db, tenantID, createdBy); err != nil {
+			return AgentToken{}, err
+		}
+	}
 	now := time.Now().UTC()
 	token := AgentToken{
 		ID:          newID(),
@@ -338,11 +344,12 @@ func (s *PostgresStore) CreateAgentToken(tenantID, createdBy, description string
 func (s *PostgresStore) ValidateAgentToken(value string) error {
 	var expiresAt time.Time
 	var usedAt sql.NullTime
+	var tenantID, createdBy, clusterID string
 	err := s.db.QueryRow(`
-		select expires_at, used_at
+		select expires_at, used_at,tenant_id,coalesce(created_by::text,''),coalesce(cluster_id::text,'')
 		from agent_tokens
 		where token_hash = $1 and revoked_at is null
-	`, value).Scan(&expiresAt, &usedAt)
+	`, value).Scan(&expiresAt, &usedAt, &tenantID, &createdBy, &clusterID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrTokenInvalid
 	}
@@ -354,6 +361,9 @@ func (s *PostgresStore) ValidateAgentToken(value string) error {
 	}
 	if time.Now().UTC().After(expiresAt) {
 		return ErrTokenExpired
+	}
+	if s.communityEntitlements && clusterID == "" {
+		return s.checkNewClusterAdmission(context.Background(), s.db, tenantID, createdBy)
 	}
 	return nil
 }
@@ -495,11 +505,11 @@ func (s *PostgresStore) RegisterCluster(input RegisterClusterInput) (Cluster, st
 	var token AgentToken
 	var usedAt sql.NullTime
 	err = tx.QueryRow(`
-		select id, tenant_id, token_hash, coalesce(description, ''), expires_at, used_at, coalesce(cluster_id::text,''), cluster_type
+		select id, tenant_id, token_hash, coalesce(description, ''), expires_at, used_at, coalesce(cluster_id::text,''), cluster_type,coalesce(created_by::text,'')
 		from agent_tokens
 		where token_hash = $1 and revoked_at is null
 		for update
-	`, input.Token).Scan(&token.ID, &token.TenantID, &token.Token, &token.Description, &token.ExpiresAt, &usedAt, &token.ClusterID, &token.ClusterType)
+	`, input.Token).Scan(&token.ID, &token.TenantID, &token.Token, &token.Description, &token.ExpiresAt, &usedAt, &token.ClusterID, &token.ClusterType, &token.CreatedBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Cluster{}, "", ErrTokenInvalid
 	}
@@ -544,6 +554,12 @@ func (s *PostgresStore) RegisterCluster(input RegisterClusterInput) (Cluster, st
 			return Cluster{}, "", err
 		}
 		return cluster, credential, nil
+	}
+
+	if s.communityEntitlements {
+		if err := s.checkNewClusterAdmission(context.Background(), tx, token.TenantID, token.CreatedBy); err != nil {
+			return Cluster{}, "", err
+		}
 	}
 
 	clusterName := input.ClusterName

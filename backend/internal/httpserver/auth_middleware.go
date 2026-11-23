@@ -69,7 +69,7 @@ func (r *Router) withPlatformAuth(next http.Handler) http.Handler {
 				return
 			}
 		}
-		if requiresAdmin(req) && user.Role != "admin" {
+		if requiresAdmin(req) && user.Role != "admin" && !user.SystemAdmin && !(r.productInfo.Edition == "community" && businessPermission(req.Method, path) != "") {
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": "administrator_required", "message": "Administrator permission is required."})
 			return
 		}
@@ -99,6 +99,9 @@ func (r *Router) withPlatformAuth(next http.Handler) http.Handler {
 		req = req.WithContext(context.WithValue(req.Context(), requestUserContextKey{}, user))
 		scopedRequest, allowed := r.applyOrganizationScope(w, req, user)
 		if !allowed {
+			return
+		}
+		if !r.authorizeBusinessRequest(w, scopedRequest, user) {
 			return
 		}
 		next.ServeHTTP(w, scopedRequest)

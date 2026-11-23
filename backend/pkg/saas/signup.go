@@ -101,11 +101,12 @@ func (s *Service) signupLimited(w http.ResponseWriter, r *http.Request, key stri
 type onboardingToken struct {
 	Kind, Email, Subject        string
 	Tenant, Role, User, Browser sql.NullString
+	CustomRole                  sql.NullString
 }
 
 func readToken(ctx context.Context, tx *sql.Tx, hash string) (onboardingToken, error) {
 	var t onboardingToken
-	e := tx.QueryRowContext(ctx, `select kind,email,tenant_id::text,role_id::text,user_id::text,browser_hash,coalesce(provider_subject,'') from saas_onboarding_tokens where token_hash=$1 and consumed_at is null and expires_at>now() for update`, hash).Scan(&t.Kind, &t.Email, &t.Tenant, &t.Role, &t.User, &t.Browser, &t.Subject)
+	e := tx.QueryRowContext(ctx, `select kind,email,tenant_id::text,role_id::text,user_id::text,browser_hash,coalesce(provider_subject,''),custom_role_id::text from saas_onboarding_tokens where token_hash=$1 and consumed_at is null and expires_at>now() for update`, hash).Scan(&t.Kind, &t.Email, &t.Tenant, &t.Role, &t.User, &t.Browser, &t.Subject, &t.CustomRole)
 	return t, e
 }
 func (s *Service) complete(w http.ResponseWriter, r *http.Request) {
@@ -179,6 +180,7 @@ func (s *Service) complete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		t.Role = inv.Role
+		t.CustomRole = inv.CustomRole
 	}
 	tenant := t.Tenant.String
 	if tenant == "" {
@@ -215,7 +217,7 @@ func (s *Service) complete(w http.ResponseWriter, r *http.Request) {
 	if google {
 		provider = "google"
 	}
-	_, e = tx.ExecContext(r.Context(), `insert into users(id,tenant_id,username,email,email_verified_at,display_name,password_hash,role,status,must_change_password,auth_provider) values($1,$2,$3,$3,now(),nullif($4,''),$5,$6,'active',false,$7)`, user, tenant, t.Email, strings.TrimSpace(in.DisplayName), hash, t.Role.String, provider)
+	_, e = tx.ExecContext(r.Context(), `insert into users(id,tenant_id,username,email,email_verified_at,display_name,password_hash,role,status,must_change_password,auth_provider,custom_role_id) values($1,$2,$3,$3,now(),nullif($4,''),$5,$6,'active',false,$7,$8)`, user, tenant, t.Email, strings.TrimSpace(in.DisplayName), hash, t.Role.String, provider, t.CustomRole)
 	if e == nil && google {
 		_, e = tx.ExecContext(r.Context(), `insert into saas_external_identities(provider,subject,user_id) values('google',$1,$2)`, t.Subject, user)
 	}

@@ -33,6 +33,9 @@ func (s *PostgresStore) AuthenticateUser(input UserAuthInput) (User, bool, error
 	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(input.Password)); err != nil {
 		return User{}, false, nil
 	}
+	if err := s.populateUserAccess(&user); err != nil {
+		return User{}, false, err
+	}
 	return user, true, nil
 }
 
@@ -81,11 +84,14 @@ func (s *PostgresStore) GetUser(id string) (User, bool, error) {
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, false, nil
 	}
+	if err == nil {
+		err = s.populateUserAccess(&u)
+	}
 	return u, err == nil, err
 }
 
 func (s *PostgresStore) UpdateUser(input UserUpdateInput) (User, bool, error) {
-	result, err := s.db.Exec(`update users set tenant_id=case when is_system_admin then tenant_id else $2 end,display_name=nullif($3,''),role=case when is_system_admin then role else $4 end,status=case when is_system_admin then status else $5 end,time_zone=nullif($6,''),updated_at=now() where id=$1`, input.ID, input.TenantID, strings.TrimSpace(input.DisplayName), input.Role, input.Status, strings.TrimSpace(input.TimeZone))
+	result, err := s.db.Exec(`update users set custom_role_id=case when not is_system_admin and (tenant_id<>$2::uuid or $4<>'operator') then null else custom_role_id end,tenant_id=case when is_system_admin then tenant_id else $2 end,display_name=nullif($3,''),role=case when is_system_admin then role else $4 end,status=case when is_system_admin then status else $5 end,time_zone=nullif($6,''),updated_at=now() where id=$1`, input.ID, input.TenantID, strings.TrimSpace(input.DisplayName), input.Role, input.Status, strings.TrimSpace(input.TimeZone))
 	if err != nil {
 		return User{}, false, err
 	}
@@ -164,6 +170,9 @@ func (s *PostgresStore) AuthenticatePlatformSession(token string) (User, bool, e
 		return User{}, false, err
 	}
 	_, _ = s.db.Exec(`update platform_sessions set last_seen_at=now() where token_hash=$1`, resetTokenDigest(token))
+	if err := s.populateUserAccess(&u); err != nil {
+		return User{}, false, err
+	}
 	return u, true, nil
 }
 

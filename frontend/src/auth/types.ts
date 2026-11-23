@@ -6,6 +6,9 @@ export type ApiLoginResponse = {
     email: string;
     displayName?: string;
     role: string;
+    roleId?: string;
+    roleName?: string;
+    permissions?: string[];
     status: string;
     authProvider?: string;
     timeZone?: string;

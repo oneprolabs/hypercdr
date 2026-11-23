@@ -28,6 +28,9 @@ func main() {
 	maintenance, stop := context.WithCancel(context.Background())
 	defer stop()
 	go service.Maintain(maintenance)
+	billingDone := make(chan struct{})
+	go func() { defer close(billingDone); service.MaintainBilling(maintenance) }()
+	defer func() { stop(); <-billingDone }()
 	if err := platform.Run(options); err != nil {
 		log.Fatal(err)
 	}

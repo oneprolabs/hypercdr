@@ -68,6 +68,9 @@ type Identity struct {
 	Email              string     `json:"email"`
 	DisplayName        string     `json:"displayName,omitempty"`
 	Role               string     `json:"role"`
+	RoleID             string     `json:"roleId,omitempty"`
+	RoleName           string     `json:"roleName,omitempty"`
+	Permissions        []string   `json:"permissions,omitempty"`
 	Status             string     `json:"status"`
 	AuthProvider       string     `json:"authProvider"`
 	TimeZone           string     `json:"timeZone,omitempty"`
@@ -165,7 +168,8 @@ type Migration struct {
 // password-change, administrator, and system-administrator checks applicable
 // to the request path. Edition handlers must still enforce their own RBAC.
 type Route struct {
-	// Public is restricted to exact edition-owned authentication endpoints.
+	// Public is restricted to exact edition-owned authentication endpoints and
+	// the exact POST SaaS subscription webhook, which verifies Stripe signatures.
 	Public  bool
 	Pattern string
 	Handler func(http.ResponseWriter, *http.Request, Principal)

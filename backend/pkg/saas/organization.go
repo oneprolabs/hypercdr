@@ -1,6 +1,8 @@
 package saas
 
 import (
+	"database/sql"
+	"errors"
 	"github.com/google/uuid"
 	"hypercdr-platform/platform/backend/internal/store"
 	"hypercdr-platform/platform/backend/pkg/platform"
@@ -46,10 +48,15 @@ func (s *Service) organization(w http.ResponseWriter, r *http.Request, p platfor
 		internal(w)
 		return
 	}
-	respond(w, 200, map[string]any{"name": name, "description": description, "createdAt": created, "memberCount": count, "role": p.Role, "roles": []map[string]string{{"name": p.Role, "roleType": "organization"}}, "canEdit": p.Role == "admin" || p.SystemAdmin})
+	var roleName string
+	if err := s.db.QueryRowContext(r.Context(), `select coalesce(r.name,case when u.role='admin' then 'Administrator' else 'Operator' end) from users u left join organization_roles r on r.id=u.custom_role_id and r.tenant_id=u.tenant_id where u.id=$1 and u.tenant_id=$2`, p.ID, p.TenantID).Scan(&roleName); err != nil {
+		internal(w)
+		return
+	}
+	respond(w, 200, map[string]any{"name": name, "description": description, "createdAt": created, "memberCount": count, "role": p.Role, "roles": []map[string]string{{"name": roleName, "roleType": "organization"}}, "canEdit": p.Role == "admin" || p.SystemAdmin})
 }
 func (s *Service) members(w http.ResponseWriter, r *http.Request, p platform.Principal) {
-	rows, e := s.db.QueryContext(r.Context(), `select id,username,coalesce(email,''),coalesce(display_name,''),role,status,is_system_admin from users where tenant_id=$1 order by created_at,id`, p.TenantID)
+	rows, e := s.db.QueryContext(r.Context(), `select u.id,u.username,coalesce(u.email,''),coalesce(u.display_name,''),u.role,u.status,u.is_system_admin,coalesce(u.custom_role_id::text,u.role),coalesce(r.name,case when u.role='admin' then 'Administrator' else 'Operator' end) from users u left join organization_roles r on r.id=u.custom_role_id and r.tenant_id=u.tenant_id where u.tenant_id=$1 order by u.created_at,u.id`, p.TenantID)
 	if e != nil {
 		internal(w)
 		return
@@ -57,13 +64,13 @@ func (s *Service) members(w http.ResponseWriter, r *http.Request, p platform.Pri
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
-		var id, username, email, name, role, status string
+		var id, username, email, name, role, status, roleID, roleName string
 		var systemAdmin bool
-		if rows.Scan(&id, &username, &email, &name, &role, &status, &systemAdmin) != nil {
+		if rows.Scan(&id, &username, &email, &name, &role, &status, &systemAdmin, &roleID, &roleName) != nil {
 			internal(w)
 			return
 		}
-		items = append(items, map[string]any{"id": id, "username": username, "email": email, "displayName": name, "role": role, "status": status, "systemAdmin": systemAdmin})
+		items = append(items, map[string]any{"id": id, "username": username, "email": email, "displayName": name, "role": role, "roleId": roleID, "roleName": roleName, "status": status, "systemAdmin": systemAdmin})
 	}
 	if rows.Err() != nil {
 		internal(w)
@@ -86,7 +93,7 @@ func (s *Service) invite(w http.ResponseWriter, r *http.Request, p platform.Prin
 		Email  string `json:"email"`
 		RoleID string `json:"roleId"`
 	}
-	if !decode(r, &in) || (in.RoleID != "admin" && in.RoleID != "operator") {
+	if !decode(r, &in) || in.RoleID == "" {
 		problem(w, 400, "invalid_invitation", "Enter an email and select a role.")
 		return
 	}
@@ -108,6 +115,15 @@ func (s *Service) invite(w http.ResponseWriter, r *http.Request, p platform.Prin
 	var name string
 	e = tx.QueryRowContext(r.Context(), `select name from resource_scopes where id=$1 and status='active' for update`, p.TenantID).Scan(&name)
 	if e != nil {
+		internal(w)
+		return
+	}
+	role, customRoleID, roleErr := resolveRole(tx, p.TenantID, in.RoleID)
+	if errors.Is(roleErr, sql.ErrNoRows) {
+		problem(w, 400, "invalid_invitation_role", "Select a role belonging to this organization.")
+		return
+	}
+	if roleErr != nil {
 		internal(w)
 		return
 	}
@@ -133,7 +149,7 @@ func (s *Service) invite(w http.ResponseWriter, r *http.Request, p platform.Prin
 	token := randomToken()
 	_, e = tx.ExecContext(r.Context(), `update saas_onboarding_tokens set consumed_at=now() where tenant_id=$1 and email=$2 and kind='invitation' and consumed_at is null`, p.TenantID, email)
 	if e == nil {
-		_, e = tx.ExecContext(r.Context(), `insert into saas_onboarding_tokens(token_hash,kind,email,tenant_id,role_id,created_by,expires_at) values($1,'invitation',$2,$3,$4,$5,now()+interval '7 days')`, digest(token), email, p.TenantID, in.RoleID, p.ID)
+		_, e = tx.ExecContext(r.Context(), `insert into saas_onboarding_tokens(token_hash,kind,email,tenant_id,role_id,created_by,expires_at,custom_role_id) values($1,'invitation',$2,$3,$4,$5,now()+interval '7 days',$6)`, digest(token), email, p.TenantID, role, p.ID, customRoleID)
 	}
 	if e == nil {
 		e = tx.Commit()
@@ -154,7 +170,7 @@ func (s *Service) listInvitations(w http.ResponseWriter, r *http.Request, p plat
 	if !admin(w, p) {
 		return
 	}
-	rows, e := s.db.QueryContext(r.Context(), `select token_hash,email,role_id,created_at,expires_at,case when consumed_at is not null then 'closed' when expires_at<now() then 'expired' else 'pending' end from saas_onboarding_tokens where kind='invitation' and tenant_id=$1 order by created_at desc limit 100`, p.TenantID)
+	rows, e := s.db.QueryContext(r.Context(), `select t.token_hash,t.email,t.role_id,t.created_at,t.expires_at,case when t.consumed_at is not null then 'closed' when t.expires_at<now() then 'expired' else 'pending' end,coalesce(t.custom_role_id::text,t.role_id),coalesce(r.name,case when t.role_id='admin' then 'Administrator' else 'Operator' end) from saas_onboarding_tokens t left join organization_roles r on r.id=t.custom_role_id and r.tenant_id=t.tenant_id where t.kind='invitation' and t.tenant_id=$1 order by t.created_at desc limit 100`, p.TenantID)
 	if e != nil {
 		internal(w)
 		return
@@ -162,13 +178,13 @@ func (s *Service) listInvitations(w http.ResponseWriter, r *http.Request, p plat
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
-		var id, email, role, status string
+		var id, email, role, status, roleID, roleName string
 		var created, expires time.Time
-		if rows.Scan(&id, &email, &role, &created, &expires, &status) != nil {
+		if rows.Scan(&id, &email, &role, &created, &expires, &status, &roleID, &roleName) != nil {
 			internal(w)
 			return
 		}
-		items = append(items, map[string]any{"id": id, "email": email, "role": role, "roleType": "organization", "createdAt": created, "expiresAt": expires, "status": status})
+		items = append(items, map[string]any{"id": id, "email": email, "role": role, "roleId": roleID, "roleName": roleName, "roleType": "organization", "createdAt": created, "expiresAt": expires, "status": status})
 	}
 	if rows.Err() != nil {
 		internal(w)
@@ -198,10 +214,14 @@ func (s *Service) audit(r *http.Request, p platform.Principal, action, tenant, t
 		actorOrganization := p.TenantID
 		_ = s.db.QueryRowContext(r.Context(), `select tenant_id from users where id=$1`, p.ID).Scan(&actorOrganization)
 		resourceID := ""
+		result := "Success"
+		if strings.HasSuffix(action, ".activation_denied") {
+			result = "Denied"
+		}
 		if id, err := uuid.Parse(target); err == nil {
 			resourceID = id.String()
 		}
-		if _, err := ci.repo.CreateAuditLog(store.AuditLogInput{ActorID: p.ID, Actor: actorLogin(p), Action: action, ResourceType: "identity", ResourceID: resourceID, ResourceName: target, Result: "Success", Payload: map[string]any{"targetOrganizationId": tenant, "actorOrganizationId": actorOrganization, "target": target}}); err != nil {
+		if _, err := ci.repo.CreateAuditLog(store.AuditLogInput{ActorID: p.ID, Actor: actorLogin(p), Action: action, ResourceType: "identity", ResourceID: resourceID, ResourceName: target, Result: result, Payload: map[string]any{"targetOrganizationId": tenant, "actorOrganizationId": actorOrganization, "target": target}}); err != nil {
 			slog.Error("identity audit recording failed", "action", action, "error", err)
 		}
 	}

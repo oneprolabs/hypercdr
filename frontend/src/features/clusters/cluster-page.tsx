@@ -1,4 +1,5 @@
 import ClusterRegistrationDrawer from './cluster-registration-drawer';
+import { useBusinessPermission } from '../../auth/business-access';
 import { NodeResourceCell, NodeResourceRefresh } from './node-resource-cell';
 import { nodeResource, type NodeResourceKind } from './node-resources';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -101,6 +102,9 @@ export default function ClusterPage(props: {
 }) {
   const { clusters, loading, protectionPlans, onLoadTopology, canUpgrade, defaultClusterId, clusterMenuId, setClusterMenuId, setSelectedCluster, setDefaultCluster, unregisterCluster, onRenameCluster, onUpgradeCluster, onUpgradeVelero, onRegisterCluster, onRefreshRegistration, clusterTaskLogs, getAgentTokenForRegistration, prefetchAgentToken, openDashboard, registrationAllowed = true, openLicenseManagement, toast } = props;
   const [registerOpen, setRegisterOpen] = useState(false);
+  const canManageCluster = useBusinessPermission('cluster.manage');
+  const canUnregisterCluster = useBusinessPermission('cluster.unregister');
+  const canDeleteBackupData = useBusinessPermission('backup.delete');
   useDialogPreload(clusterDialogModules);
   const [cacheCluster, setCacheCluster] = useState<Cluster | null>(null);
   const [licenseGuideOpen, setLicenseGuideOpen] = useState(false);
@@ -654,7 +658,7 @@ export default function ClusterPage(props: {
                       <motion.div data-cluster-menu-root initial={{ opacity: 0, scale: 0.96, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 8 }} className="cluster-card-action-menu absolute right-0 top-9 z-50 w-44 rounded-xl border border-slate-100 bg-white py-2 shadow-2xl shadow-slate-200/70 ring-1 ring-slate-950/5" onClick={(event) => event.stopPropagation()}>
                         <button onClick={(event) => { event.stopPropagation(); setClusterMenuId(null); setClusterResourceDetail({ cluster, type: 'overview' }); }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"><Eye size={15} />View Detail</button>
                         {canUpgrade && <button onMouseEnter={() => preloadDialog(ClusterCacheSettingsDrawer)} onFocus={() => preloadDialog(ClusterCacheSettingsDrawer)} onClick={() => { setClusterMenuId(null); setCacheCluster(cluster); }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"><Settings2 size={15} />Cache settings</button>}
-                        <button onClick={(event) => openUnregister(cluster, event)} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-rose-600 hover:bg-rose-50"><Trash2 size={15} />Unregister Cluster</button>
+                        <button disabled={!canUnregisterCluster} title={!canUnregisterCluster ? "Your role cannot unregister clusters." : undefined} onClick={(event) => openUnregister(cluster, event)} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-rose-600 hover:bg-rose-50"><Trash2 size={15} />Unregister Cluster</button>
                       </motion.div>
                     </>
                   )}
@@ -669,7 +673,7 @@ export default function ClusterPage(props: {
                       <Star size={10} className="fill-blue-500 text-blue-500" />Default
                     </span>
                   ) : (
-                    <button type="button" onClick={(event) => setDefaultCluster(cluster, event)} className="cluster-default-button inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700">
+                    <button disabled={!canManageCluster} type="button" onClick={(event) => setDefaultCluster(cluster, event)} className="cluster-default-button inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700">
                       <Star size={10} />Default
                     </button>
                   )}
@@ -712,7 +716,7 @@ export default function ClusterPage(props: {
               ) : (
                 <div className="mb-1 flex min-w-0 items-center gap-2 pr-10">
                   <h4 className={`cluster-card-title min-w-0 truncate text-[1.08rem] font-extrabold tracking-tight transition-colors group-hover:text-blue-700 ${cluster.name === 'unknown-cluster' ? 'text-slate-500' : 'text-slate-950'}`}>{cluster.name === 'unknown-cluster' ? 'Unnamed cluster' : cluster.name}</h4>
-                  <button type="button" onClick={(event) => openRename(cluster, event)} className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600" aria-label="Edit cluster name">
+                  <button disabled={!canManageCluster} type="button" onClick={(event) => openRename(cluster, event)} className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600" aria-label="Edit cluster name">
                     <Edit2 size={14} />
                   </button>
                 </div>
@@ -1098,7 +1102,7 @@ export default function ClusterPage(props: {
                   {unregisterPrecheck && <>
                   {unregisterPrecheck && <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-500"><span>Source configurations <strong className="text-slate-800">{unregisterPrecheck.sourcePlanCount}</strong></span><span>Target references <strong className="text-slate-800">{unregisterPrecheck.targetPlanCount}</strong></span><span>Restore points <strong className="text-slate-800">{unregisterPrecheck.restorePointCount}</strong></span><span>Active tasks <strong className="text-slate-800">{unregisterPrecheck.activeTaskCount}</strong></span></div>}
                   {unregisterPrecheck?.blockers.map(blocker => <p key={blocker} className="mt-2 rounded bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">{blocker}</p>)}
-                  {(unregisterPrecheck?.restorePointCount || unregisterPrecheck?.sourcePlanCount || unregisterPrecheck?.targetPlanCount) ? <label className="mt-3 flex items-start gap-2 border-t border-slate-100 pt-3 text-xs text-slate-600"><input type="checkbox" checked={deleteBackupData} onChange={event=>setDeleteBackupData(event.target.checked)} disabled={unregistering||forceRemoveEnabled} className="mt-0.5"/><span><strong className="block text-slate-800">Clean up related data</strong>{unregisterPrecheck.sourcePlanCount ? 'This cluster is a DR source. Its DR configurations, restore points, and backup data will be removed. ' : ''}{unregisterPrecheck.targetPlanCount ? 'This cluster is a DR target. Other source configurations and backup data will be preserved; only their default target will be cleared. ' : ''}Business namespaces, workloads, and PVCs will not be deleted.</span></label> : unregisterPrecheck?.objectStorageNeeded ? <p className="mt-3 border-t border-slate-100 pt-3 text-xs leading-5 text-blue-700"><strong className="block text-blue-800">Historical storage data detected</strong>The cluster storage prefix will be checked and cleaned automatically before unregister.</p> : <p className="mt-3 border-t border-slate-100 pt-3 text-xs text-emerald-700">This cluster has never used object storage. Object storage will not be accessed.</p>}
+                  {(unregisterPrecheck?.restorePointCount || unregisterPrecheck?.sourcePlanCount || unregisterPrecheck?.targetPlanCount) ? <label className="mt-3 flex items-start gap-2 border-t border-slate-100 pt-3 text-xs text-slate-600"><input type="checkbox" checked={deleteBackupData} onChange={event=>setDeleteBackupData(event.target.checked)} disabled={unregistering||forceRemoveEnabled||!canDeleteBackupData} title={!canDeleteBackupData ? "Your role cannot delete backup data." : undefined} className="mt-0.5"/><span><strong className="block text-slate-800">Clean up related data</strong>{unregisterPrecheck.sourcePlanCount ? 'This cluster is a DR source. Its DR configurations, restore points, and backup data will be removed. ' : ''}{unregisterPrecheck.targetPlanCount ? 'This cluster is a DR target. Other source configurations and backup data will be preserved; only their default target will be cleared. ' : ''}Business namespaces, workloads, and PVCs will not be deleted.</span></label> : unregisterPrecheck?.objectStorageNeeded ? <p className="mt-3 border-t border-slate-100 pt-3 text-xs leading-5 text-blue-700"><strong className="block text-blue-800">Historical storage data detected</strong>The cluster storage prefix will be checked and cleaned automatically before unregister.</p> : <p className="mt-3 border-t border-slate-100 pt-3 text-xs text-emerald-700">This cluster has never used object storage. Object storage will not be accessed.</p>}
                   </>}
                 </section>
 

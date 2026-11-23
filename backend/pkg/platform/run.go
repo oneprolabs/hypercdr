@@ -34,6 +34,9 @@ func Run(options Options) error {
 		return err
 	}
 	defer postgresStore.Close()
+	if options.Edition == EditionCommunity {
+		postgresStore.EnableCommunityEntitlements()
+	}
 	secretCtx, secretCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	if err := postgresStore.ConfigureSecretKey(secretCtx, cfg.SecretKey); err != nil {
 		secretCancel()
@@ -321,7 +324,7 @@ func (a identityProviderAdapter) ResetPassword(ctx context.Context, token, passw
 	return a.provider.ResetPassword(ctx, token, password)
 }
 func editionIdentity(identity Identity) httpserver.EditionIdentity {
-	return httpserver.EditionIdentity{ID: identity.ID, TenantID: identity.TenantID, TenantName: identity.TenantName, Username: identity.Username, EmailVerifiedAt: identity.EmailVerifiedAt, Email: identity.Email, DisplayName: identity.DisplayName, Role: identity.Role, Status: identity.Status, AuthProvider: identity.AuthProvider, TimeZone: identity.TimeZone, Theme: identity.Theme, SystemAdmin: identity.SystemAdmin, MustChangePassword: identity.MustChangePassword}
+	return httpserver.EditionIdentity{ID: identity.ID, TenantID: identity.TenantID, TenantName: identity.TenantName, Username: identity.Username, EmailVerifiedAt: identity.EmailVerifiedAt, Email: identity.Email, DisplayName: identity.DisplayName, Role: identity.Role, RoleID: identity.RoleID, RoleName: identity.RoleName, Permissions: identity.Permissions, Status: identity.Status, AuthProvider: identity.AuthProvider, TimeZone: identity.TimeZone, Theme: identity.Theme, SystemAdmin: identity.SystemAdmin, MustChangePassword: identity.MustChangePassword}
 }
 
 func utcLogTime(_ []string, attr slog.Attr) slog.Attr {

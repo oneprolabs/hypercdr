@@ -1041,6 +1041,12 @@ func (r *Router) unregisterCluster(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 	}
+	if body.DeleteBackupData && r.productInfo.Edition == "community" {
+		if user, ok := requestUser(req); ok && !hasBusinessPermission(user, "backup.delete") {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "organization_permission_required", "permission": "backup.delete", "message": "Your role does not allow deleting backup data. Contact your organization administrator."})
+			return
+		}
+	}
 	audit, err := r.auditClusterUnregister(clusterID)
 	if err != nil {
 		if err.Error() == "cluster not found" {

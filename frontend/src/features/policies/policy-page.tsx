@@ -1,4 +1,5 @@
 import PageTitleBar from '../../components/page-title-bar';
+import { useBusinessPermission } from '../../auth/business-access';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Calendar, CheckCircle2, ChevronDown, Plus, Clock, Edit2, Eye, History, Layers, MoreVertical, RefreshCw, Search, ShieldCheck, Sun, Trash2, X, Zap } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
@@ -26,6 +27,7 @@ const mapPolicy=(policy:ApiPolicy):PolicyItem=>{const display=scheduleUTCToDispl
 function Info({label,value}:{label:string;value:string}){return <div className="rounded bg-slate-50 p-3"><p className="text-[10px] font-black uppercase tracking-wider text-slate-400">{label}</p><p className="mt-1 truncate text-xs font-bold text-slate-700">{value}</p></div>}
 
 export default function PolicyPage({ policies, setPolicies }: { policies: PolicyItem[]; setPolicies: React.Dispatch<React.SetStateAction<PolicyItem[]>> }) {
+  const canManage = useBusinessPermission('policy.manage');
   const [query, setQuery] = useState('');
   const [queryField, setQueryField] = useState('name');
   const [activeTags, setActiveTags] = useState<string[]>([]);
@@ -304,7 +306,7 @@ export default function PolicyPage({ policies, setPolicies }: { policies: Policy
           <div className="hbdr-dr-table-head">
             <div className="hbdr-dr-toolbar">
               <div className="hbdr-dr-action-group">
-                <button aria-label="Create DR policy" title="Create DR policy" onClick={openCreatePolicy} className="hbdr-dr-action-primary"><Plus size={14} />New</button>
+                <button disabled={!canManage} aria-label="Create DR policy" title="Create DR policy" onClick={openCreatePolicy} className="hbdr-dr-action-primary"><Plus size={14} />New</button>
                 <div className="relative">
                   <button disabled={selectedPolicies.length === 0} onClick={() => setPolicyBulkMenuOpen(prev => !prev)} className="hbdr-dr-more">
                     More <ChevronDown size={15} className={policyBulkMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
@@ -315,7 +317,7 @@ export default function PolicyPage({ policies, setPolicies }: { policies: Policy
                         <div className="fixed inset-0 z-30" onClick={() => setPolicyBulkMenuOpen(false)} />
                         <motion.div initial={{ opacity: 0, y: 8, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8, scale: 0.96 }} className="absolute left-0 top-11 z-40 w-48 overflow-hidden rounded-2xl border border-slate-100 bg-white py-1 shadow-2xl shadow-slate-200/80 ring-1 ring-slate-950/5">
                           <button disabled={!singleSelectedPolicy} onClick={() => { if (!singleSelectedPolicy) return; setDetailPolicy(singleSelectedPolicy); setPolicyBulkMenuOpen(false); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"><Eye size={14} />View</button>
-                          <button disabled={!singleSelectedPolicy} onClick={() => { if (!singleSelectedPolicy) return; openEditPolicy(singleSelectedPolicy); setPolicyBulkMenuOpen(false); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"><Edit2 size={14} />Edit</button>
+                          <button disabled={!canManage || !singleSelectedPolicy} onClick={() => { if (!singleSelectedPolicy) return; openEditPolicy(singleSelectedPolicy); setPolicyBulkMenuOpen(false); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"><Edit2 size={14} />Edit</button>
                           <button disabled={!singleSelectedPolicy} onClick={() => { if (!singleSelectedPolicy) return; setDeletePolicy(singleSelectedPolicy); setPolicyBulkMenuOpen(false); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"><Trash2 size={14} />Delete</button>
                         </motion.div>
                       </>
@@ -394,7 +396,7 @@ export default function PolicyPage({ policies, setPolicies }: { policies: Policy
                       <>
                         <div className="fixed inset-0 z-30" onClick={() => setMenuId(null)} />
                         <motion.div data-policy-menu-root onClick={(event) => event.stopPropagation()} initial={{ opacity: 0, y: 8, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8, scale: 0.96 }} className="absolute right-0 top-10 z-50 w-44 overflow-hidden rounded-xl border border-slate-100 bg-white py-1 shadow-2xl shadow-slate-200/70 ring-1 ring-slate-950/5">
-                          <button onClick={() => openEditPolicy(policy)} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50"><Edit2 size={14} />Edit Policy</button>
+                          <button disabled={!canManage} onClick={() => openEditPolicy(policy)} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50"><Edit2 size={14} />Edit Policy</button>
                           <button onClick={() => togglePolicyStatus(policy)} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 hover:bg-slate-50"><RefreshCw size={14} />{policy.status === 'Active' ? 'Disable Policy' : 'Enable Policy'}</button>
                           <button onClick={() => { setDeletePolicy(policy); setMenuId(null); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-bold text-rose-600 hover:bg-rose-50"><Trash2 size={14} />Delete Policy</button>
                         </motion.div>

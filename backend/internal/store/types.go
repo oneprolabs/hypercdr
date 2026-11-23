@@ -476,6 +476,9 @@ type User struct {
 	Email              string     `json:"email"`
 	DisplayName        string     `json:"displayName,omitempty"`
 	Role               string     `json:"role"`
+	RoleID             string     `json:"roleId,omitempty"`
+	RoleName           string     `json:"roleName,omitempty"`
+	Permissions        []string   `json:"permissions,omitempty"`
 	Status             string     `json:"status"`
 	AuthProvider       string     `json:"authProvider"`
 	TimeZone           string     `json:"timeZone,omitempty"`

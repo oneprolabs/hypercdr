@@ -2,7 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import type { HyperCDRFrontendModule } from "./app/extensions";
-import { Building2, Users, KeyRound, Globe } from 'lucide-react';
+import { Building2, Users, KeyRound, Globe, Shield } from 'lucide-react';
 import CommunityMigrationAuthorizationsPage from './features/migrations/community-migration-authorizations-page';
 import "./styles.css";
 import { PublicAuthPage, SaaSLoginSupplement } from './features/saas/saas-auth';
@@ -11,10 +11,14 @@ import { AccountAccess } from './features/saas/account-access';
 import { AccessLoginPage } from './features/saas/access-login-page';
 import { PlatformDirectory } from './features/saas/platform-directory';
 import { MembersPage } from './features/saas/members-page';
+import { RolesPage } from './features/saas/roles-page';
+import { SubscriptionPage } from './features/saas/subscription-page';
 
 import { VerifyBoundEmail } from './features/saas/bound-email';
 
 const modules:HyperCDRFrontendModule[]=[
+{id:'roles',view:'extension:roles',navigation:{label:'Roles & Permissions',description:'Organization business roles and permissions',icon:Shield,order:45,group:'settings'},component:RolesPage,isVisible:({currentUser})=>currentUser.role==='admin'||currentUser.systemAdmin===true},
+{id:'license',view:'extension:license',navigation:{label:'Subscription',description:'Organization plan, cluster capacity and billing',icon:KeyRound,order:50,group:'settings'},component:SubscriptionPage},
 {id:'platform-users',view:'extension:platform-users',navigation:{label:'Users',description:'All platform users and organization ownership',icon:Users,order:60,group:'settings'},component:props=><PlatformDirectory {...props} kind="users"/>,isVisible:({currentUser})=>currentUser.systemAdmin===true},
 {id:'platform-organizations',view:'extension:platform-organizations',navigation:{label:'Organizations',description:'All organizations and their members',icon:Building2,order:70,group:'settings'},component:props=><PlatformDirectory {...props} kind="organizations"/>,isVisible:({currentUser})=>currentUser.systemAdmin===true},
 {id:'platform-access',view:'extension:platform-access',navigation:{label:'Access & Sign-in',description:'Platform access address and sign-in links',icon:Globe,order:100,group:'settings'},component:AccessLoginPage,isVisible:({currentUser})=>currentUser.systemAdmin===true},
