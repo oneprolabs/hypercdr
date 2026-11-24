@@ -1,0 +1,29 @@
+.hc-cluster-count { margin-left: 6px; color: var(--hc-text-3); font-size: 11px; font-weight: 400; }
+.hc-cluster-view-toggle { display: inline-flex; border: 1px solid var(--hc-border); border-radius: 4px; overflow: hidden; }
+.hc-cluster-view-toggle button { display: flex; align-items: center; justify-content: center; width: 30px; height: 28px; background: var(--hc-bg); color: var(--hc-text-3); border: 0; cursor: pointer; }
+.hc-cluster-view-toggle button + button { border-left: 1px solid var(--hc-border); }
+.hc-cluster-view-toggle button[aria-pressed='true'] { color: var(--hc-accent); background: color-mix(in srgb, var(--hc-accent) 8%, var(--hc-bg)); }
+.hc-cluster-view-toggle button:focus-visible, .hc-cluster-list button:focus-visible { outline: 2px solid var(--hc-accent); outline-offset: -2px; }
+.hc-cluster-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--hc-border); }
+.premium-app .hc-cluster-filters input, .premium-app .hc-cluster-filters select { height: 30px; box-sizing: border-box; border: 1px solid var(--hc-border); border-radius: 4px; padding: 4px 8px; background: var(--hc-surface); color: var(--hc-text); font: 12px 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif; }
+.hc-cluster-filters input { width: 240px; max-width: 100%; }
+#root .premium-app .hc-cluster-filters input, #root .premium-app .hc-cluster-filters select { background: var(--hc-surface) !important; color: var(--hc-text) !important; border-color: var(--hc-border) !important; }
+.hc-cluster-filters > button { color: var(--hc-accent); font-size: 11.5px; }
+.hc-cluster-list-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.hc-cluster-list-name > button:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 600; color: var(--hc-accent); }
+.hc-cluster-list-name > svg { flex-shrink: 0; color: var(--hc-accent); }
+.hc-cluster-list-name > button:last-child { flex-shrink: 0; color: var(--hc-text-3); }
+.hc-cluster-list-actions { display: flex; align-items: center; gap: 6px; }
+.hc-cluster-list-actions > button { display: flex; align-items: center; justify-content: center; width: 26px; height: 28px; color: var(--hc-accent); }
+.hc-cluster-list-menu { position: relative; }
+.hc-cluster-list-menu > button { width: auto; }
+.hc-clusters-table-region { min-width: 0; }
+.hc-clusters-table-region .hbdr-dr-toolbar { flex-wrap: wrap; }
+.premium-app .hc-clusters-table-region .hc-cluster-list-tools { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-left: auto; min-width: 0; }
+.premium-app .hc-clusters-table-region .hc-cluster-list-tools .hbdr-dr-query-group { flex: 0 1 auto; margin-left: 0; }
+.hc-cluster-list-tools .hc-cluster-view-toggle { flex-shrink: 0; }
+.hc-clusters-table-region .hbdr-cluster-card-grid { padding: 12px; }
+.hc-cluster-component { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; font-weight: 400; }
+.hc-cluster-component > span:first-child { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hc-cluster-component > span + span { color: var(--hc-text-3); font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif; }
+.hc-cluster-empty { margin: 0; padding: 24px; color: var(--hc-text-3); font-size: 12px; }

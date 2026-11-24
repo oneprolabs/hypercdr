@@ -34,20 +34,12 @@ export default function ClusterActivityPanel({ logs, clusters, highlightedTaskId
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [retryingCleanupId, setRetryingCleanupId] = useState<string | null>(null);
   const [cleanupRetryError, setCleanupRetryError] = useState<{ taskId: string; message: string } | null>(null);
-  const [dockExpanded, setDockExpanded] = useState(() => {
-    const saved = window.localStorage.getItem('hypercdr:clusters:recent-tasks-expanded');
-    if (saved !== null) return saved === 'true';
-    return !window.matchMedia('(max-width: 900px)').matches;
-  });
+  const [dockExpanded, setDockExpanded] = useState(false);
   const setDockState = (expanded: boolean) => {
     setDockExpanded(expanded);
-    window.localStorage.setItem('hypercdr:clusters:recent-tasks-expanded', String(expanded));
   };
   const runningCount = entries.filter(entry => ['running', 'accepted', 'dispatched', 'queued'].includes(entry.log.task.status || '')).length;
   const failedCount = entries.filter(entry => entry.log.task.status === 'failed').length;
-  useEffect(() => {
-    if (runningCount > 0) setDockState(true);
-  }, [runningCount]);
   useEffect(() => {
     if (!highlightedTaskId) return;
     setDockState(true);

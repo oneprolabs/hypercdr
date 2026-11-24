@@ -1,4 +1,9 @@
 import ClusterRegistrationDrawer from './cluster-registration-drawer';
+import { readClusterView, saveClusterView, type ClusterView } from './cluster-view';
+import './cluster-view.css';
+import ListToolbarControls, { matchesColumnFilterToken } from '../../components/list-toolbar-controls';
+import { ChevronDown, LayoutGrid, List } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import { useBusinessPermission } from '../../auth/business-access';
 import { NodeResourceCell, NodeResourceRefresh } from './node-resource-cell';
 import { nodeResource, type NodeResourceKind } from './node-resources';
@@ -102,6 +107,19 @@ export default function ClusterPage(props: {
 }) {
   const { clusters, loading, protectionPlans, onLoadTopology, canUpgrade, defaultClusterId, clusterMenuId, setClusterMenuId, setSelectedCluster, setDefaultCluster, unregisterCluster, onRenameCluster, onUpgradeCluster, onUpgradeVelero, onRegisterCluster, onRefreshRegistration, clusterTaskLogs, getAgentTokenForRegistration, prefetchAgentToken, openDashboard, registrationAllowed = true, openLicenseManagement, toast } = props;
   const [registerOpen, setRegisterOpen] = useState(false);
+  const [clusterView, setClusterView] = useState<ClusterView>(() => readClusterView(window.localStorage));
+  const [clusterQuery, setClusterQuery] = useState('');
+  const [menuPosition, setMenuPosition] = useState({ top: 0, right: 0 });
+  const [selectedClusterIds, setSelectedClusterIds] = useState<string[]>([]);
+  const [queryField, setQueryField] = useState('name');
+  const [activeTags, setActiveTags] = useState<string[]>([]);
+  const [activeFilters, setActiveFilters] = useState<string[]>([]);
+  const [visibleColumns, setVisibleColumns] = useState(['name', 'id', 'type', 'kubernetes', 'connectionState', 'connection', 'roles', 'nodes', 'namespaces', 'protected', 'agent', 'velero', 'lastSeen', 'unregister']);
+  const changeClusterView = (view: ClusterView) => {
+    setClusterView(view);
+    saveClusterView(window.localStorage, view);
+    setClusterMenuId(null);
+  };
   const canManageCluster = useBusinessPermission('cluster.manage');
   const canUnregisterCluster = useBusinessPermission('cluster.unregister');
   const canDeleteBackupData = useBusinessPermission('backup.delete');
@@ -598,7 +616,64 @@ export default function ClusterPage(props: {
     }
   };
 
+  const renderClusterMenu = (cluster: Cluster, inList = false) => (
+              <div className={inList ? 'hc-cluster-list-menu' : 'absolute right-5 top-5 z-20'} data-cluster-menu-root>
+                <button onClick={(event) => { event.stopPropagation(); const bounds = event.currentTarget.getBoundingClientRect(); setMenuPosition({ top: Math.min(bounds.bottom + 4, window.innerHeight - 230), right: Math.max(8, window.innerWidth - bounds.right) }); setClusterMenuId(clusterMenuId === cluster.id ? null : cluster.id); }} className={inList ? 'hbdr-dr-more' : 'cluster-card-action-button flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700'} aria-label={inList ? 'More cluster actions' : `Actions for ${cluster.name}`} aria-expanded={clusterMenuId === cluster.id}>
+                  {inList ? <>More <ChevronDown size={15} /></> : <MoreVertical size={17} />}
+                </button>
+                  {clusterMenuId === cluster.id && (
+                    createPortal(<>
+                      <div className="fixed inset-0 z-30" onClick={(event) => { event.stopPropagation(); setClusterMenuId(null); }} />
+                      <motion.div data-cluster-menu-root initial={{ opacity: 0, scale: 0.96, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 8 }} style={{ position: 'fixed', top: menuPosition.top, right: menuPosition.right, zIndex: 100 }} className="cluster-card-action-menu w-44 rounded-xl border border-slate-100 bg-white py-2 shadow-2xl shadow-slate-200/70 ring-1 ring-slate-950/5" onClick={(event) => event.stopPropagation()}>
+                        <button onClick={(event) => { event.stopPropagation(); setClusterMenuId(null); setClusterResourceDetail({ cluster, type: 'overview' }); }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"><Eye size={15} />View Detail</button>
+                        {inList && <button onClick={() => { setClusterMenuId(null); setSelectedCluster(cluster); openDashboard(); }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"><ChevronRight size={15} />DR Workspace</button>}
+                        {inList && <button disabled={!canManageCluster} onClick={event => { setClusterMenuId(null); changeClusterView('cards'); openRename(cluster, event); }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"><Edit2 size={15} />Rename</button>}
+                        {inList && !(cluster.isDefault || cluster.id === defaultClusterId) && <button disabled={!canManageCluster} onClick={event => { setClusterMenuId(null); setDefaultCluster(cluster, event); }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"><Star size={15} />Set as default</button>}
+                        {canUpgrade && <button onMouseEnter={() => preloadDialog(ClusterCacheSettingsDrawer)} onFocus={() => preloadDialog(ClusterCacheSettingsDrawer)} onClick={() => { setClusterMenuId(null); setCacheCluster(cluster); }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"><Settings2 size={15} />Cache settings</button>}
+                        <button disabled={!canUnregisterCluster} title={!canUnregisterCluster ? "Your role cannot unregister clusters." : undefined} onClick={(event) => openUnregister(cluster, event)} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-rose-600 hover:bg-rose-50"><Trash2 size={15} />Unregister Cluster</button>
+                      </motion.div>
+                    </>, document.querySelector('.premium-app') || document.body)
+                  )}
+              </div>
+  );
+
   const failedUnregister = unregisterTask?.status === 'failed' ? unregisterFailure(unregisterTask, unregisterEvents) : null;
+  const renderComponentVersion = (cluster: Cluster, component: 'agent' | 'velero') => {
+    const isAgent = component === 'agent';
+    const version = isAgent ? cluster.agentVersion : cluster.veleroVersion;
+    const latest = isAgent ? cluster.latestAgentVersion : cluster.latestVeleroVersion;
+    const available = isAgent ? cluster.agentUpgradeAvailable : cluster.veleroUpgradeAvailable;
+    const status = isAgent ? cluster.agentUpgradeStatus : cluster.veleroUpgradeStatus;
+    return <div className="hc-cluster-component"><span title={version || 'Not detected'}>{version || 'unknown'}{available && latest ? ` → ${latest}` : ''}</span>{status === 'upgrading' ? <span>Upgrading{!isAgent ? ` ${formatPercent(cluster.veleroUpgradeProgress || 0)}%` : ''}</span> : available ? canUpgrade && cluster.connectionStatus === 'online' ? <button className="cluster-component-update" onClick={event => isAgent ? openUpgrade(cluster, event) : openVeleroUpgrade(cluster, event)}>Update</button> : <span>Update available</span> : <span>{version && !['unknown', 'pending'].includes(version) ? 'Up to date' : 'Not detected'}</span>}</div>;
+  };
+  const clusterColumns: HyperTableColumn<Cluster>[] = [
+    { id: 'select', header: () => <input type="checkbox" aria-label="Select all clusters" checked={visibleClusters.length > 0 && visibleClusters.every(cluster => selectedClusterIds.includes(cluster.id))} onChange={event => setSelectedClusterIds(event.target.checked ? visibleClusters.map(cluster => cluster.id) : [])} />, size: 42, enableSorting: false, cell: info => <input type="checkbox" aria-label={`Select ${info.row.original.name}`} checked={selectedClusterIds.includes(info.row.original.id)} onChange={() => toggleClusterSelection(info.row.original.id)} /> },
+    { id: 'name', header: 'Cluster', accessorKey: 'name', size: 210, meta: { kind: 'primary', title: cluster => `${cluster.name} · ${cluster.id}` }, cell: info => <div className="hc-cluster-list-name"><button onClick={() => setClusterResourceDetail({ cluster: info.row.original, type: 'overview' })}>{info.row.original.name === 'unknown-cluster' ? 'Unnamed cluster' : info.row.original.name}</button>{(info.row.original.isDefault || info.row.original.id === defaultClusterId) && <Star size={12} aria-label="Default cluster" />}<button aria-label={`Rename ${info.row.original.name}`} disabled={!canManageCluster} onClick={event => { setClusterView('cards'); saveClusterView(window.localStorage, 'cards'); openRename(info.row.original, event); }}><Edit2 size={12} /></button></div> },
+    { id: 'connection', header: 'Status', accessorFn: cluster => agentReadiness(cluster).label, size: 105, meta: { kind: 'status' }, cell: info => <span className={agentReadiness(info.row.original).className}>{agentReadiness(info.row.original).label}</span> },
+    { id: 'connectionState', header: 'Connection', accessorFn: cluster => cluster.connectionStatus === 'online' ? 'Online' : 'Offline · Reconnecting', size: 155 },
+    { id: 'roles', header: 'DR roles', accessorFn: cluster => [topology.summaries[cluster.id]?.outboundRelationships > 0 ? 'Source' : '', topology.summaries[cluster.id]?.inboundRelationships > 0 ? 'Target' : ''].filter(Boolean).join(' / ') || '—', size: 120 },
+    { id: 'protected', header: 'Protected', accessorFn: cluster => topology.summaries[cluster.id]?.protectedApps || 0, size: 130, meta: { kind: 'number' } },
+    { id: 'nodes', header: 'Nodes', accessorKey: 'nodes', size: 105, meta: { kind: 'number' }, cell: info => <button onClick={() => setClusterResourceDetail({ cluster: info.row.original, type: 'nodes' })}>{info.row.original.nodes}</button> },
+    { id: 'namespaces', header: 'Namespaces', accessorKey: 'applications', size: 120, meta: { kind: 'number' }, cell: info => <button onClick={() => setClusterResourceDetail({ cluster: info.row.original, type: 'namespaces' })}>{info.row.original.applications}</button> },
+    { id: 'agent', header: 'Comm-agent', accessorKey: 'agentVersion', size: 420, minSize: 320, meta: { kind: 'code' }, cell: info => renderComponentVersion(info.row.original, 'agent') },
+    { id: 'velero', header: 'Velero-agent', accessorKey: 'veleroVersion', size: 420, minSize: 320, meta: { kind: 'code' }, cell: info => renderComponentVersion(info.row.original, 'velero') },
+    { id: 'lastSeen', header: 'Last seen', accessorFn: cluster => { const timestamp = Date.parse(cluster.lastSeenAt || ''); return Number.isFinite(timestamp) ? timestamp : 0; }, size: 115, meta: { kind: 'code', title: cluster => cluster.lastSeenAt || 'Unknown' }, cell: info => <span>{formatLastSeen(info.row.original.lastSeenAt)}</span> },
+    { id: 'kubernetes', header: 'Kubernetes', accessorKey: 'version', size: 130, meta: { kind: 'code' } },
+    { id: 'type', header: 'Type', accessorFn: cluster => clusterTypePresentation(cluster.clusterType).label, size: 150 },
+    { id: 'id', header: 'Cluster ID', accessorKey: 'id', size: 280, meta: { kind: 'code' } },
+    { id: 'unregister', header: 'Unregister status', accessorFn: cluster => unregisterTask?.clusterId === cluster.id ? `${taskStatusLabel(unregisterTask.status)} ${formatPercent(unregisterTask.progress || 0)}%` : '—', size: 160 },
+  ];
+  const columnChoices = clusterColumns.filter(column => !['select', 'actions'].includes(column.id || '')).map(column => ({ value: column.id!, label: String(column.header), locked: column.id === 'name' }));
+  const clusterFieldValue = (cluster: Cluster, field: string) => {
+    if (field === 'connection') return `${cluster.connectionStatus} ${agentReadiness(cluster).label}`;
+    const column = clusterColumns.find(column => column.id === field);
+    if (column && 'accessorFn' in column && column.accessorFn) return String(column.accessorFn(cluster, 0));
+    if (column && 'accessorKey' in column) return String(cluster[column.accessorKey as keyof Cluster] ?? '');
+    return '';
+  };
+  const visibleClusters = clusters.filter(cluster => (!clusterQuery.trim() || clusterFieldValue(cluster, queryField).toLowerCase().includes(clusterQuery.trim().toLowerCase())) && (activeTags.length === 0 || activeTags.includes(cluster.clusterType || 'native-kubernetes')) && activeFilters.every(filter => filter.startsWith('columnFilter:') ? matchesColumnFilterToken(filter, field => clusterFieldValue(cluster, field)) : filter === (cluster.connectionStatus === 'online' ? 'online' : 'offline')));
+  const toggleClusterSelection = (id: string) => setSelectedClusterIds(previous => previous.includes(id) ? previous.filter(selected => selected !== id) : [...previous, id]);
+  const selectedCluster = visibleClusters.filter(cluster => selectedClusterIds.includes(cluster.id));
 
   return (
     <motion.div key="clusters" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="hbdr-clusters-page">
@@ -623,18 +698,23 @@ export default function ClusterPage(props: {
       {loading ? (
         <div className="hbdr-section-card flex min-h-48 items-center justify-center text-xs font-semibold text-slate-400" role="status">Loading clusters...</div>
       ) : clusters.length > 0 ? (
-        <div className="hbdr-section-card hbdr-clusters-card-region">
-          <div className="hbdr-section-toolbar">
-            <div>
-              <h3>Registered Clusters</h3>
-            </div>
-            <div className="hbdr-cluster-toolbar-actions">
-              <button type="button" onClick={() => void openTopology()} className="hbdr-cluster-topology-trigger"><GitBranch size={14} />DR Topology</button>
-              <button type="button" onClick={openRegister} className="hbdr-dr-action-primary inline-flex items-center gap-1.5"><Plus size={14} />Register Cluster</button>
+        <div className="hbdr-dr-table-card hc-clusters-table-region">
+          <div className="hbdr-dr-table-head">
+            <div className="hbdr-dr-toolbar">
+              <div className="hbdr-dr-action-group">
+                <button type="button" onClick={openRegister} className="hbdr-dr-action-primary"><Plus size={14} />Register Cluster</button>
+                <button type="button" onClick={() => void openTopology()} className="hbdr-dr-action-secondary"><GitBranch size={14} />DR Topology</button>
+                {selectedCluster.length === 1 ? renderClusterMenu(selectedCluster[0], true) : <button className="hbdr-dr-more" disabled>More <ChevronDown size={15} /></button>}
+              </div>
+              <div className="hc-cluster-list-tools">
+              <ListToolbarControls query={clusterQuery} setQuery={setClusterQuery} queryField={queryField} setQueryField={setQueryField} queryFields={columnChoices} tags={['native-kubernetes', 'huaweicloud-cce', 'openshift'].map(value => ({ value, label: clusterTypePresentation(value).label }))} activeTags={activeTags} setActiveTags={setActiveTags} filters={[{ value: 'online', label: 'Online' }, { value: 'offline', label: 'Offline' }]} activeFilters={activeFilters} setActiveFilters={setActiveFilters} columns={columnChoices} visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} onRefresh={() => { setClusterMenuId(null); void onRefreshRegistration(); }} />
+              <div className="hc-cluster-view-toggle" role="group" aria-label="Cluster view"><button type="button" aria-label="Card view" aria-pressed={clusterView === 'cards'} onClick={() => changeClusterView('cards')}><LayoutGrid size={14} /></button><button type="button" aria-label="List view" aria-pressed={clusterView === 'list'} onClick={() => changeClusterView('list')}><List size={14} /></button></div>
+              </div>
             </div>
           </div>
-          <div className={`hbdr-cluster-card-grid ${clusters.length <= 3 ? 'is-single-row' : 'is-multi-row'}`}>
-            {clusters.map(cluster => (
+          {clusterView === 'list' ? <HyperTable variant="page" className="hc-cluster-list" density="comfortable" columns={clusterColumns.filter(column => column.id === 'select' || visibleColumns.includes(column.id || ''))} data={visibleClusters} getRowId={cluster => cluster.id} getRowClassName={cluster => selectedClusterIds.includes(cluster.id) ? 'hbdr-dr-row-selected' : ''} selectedCount={selectedCluster.length} emptyMessage="No clusters match your filters." /> : <div className={`hbdr-cluster-card-grid ${visibleClusters.length <= 3 ? 'is-single-row' : 'is-multi-row'}`}>
+            {visibleClusters.length === 0 && <p className="hc-cluster-empty" role="status">No clusters match your filters.</p>}
+            {visibleClusters.map(cluster => (
               <motion.div key={cluster.id} whileHover={{ y: -2 }} className={`cluster-card-premium ${cluster.connectionStatus !== 'online' ? 'cluster-card-offline' : ''} relative w-full cursor-default overflow-visible rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm transition-all hover:border-blue-200 hover:shadow-lg md:w-[340px] group ${clusterMenuId === cluster.id ? 'z-40' : 'z-0'}`}>
               {(() => {
                 const readiness = agentReadiness(cluster);
@@ -647,23 +727,7 @@ export default function ClusterPage(props: {
                   {unregisterActive ? `Unregistering ${formatPercent(unregisterTaskForCluster.progress || 0)}%` : `Unregister ${taskStatusLabel(unregisterTaskForCluster.status)}`}
                 </div>
               )}
-              <div className="absolute right-5 top-5 z-20" data-cluster-menu-root>
-                <button onClick={(event) => { event.stopPropagation(); setClusterMenuId(clusterMenuId === cluster.id ? null : cluster.id); }} className="cluster-card-action-button flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700" aria-label="Cluster Actions">
-                  <MoreVertical size={17} />
-                </button>
-                <AnimatePresence>
-                  {clusterMenuId === cluster.id && (
-                    <>
-                      <div className="fixed inset-0 z-30" onClick={(event) => { event.stopPropagation(); setClusterMenuId(null); }} />
-                      <motion.div data-cluster-menu-root initial={{ opacity: 0, scale: 0.96, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 8 }} className="cluster-card-action-menu absolute right-0 top-9 z-50 w-44 rounded-xl border border-slate-100 bg-white py-2 shadow-2xl shadow-slate-200/70 ring-1 ring-slate-950/5" onClick={(event) => event.stopPropagation()}>
-                        <button onClick={(event) => { event.stopPropagation(); setClusterMenuId(null); setClusterResourceDetail({ cluster, type: 'overview' }); }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"><Eye size={15} />View Detail</button>
-                        {canUpgrade && <button onMouseEnter={() => preloadDialog(ClusterCacheSettingsDrawer)} onFocus={() => preloadDialog(ClusterCacheSettingsDrawer)} onClick={() => { setClusterMenuId(null); setCacheCluster(cluster); }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"><Settings2 size={15} />Cache settings</button>}
-                        <button disabled={!canUnregisterCluster} title={!canUnregisterCluster ? "Your role cannot unregister clusters." : undefined} onClick={(event) => openUnregister(cluster, event)} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-rose-600 hover:bg-rose-50"><Trash2 size={15} />Unregister Cluster</button>
-                      </motion.div>
-                    </>
-                  )}
-                </AnimatePresence>
-              </div>
+              {renderClusterMenu(cluster)}
 
               <div className="cluster-card-head mb-2 flex items-start justify-between">
                 <div className="cluster-card-icon rounded-lg bg-slate-50 p-2 transition-colors group-hover:bg-blue-50"><Server className="text-blue-600" size={20} /></div>
@@ -800,7 +864,7 @@ export default function ClusterPage(props: {
               })()}
               </motion.div>
             ))}
-          </div>
+          </div>}
         </div>
       ) : (
 
