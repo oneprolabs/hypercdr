@@ -2,6 +2,8 @@
 
 Current entry points:
 
+- `bash scripts/release/check-tag-version.sh ce-vX.Y.Z`: verify working and committed VERSION before tagging; push releases only to `github`, not `origin`.
+
 - `dev/start-dev.sh`, `dev/status-dev.sh`, `dev/update-dev.sh`, `dev/stop-dev.sh`: host development with external runtime and provenance.
 - `dev/source-compose.sh`: isolated source-container development.
 - `test-backend.sh`: tests with real isolated PostgreSQL.

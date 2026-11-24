@@ -1,5 +1,19 @@
 # HyperCDR Engineering Guide
 
+## GitHub release checklist
+
+- Push commits and tags only to the `github` remote (`oneprolabs/hypercdr`).
+  Never push to `origin` unless the user explicitly requests it.
+- A request to submit code and tag includes pushing both to GitHub.
+- Before creating a community release tag, update and commit `VERSION` so its
+  exact contents match the intended `ce-vX.Y.Z` tag. Never tag first.
+- Run `bash scripts/release/check-tag-version.sh ce-vX.Y.Z` before tagging.
+  This verifies both the working copy and committed `HEAD` version.
+- Use a new version after a failed published tag; do not move remote tags
+  without explicit user approval.
+- Check the GitHub Actions release run after pushing. A successful push does
+  not prove the build or publication succeeded.
+
 ## Repository boundaries
 
 - `backend`: control-plane API, scheduler, persistence, migrations, and upgrader.
