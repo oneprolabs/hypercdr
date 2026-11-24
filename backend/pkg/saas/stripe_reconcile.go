@@ -69,7 +69,7 @@ func paidInvoicePeriod(invoice stripeInvoice, subscription stripeSubscription, p
 	}
 	line := invoice.Lines.Data[0]
 	item := subscription.Items.Data[0]
-	if line.Quantity != 1 || line.Amount < plan.AmountMinor || line.Pricing.Details.Price != price || line.Period.Start != item.Start || line.Period.End != item.End {
+	if line.Quantity != item.Quantity || item.Quantity < 1 || (!plan.PerNode() && item.Quantity != 1) || line.Amount < plan.AmountMinor || line.Pricing.Details.Price != price || line.Period.Start != item.Start || line.Period.End != item.End {
 		return nil, nil
 	}
 	end := time.Unix(item.End, 0).UTC()
@@ -145,7 +145,7 @@ func (s *Service) reconcileStripe(ctx context.Context, tenant string) error {
 			}
 			current = &previous
 		}
-		if len(selected.Items.Data) != 1 || selected.Items.Data[0].Quantity != 1 {
+		if len(selected.Items.Data) != 1 {
 			return errors.New("unexpected Stripe subscription items")
 		}
 		item := selected.Items.Data[0]
@@ -156,10 +156,22 @@ func (s *Service) reconcileStripe(ctx context.Context, tenant string) error {
 				break
 			}
 		}
+		if plan.ID == "" && current != nil {
+			for _, candidate := range billing.DefaultPlans() {
+				if current.Plan.ID == candidate.ID && s.cfg.Stripe.Prices[candidate.ID] == item.Price.ID {
+					plan = candidate
+					break
+				}
+			}
+		}
 		if plan.ID == "" || item.Start <= 0 || item.End <= item.Start {
 			return errors.New("unknown Stripe subscription plan or period")
 		}
 		if err = s.stripe.ValidatePrices(ctx, []billing.Plan{plan}); err != nil {
+			return err
+		}
+		plan, err = plan.WithQuantity(int(item.Quantity))
+		if err != nil {
 			return err
 		}
 		var invoices struct {

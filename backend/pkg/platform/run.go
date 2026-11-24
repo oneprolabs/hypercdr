@@ -36,6 +36,9 @@ func Run(options Options) error {
 	defer postgresStore.Close()
 	if options.Edition == EditionCommunity {
 		postgresStore.EnableCommunityEntitlements()
+		if strings.TrimSpace(os.Getenv("HCDR_DEPLOYMENT_MODE")) != "private" {
+			postgresStore.EnableWorkerNodeEntitlements()
+		}
 	}
 	secretCtx, secretCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	if err := postgresStore.ConfigureSecretKey(secretCtx, cfg.SecretKey); err != nil {

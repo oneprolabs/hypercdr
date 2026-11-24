@@ -23,7 +23,11 @@ var planID = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,79}$`)
 var currency = regexp.MustCompile(`^[a-z]{3}$`)
 
 func (plan Plan) Validate() error {
-	validCapacity := (plan.Unlimited && plan.MaxClusters == 0) || (!plan.Unlimited && plan.MaxClusters >= 2 && plan.MaxClusters <= 1000000)
+	minimumCapacity := 2
+	if plan.PerNode() {
+		minimumCapacity = 1
+	}
+	validCapacity := (plan.Unlimited && plan.MaxClusters == 0) || (!plan.Unlimited && plan.MaxClusters >= minimumCapacity && plan.MaxClusters <= 1000000)
 	if !planID.MatchString(plan.ID) || plan.ID == "free" || strings.TrimSpace(plan.Name) != plan.Name || plan.Name == "" || len(plan.Name) > 80 || len(plan.Description) > 500 || !validCapacity || plan.AmountMinor <= 0 || plan.AmountMinor > 100000000000 || !currency.MatchString(plan.Currency) || (plan.Interval != "month" && plan.Interval != "year") {
 		return errors.New("invalid commercial subscription plan")
 	}
@@ -35,6 +39,32 @@ func DefaultPlans() []Plan {
 		{ID: "standard", Name: "Standard", Description: "Protect across multiple clusters.", MaxClusters: 5, AmountMinor: 10000, Currency: "usd", Interval: "month"},
 		{ID: "business", Name: "Business", Description: "Scale protection without a cluster limit.", Unlimited: true, AmountMinor: 50000, Currency: "usd", Interval: "month"},
 	}
+}
+
+func WorkerPlans() []Plan {
+	return []Plan{
+		{ID: "flex-monthly", Name: "Flex", Description: "Per subscribed worker node", MaxClusters: 3, AmountMinor: 4900, Currency: "usd", Interval: "month"},
+		{ID: "flex-annual", Name: "Flex", Description: "Per subscribed worker node; pay for 10 months", MaxClusters: 3, AmountMinor: 49000, Currency: "usd", Interval: "year"},
+		{ID: "business-monthly", Name: "Business", Description: "Unlimited worker nodes", Unlimited: true, AmountMinor: 490000, Currency: "usd", Interval: "month"},
+		{ID: "business-annual", Name: "Business", Description: "Unlimited worker nodes; pay for 10 months", Unlimited: true, AmountMinor: 4900000, Currency: "usd", Interval: "year"},
+	}
+}
+
+func (plan Plan) PerNode() bool {
+	return plan.ID == "flex-monthly" || plan.ID == "flex-annual"
+}
+
+func (plan Plan) WithQuantity(quantity int) (Plan, error) {
+	if plan.PerNode() {
+		if quantity < 1 || quantity > 1000000 {
+			return Plan{}, errors.New("Flex requires 1 to 1000000 subscribed worker nodes")
+		}
+		plan.MaxClusters = quantity
+		plan.AmountMinor *= int64(quantity)
+	} else if quantity != 1 {
+		return Plan{}, errors.New("fixed subscriptions require quantity 1")
+	}
+	return plan, plan.Validate()
 }
 
 func ParsePlans(raw string) ([]Plan, error) {

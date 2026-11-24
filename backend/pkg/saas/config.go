@@ -96,7 +96,7 @@ func ConfigFromEnvironment() (Config, error) {
 		return c, err
 	}
 	if strings.TrimSpace(os.Getenv("HCDR_SUBSCRIPTION_PLANS_JSON")) == "" {
-		c.SubscriptionPlans = billing.DefaultPlans()
+		c.SubscriptionPlans = billing.WorkerPlans()
 	}
 	c.Stripe, err = billing.LoadStripeConfig(os.Getenv("HCDR_STRIPE_CONFIG_FILE"))
 	if err != nil {
@@ -180,6 +180,7 @@ func (s *Service) Routes() []platform.Route {
 	private("POST /api/v1/saas/license", (*Service).license)
 	private("GET /api/v1/saas/subscription", (*Service).subscription)
 	private("POST /api/v1/saas/subscription/checkout", (*Service).subscriptionCheckout)
+	private("POST /api/v1/saas/subscription/quote", (*Service).subscriptionQuote)
 	private("POST /api/v1/saas/subscription/portal", (*Service).subscriptionPortal)
 	private("POST /api/v1/saas/roles", (*Service).roles)
 	private("PATCH /api/v1/saas/roles/{id}", (*Service).roles)

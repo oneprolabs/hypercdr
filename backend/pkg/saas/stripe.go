@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -55,7 +56,14 @@ type stripeSession struct {
 	Reference string `json:"client_reference_id"`
 }
 
-func (s *Service) createCheckout(ctx context.Context, tenant string, plan billing.Plan) (string, error) {
+func (s *Service) createCheckout(ctx context.Context, tenant string, plan billing.Plan, quantities ...int) (string, error) {
+	quantity := 1
+	if len(quantities) > 0 {
+		quantity = quantities[0]
+	}
+	if _, err := plan.WithQuantity(quantity); err != nil {
+		return "", err
+	}
 	unlock, err := s.billingLock(ctx, tenant)
 	if err != nil {
 		return "", err
@@ -113,9 +121,10 @@ func (s *Service) createCheckout(ctx context.Context, tenant string, plan billin
 		}
 	}
 	var intent, existingPlan, price, origin string
+	var existingQuantity int
 	var sessionID sql.NullString
 	var created time.Time
-	err = s.db.QueryRowContext(ctx, `select id,plan_id,price_id,session_id,created_at,return_origin from tenant_stripe_checkouts where tenant_id=$1 and state in ('creating','open')`, tenant).Scan(&intent, &existingPlan, &price, &sessionID, &created, &origin)
+	err = s.db.QueryRowContext(ctx, `select id,plan_id,price_id,session_id,created_at,return_origin,quantity from tenant_stripe_checkouts where tenant_id=$1 and state in ('creating','open')`, tenant).Scan(&intent, &existingPlan, &price, &sessionID, &created, &origin, &existingQuantity)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", err
 	}
@@ -128,7 +137,7 @@ func (s *Service) createCheckout(ctx context.Context, tenant string, plan billin
 			return "", errors.New("Stripe checkout ownership mismatch")
 		}
 		if session.Status == "open" {
-			if existingPlan != plan.ID {
+			if existingPlan != plan.ID || existingQuantity != quantity {
 				var expired stripeSession
 				if err = s.stripe.Request(ctx, "POST", "/checkout/sessions/"+url.PathEscape(sessionID.String)+"/expire", "hcdr-expire-"+intent, url.Values{}, &expired); err != nil {
 					return "", err
@@ -153,14 +162,14 @@ func (s *Service) createCheckout(ctx context.Context, tenant string, plan billin
 	if intent != "" && time.Since(created) > 23*time.Hour {
 		return "", errors.New("checkout recovery requires administrator review")
 	}
-	if intent != "" && existingPlan != plan.ID {
+	if intent != "" && (existingPlan != plan.ID || existingQuantity != quantity) {
 		return "", errors.New("another checkout is being prepared")
 	}
 	if intent == "" {
 		intent = uuid.NewString()
 		price = s.cfg.Stripe.Prices[plan.ID]
 		origin = s.cfg.Origin
-		_, err = s.db.ExecContext(ctx, `insert into tenant_stripe_checkouts(id,tenant_id,plan_id,price_id,customer_id,return_origin,expires_at) values($1,$2,$3,$4,$5,$6,now()+interval '24 hours')`, intent, tenant, plan.ID, price, customer.String, origin)
+		_, err = s.db.ExecContext(ctx, `insert into tenant_stripe_checkouts(id,tenant_id,plan_id,price_id,customer_id,return_origin,expires_at,quantity) values($1,$2,$3,$4,$5,$6,now()+interval '24 hours',$7)`, intent, tenant, plan.ID, price, customer.String, origin, quantity)
 		if err != nil {
 			return "", err
 		}
@@ -169,7 +178,7 @@ func (s *Service) createCheckout(ctx context.Context, tenant string, plan billin
 	err = s.stripe.Request(ctx, "POST", "/checkout/sessions", "hcdr-sandbox-checkout-"+intent, url.Values{
 		"mode": {"subscription"}, "customer": {customer.String}, "client_reference_id": {tenant},
 		"adaptive_pricing[enabled]": {"false"},
-		"line_items[0][price]":      {price}, "line_items[0][quantity]": {"1"},
+		"line_items[0][price]":      {price}, "line_items[0][quantity]": {strconv.Itoa(quantity)},
 		"metadata[hypercdr_tenant_id]": {tenant}, "subscription_data[metadata][hypercdr_tenant_id]": {tenant},
 		"success_url": {origin + "/?billing=success"}, "cancel_url": {origin + "/?billing=canceled"},
 	}, &session)

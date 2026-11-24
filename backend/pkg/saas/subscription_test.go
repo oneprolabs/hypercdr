@@ -19,7 +19,7 @@ func TestApprovedSubscriptionCatalogConfiguration(t *testing.T) {
 	t.Setenv("HCDR_GOOGLE_CLIENT_SECRET", "")
 	t.Setenv("HCDR_SUBSCRIPTION_PLANS_JSON", "")
 	cfg, err := ConfigFromEnvironment()
-	if err != nil || len(cfg.SubscriptionPlans) != 2 || cfg.SubscriptionPlans[0].MaxClusters != 5 || cfg.SubscriptionPlans[0].AmountMinor != 10000 || !cfg.SubscriptionPlans[1].Unlimited || cfg.SubscriptionPlans[1].AmountMinor != 50000 {
+	if err != nil || len(cfg.SubscriptionPlans) != 4 || cfg.SubscriptionPlans[0].MaxClusters != 3 || cfg.SubscriptionPlans[0].AmountMinor != 4900 || !cfg.SubscriptionPlans[2].Unlimited || cfg.SubscriptionPlans[2].AmountMinor != 490000 {
 		t.Fatalf("approved default catalog: %+v %v", cfg.SubscriptionPlans, err)
 	}
 	t.Setenv("HCDR_SUBSCRIPTION_PLANS_JSON", "[]")

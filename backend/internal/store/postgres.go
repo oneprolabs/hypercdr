@@ -18,10 +18,11 @@ import (
 )
 
 type PostgresStore struct {
-	db                    *sql.DB
-	diagnosticWriter      DiagnosticLogWriter
-	secretKey             string
-	communityEntitlements bool
+	db                     *sql.DB
+	diagnosticWriter       DiagnosticLogWriter
+	secretKey              string
+	communityEntitlements  bool
+	workerNodeEntitlements bool
 }
 
 type DiagnosticLogWriter interface {

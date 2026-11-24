@@ -16,7 +16,7 @@ import (
 )
 
 func (s *Service) subscription(w http.ResponseWriter, r *http.Request, principal platform.Principal) {
-	tx, err := s.db.BeginTx(r.Context(), &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+	tx, err := s.db.BeginTx(r.Context(), &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
 	if err != nil {
 		internal(w)
 		return
@@ -26,6 +26,26 @@ func (s *Service) subscription(w http.ResponseWriter, r *http.Request, principal
 	if err != nil {
 		problem(w, 503, "subscription_unavailable", "Subscription information could not be loaded. Retry shortly.")
 		return
+	}
+	if s.cfg.SaaS {
+		usage.CanRegister = true
+		usage.OverLimit = false
+	}
+	if usage.WorkerNodesOverLimit && usage.WorkerOverageStartedAt == nil {
+		now := time.Now().UTC()
+		if _, err := tx.ExecContext(r.Context(), `insert into tenant_worker_entitlement_state(tenant_id,overage_started_at,updated_at) values($1,$2,$2) on conflict(tenant_id) do update set overage_started_at=coalesce(tenant_worker_entitlement_state.overage_started_at,excluded.overage_started_at),updated_at=excluded.updated_at`, principal.TenantID, now); err != nil {
+			internal(w)
+			return
+		}
+		ends := now.Add(30 * 24 * time.Hour)
+		usage.WorkerOverageStartedAt = &now
+		usage.WorkerGracePeriodEndsAt = &ends
+	}
+	if !usage.WorkerNodesOverLimit {
+		if _, err := tx.ExecContext(r.Context(), `update tenant_worker_entitlement_state set overage_started_at=null,updated_at=now() where tenant_id=$1 and overage_started_at is not null`, principal.TenantID); err != nil {
+			internal(w)
+			return
+		}
 	}
 	snapshot, err := store.ReadTenantSubscription(r.Context(), tx, principal.TenantID)
 	if err != nil {
@@ -68,7 +88,8 @@ func (s *Service) subscriptionCheckout(w http.ResponseWriter, r *http.Request, p
 		return
 	}
 	var input struct {
-		PlanID string `json:"planId"`
+		PlanID   string `json:"planId"`
+		Quantity int    `json:"quantity"`
 	}
 	if !decode(r, &input) {
 		problem(w, 400, "invalid_plan", "Select a commercial plan.")
@@ -76,10 +97,18 @@ func (s *Service) subscriptionCheckout(w http.ResponseWriter, r *http.Request, p
 	}
 	for _, plan := range s.cfg.SubscriptionPlans {
 		if plan.ID == input.PlanID {
+			quantity := input.Quantity
+			if quantity == 0 && !plan.PerNode() {
+				quantity = 1
+			}
+			if _, err := plan.WithQuantity(quantity); err != nil {
+				problem(w, 400, "invalid_quantity", err.Error())
+				return
+			}
 			if s.billingReady() {
 				ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
 				defer cancel()
-				redirect, err := s.createCheckout(ctx, principal.TenantID, plan)
+				redirect, err := s.createCheckout(ctx, principal.TenantID, plan, quantity)
 				if err != nil {
 					billingProblem(w, err)
 					return
@@ -92,6 +121,30 @@ func (s *Service) subscriptionCheckout(w http.ResponseWriter, r *http.Request, p
 		}
 	}
 	problem(w, 400, "invalid_plan", "This plan is not available. Refresh the subscription page.")
+}
+
+func (s *Service) subscriptionQuote(w http.ResponseWriter, r *http.Request, principal platform.Principal) {
+	var input struct {
+		PlanID   string `json:"planId"`
+		Quantity int    `json:"quantity"`
+	}
+	if !decode(r, &input) {
+		problem(w, 400, "invalid_quote", "Select a plan and a whole number of nodes.")
+		return
+	}
+	for _, plan := range billing.WorkerPlans() {
+		if plan.ID != input.PlanID {
+			continue
+		}
+		quote, err := plan.WithQuantity(input.Quantity)
+		if err != nil {
+			problem(w, 400, "invalid_quantity", err.Error())
+			return
+		}
+		respond(w, 200, map[string]any{"planId": plan.ID, "quantity": input.Quantity, "unitAmountMinor": plan.AmountMinor, "amountMinor": quote.AmountMinor, "interval": plan.Interval, "currency": plan.Currency, "unlimited": plan.Unlimited, "paymentRequired": true, "checkoutAvailable": false})
+		return
+	}
+	problem(w, 400, "invalid_plan", "Select Flex or Business.")
 }
 
 func (s *Service) subscriptionPortal(w http.ResponseWriter, r *http.Request, principal platform.Principal) {

@@ -28,6 +28,7 @@ type sandboxProvider struct {
 	refunded             bool
 	unavailable          bool
 	start, end           int64
+	lastQuantity         string
 }
 
 func (provider *sandboxProvider) ValidatePrices(context.Context, []billing.Plan) error { return nil }
@@ -59,6 +60,7 @@ func (provider *sandboxProvider) Request(ctx context.Context, method, path, key 
 	case path == "/checkout/sessions" || strings.HasPrefix(path, "/checkout/sessions/"):
 		if method == "POST" && path == "/checkout/sessions" {
 			provider.checkouts++
+			provider.lastQuantity = values.Get("line_items[0][quantity]")
 		}
 		sessionID := fmt.Sprintf("cs_test_sandbox_%d", provider.checkouts)
 		if path != "/checkout/sessions" {

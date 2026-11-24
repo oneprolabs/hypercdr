@@ -1,127 +1,139 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { CreditCard, RefreshCw } from 'lucide-react';
+import { Check, CreditCard, RefreshCw } from 'lucide-react';
 import { apiGet, apiPost } from '../../api/client';
 import type { FrontendModuleContext } from '../../app/extensions';
 import { formatLocalDateTime } from '../../lib/date-time';
 import { SettingsHeader } from './organization-settings';
 import { LicensePage } from './license-page';
-import { formatClusterCapacity, formatSubscriptionPrice, subscriptionCheckoutAvailable, subscriptionNotice, subscriptionStatusLabel, type SubscriptionPlan, type SubscriptionSnapshot } from './subscription-model';
+import { clearBillingReturn } from './billing-return';
+import { subscriptionStatusLabel, type SubscriptionSnapshot } from './subscription-model';
 import './tenant-access.css';
 
 type SubscriptionResponse = {
   mode: 'online' | 'offline';
   usage: {
-    tenantId: string; source: 'subscription' | 'license'; plan: 'free' | 'commercial'; status: string;
-    maxClusters: number; unlimited?: boolean; usedClusters: number; overLimit: boolean; canRegister: boolean; validUntil?: string;
+    source: 'subscription' | 'license'; plan: 'free' | 'commercial'; status: string;
+    unlimited?: boolean; validUntil?: string; workerNodes: number; maxWorkerNodes: number;
+    workerNodesOverLimit: boolean; workerGracePeriodEndsAt?: string; workerTasksBlocked: boolean;
   };
   subscription: SubscriptionSnapshot | null;
-  plans: SubscriptionPlan[];
   canManage: boolean;
-  payment: { configured: boolean; reason: string; testMode?: boolean; verificationDelayed?: boolean };
 };
+type Quote = { planId: string; quantity: number; amountMinor: number; interval: 'month' | 'year' };
+const money = (minor: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(minor / 100);
 
 export function SubscriptionPage(context: FrontendModuleContext) {
   const [data, setData] = useState<SubscriptionResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [actionError, setActionError] = useState('');
-  const [busy, setBusy] = useState('');
-  const actionLock = useRef(false);
-  const billingReturn = useRef(new URLSearchParams(window.location.search).get('billing'));
+  const [subscribedNodes, setSubscribedNodes] = useState('');
+  const [interval, setInterval] = useState<'month' | 'year'>('month');
+  const [selected, setSelected] = useState<'flex' | 'business' | null>(null);
+  const [quote, setQuote] = useState<Quote | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [quoteError, setQuoteError] = useState('');
   const request = useRef(0);
+  const initialized = useRef(false);
+  useEffect(() => { clearBillingReturn(window.history, window.location.href); }, []);
   const load = useCallback(async () => {
     const version = ++request.current;
     setLoading(true);
     setError('');
     try {
       const response = await apiGet<SubscriptionResponse>('/api/v1/saas/subscription');
-      if (request.current === version) setData(response);
+      if (version !== request.current) return;
+      setData(response);
+      if (!initialized.current) {
+        setSubscribedNodes(String(Math.max(1, response.usage.workerNodes)));
+        initialized.current = true;
+      }
     } catch (failure) {
-      if (request.current === version) setError(failure instanceof Error ? failure.message : 'Subscription information could not be loaded.');
+      if (version === request.current) setError(failure instanceof Error ? failure.message : 'Could not load subscription.');
     } finally {
-      if (request.current === version) setLoading(false);
+      if (version === request.current) setLoading(false);
     }
   }, []);
   useEffect(() => { void load(); return () => { request.current++; }; }, [load]);
-  useEffect(() => {
-    const restore = (event: PageTransitionEvent) => {
-      if (!event.persisted) return;
-      actionLock.current = false;
-      setBusy('');
-      void load();
-    };
-    window.addEventListener('pageshow', restore);
-    return () => window.removeEventListener('pageshow', restore);
-  }, [load]);
-  useEffect(() => {
-    if (!['success', 'return'].includes(billingReturn.current || '')) return;
-    const timer = window.setInterval(() => { void load(); }, 5000);
-    const timeout = window.setTimeout(() => window.clearInterval(timer), 120000);
-    return () => { window.clearInterval(timer); window.clearTimeout(timeout); };
-  }, [load]);
-  const openBilling = async (action: 'checkout' | 'portal', planId?: string) => {
-    if (actionLock.current) return;
-    actionLock.current = true;
-    setBusy(planId || action);
-    setActionError('');
-    try {
-      const response = await apiPost<{ url: string }>(`/api/v1/saas/subscription/${action}`, planId ? { planId } : {});
-      const destination = new URL(response.url);
-      if (destination.protocol !== 'https:' || !['checkout.stripe.com', 'billing.stripe.com'].includes(destination.host)) throw new Error('Billing returned an invalid destination. Retry shortly.');
-      window.location.assign(destination.href);
-    } catch (failure) {
-      setActionError(failure instanceof Error ? failure.message : 'Billing could not be opened. Retry shortly.');
-      actionLock.current = false;
-      setBusy('');
-    }
-  };
+  useEffect(() => { setQuote(null); setQuoteError(''); }, [subscribedNodes, data?.usage.workerNodes, interval, selected]);
 
   if (data?.mode === 'offline') return <LicensePage {...context} />;
   const usage = data?.usage;
-  const commercial = usage?.plan === 'commercial';
-  const subscription = usage?.source === 'subscription' ? data?.subscription ?? null : null;
-  const checkoutAvailable = subscriptionCheckoutAvailable(subscription);
-  const notice = subscriptionNotice(subscription, commercial);
-  const planName = commercial ? subscription?.plan.name || 'Commercial license' : 'Free';
+  const snapshot = data?.subscription;
+  const paid = usage?.plan === 'commercial';
+  const knownPlan = snapshot?.plan.id.startsWith('flex-') ? 'Flex' : snapshot?.plan.id.startsWith('business-') ? 'Business' : null;
+  const currentPlan = paid ? knownPlan || (usage?.source === 'license' ? 'License' : 'Previous paid plan') : 'Free';
+  const quantity = subscribedNodes.trim() === '' ? NaN : Number(subscribedNodes);
+  const minimumNodes = Math.max(1, usage?.workerNodes ?? 0);
+  const validNodes = Number.isInteger(quantity) && quantity >= minimumNodes && quantity <= 1000000;
+  const factor = interval === 'year' ? 10 : 1;
+  const flexPrice = validNodes ? quantity * 4900 * factor : null;
+  const businessPrice = 490000 * factor;
+  const review = async () => {
+    if (!selected) return;
+    setBusy(true);
+    setQuoteError('');
+    try {
+      setQuote(await apiPost<Quote>('/api/v1/saas/subscription/quote', { planId: `${selected}-${interval === 'year' ? 'annual' : 'monthly'}`, quantity: selected === 'flex' ? quantity : 1 }));
+    } catch (failure) {
+      setQuoteError(failure instanceof Error ? failure.message : 'Quote could not be confirmed.');
+    } finally { setBusy(false); }
+  };
 
   return <section className="ee-organization-access hc-subscription-page">
-    {billingReturn.current === 'success' && <p className="hc-access-note" role="status">Checkout returned. Your subscription updates only after payment is confirmed. This can take a moment; refresh if it has not updated.</p>}
-    {billingReturn.current === 'canceled' && <p className="hc-access-note" role="status">Checkout canceled. No subscription change was requested.</p>}
-    <SettingsHeader title="Subscription" description="Your organization’s plan, shared cluster capacity and billing." icon={<CreditCard size={18} />} />
+    <SettingsHeader title="Subscription & billing" description="Manage your plan, node capacity and billing cycle." icon={<CreditCard size={18} />} />
     <div className="ee-settings-panel">
-      <header><h4>Current subscription</h4><button className="hbdr-dr-action-secondary" disabled={loading} onClick={() => void load()}><RefreshCw size={14} />{loading && data ? 'Refreshing…' : 'Refresh'}</button></header>
-      {error && <p className="ee-settings-error" role="alert">{error} Use Refresh to retry. {data ? 'Previously loaded information is shown below.' : ''}</p>}
-      {actionError && <p className="ee-settings-error" role="alert">{actionError}</p>}
-      {data?.payment.verificationDelayed && <p className="hc-access-note hc-access-note-warning" role="status">Payment verification is delayed. We are retrying automatically. Previously confirmed access remains valid until its expiry; use Refresh to check again.</p>}
-      {loading && !data && <p role="status">Loading subscription information…</p>}
+      <header><h4>Current subscription</h4><button className="hbdr-dr-action-secondary" disabled={loading} onClick={() => void load()}><RefreshCw size={14} />Refresh</button></header>
+      {error && <p className="ee-settings-error" role="alert">{error} Refresh to retry.</p>}
+      {loading && !data && <p role="status">Loading subscription…</p>}
       {usage && <>
-        <div className="hc-subscription-overview">
-        <div className="hc-subscription-current"><strong>{planName}</strong><span>{usage.status === 'expired' ? 'Paid access expired' : subscription ? subscriptionStatusLabel(subscription.status) : 'Active'}</span></div>
-        <dl className="hc-license-summary">
-          <div><dt>Registered clusters</dt><dd>{usage.usedClusters} <span className="hc-subscription-muted">/ {formatClusterCapacity(usage)}</span></dd><small>{usage.unlimited ? 'No cluster limit' : usage.overLimit ? 'Over limit · New registrations blocked' : usage.canRegister ? `${usage.maxClusters - usage.usedClusters} available` : 'Limit reached'}</small></div>
-          <div><dt>{commercial ? 'Paid through' : 'Validity'}</dt><dd>{commercial && usage.validUntil ? formatLocalDateTime(usage.validUntil) : 'No expiry'}</dd></div>
-          <div><dt>{subscription && !commercial ? 'Subscription billing' : 'Billing'}</dt><dd>{subscription ? formatSubscriptionPrice(subscription.plan) : commercial ? 'License-based' : 'No charges'}</dd>{subscription && !commercial && <small>{subscriptionStatusLabel(subscription.status)} · Separate from current free access</small>}{subscription?.cancelAtPeriodEnd && <small>Cancellation scheduled</small>}</div>
-        </dl>
+        <div className="hc-member-overview">
+          <div className="hc-member-identity"><span>Your plan</span><div><strong>{currentPlan}</strong><span className="hc-subscription-label">{paid && snapshot ? subscriptionStatusLabel(snapshot.status) : paid ? 'Licensed' : 'Free account'}</span></div><small>{paid ? 'Paid membership' : 'Free forever · No credit card required'}</small></div>
+          <div><span>Worker node usage</span><strong>{usage.workerNodes} <small>/ {usage.unlimited ? 'Unlimited' : usage.maxWorkerNodes} nodes</small></strong>{!usage.unlimited && <progress aria-label="Worker node usage" value={Math.min(usage.workerNodes, usage.maxWorkerNodes)} max={Math.max(1, usage.maxWorkerNodes)} />}<small>{usage.workerNodesOverLimit ? 'Over quota · Review your capacity' : usage.unlimited ? 'Unlimited capacity included' : `${Math.max(0, usage.maxWorkerNodes - usage.workerNodes)} nodes available`}</small></div>
+          <div><span>Current billing</span><strong>{paid && snapshot ? `${money(snapshot.plan.amountMinor)} / ${snapshot.plan.interval}` : paid ? 'License-based' : '$0'}</strong><small>{paid && usage.validUntil ? `Paid through ${formatLocalDateTime(usage.validUntil)}` : 'No expiry'}</small></div>
         </div>
-        {(usage.overLimit || (usage.status === 'expired' && !notice)) && <p className="hc-access-note hc-access-note-warning" role="status">{usage.overLimit ? 'Cluster limit exceeded. New registrations are blocked.' : 'Paid access expired. The free cluster limit applies.'} Existing clusters and tasks are unaffected.</p>}
-        {notice && <p className="hc-access-note hc-access-note-warning" role="status">{notice}</p>}
-        {usage.source === 'license' && <p className="hc-access-note">Your existing license is preserved. Online subscription capacity is not added to license capacity.</p>}
+        {paid && !knownPlan && <p className="hc-access-note">Your previous subscription is preserved. It has not been migrated or repriced to Flex or Business.</p>}
+        {snapshot?.cancelAtPeriodEnd && <p className="hc-access-note">Cancellation scheduled. Confirmed paid access remains until the paid-through date.</p>}
+        {usage.workerNodesOverLimit && <p className="hc-access-note hc-access-note-warning" role="status">{usage.workerTasksBlocked ? 'Grace period ended. New Sync and Drill tasks are paused. All other operations remain available.' : `You are over your node allowance. Tasks continue normally during the 30-day grace period${usage.workerGracePeriodEndsAt ? ` until ${formatLocalDateTime(usage.workerGracePeriodEndsAt)}` : ''}. Increase your quota before it ends.`}</p>}
       </>}
     </div>
     {data && <div className="ee-settings-panel">
-      <header><h4>Subscriptions</h4><span className="hc-subscription-muted hc-subscription-caption">Prices and cluster limits are per organization</span></header>
-      <div className="hc-subscription-plans">
-        <article className={`hc-subscription-plan${!commercial ? ' is-current' : ''}`}><div className="hc-subscription-plan-heading"><h5>Free</h5>{!commercial && <span className="hc-subscription-label">Current</span>}</div><p className="hc-subscription-price">$0 <small>· No expiry</small></p><div className="hc-subscription-capacity"><strong>1</strong><span>registered cluster</span></div><footer><button className="hbdr-dr-action-secondary" disabled>{commercial ? 'Included free tier' : 'Current subscription'}</button></footer></article>
-        {data.plans.map(plan => {
-          const current = commercial && subscription?.plan.id === plan.id;
-          return <article className={`hc-subscription-plan${current ? ' is-current' : ''}`} key={plan.id}><div className="hc-subscription-plan-heading"><h5>{plan.name}</h5>{current && <span className="hc-subscription-label is-commercial">Current</span>}</div><p className="hc-subscription-price">{formatSubscriptionPrice(plan)} <small>{plan.currency.toUpperCase()}</small></p><div className="hc-subscription-capacity"><strong className={plan.unlimited ? 'is-unlimited' : undefined}>{formatClusterCapacity(plan)}</strong><span>registered clusters</span></div><footer><button className="hbdr-dr-action-secondary" disabled={!data.canManage || !data.payment.configured || !!busy || current} aria-busy={busy === plan.id} onClick={() => { void openBilling(checkoutAvailable ? 'checkout' : 'portal', checkoutAvailable ? plan.id : undefined); }} title={current ? 'This is your current subscription.' : data.canManage ? data.payment.reason : 'Only organization administrators can manage subscriptions.'}>{busy === plan.id ? 'Opening checkout…' : current ? 'Current subscription' : checkoutAvailable ? `Upgrade to ${plan.name}` : 'Manage subscription'}</button></footer></article>;
-        })}
-        {data.plans.length === 0 && <article className="hc-subscription-plan hc-subscription-plan-pending"><h5>Need more clusters?</h5><p>Commercial subscriptions are not available yet.</p><p className="hc-subscription-muted">Plans and pricing will appear here after they are configured. Your free access remains available.</p></article>}
+      <header><div><h4>Available plans</h4><span className="hc-subscription-muted">All plans include unlimited cluster registrations.</span></div><span className="hc-subscription-muted">Prices in USD</span></header>
+      <div className="hc-billing-choice" aria-label="Billing cycle"><button aria-pressed={interval === 'month'} className={interval === 'month' ? 'is-active' : ''} disabled={busy} onClick={() => setInterval('month')}>Monthly</button><button aria-pressed={interval === 'year'} className={interval === 'year' ? 'is-active' : ''} disabled={busy} onClick={() => setInterval('year')}>Annual <small>Pay for 10 months · Save 16.7%</small></button></div>
+      <div className="hc-subscription-plans hc-worker-plans">
+        <article onClick={() => { if (!busy) setSelected(null); }} className={`hc-subscription-plan${currentPlan === 'Free' ? ' is-current' : ''}`}>
+          <div className="hc-subscription-plan-heading"><h5>Free</h5>{currentPlan === 'Free' && <span className="hc-subscription-label">Current plan</span>}</div>
+          <p>For small environments</p><p className="hc-subscription-price">$0 <small>forever</small></p>
+          <ul><li><Check size={14} />Up to 2 worker nodes</li><li><Check size={14} />No payment required</li><li><Check size={14} />Upgrade when you need more nodes</li></ul>
+          <footer><button className="hbdr-dr-action-secondary" disabled={busy} onClick={() => setSelected(null)}>{currentPlan === 'Free' ? 'Current plan' : 'View free tier'}</button></footer>
+        </article>
+        <article onClick={() => { if (!busy) setSelected('flex'); }} className={`hc-subscription-plan${currentPlan === 'Flex' ? ' is-current' : ''}${selected === 'flex' ? ' is-selected' : ''}`}>
+          <div className="hc-subscription-plan-heading"><h5>Flex</h5>{currentPlan === 'Flex' && <span className="hc-subscription-label">Current plan</span>}</div>
+          <p>Pay for your subscribed node quota</p><p className="hc-subscription-price">{money(4900 * factor)} <small>/ node / {interval}</small></p>
+          <ul><li><Check size={14} />All subscribed nodes are charged</li><li><Check size={14} />Reserve capacity for expansion</li><li><Check size={14} />30-day over-quota grace period</li></ul>
+          <footer><button className="hbdr-dr-action-secondary" disabled={busy} aria-label="Select Flex plan" aria-pressed={selected === 'flex'} onClick={() => setSelected('flex')}>{selected === 'flex' ? 'Selected' : 'Select plan'}</button></footer>
+        </article>
+        <article onClick={() => { if (!busy) setSelected('business'); }} className={`hc-subscription-plan${currentPlan === 'Business' ? ' is-current' : ''}${selected === 'business' ? ' is-selected' : ''}`}>
+          <div className="hc-subscription-plan-heading"><h5>Business</h5>{currentPlan === 'Business' && <span className="hc-subscription-label">Current plan</span>}</div>
+          <p>Fixed price, unlimited nodes</p><p className="hc-subscription-price">{money(businessPrice)} <small>/ {interval}</small></p>
+          <ul><li><Check size={14} />Unlimited worker nodes</li><li><Check size={14} />No per-node overage charges</li><li><Check size={14} />Best value above 100 nodes</li></ul>
+          <footer><button className="hbdr-dr-action-secondary" disabled={busy} aria-label="Select Business plan" aria-pressed={selected === 'business'} onClick={() => setSelected('business')}>{selected === 'business' ? 'Selected' : 'Select plan'}</button></footer>
+        </article>
       </div>
-      <p className="hc-subscription-muted hc-subscription-terms">All tiers include backup, recovery, Drill and role-based access.</p>
-      <div className="hc-subscription-payment"><div><strong>{data.payment.configured ? 'Sandbox billing' : 'Online billing is not connected'}</strong><span> · {data.payment.configured ? 'Test payments only. No real money is charged.' : 'Purchases are unavailable. Your current access is unchanged.'}</span></div>{data.canManage && subscription && <button className="hbdr-dr-action-secondary" disabled={!data.payment.configured || !!busy} aria-busy={busy === 'portal'} onClick={() => { void openBilling('portal'); }} title={data.payment.reason}>{busy === 'portal' ? 'Opening…' : 'Manage subscription'}</button>}</div>
-      {!data.canManage && <p className="ee-invite-description">Only organization administrators can purchase or manage subscriptions. Contact your administrator for additional capacity.</p>}
-      <details className="hc-subscription-rules"><summary>Cluster capacity &amp; expiry</summary><div><section><h5>Cluster counting</h5><p>Source, target, offline and unregistering clusters count until unregistration completes.</p></section><section><h5>When paid access expires</h5><p>The limit returns to 1 cluster. Over-limit registrations are blocked; existing clusters and running tasks are unaffected.</p></section></div></details>
+      {selected ? <>
+        <div className="hc-plan-config-bar">
+          <div className="hc-config-plan"><strong>{selected === 'flex' ? 'Flex' : 'Business'}</strong><span>{interval === 'year' ? 'Annual billing' : 'Monthly billing'}</span></div>
+          {selected === 'flex' ? <div className="hc-config-nodes"><div><span>Current usage</span><strong>{usage?.workerNodes ?? 0} nodes</strong></div><label htmlFor="hc-subscribed-nodes"><span>Subscribed nodes</span><input id="hc-subscribed-nodes" type="number" min={minimumNodes} max="1000000" step="1" value={subscribedNodes} disabled={busy} onChange={event => setSubscribedNodes(event.target.value)} aria-describedby="hc-config-help" /></label></div> : <span className="hc-config-unlimited">Unlimited worker nodes</span>}
+          <div className="hc-config-price" aria-live="polite"><span>{selected === 'flex' ? `${validNodes ? quantity : '—'} nodes total` : 'Fixed subscription'}</span><strong>{selected === 'business' ? money(businessPrice) : flexPrice === null ? '—' : money(flexPrice)}<small> / {interval}</small></strong></div>
+          <button className="hbdr-dr-action-primary" disabled={!data.canManage || busy || (selected === 'flex' && !validNodes)} onClick={() => void review()}>{busy ? 'Checking…' : 'Confirm estimate'}</button>
+        </div>
+        <p id="hc-config-help" className="hc-subscription-footnote">{selected === 'flex' ? 'We recommend subscribing to extra nodes for future expansion. All subscribed nodes are billed, including the first two.' : 'No per-node charges or capacity limits.'}</p>
+        {selected === 'flex' && !validNodes && <p className="ee-settings-error" role="alert">Enter a whole number between {minimumNodes} and 1,000,000. Subscription capacity cannot be lower than current usage.</p>}
+      </> : <p className="hc-subscription-footnote">Choose a plan to configure your subscription. Your current plan remains {currentPlan}.</p>}
+      {quoteError && <p className="ee-settings-error" role="alert">{quoteError}</p>}
+      {quote && <p className="hc-access-note" role="status">Quote confirmed: {money(quote.amountMinor)} / {quote.interval}. Payment is not connected for these plans yet. No subscription was changed and no payment was taken.</p>}
+      <p className="hc-subscription-footnote">Checkout is not enabled yet. Reviewing a quote does not change your plan or charge your account.</p>
+      {!data.canManage && <p className="hc-access-note">Only organization administrators can manage subscriptions.</p>}
+      <details className="hc-subscription-rules"><summary>Node billing and over-quota rules</summary><div><section><h5>Free versus Flex</h5><p>Free includes up to 2 nodes. Once you subscribe to Flex, every subscribed node is charged; the first 2 are not deducted. Annual subscriptions cost 10 monthly payments for a full year.</p></section><section><h5>30-day grace period</h5><p>Tasks continue normally while over quota for 30 days. Afterward, only new Sync and Drill tasks pause. All other operations, including cluster registration and recovery, remain available. Business has no node quota.</p></section></div></details>
     </div>}
   </section>;
 }

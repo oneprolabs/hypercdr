@@ -122,6 +122,9 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 			}
 			task, err := r.createPendingBackupTask(body, "")
 			if err != nil {
+				if writeWorkerEntitlementError(w, err) {
+					return
+				}
 				if errors.Is(err, errSourceNamespaceMissing) {
 					writeJSON(w, http.StatusConflict, map[string]any{"error": "source_namespace_missing", "message": err.Error()})
 					return
@@ -259,6 +262,9 @@ func (r *Router) createBackupTask(w http.ResponseWriter, req *http.Request) {
 		}
 		task, err := r.createPendingBackupTask(body, tgt.appID)
 		if err != nil {
+			if writeWorkerEntitlementError(w, err) {
+				return
+			}
 			if errors.Is(err, errSourceNamespaceMissing) {
 				writeJSON(w, http.StatusConflict, map[string]any{"error": "source_namespace_missing", "message": err.Error()})
 				return

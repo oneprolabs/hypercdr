@@ -1,0 +1,2 @@
+alter table tenant_subscriptions drop constraint tenant_subscriptions_max_clusters_check;
+alter table tenant_subscriptions add constraint tenant_subscriptions_max_clusters_check check (max_clusters between 0 and 1000000);

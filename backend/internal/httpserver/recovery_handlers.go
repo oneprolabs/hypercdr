@@ -330,6 +330,9 @@ func (r *Router) createRecoveryTask(w http.ResponseWriter, req *http.Request, ta
 	})
 	if err != nil {
 		r.logger.Error("failed to create recovery task", "task_type", taskType, "error", err)
+		if writeWorkerEntitlementError(w, err) {
+			return
+		}
 		if errors.Is(err, store.ErrProtectionPlanBusy) {
 			writeJSON(w, http.StatusConflict, map[string]any{"error": "recovery_target_busy", "message": "Target resources are being cleaned. Wait for cleanup to finish."})
 			return
@@ -470,6 +473,9 @@ func (r *Router) retryRecoveryTask(w http.ResponseWriter, req *http.Request) {
 	payload["requestedBy"] = requestActor(req)
 	task, err := r.store.CreateTask(store.TaskInput{ClusterID: original.ClusterID, AppID: original.AppID, ProtectionPlanID: original.ProtectionPlanID, RestorePointID: original.RestorePointID, Type: original.Type, Status: "queued", CommandID: store.NewPublicID(), Payload: payload})
 	if err != nil {
+		if writeWorkerEntitlementError(w, err) {
+			return
+		}
 		if errors.Is(err, store.ErrProtectionPlanBusy) {
 			writeJSON(w, http.StatusConflict, map[string]any{"error": "recovery_target_busy", "message": "Target resources are being cleaned. Wait for cleanup to finish."})
 			return

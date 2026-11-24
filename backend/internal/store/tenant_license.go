@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -15,10 +16,15 @@ import (
 
 var ErrLicenseRevision = errors.New("a newer or different license revision is already activated")
 var ErrClusterCapacity = errors.New("the organization's cluster limit has been reached")
+var ErrWorkerNodeCapacity = errors.New("the organization's worker node subscription is over quota")
 var ErrRegistrationPermission = errors.New("the installation credential owner no longer has cluster registration permission")
 
 func (s *PostgresStore) EnableCommunityEntitlements() {
 	s.communityEntitlements = true
+}
+
+func (s *PostgresStore) EnableWorkerNodeEntitlements() {
+	s.workerNodeEntitlements = true
 }
 
 func (s *PostgresStore) checkNewClusterAdmission(ctx context.Context, reader TenantLicenseReader, tenantID, createdBy string) error {
@@ -48,6 +54,9 @@ func (s *PostgresStore) checkNewClusterAdmission(ctx context.Context, reader Ten
 			return ErrRegistrationPermission
 		}
 	}
+	if s.workerNodeEntitlements {
+		return nil
+	}
 	usage, err := ReadTenantLicenseUsage(ctx, reader, tenantID)
 	if err != nil {
 		return err
@@ -59,18 +68,24 @@ func (s *PostgresStore) checkNewClusterAdmission(ctx context.Context, reader Ten
 }
 
 type TenantLicenseUsage struct {
-	Source       string     `json:"source"`
-	TenantID     string     `json:"tenantId"`
-	Plan         string     `json:"plan"`
-	Status       string     `json:"status"`
-	MaxClusters  int        `json:"maxClusters"`
-	Unlimited    bool       `json:"unlimited"`
-	UsedClusters int        `json:"usedClusters"`
-	OverLimit    bool       `json:"overLimit"`
-	CanRegister  bool       `json:"canRegister"`
-	LicenseID    string     `json:"licenseId,omitempty"`
-	Revision     int64      `json:"revision,omitempty"`
-	ValidUntil   *time.Time `json:"validUntil,omitempty"`
+	Source                  string     `json:"source"`
+	TenantID                string     `json:"tenantId"`
+	Plan                    string     `json:"plan"`
+	Status                  string     `json:"status"`
+	MaxClusters             int        `json:"maxClusters"`
+	Unlimited               bool       `json:"unlimited"`
+	UsedClusters            int        `json:"usedClusters"`
+	OverLimit               bool       `json:"overLimit"`
+	CanRegister             bool       `json:"canRegister"`
+	WorkerNodes             int        `json:"workerNodes"`
+	MaxWorkerNodes          int        `json:"maxWorkerNodes"`
+	WorkerNodesOverLimit    bool       `json:"workerNodesOverLimit"`
+	WorkerOverageStartedAt  *time.Time `json:"workerOverageStartedAt,omitempty"`
+	WorkerGracePeriodEndsAt *time.Time `json:"workerGracePeriodEndsAt,omitempty"`
+	WorkerTasksBlocked      bool       `json:"workerTasksBlocked"`
+	LicenseID               string     `json:"licenseId,omitempty"`
+	Revision                int64      `json:"revision,omitempty"`
+	ValidUntil              *time.Time `json:"validUntil,omitempty"`
 }
 
 type TenantLicenseReader interface {
@@ -78,7 +93,7 @@ type TenantLicenseReader interface {
 }
 
 func ReadTenantLicenseUsage(ctx context.Context, reader TenantLicenseReader, tenantID string) (TenantLicenseUsage, error) {
-	usage := TenantLicenseUsage{TenantID: tenantID, Plan: "free", Status: "active", MaxClusters: 1}
+	usage := TenantLicenseUsage{TenantID: tenantID, Plan: "free", Status: "active", MaxClusters: 1, MaxWorkerNodes: 2}
 	var licenseID sql.NullString
 	var validFrom, validUntil sql.NullTime
 	var clusters sql.NullInt64
@@ -86,7 +101,8 @@ func ReadTenantLicenseUsage(ctx context.Context, reader TenantLicenseReader, ten
 	var subscriptionStatus sql.NullString
 	var subscriptionClusters sql.NullInt64
 	var paidUntil, periodStart sql.NullTime
-	err := reader.QueryRowContext(ctx, `select e.source,l.id,l.revision,l.max_clusters,l.valid_from,l.valid_until,(select count(*) from clusters c where c.tenant_id=e.tenant_id),s.status,s.max_clusters,s.paid_until,s.period_start from tenant_entitlements e left join tenant_licenses l on l.id=e.license_id and l.tenant_id=e.tenant_id left join tenant_subscriptions s on s.tenant_id=e.tenant_id where e.tenant_id=$1`, tenantID).Scan(&usage.Source, &licenseID, &revision, &clusters, &validFrom, &validUntil, &usage.UsedClusters, &subscriptionStatus, &subscriptionClusters, &paidUntil, &periodStart)
+	var workerOverageStarted sql.NullTime
+	err := reader.QueryRowContext(ctx, `select e.source,l.id,l.revision,l.max_clusters,l.valid_from,l.valid_until,(select count(*) from clusters c where c.tenant_id=e.tenant_id),coalesce((select sum(greatest(c.node_count,0)) from clusters c where c.tenant_id=e.tenant_id),0),s.status,s.max_clusters,s.paid_until,s.period_start,twes.overage_started_at from tenant_entitlements e left join tenant_licenses l on l.id=e.license_id and l.tenant_id=e.tenant_id left join tenant_subscriptions s on s.tenant_id=e.tenant_id left join tenant_worker_entitlement_state twes on twes.tenant_id=e.tenant_id where e.tenant_id=$1`, tenantID).Scan(&usage.Source, &licenseID, &revision, &clusters, &validFrom, &validUntil, &usage.UsedClusters, &usage.WorkerNodes, &subscriptionStatus, &subscriptionClusters, &paidUntil, &periodStart, &workerOverageStarted)
 	if err != nil {
 		return TenantLicenseUsage{}, err
 	}
@@ -101,7 +117,7 @@ func ReadTenantLicenseUsage(ctx context.Context, reader TenantLicenseReader, ten
 				usage.Status = "expired"
 			}
 			if paidUntil.Valid && paidUntil.Time.After(now) && !periodStart.Time.After(now) && (subscriptionStatus.String == "active" || subscriptionStatus.String == "past_due" || subscriptionStatus.String == "canceled") {
-				usage.Plan, usage.MaxClusters, usage.Status = "commercial", int(subscriptionClusters.Int64), "active"
+				usage.Plan, usage.MaxClusters, usage.MaxWorkerNodes, usage.Status = "commercial", int(subscriptionClusters.Int64), int(subscriptionClusters.Int64), "active"
 				usage.Unlimited = subscriptionClusters.Valid && subscriptionClusters.Int64 == 0
 			}
 		}
@@ -110,13 +126,67 @@ func ReadTenantLicenseUsage(ctx context.Context, reader TenantLicenseReader, ten
 		now := time.Now().UTC()
 		if !validFrom.Time.After(now) && validUntil.Time.After(now) {
 			usage.Plan, usage.MaxClusters = "commercial", int(clusters.Int64)
+			usage.MaxWorkerNodes = int(clusters.Int64)
 		} else {
 			usage.Status = "expired"
 		}
 	}
 	usage.OverLimit = !usage.Unlimited && usage.UsedClusters > usage.MaxClusters
+	usage.WorkerNodesOverLimit = !usage.Unlimited && usage.WorkerNodes > usage.MaxWorkerNodes
+	if workerOverageStarted.Valid && usage.WorkerNodesOverLimit {
+		started := workerOverageStarted.Time.UTC()
+		usage.WorkerOverageStartedAt = &started
+		ends := started.Add(30 * 24 * time.Hour)
+		usage.WorkerGracePeriodEndsAt = &ends
+		usage.WorkerTasksBlocked = !ends.After(time.Now().UTC())
+	}
 	usage.CanRegister = usage.Unlimited || usage.UsedClusters < usage.MaxClusters
 	return usage, nil
+}
+
+func workerTaskRequiresCapacity(taskType string) bool {
+	switch taskType {
+	case "backup", "drill":
+		return true
+	default:
+		return false
+	}
+}
+
+func CheckWorkerTaskAdmission(ctx context.Context, tx *sql.Tx, tenantID, taskType string, now time.Time) error {
+	if !workerTaskRequiresCapacity(taskType) {
+		return nil
+	}
+	var workerNodes int
+	if err := tx.QueryRowContext(ctx, `select coalesce(sum(greatest(node_count,0)),0) from clusters where tenant_id=$1`, tenantID).Scan(&workerNodes); err != nil {
+		return err
+	}
+	maxNodes := 2
+	var subscriptionStatus string
+	var subscriptionMax int
+	var paidUntil, periodStart sql.NullTime
+	err := tx.QueryRowContext(ctx, `select s.status,s.max_clusters,s.paid_until,s.period_start from tenant_subscriptions s join tenant_entitlements e on e.tenant_id=s.tenant_id and e.source='subscription' where s.tenant_id=$1`, tenantID).Scan(&subscriptionStatus, &subscriptionMax, &paidUntil, &periodStart)
+	if err == nil && paidUntil.Valid && paidUntil.Time.After(now) && !periodStart.Time.After(now) && (subscriptionStatus == "active" || subscriptionStatus == "past_due" || subscriptionStatus == "canceled") {
+		maxNodes = subscriptionMax
+	} else if !errors.Is(err, sql.ErrNoRows) && err != nil {
+		return err
+	}
+	var overageStarted sql.NullTime
+	if err := tx.QueryRowContext(ctx, `select overage_started_at from tenant_worker_entitlement_state where tenant_id=$1 for update`, tenantID).Scan(&overageStarted); err != nil {
+		return err
+	}
+	if maxNodes == 0 || workerNodes <= maxNodes {
+		_, err = tx.ExecContext(ctx, `update tenant_worker_entitlement_state set overage_started_at=null,updated_at=$2 where tenant_id=$1`, tenantID, now)
+		return err
+	}
+	if !overageStarted.Valid {
+		_, err = tx.ExecContext(ctx, `update tenant_worker_entitlement_state set overage_started_at=$2,updated_at=$2 where tenant_id=$1`, tenantID, now)
+		return err
+	}
+	if overageStarted.Time.Add(30 * 24 * time.Hour).After(now) {
+		return nil
+	}
+	return fmt.Errorf("%w: using %d worker nodes with a %d-node quota; the 30-day grace period has ended", ErrWorkerNodeCapacity, workerNodes, maxNodes)
 }
 
 func ActivateTenantLicense(ctx context.Context, db *sql.DB, verified licensing.Verified, raw, actorID string) (bool, error) {

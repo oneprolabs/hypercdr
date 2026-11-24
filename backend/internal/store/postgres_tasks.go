@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -56,6 +57,11 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 	}
 	if input.TenantID != "" && input.TenantID != tenantID {
 		return Task{}, ErrTenantResourceMismatch
+	}
+	if s.workerNodeEntitlements {
+		if err := CheckWorkerTaskAdmission(context.Background(), tx, tenantID, input.Type, time.Now().UTC()); err != nil {
+			return Task{}, err
+		}
 	}
 	if err := validateTaskReferences(tx, input, tenantID); err != nil {
 		return Task{}, err
