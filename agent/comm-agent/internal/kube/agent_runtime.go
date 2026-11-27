@@ -978,7 +978,10 @@ func imageTag(image string) string {
 	if slash, colon := strings.LastIndex(image, "/"), strings.LastIndex(image, ":"); colon > slash {
 		tag := image[colon+1:]
 		if strings.HasPrefix(tag, "velero-v") {
-			return strings.TrimPrefix(tag, "velero-")
+			tag = strings.TrimPrefix(tag, "velero-")
+		}
+		if strings.Contains(tag, "-hcdr.") {
+			tag, _, _ = strings.Cut(tag, "-build.")
 		}
 		return tag
 	}

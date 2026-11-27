@@ -16,7 +16,7 @@ if [[ "${MOCK_MODE}" == locked ]]; then
   [[ "$1 $2 $3" == 'manifest inspect --verbose' ]] || exit 77
   case "$4" in
     *postgres-16) query='.runtime.postgres.targetDigest' ;;
-    *velero-v1.18.2-hcdr.8-backup-volume-policy-v1-*-isolation-cache-v1)
+    *velero-v1.18.2-hcdr.9-build.*)
       printf '{"Descriptor":{"digest":"sha256:%064d"}}\n' 1
       exit 0 ;;
     *velero-plugin-for-aws-v1.13.0) query='.runtime.plugins.targets["velero-plugin-for-aws"]' ;;
@@ -39,6 +39,9 @@ EOF
 chmod +x "$work/bin/docker"
 export PATH="$work/bin:$PATH"
 source "$root/scripts/release/common.sh"
+source "$root/scripts/release/dependency-fingerprint.sh"
+[[ "$(velero_release_version)" == v1.18.2-hcdr.9 ]]
+[[ "$(default_velero_image_tag)" =~ ^v1\.18\.2-hcdr\.9-build\.[0-9a-f]{40}-backup-volume-policy-v1-isolation-cache-v1$ ]]
 expected="$(printf 'sha256:%064d' 0)"
 export MOCK_MODE=present
 dependency_target_matches_digest example.invalid/image:fixed "$expected"

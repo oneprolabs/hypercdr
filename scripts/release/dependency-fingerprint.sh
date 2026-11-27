@@ -12,11 +12,19 @@ velero_source_fingerprint() {
   ) | sha256sum | cut -d' ' -f1
 }
 
+velero_release_version() {
+  local version
+  version="$(cat "$ROOT_DIR/third_party/velero/HYPERCDR_VERSION")" || return 1
+  [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-hcdr\.[0-9]+$ ]] || return 1
+  printf '%s\n' "$version"
+}
+
 default_velero_image_tag() {
-  local fingerprint
+  local fingerprint version
+  version="$(velero_release_version)" || return 1
   fingerprint="$(velero_source_fingerprint)" || return 1
   [[ "$fingerprint" =~ ^[0-9a-f]{64}$ ]] || return 1
-  printf 'v1.18.2-hcdr.8-backup-volume-policy-v1-%.40s-isolation-cache-v1\n' "$fingerprint"
+  printf '%s-build.%.40s-backup-volume-policy-v1-isolation-cache-v1\n' "$version" "$fingerprint"
 }
 
 velero_input_fingerprint() {

@@ -6,6 +6,7 @@ mkdir -p "$runtime/validation"
 work="$(mktemp -d "$runtime/validation/csi-delivery.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/source/third_party/velero/pkg" "$work/bin"
+cp "$root/third_party/velero/HYPERCDR_VERSION" "$work/source/third_party/velero/"
 git -C "$work/source" init -q
 printf baseline > "$work/source/third_party/velero/pkg/source.go"
 git -C "$work/source" add .

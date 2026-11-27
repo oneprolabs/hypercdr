@@ -2308,6 +2308,9 @@ func TestUpgradeTargetIsNewer(t *testing.T) {
 		digestMismatch, upgrade bool
 	}{
 		{name: "newer calendar build", current: "v20260723.4", target: "v20260724.1", digestMismatch: true, upgrade: true},
+		{name: "legacy hash does not hide updated build", current: "v1.18.2-hcdr.8-backup-volume-policy-v1-185a3eed8c2ecd2824651a897265d85707dbe742-isolation-cache-v1", target: "v1.18.2-hcdr.8-backup-volume-policy-v1-0b2a30c3c357b62f9f2472134349bcaaa8dcf8f9-isolation-cache-v1", digestMismatch: true, upgrade: true},
+		{name: "standard revision replaces legacy", current: "v1.18.2-hcdr.8-backup-volume-policy-v1-9999999999999999999999999999999999999999", target: "v1.18.2-hcdr.9", digestMismatch: true, upgrade: true},
+		{name: "older revision blocked regardless of hash", current: "v1.18.2-hcdr.10", target: "v1.18.2-hcdr.9-build.9999999999999999999999999999999999999999", digestMismatch: true, upgrade: false},
 		{name: "older target is not upgrade", current: "v20260723.4", target: "v20260723.1", digestMismatch: true, upgrade: false},
 		{name: "same immutable version and digest", current: "v1.17.1", target: "v1.17.1", upgrade: false},
 		{name: "same version changed digest", current: "v1.17.1", target: "v1.17.1", digestMismatch: true, upgrade: true},

@@ -6,7 +6,8 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 fixture="$tmp/repository"
 mkdir -p "$fixture/scripts/release" "$fixture/scripts/lib" "$fixture/third_party/velero/deployments"
-cp "$root/scripts/release/build-velero.sh" "$root/scripts/release/common.sh" "$fixture/scripts/release/"
+cp "$root/scripts/release/build-velero.sh" "$root/scripts/release/common.sh" "$root/scripts/release/dependency-fingerprint.sh" "$fixture/scripts/release/"
+cp "$root/third_party/velero/HYPERCDR_VERSION" "$fixture/third_party/velero/"
 cp "$root/scripts/lib/registry-config.sh" "$fixture/scripts/lib/"
 git -C "$fixture" init -q
 git -C "$fixture" -c user.name=Test -c user.email=test@example.invalid commit --allow-empty -qm fixture
@@ -41,5 +42,7 @@ for mode in default override; do
   [[ -d "$runtime/build" ]]
   grep -Fxq "$runtime/build/velero/runtime-test" "$BUILD_ARGS_LOG"
   grep -Fxq -- '--push' "$BUILD_ARGS_LOG"
+  grep -Fxq -- "$(cat "$root/third_party/velero/HYPERCDR_VERSION")" "$BUILD_ARGS_LOG"
+  ! grep -A1 -Fx -- '--version' "$BUILD_ARGS_LOG" | grep -Fxq runtime-test
 done
 echo "Velero build initializes absent default and custom runtime directories"

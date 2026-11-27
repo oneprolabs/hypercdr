@@ -30,7 +30,8 @@ if [[ -z "${REGISTRY}" ]]; then
   REGISTRY="${HCDR_IMAGE_REGISTRY}"
 fi
 require_registry "${REGISTRY}"
-args=(--registry "${REGISTRY}" --tag "${IMAGE_TAG}" --version "${IMAGE_TAG}" --build-dir "${HCDR_RUNTIME_ROOT:-${RUNTIME_ROOT}}/build/velero/${IMAGE_TAG}")
+source "${SCRIPT_DIR}/dependency-fingerprint.sh"
+args=(--registry "${REGISTRY}" --tag "${IMAGE_TAG}" --version "$(velero_release_version)" --build-dir "${HCDR_RUNTIME_ROOT:-${RUNTIME_ROOT}}/build/velero/${IMAGE_TAG}")
 [[ "${PUSH}" == "true" ]] && args+=(--push)
 mkdir -p "${HCDR_RUNTIME_ROOT:-${RUNTIME_ROOT}}/build"
 STAGING_PARENT="$(mktemp -d "${HCDR_RUNTIME_ROOT:-${RUNTIME_ROOT}}/build/velero-patched-${IMAGE_TAG}-XXXXXX")"

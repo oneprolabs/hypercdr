@@ -12,11 +12,13 @@ import (
 
 func TestVeleroImageVersionPreservesReleaseIdentity(t *testing.T) {
 	for image, expected := range map[string]string{
-		"registry:5000/hypercdr:velero-v1.18.2-hcdr.8-backup-volume-policy-v1": "v1.18.2-hcdr.8-backup-volume-policy-v1",
-		"registry/velero:v1.18.2-hcdr.8":                                       "v1.18.2-hcdr.8",
-		"registry/velero:v1.18.2":                                              "v1.18.2",
-		"registry/hypercdr:velero-v1.18.2-hcdr.8@sha256:target":                "v1.18.2-hcdr.8",
-		"registry:5000/velero@sha256:target":                                   "",
+		"registry/hypercdr:velero-v1.18.2-hcdr.9-build.abcdef-backup-volume-policy-v1-isolation-cache-v1": "v1.18.2-hcdr.9",
+		"registry/hypercdr:velero-v1.18.2-hcdr.9-build.abcdef123456":                                      "v1.18.2-hcdr.9",
+		"registry:5000/hypercdr:velero-v1.18.2-hcdr.8-backup-volume-policy-v1":                            "v1.18.2-hcdr.8-backup-volume-policy-v1",
+		"registry/velero:v1.18.2-hcdr.8":                                                                  "v1.18.2-hcdr.8",
+		"registry/velero:v1.18.2":                                                                         "v1.18.2",
+		"registry/hypercdr:velero-v1.18.2-hcdr.8@sha256:target":                                           "v1.18.2-hcdr.8",
+		"registry:5000/velero@sha256:target":                                                              "",
 	} {
 		if actual := imageTag(image); actual != expected {
 			t.Errorf("imageTag(%q) = %q, want %q", image, actual, expected)

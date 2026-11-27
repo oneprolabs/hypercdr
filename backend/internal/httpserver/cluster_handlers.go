@@ -272,7 +272,12 @@ func compareNumericVersions(left, right string) (int, bool) {
 	return 0, true
 }
 
+var hypercdrRuntimeVersionPattern = regexp.MustCompile(`^v?([0-9]+\.[0-9]+\.[0-9]+-hcdr\.[0-9]+)(?:[-+].*)?$`)
+
 func numericVersionParts(version string) []int {
+	if matches := hypercdrRuntimeVersionPattern.FindStringSubmatch(strings.TrimSpace(version)); len(matches) > 1 {
+		version = matches[1]
+	}
 	var parts []int
 	for index := 0; index < len(version); {
 		if version[index] < '0' || version[index] > '9' {
