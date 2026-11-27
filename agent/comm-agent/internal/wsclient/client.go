@@ -3242,7 +3242,13 @@ func (c *Client) buildVolumeProgressPayload(ctx context.Context, object kube.App
 	default:
 		return nil, 0, "", false
 	}
-	if err != nil || len(progress.Items) == 0 {
+	if err != nil {
+		return nil, 0, "", false
+	}
+	if len(progress.Items) == 0 {
+		if object.Kind == "Backup" && progress.DiscoveryComplete && progress.DiscoveryCount == 0 {
+			return map[string]any{"discoveryComplete": true, "discoveryCount": 0, "itemCount": 0}, 0, "", false
+		}
 		return nil, 0, "", false
 	}
 

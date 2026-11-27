@@ -163,6 +163,36 @@ func TestBackupVolumeDiscoveryRequiresMatchingIdentityAndCount(t *testing.T) {
 	}
 }
 
+func TestBackupVolumeDiscoverySupportsMetadataOnlyInBothModes(t *testing.T) {
+	for _, snapshotMoveData := range []bool{false, true} {
+		backup := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "velero.io/v1", "kind": "Backup",
+			"metadata": map[string]any{
+				"name": "empty-backup", "namespace": "velero", "uid": "empty-uid",
+				"annotations": map[string]any{
+					"hypercdr.io/pod-volume-discovery":         "empty-uid:0",
+					"hypercdr.io/snapshot-volume-inventory-v1": `{"namespaces":["default"],"volumes":[]}`,
+				},
+			},
+			"spec": map[string]any{"snapshotMoveData": snapshotMoveData},
+		}}
+		kinds := map[schema.GroupVersionResource]string{
+			{Group: "velero.io", Version: "v1", Resource: "podvolumebackups"}:  "PodVolumeBackupList",
+			{Group: "velero.io", Version: "v2alpha1", Resource: "datauploads"}: "DataUploadList",
+		}
+		client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), kinds, backup)
+		progress, err := NewDynamicManifestApplierWithClient(client).GetBackupVolumeProgress(context.Background(), "velero", "empty-backup")
+		if err != nil || !progress.DiscoveryComplete || progress.DiscoveryCount != 0 || len(progress.Items) != 0 {
+			t.Fatalf("snapshotMoveData=%v: progress=%#v err=%v", snapshotMoveData, progress, err)
+		}
+		for _, action := range client.Actions() {
+			if action.GetVerb() != "get" && action.GetVerb() != "list" {
+				t.Fatalf("empty backup must not create temporary resources: %v", action)
+			}
+		}
+	}
+}
+
 func restoreVolumeProgressForAge(t *testing.T, age time.Duration, missingPVC bool) VolumeProgress {
 	t.Helper()
 	pvrGVR := schema.GroupVersionResource{Group: "velero.io", Version: "v1", Resource: "podvolumerestores"}

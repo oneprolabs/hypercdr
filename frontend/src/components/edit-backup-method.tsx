@@ -17,7 +17,6 @@ export function EditBackupMethod(props: Props) {
   const [result, setResult] = useState<ReturnType<typeof snapshotPrerequisiteResult> | null>(null);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
-  const [helpOpen, setHelpOpen] = useState(false);
   const latest = useRef(props);
   latest.current = props;
   const scopeKey = JSON.stringify([props.scopeKey, [...new Set(props.namespaces)].sort()]);
@@ -30,7 +29,6 @@ export function EditBackupMethod(props: Props) {
     let canceled = false;
     setResult(null);
     setError('');
-    setHelpOpen(false);
     const check = async () => {
       try {
         if (!latest.current.onCheck) throw new Error('CSI detection is unavailable.');
@@ -76,8 +74,7 @@ export function EditBackupMethod(props: Props) {
           </tr>) : [<tr key={check.namespace}><td>{check.namespace}</td><td>—</td><td>—</td><td>{check.status === 'configured' ? 'No volumes' : 'Detection failed'}</td><td>{check.status === 'configured' ? 'No persistent volumes.' : check.error || error || 'Check Agent connectivity and permissions, then recheck.'}</td></tr>])}
         </tbody></table></div>
       </details>
-      <div className="hbdr-protect-backup-status"><button type="button" onClick={() => setRetry(previous => previous + 1)}>Recheck</button><button type="button" aria-expanded={helpOpen} onClick={() => setHelpOpen(previous => !previous)}>How to enable CSI snapshots?</button></div>
-      {helpOpen && <ol className="hbdr-csi-setup-steps"><li>Use volumes backed by a snapshot-capable CSI driver.</li><li>Install snapshot CRDs, the snapshot controller and the driver's CSI snapshotter.</li><li>Configure a VolumeSnapshotClass matching each volume's CSI driver.</li><li>Check Agent connectivity and permissions, then click Recheck. Validate with an isolated test volume.</li></ol>}
+      <div className="hbdr-protect-backup-status"><button type="button" onClick={() => setRetry(previous => previous + 1)}>Recheck</button><a href="https://kubernetes.io/docs/concepts/storage/volume-snapshots/" target="_blank" rel="noopener noreferrer">How to enable CSI snapshots? (Kubernetes docs)</a></div>
     </>)}
     {props.value?.mode === 'application-consistent' && <p role="alert">Select CSI snapshots or file-level backup. Application stop/freeze coordination is no longer supported.</p>}
     <p className="hbdr-edit-backup-method-note">Future syncs only. Existing recovery points are unchanged.</p>

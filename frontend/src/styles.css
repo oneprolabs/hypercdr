@@ -27697,8 +27697,8 @@ html[data-theme='dark'] #root .tags-page .hbdr-page-hero p { color:var(--hc-text
 .hbdr-protect-backup-method label.is-unavailable strong { color:var(--hc-text-3); }
 .hbdr-backup-recommended { margin-left:6px; color:var(--hc-accent); font-size:10px; font-weight:500; }
 .hbdr-protect-backup-status { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 14px; margin-top:10px; color:var(--hc-text-3); font-size:11.5px; }
-.hbdr-protect-backup-status button { padding:0; border:0; background:none; color:var(--hc-accent); font:inherit; cursor:pointer; text-decoration:underline; text-underline-offset:3px; }
-.hbdr-protect-backup-status button:focus-visible { outline:2px solid var(--hc-accent); outline-offset:3px; }
+.hbdr-protect-backup-status button, .hbdr-protect-backup-status a { padding:0; border:0; background:none; color:var(--hc-accent); font:inherit; cursor:pointer; text-decoration:underline; text-underline-offset:3px; }
+.hbdr-protect-backup-status button:focus-visible, .hbdr-protect-backup-status a:focus-visible { outline:2px solid var(--hc-accent); outline-offset:3px; }
 .hbdr-protect-backup-checking { display:inline-flex; align-items:center; gap:6px; }
 .hbdr-protect-backup-checking svg { flex:none; }
 .hbdr-csi-volume-details { margin-top:12px; border:1px solid var(--hc-border); border-radius:5px; font-size:11.5px; }
@@ -29855,6 +29855,7 @@ html[data-theme='dark'] #root .hbdr-dr-task-log-drawer .hbdr-task-final-result.i
 .hbdr-sync-transfer-body { flex: 1; min-width: 0; }
 .hbdr-sync-volume-timeline .hbdr-sync-transfer-body { margin-top: 6px; font-size: 11.5px; line-height: 1.5; }
 .hbdr-sync-volume-timeline .hbdr-sync-volume-context { font-family: inherit; }
+.hbdr-sync-transfer-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hbdr-sync-volume-timeline summary { margin-top: 7px; color: var(--hc-accent); cursor: pointer; }
 .hbdr-sync-volume-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hbdr-sync-volume-row .hbdr-sync-volume-heading { flex-wrap: nowrap; }

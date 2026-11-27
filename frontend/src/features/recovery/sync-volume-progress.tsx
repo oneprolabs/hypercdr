@@ -25,6 +25,11 @@ export function SyncVolumeProgress({ task, events, completed }: { task: ApiTask;
   const discoveryAt = summary.discoveryCompletedAt || summary.discoveryStartedAt;
   const failed = ['failed', 'canceled', 'cancelled'].includes(task.status);
   const total = summary.volumes.length;
+  const progressSummary = [
+    completed ? `${dataSize(summary.bytesDone)} processed` : percent !== undefined ? `${dataSize(summary.bytesDone)} / ~${dataSize(summary.totalBytes)} · ~${percent.toFixed(2)}%` : `${dataSize(summary.bytesDone)} processed · Total pending`,
+    `${summary.completed}/${total} volumes`,
+    ...(completed ? ['Completed'] : summary.speedBytesPerSecond > 0 ? [`${dataSize(summary.speedBytesPerSecond)}/s`] : []),
+  ].join(' · ');
   const snapshots = summary.volumes.filter(volume => volume.snapshotReady).length;
   const mounted = summary.volumes.filter(volume => volume.temporaryVolumeReady).length;
   const preparation = [
@@ -37,15 +42,10 @@ export function SyncVolumeProgress({ task, events, completed }: { task: ApiTask;
     {(summary.transferStartedAt || completed) && <TimelineItem status={completed ? 'completed' : failed ? 'failed' : 'in_progress'} className="hbdr-task-log-entry" title={<>{summary.transferStartedAt && <time>[{formatLocalDateTime(summary.transferStartedAt)}]</time>}<span>{summary.csi ? 'Scanning and backing up snapshot data.' : 'Scanning and backing up live volume data.'}</span></>}>
     <div className="hbdr-sync-transfer-body">
       <TransferProgress percent={completed ? 100 : percent} active={!completed && !failed} label={completed ? 'Volume data backup completed' : 'Volume data backup progress'} />
-      <div className="hbdr-sync-volume-context">Processed {dataSize(summary.bytesDone)}{!completed && percent !== undefined ? ` / Estimated ${dataSize(summary.totalBytes)} · ~${percent.toFixed(2)}% · Estimated` : completed ? ' · Completed' : ''}</div>
-      <div className="hbdr-sync-volume-context">Volumes completed: {summary.completed}/{total}
-        {!completed && summary.speedBytesPerSecond > 0 ? ` · ${dataSize(summary.speedBytesPerSecond)}/s` : ''}
-        {!completed && summary.etaSeconds > 0 ? ` · Estimated remaining: ${Math.ceil(summary.etaSeconds / 60)} min` : ''}
-        {!completed && percent === undefined && !summary.allDataComplete ? ' · Total size not yet fully known' : ''}
-      </div>
-      {!completed && <div className="hbdr-sync-volume-context" role="status">{summary.activity}</div>}
-      {summary.lastObservedAt && <div className="hbdr-sync-volume-context">Last observed: {formatLocalDateTime(summary.lastObservedAt)}</div>}
+      <div className="hbdr-sync-volume-context hbdr-sync-transfer-summary" role="status" title={progressSummary}>{progressSummary}</div>
       {summary.volumes.length > 0 && <details><summary>Volume details</summary>
+      {!completed && <div className="hbdr-sync-volume-context">{summary.activity}</div>}
+      {summary.lastObservedAt && <div className="hbdr-sync-volume-context">Last observed: {formatLocalDateTime(summary.lastObservedAt)}</div>}
       {summary.volumes.map(volume => <div className="hbdr-sync-volume-row" key={volume.id}>
         <div className="hbdr-sync-volume-heading"><strong className="hbdr-sync-volume-name" title={volume.label}>{volume.label}</strong><span>{volume.state}</span></div>
         <div className="hbdr-sync-volume-context">{volume.context}</div>

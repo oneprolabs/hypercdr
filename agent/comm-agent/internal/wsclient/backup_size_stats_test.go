@@ -84,6 +84,42 @@ type backupSizeStatsReader struct {
 	volumeBytes   int64
 }
 
+type emptyBackupVolumeReader struct {
+	kube.VolumeProgressReader
+	complete bool
+}
+
+func (reader emptyBackupVolumeReader) GetBackupVolumeProgress(context.Context, string, string) (kube.VolumeProgress, error) {
+	return kube.VolumeProgress{DiscoveryComplete: reader.complete}, nil
+}
+
+func TestMetadataOnlyBackupCompletionPreservesEmptyDiscovery(t *testing.T) {
+	for _, complete := range []bool{false, true} {
+		client := &Client{
+			volumeReader: emptyBackupVolumeReader{complete: complete},
+			statsReader:  backupSizeStatsReader{metadataBytes: 24001},
+		}
+		object := kube.AppliedObject{Kind: "Backup", Namespace: "hypercdr-agent", Name: "empty-backup"}
+		var samples []volumeProgressSample
+		progress, _, _, ready := client.buildVolumeProgressPayload(context.Background(), object, &samples)
+		if ready {
+			t.Fatal("empty discovery must not create a transfer progress bar")
+		}
+		if !complete && progress != nil {
+			t.Fatal("unknown discovery must not report zero volumes")
+		}
+		payload := map[string]any{"storageLocation": "default", "volumeProgress": progress}
+		client.attachBackupSizeStats(context.Background(), object, payload)
+		size := wsMapFromAny(payload["restorePointSize"])
+		if known, _ := size["allIncrementalKnown"].(bool); known != complete {
+			t.Fatalf("complete=%v: unexpected size knowledge: %#v", complete, size)
+		}
+		if complete && (payload["sizeStatus"] != "complete" || int64FromAny(size["totalBytes"]) != 24001 || int64FromAny(size["uploadedBytes"]) != 24001) {
+			t.Fatalf("metadata-only backup must retain measured metadata bytes: %#v", payload)
+		}
+	}
+}
+
 func (r backupSizeStatsReader) GetBackupObjectStats(context.Context, string, string, string) (kube.BackupObjectStats, error) {
 	return kube.BackupObjectStats{MetadataPackageBytes: r.metadataBytes}, nil
 }

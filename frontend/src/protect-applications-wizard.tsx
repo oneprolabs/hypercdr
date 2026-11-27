@@ -33,12 +33,11 @@ export function ProtectApplicationsWizard(props: Props & { onResourcesChanged: (
   const [fileLevelRiskAccepted, setFileLevelRiskAccepted] = useState(false);
   const [snapshotResult, setSnapshotResult] = useState<(ReturnType<typeof snapshotPrerequisiteResult> & { key: string; message?: string }) | null>(null);
   const [snapshotRetry, setSnapshotRetry] = useState(0);
-  const [snapshotHelpOpen, setSnapshotHelpOpen] = useState(false);
   const snapshotRefreshRef = useRef(props.onRequestSnapshotPrerequisites);
   snapshotRefreshRef.current = props.onRequestSnapshotPrerequisites;
   const snapshotScopeKey = JSON.stringify([props.snapshotSourceClusterId, [...new Set(props.snapshotNamespaces || props.targetNames)].sort()]);
   useEffect(() => {
-    if (!props.open) { setSnapshotHelpOpen(false); setSnapshotResult(null); return; }
+    if (!props.open) { setSnapshotResult(null); return; }
     let canceled = false;
     setSnapshotResult(null);
     const refresh = async () => {
@@ -344,7 +343,7 @@ export function ProtectApplicationsWizard(props: Props & { onResourcesChanged: (
                     </tbody></table>
                   </div>
                 </details>
-                <div className="hbdr-protect-backup-status"><button type="button" onClick={() => setSnapshotRetry(previous => previous + 1)}>Recheck</button><button type="button" onClick={() => setSnapshotHelpOpen(true)}>How to enable CSI snapshots?</button></div>
+                <div className="hbdr-protect-backup-status"><button type="button" onClick={() => setSnapshotRetry(previous => previous + 1)}>Recheck</button><a href="https://kubernetes.io/docs/concepts/storage/volume-snapshots/" target="_blank" rel="noopener noreferrer">How to enable CSI snapshots? (Kubernetes docs)</a></div>
               </>}
             </>}
             {groupError && <p role="alert">{groupError}</p>}
@@ -352,18 +351,6 @@ export function ProtectApplicationsWizard(props: Props & { onResourcesChanged: (
             </div>
           </section>}
         </main>
-        {snapshotHelpOpen && <ResourceCreateDrawer title="Enable CSI snapshots" kind="cluster" onClose={() => setSnapshotHelpOpen(false)} actions={<button type="button" onClick={() => setSnapshotHelpOpen(false)}>Done</button>}>
-          <p>Ask your cluster administrator to check these requirements:</p>
-          <ol className="hbdr-csi-setup-steps">
-            <li>Use CSI-backed volumes with a storage driver that supports snapshots. Installing snapshot components cannot add support to an incompatible driver.</li>
-            <li>Install the Kubernetes snapshot CRDs and snapshot controller, and enable the CSI driver's external-snapshotter sidecar.</li>
-            <li>Configure a VolumeSnapshotClass matching each volume's CSI driver.</li>
-            <li>Keep the HyperCDR Agent connected and up to date, with permission to read volume and snapshot resources. After updating configuration, click Recheck.</li>
-            <li>Validate snapshot creation and recovery using an isolated test volume before relying on it.</li>
-          </ol>
-          {snapshotChecks.filter(result => result.status !== 'configured').map(result => <section key={result.namespace}><h4>{result.namespace}</h4>{result.volumes.length ? result.volumes.filter(volume => volume.fields?.status !== 'configured').map(volume => <p key={volume.name}><strong>{volume.name}</strong>: {snapshotSetupGuidance(volume)}</p>) : <p>Fresh CSI inventory is unavailable. Check Agent connectivity, version and permissions.</p>}</section>)}
-          <p>CSI provides driver-level crash consistency, not application consistency or atomic snapshots across volumes. HyperCDR does not stop or freeze applications.</p>
-        </ResourceCreateDrawer>}
       </div>
       <footer className="hbdr-protect-wizard-footer"><span>Step {props.step} of 5</span><div><button type="button" onClick={closeWizard}>Cancel</button><button type="button" disabled={props.step === 1} onClick={() => props.setStep((props.step - 1) as ProtectWizardStep)}>Back</button><button type="button" className="is-primary" disabled={!canNext || props.submitting} onClick={goNext}>{props.step === 5 ? props.submitting ? 'Saving…' : 'Create protection' : 'Next'}<ChevronRight size={16}/></button></div></footer>
       {inlineCreate === 'policy' && <ResourceCreateDrawer title="New DR Policy" kind="policy" onClose={() => closeInline()} actions={<><button type="button" disabled={creationBusy || !policyForm.name.trim()} onClick={() => void createResource()}>{creationBusy ? 'Saving...' : 'Save Policy'}</button><button type="button" onClick={() => closeInline()}>Cancel</button></>}><PolicyFormFields policyForm={policyForm} setPolicyForm={setPolicyForm} />{creationError && <p role="alert">{creationError}</p>}</ResourceCreateDrawer>}
