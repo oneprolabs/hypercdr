@@ -1,8 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { drillCleanupCandidates } from '../applications/drill-cleanup-model.ts';
+import { preferTaskSnapshot } from './progress-snapshot.ts';
 
 const drill = (id, namespace, createdAt, extra = {}) => ({ id, type: 'drill', clusterId: 'target', protectionPlanId: 'plan', status: 'succeeded', createdAt, payload: { targetNamespace: namespace }, ...extra });
+test('summary refresh after another drill never resurrects a cleaned namespace', () => {
+  const old = drill('old', 'default-drill-test', '2026-11-27T09:36:48Z');
+  const cleanup = {
+    id: 'cleanup', type: 'protection-cleanup', clusterId: 'target', status: 'succeeded',
+    createdAt: '2026-11-27T09:37:11Z', completedAt: '2026-11-27T09:37:17Z',
+    payload: { cleanupMode: 'drill', drillTaskId: 'old', drillNamespaces: ['default-drill-test'], technicalDetails: { large: true } },
+  };
+  const { technicalDetails, ...summaryPayload } = cleanup.payload;
+  const summary = { ...cleanup, payload: summaryPayload };
+  const refreshed = preferTaskSnapshot(cleanup, summary);
+  assert.deepEqual(drillCleanupCandidates(['plan'], [old, refreshed]), []);
+  const newer = drill('new', 'default-drill', '2026-11-27T09:38:47Z');
+  assert.deepEqual(drillCleanupCandidates(['plan'], [old, refreshed, newer]).map(item => item.namespaces), [['default-drill']]);
+});
 test('lists all uncleaned targets, merges reused namespaces and retains failed drills', () => {
   const tasks = [drill('old', 'app', '2026-01-01'), drill('new', 'app', '2026-01-02'), drill('other', 'other', '2026-01-03', { status: 'failed' })];
   assert.deepEqual(drillCleanupCandidates(['plan'], tasks).map(item => item.task.id), ['other', 'new']);

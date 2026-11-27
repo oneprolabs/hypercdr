@@ -2,6 +2,36 @@ package store
 
 import "testing"
 
+func TestTaskSummaryPreservesDrillCleanupIdentity(t *testing.T) {
+	repo := newTestStore(t)
+	cleanup, err := repo.CreateTask(TaskInput{
+		TenantID: DefaultTenantID, Type: "protection-cleanup", Status: "succeeded",
+		Payload: map[string]any{
+			"cleanupMode": "drill", "drillTaskId": NewPublicID(),
+			"drillNamespaces":  []string{"default-drill-test", "database-drill"},
+			"technicalDetails": map[string]any{"large": true},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := repo.ListTasksFiltered(TaskFilter{TenantID: DefaultTenantID, Summary: true, Types: []string{"protection-cleanup"}})
+	if err != nil || len(items) != 1 {
+		t.Fatalf("summary items=%v err=%v", items, err)
+	}
+	payload := items[0].Payload
+	if payload["cleanupMode"] != "drill" || payload["drillTaskId"] != cleanup.Payload["drillTaskId"] {
+		t.Fatalf("cleanup identity lost in task summary: %#v", payload)
+	}
+	namespaces, ok := payload["drillNamespaces"].([]any)
+	if !ok || len(namespaces) != 2 || namespaces[0] != "default-drill-test" || namespaces[1] != "database-drill" {
+		t.Fatalf("cleaned namespaces lost in task summary: %#v", payload)
+	}
+	if _, present := payload["technicalDetails"]; present {
+		t.Fatal("summary must remain compact")
+	}
+}
+
 func TestPlanTaskBatchKeepsLatestPointersAndAllActiveTasks(t *testing.T) {
 	repo := newTestStore(t)
 	planIDs := []string{}

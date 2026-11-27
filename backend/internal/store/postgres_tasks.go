@@ -353,6 +353,7 @@ func (s *PostgresStore) listTasks(filter TaskFilter) ([]Task, error) {
 			'namespace',payload->'namespace','sourceNamespace',payload->'sourceNamespace',
 			'sourceNamespaces',payload->'sourceNamespaces','namespaceMode',payload->'namespaceMode',
 			'targetNamespace',payload->'targetNamespace','targetNamespaces',payload->'targetNamespaces',
+			'cleanupMode',payload->'cleanupMode','drillTaskId',payload->'drillTaskId','drillNamespaces',payload->'drillNamespaces',
 			'targetClusterName',payload->'targetClusterName',
 			'applicationName',payload->'applicationName','stage',payload->'stage',
 			'recoveryStages',payload->'recoveryStages',
