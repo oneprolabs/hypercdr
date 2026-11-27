@@ -107,8 +107,8 @@ func TestRuntimeDetailsAreCachedButReadinessIsAlwaysFresh(t *testing.T) {
 	if status.ServerReady {
 		t.Fatal("readiness used an old observation")
 	}
-	if resourceListCount(client, "pods") != 0 || resourceListCount(client, "jobs") != 0 {
-		t.Fatal("cached detail observation still listed pods or cleanup jobs")
+	if resourceListCount(client, "pods") != 2 || resourceListCount(client, "jobs") != 0 {
+		t.Fatal("runtime digests must be live while expensive cleanup details remain cached")
 	}
 	manager.InvalidateRuntimeObservations()
 	client.ClearActions()

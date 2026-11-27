@@ -1,7 +1,7 @@
 # Cluster sync settings
 
 Each native managed source cluster has two persisted settings: simultaneous sync
-tasks (default 4, range 1–20) and transfers per node (default 4, range 1–32).
+tasks (default 4, range 1–20) and transfers per node (default 8, range 1–32).
 The cluster card and list share More → Sync settings. OADP-managed runtime changes
 are explicitly rejected until its operator configuration path is supported.
 
@@ -18,7 +18,10 @@ Only configured clusters are reconciled automatically. Changing runtime settings
 drains active data operations before a managed same-image Velero upgrade updates
 server backup concurrency and node-agent transfer concurrency. New admissions
 wait during pending configuration and rollout; previously admitted work continues.
-The preparation queue remains internal at 4. A failed apply is visible and requires
+The preparation queue remains internal at 8, shared across the cluster rather
+than multiplied by task or node count. Existing saved transfer settings are not
+overwritten by a default change; save a new value explicitly to change them.
+A failed apply is visible and requires
 an explicit save to retry. Save and applied states are distinct. Same-image
 heartbeats cannot confirm the new settings until the Agent has acknowledged
 successful rollout. No custom per-task transfer fairness or preemption is added.

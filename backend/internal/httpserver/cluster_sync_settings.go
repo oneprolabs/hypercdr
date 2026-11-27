@@ -107,7 +107,7 @@ func (r *Router) reconcileClusterSyncSettings() {
 		}
 		task, err := r.store.CreateTask(store.TaskInput{TenantID: cluster.TenantID, ClusterID: cluster.ID, Type: "velero-upgrade", Status: "queued", CommandID: store.NewPublicID(), Payload: map[string]any{
 			"syncSettingsApply": true, "namespace": r.dataProtectionNamespaceForCluster(cluster.ID), "image": cluster.VeleroImage, "version": cluster.VeleroVersion,
-			"deploymentName": "velero", "daemonSetName": "node-agent", "concurrentBackups": settings.MaxSyncTasks, "nodeAgentConcurrency": settings.NodeTransferConcurrency, "prepareQueueLength": 4,
+			"deploymentName": "velero", "daemonSetName": "node-agent", "concurrentBackups": settings.MaxSyncTasks, "nodeAgentConcurrency": settings.NodeTransferConcurrency, "prepareQueueLength": store.DefaultSyncPrepareQueueLength,
 		}})
 		if err != nil {
 			if !errors.Is(err, store.ErrCacheConfigurationBusy) {

@@ -111,7 +111,7 @@ func TestVeleroRuntimeStatusRequiresEveryNodeAgentDigest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.Version != "v1.17.1" {
+	if status.Version != "v1.17.1-hcdr.1" {
 		t.Fatalf("unexpected version %q", status.Version)
 	}
 	if status.ImageDigest != "sha256:target" || status.NodeAgentImageDigest != "sha256:target" {

@@ -1466,7 +1466,7 @@ func (r *Router) upgradeClusterVelero(w http.ResponseWriter, req *http.Request) 
 		"clusterId":   clusterID, "namespace": r.dataProtectionNamespaceForCluster(clusterID), "image": targetImage, "version": target.Version, "releaseId": target.ID,
 		"expectedDigest": targetDigest, "deploymentName": "velero", "daemonSetName": "node-agent",
 		"awsPluginImage": awsPlugin.Image, "azurePluginImage": azurePlugin.Image, "gcpPluginImage": gcpPlugin.Image,
-		"concurrentBackups": syncSettings.MaxSyncTasks, "nodeAgentConcurrency": syncSettings.NodeTransferConcurrency, "prepareQueueLength": 4,
+		"concurrentBackups": syncSettings.MaxSyncTasks, "nodeAgentConcurrency": syncSettings.NodeTransferConcurrency, "prepareQueueLength": store.DefaultSyncPrepareQueueLength,
 		"cacheStorageClass": cacheStorageClass, "cacheResidentThresholdMB": 1024, "cacheLimitMB": 5120,
 		"crdsUrl": func() string {
 			// Packaging-only HyperCDR builds do not change the upstream Velero

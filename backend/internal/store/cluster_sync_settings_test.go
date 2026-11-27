@@ -17,6 +17,29 @@ func TestClusterSyncSettingsValidation(t *testing.T) {
 	}
 }
 
+func TestClusterSyncDefaultsAndSavedOverrides(t *testing.T) {
+	repo := newTestStore(t)
+	cluster, _ := seedPlanApplication(t, repo)
+	if err := repo.EnsureClusterSyncSettings(cluster.ID); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := repo.GetClusterSyncSettings(cluster.ID)
+	if err != nil || settings.MaxSyncTasks != 4 || settings.NodeTransferConcurrency != 8 || DefaultSyncPrepareQueueLength != 8 {
+		t.Fatalf("persisted defaults: %+v %v", settings, err)
+	}
+	settings.NodeTransferConcurrency = 4
+	if err := repo.SaveClusterSyncSettings(cluster.ID, settings); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.EnsureClusterSyncSettings(cluster.ID); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := repo.GetClusterSyncSettings(cluster.ID)
+	if err != nil || saved.NodeTransferConcurrency != 4 {
+		t.Fatalf("saved override changed: %+v %v", saved, err)
+	}
+}
+
 func TestQueuedSyncCancellationAndRestart(t *testing.T) {
 	repo := newTestStore(t)
 	cluster, _ := seedPlanApplication(t, repo)
@@ -55,7 +78,7 @@ func TestSyncAdmissionQueueAndRelease(t *testing.T) {
 	repo := newTestStore(t)
 	cluster, _ := seedPlanApplication(t, repo)
 	settings, err := repo.GetClusterSyncSettings(cluster.ID)
-	if err != nil || settings.MaxSyncTasks != 4 || settings.NodeTransferConcurrency != 4 {
+	if err != nil || settings.MaxSyncTasks != 4 || settings.NodeTransferConcurrency != 8 {
 		t.Fatalf("defaults: %+v %v", settings, err)
 	}
 	tasks := []Task{}

@@ -88,7 +88,7 @@ func (c *Client) collectRuntime(ctx context.Context, force bool) {
 	c.runtimeObservationMu.Lock()
 	c.runtimeObservation = observed
 	c.runtimeObservationMu.Unlock()
-	changed := observed.velero.ServerReady != previous.velero.ServerReady || observed.velero.NodeAgentReady != previous.velero.NodeAgentReady || observed.velero.NodeAgentDesired != previous.velero.NodeAgentDesired
+	changed := observed.velero.ServerReady != previous.velero.ServerReady || observed.velero.NodeAgentReady != previous.velero.NodeAgentReady || observed.velero.NodeAgentDesired != previous.velero.NodeAgentDesired || observed.velero.ImageDigest != previous.velero.ImageDigest || observed.velero.NodeAgentImageDigest != previous.velero.NodeAgentImageDigest || observed.velero.Version != previous.velero.Version
 	if c.conn != nil && (force || previous.statusAt.IsZero() || changed) {
 		if err := c.sendHeartbeat(false); err != nil {
 			c.logger.Warn("failed to report runtime observation", "error", err)

@@ -7,7 +7,7 @@ type Response = { settings: Values & { appliedMaxSyncTasks: number; appliedNodeT
 
 export function ClusterSyncSettingsDrawer({ clusterId, name, onClose }: { clusterId: string; name: string; onClose: () => void }) {
   const [response, setResponse] = useState<Response | null>(null);
-  const [values, setValues] = useState<Values>({ maxSyncTasks: 4, nodeTransferConcurrency: 4 });
+  const [values, setValues] = useState<Values>({ maxSyncTasks: 4, nodeTransferConcurrency: 8 });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);

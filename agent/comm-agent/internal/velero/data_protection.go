@@ -7,6 +7,7 @@ func configureDataProtection(spec *BackupManifestSpec, mode string) error {
 	case "", "live-filesystem":
 		spec.SnapshotVolumes = boolPtr(false)
 		spec.DefaultVolumesToFsBackup = boolPtr(true)
+		spec.SnapshotMoveData = nil
 	case "snapshot-crash-consistent":
 		spec.SnapshotVolumes = boolPtr(true)
 		spec.DefaultVolumesToFsBackup = boolPtr(false)

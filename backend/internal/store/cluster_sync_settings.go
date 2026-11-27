@@ -15,8 +15,10 @@ type ClusterSyncSettings struct {
 	ApplyTaskID                    string `json:"applyTaskId,omitempty"`
 }
 
+const DefaultSyncPrepareQueueLength = 8
+
 func DefaultClusterSyncSettings() ClusterSyncSettings {
-	return ClusterSyncSettings{MaxSyncTasks: 4, NodeTransferConcurrency: 4}
+	return ClusterSyncSettings{MaxSyncTasks: 4, NodeTransferConcurrency: 8}
 }
 
 func (s *PostgresStore) EnsureClusterSyncSettings(clusterID string) error {

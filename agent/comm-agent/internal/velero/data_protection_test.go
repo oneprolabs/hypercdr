@@ -7,6 +7,19 @@ import (
 	"hypercdr-platform/agent/comm-agent/pkg/protocol"
 )
 
+func TestSwitchingToFilesystemClearsSnapshotDataMovement(t *testing.T) {
+	var spec BackupManifestSpec
+	if err := configureDataProtection(&spec, "snapshot-crash-consistent"); err != nil {
+		t.Fatal(err)
+	}
+	if err := configureDataProtection(&spec, "live-filesystem"); err != nil {
+		t.Fatal(err)
+	}
+	if spec.SnapshotMoveData != nil || *spec.SnapshotVolumes || !*spec.DefaultVolumesToFsBackup {
+		t.Fatalf("filesystem mode retained CSI settings: %+v", spec)
+	}
+}
+
 func TestOrdinaryManifestsRejectExplicitConsistencyGroups(t *testing.T) {
 	for _, mode := range []string{"", "live-filesystem", "snapshot-crash-consistent", "application-consistent"} {
 		group := &protocol.ConsistencyGroup{ID: "must-not-ignore"}

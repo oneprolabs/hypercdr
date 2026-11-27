@@ -13,8 +13,8 @@ func TestAgentInstallerEnablesVeleroCSI(t *testing.T) {
 }
 
 func TestAgentInstallerDefaultTransferConcurrency(t *testing.T) {
-	if !strings.Contains(installScriptTemplate, `\"globalConfig\":4`) || !strings.Contains(installScriptTemplate, `\"prepareQueueLength\":4`) || !strings.Contains(installScriptTemplate, `if [[ -z "$existing_node_config" ]]`) {
-		t.Fatal("installer must configure four transfers with preparation queue capacity four")
+	if !strings.Contains(installScriptTemplate, `\"globalConfig\":8`) || !strings.Contains(installScriptTemplate, `\"prepareQueueLength\":8`) || !strings.Contains(installScriptTemplate, `if [[ -z "$existing_node_config" ]]`) {
+		t.Fatal("installer must configure eight transfers with preparation queue capacity eight")
 	}
 }
 

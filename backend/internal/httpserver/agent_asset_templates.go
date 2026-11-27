@@ -1338,7 +1338,7 @@ for argument in $existing_velero_args; do
 done
 existing_node_config="$(kubectl -n "$NAMESPACE" get configmap node-agent-config --ignore-not-found -o name)" || fail "Unable to read existing node-agent configuration"
 if [[ -z "$existing_node_config" ]]; then
-  kubectl -n "$NAMESPACE" create configmap node-agent-config --from-literal="node-agent-config.json={\"loadConcurrency\":{\"globalConfig\":4,\"prepareQueueLength\":4},${CACHE_PVC_CONFIG}}" --dry-run=client -o yaml | kubectl_apply_retry
+  kubectl -n "$NAMESPACE" create configmap node-agent-config --from-literal="node-agent-config.json={\"loadConcurrency\":{\"globalConfig\":8,\"prepareQueueLength\":8},${CACHE_PVC_CONFIG}}" --dry-run=client -o yaml | kubectl_apply_retry
 fi
 cat <<YAML | kubectl_apply_retry
 apiVersion: v1
@@ -1606,6 +1606,8 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: ${AGENT_RBAC_NAME}
+  annotations:
+    hypercdr.io/permission-profile: "managed-cluster-v1"
 rules:
   - apiGroups: ["*"]
     resources: ["*"]

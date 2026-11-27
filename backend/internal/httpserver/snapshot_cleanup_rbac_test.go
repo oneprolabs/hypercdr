@@ -24,7 +24,7 @@ func TestAgentInstallerGrantsScopedSnapshotCleanupVerbs(t *testing.T) {
 			Verbs     []string `yaml:"verbs"`
 		} `yaml:"rules"`
 	}
-	if err := yaml.Unmarshal([]byte(role), &manifest); err != nil {
+	if err := yaml.Unmarshal([]byte("metadata:\n"+role), &manifest); err != nil {
 		t.Fatal(err)
 	}
 	var snapshotVerbs []string

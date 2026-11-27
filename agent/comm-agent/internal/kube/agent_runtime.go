@@ -516,6 +516,16 @@ func (r *KubernetesAgentRuntime) VeleroRuntimeStatus(ctx context.Context, namesp
 		status.ServerReady = deployment.Status.Replicas > 0 && deployment.Status.AvailableReplicas == deployment.Status.Replicas && deployment.Status.UpdatedReplicas == deployment.Status.Replicas
 		status.NodeAgentDesired = daemonSet.Status.DesiredNumberScheduled
 		status.NodeAgentReady = daemonSet.Status.NumberReady
+		serverPods, err := r.client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: metav1.FormatLabelSelector(deployment.Spec.Selector)})
+		if err != nil {
+			return VeleroRuntimeStatus{}, err
+		}
+		nodePods, err := r.client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: metav1.FormatLabelSelector(daemonSet.Spec.Selector)})
+		if err != nil {
+			return VeleroRuntimeStatus{}, err
+		}
+		status.ImageDigest = commonReadyPodDigest(serverPods.Items, "velero", 1)
+		status.NodeAgentImageDigest = commonReadyPodDigest(nodePods.Items, "node-agent", int(status.NodeAgentDesired))
 		return status, nil
 	}
 	status := VeleroRuntimeStatus{
@@ -939,6 +949,9 @@ func commonReadyPodDigest(pods []corev1.Pod, containerName string, expected int)
 	digest := ""
 	count := 0
 	for i := range pods {
+		if pods[i].DeletionTimestamp != nil {
+			continue
+		}
 		for _, container := range pods[i].Status.ContainerStatuses {
 			if container.Name != containerName || !container.Ready {
 				continue
@@ -964,10 +977,8 @@ func imageTag(image string) string {
 	}
 	if slash, colon := strings.LastIndex(image, "/"), strings.LastIndex(image, ":"); colon > slash {
 		tag := image[colon+1:]
-		if strings.HasPrefix(tag, "v") {
-			if suffix := strings.Index(tag, "-"); suffix > 0 {
-				return tag[:suffix]
-			}
+		if strings.HasPrefix(tag, "velero-v") {
+			return strings.TrimPrefix(tag, "velero-")
 		}
 		return tag
 	}

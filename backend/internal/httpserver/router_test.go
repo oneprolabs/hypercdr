@@ -950,7 +950,7 @@ func TestInstallScriptIncludesVeleroInstaller(t *testing.T) {
 		"--backup-repository-configmap=backup-repository-config",
 		"name: backup-repository-config",
 		`"cacheLimitMB": 5120`,
-		`\"prepareQueueLength\":4`,
+		`\"prepareQueueLength\":8`,
 		`"cachePVC"`,
 		"resources: [\"services\"]\n    verbs: [\"patch\", \"update\"]",
 		"resources: [\"customresourcedefinitions\"]\n    verbs: [\"get\", \"list\", \"watch\", \"create\", \"patch\", \"update\", \"delete\"]",

@@ -15,6 +15,28 @@ import (
 	clienttesting "k8s.io/client-go/testing"
 )
 
+func TestFilesystemBackupCleanupToleratesAbsentSnapshotAPI(t *testing.T) {
+	backup := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "velero.io/v1", "kind": "Backup",
+		"metadata": map[string]any{"namespace": "agent", "name": "filesystem", "uid": "backup-uid", "labels": map[string]any{"hypercdr.io/managed-by": "hypercdr", "hypercdr.io/task-id": "task"}},
+		"spec":     map[string]any{"snapshotVolumes": false, "defaultVolumesToFsBackup": true},
+		"status":   map[string]any{"phase": "Completed"},
+	}}
+	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{consistencyBackups: "BackupList", cleanupSnapshots: "VolumeSnapshotList"}, backup)
+	client.PrependReactor("list", "volumesnapshots", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewNotFound(cleanupSnapshots.GroupResource(), "")
+	})
+	applier := &DynamicManifestApplier{client: client}
+	if err := applier.CleanupTerminalBackupSnapshots(context.Background(), "agent"); err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range client.Actions() {
+		if action.GetVerb() != "list" || (action.GetResource() != consistencyBackups && action.GetResource() != cleanupSnapshots) {
+			t.Fatalf("filesystem backup triggered task-specific CSI cleanup: %v", action)
+		}
+	}
+}
+
 func TestTerminalSnapshotCleanupOwnershipAndSafety(t *testing.T) {
 	for _, scenario := range []string{"completed", "failed", "canceled", "running-backup", "running-upload", "failed-running-upload", "failed-foreign-upload", "timeout-running-upload", "wrong-cancel-task", "unknown-upload", "foreign", "wrong-uid", "wrong-task", "referenced", "delete-error", "orphan-retry", "orphan-running-upload"} {
 		t.Run(scenario, func(t *testing.T) {

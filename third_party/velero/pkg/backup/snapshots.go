@@ -42,6 +42,9 @@ func GetBackupCSIResources(
 	volumeSnapshotContents []snapshotv1api.VolumeSnapshotContent,
 	volumeSnapshotClasses []snapshotv1api.VolumeSnapshotClass,
 ) {
+	if boolptr.IsSetToFalse(backup.Spec.SnapshotVolumes) && !boolptr.IsSetToTrue(backup.Spec.SnapshotMoveData) {
+		return nil, nil, nil
+	}
 	if boolptr.IsSetToTrue(backup.Spec.SnapshotMoveData) {
 		backupLog.Info("backup SnapshotMoveData is set to true, skip VolumeSnapshot resource persistence.")
 	} else if features.IsEnabled(velerov1api.CSIFeatureFlag) {
