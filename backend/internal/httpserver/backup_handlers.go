@@ -471,6 +471,17 @@ func (r *Router) createPendingBackupTask(body backupTaskRequest, appID string) (
 }
 
 func (r *Router) dispatchBackupTaskAfterStorageSync(task store.Task, storageName string, storageRepoID string, sourceClusterID string) {
+	if _, online := r.hub.get(task.ClusterID); !online {
+		return
+	}
+	admitted, admissionErr := r.store.AdmitSyncTask(task.ID, task.ClusterID, task.TenantID)
+	if admissionErr != nil {
+		r.logger.Error("sync admission failed", "task_id", task.ID, "error", admissionErr)
+		return
+	}
+	if !admitted {
+		return
+	}
 	if !task.CompletedAt.IsZero() {
 		return
 	}
@@ -555,6 +566,9 @@ func (r *Router) dispatchBackupTask(task store.Task) {
 		return
 	}
 	if err := r.dispatchStoredTask(conn, task); err != nil {
+		if errors.Is(err, errSyncWaiting) {
+			return
+		}
 		r.logger.Error("failed to dispatch backup task after storage preflight", "task_id", task.ID, "error", err)
 		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{
 			TaskID:       task.ID,

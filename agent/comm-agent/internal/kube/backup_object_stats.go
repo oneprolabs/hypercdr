@@ -218,7 +218,21 @@ func (a *DynamicManifestApplier) planObjectStorageStats(ctx context.Context, nam
 }
 
 func (a *DynamicManifestApplier) GetRestoreResultSummary(ctx context.Context, namespace string, storageLocation string, restoreName string) (RestoreResultSummary, error) {
-	if strings.TrimSpace(namespace) == "" || strings.TrimSpace(storageLocation) == "" || strings.TrimSpace(restoreName) == "" {
+	if strings.TrimSpace(restoreName) == "" {
+		return RestoreResultSummary{}, nil
+	}
+	return a.getVeleroResultSummary(ctx, namespace, storageLocation, restoreResultsKey("", restoreName))
+}
+
+func (a *DynamicManifestApplier) GetBackupResultSummary(ctx context.Context, namespace, storageLocation, backupName string) (RestoreResultSummary, error) {
+	if strings.TrimSpace(backupName) == "" {
+		return RestoreResultSummary{}, nil
+	}
+	return a.getVeleroResultSummary(ctx, namespace, storageLocation, backupObjectPrefix("", backupName)+backupName+"-results.gz")
+}
+
+func (a *DynamicManifestApplier) getVeleroResultSummary(ctx context.Context, namespace, storageLocation, resultKey string) (RestoreResultSummary, error) {
+	if strings.TrimSpace(namespace) == "" || strings.TrimSpace(storageLocation) == "" {
 		return RestoreResultSummary{}, nil
 	}
 	bsl, err := a.readBackupStorageLocation(ctx, namespace, storageLocation)
@@ -236,7 +250,11 @@ func (a *DynamicManifestApplier) GetRestoreResultSummary(ctx context.Context, na
 	if err != nil {
 		return RestoreResultSummary{}, err
 	}
-	key := restoreResultsKey(bsl.Prefix, restoreName)
+	key := strings.Trim(bsl.Prefix, "/")
+	if key != "" {
+		key += "/"
+	}
+	key += resultKey
 	object, err := client.GetObject(ctx, bsl.Bucket, key, minio.GetObjectOptions{})
 	if err != nil {
 		return RestoreResultSummary{}, err
@@ -247,7 +265,7 @@ func (a *DynamicManifestApplier) GetRestoreResultSummary(ctx context.Context, na
 		return RestoreResultSummary{}, err
 	}
 	defer reader.Close()
-	data, err := io.ReadAll(reader)
+	data, err := io.ReadAll(io.LimitReader(reader, 4<<20))
 	if err != nil {
 		return RestoreResultSummary{}, err
 	}

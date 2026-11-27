@@ -49,6 +49,7 @@ type Client struct {
 	taskRunMu            sync.Mutex
 	taskAborts           sync.Map
 	taskRuns             map[string]*abortableTaskRun
+	taskRunsClosed       bool
 	capacityMu           sync.Mutex
 	cacheCleanupRunning  sync.Map
 	cacheSettingsRunning sync.Map
@@ -269,7 +270,7 @@ func (c *Client) Register() (protocol.RegisterAcceptedPayload, error) {
 		AgentCredential: c.cfg.AgentCredential,
 		Cluster:         clusterSummary,
 		Agent: protocol.AgentSummary{
-			Capabilities: []string{"plan-capacity-v1", "force-protection-cleanup-v1", "task-abort-v1"},
+			Capabilities: c.agentCapabilities(),
 			Version:      c.cfg.AgentVersion,
 			Namespace:    c.cfg.Namespace,
 			PodName:      c.cfg.PodName,
@@ -439,6 +440,7 @@ func (c *Client) RunHeartbeat() error {
 		return errors.New("websocket is not connected")
 	}
 	defer c.conn.Close()
+	defer c.stopTaskRuns()
 
 	interval := c.cfg.HeartbeatInterval
 	if interval <= 0 {
@@ -842,6 +844,10 @@ func (c *Client) recoverObservedTasks(pendingSubmissionsOnly bool) {
 		case "backup":
 			c.markBackupContext(task)
 			go c.runAbortableTask(task, func() {
+				if requiresCoordinatedBackup(task) {
+					_ = c.sendTaskFailed(task, "CONSISTENCY_EXECUTION_UNAVAILABLE", "legacy application coordination is no longer supported; reconfigure the protection plan for CSI snapshots")
+					return
+				}
 				c.pollVeleroStatus(task, object, manifestPayload(object.Kind, object.Name, object.Namespace), backupStatusResult)
 			})
 		case "restore", "drill", "takeover":
@@ -1315,6 +1321,10 @@ func (c *Client) executeUnregisterTask(task protocol.TaskDispatchPayload) {
 func (c *Client) executeBackupTask(task protocol.TaskDispatchPayload) {
 	if task.Backup == nil {
 		_ = c.sendTaskFailed(task, "BACKUP_COMMAND_INVALID", "backup command is required")
+		return
+	}
+	if requiresCoordinatedBackup(task) {
+		_ = c.sendTaskFailed(task, "CONSISTENCY_EXECUTION_UNAVAILABLE", "application stop/freeze coordination is no longer supported; explicitly reconfigure the protection plan to use CSI snapshots")
 		return
 	}
 	if strings.EqualFold(c.cfg.BackupBackend, "oadp") {
@@ -2304,6 +2314,9 @@ func (c *Client) pollVeleroStatus(task protocol.TaskDispatchPayload, object kube
 			if isTransientKubernetesReadError(err) && now.Before(deadline) {
 				if statusReadErrorSince.IsZero() {
 					statusReadErrorSince = now
+					if task.Type == "backup" {
+						_ = c.sendTaskProgress(task, map[string]any{"observationError": err.Error(), "observationState": "retrying"}, progress, "Kubernetes API is temporarily unavailable; retrying backup observation. The backup may still be running.")
+					}
 				}
 				if shouldRetryVeleroStatusRead(err, now, statusReadErrorSince, deadline) {
 					if c.logger != nil {
@@ -2347,6 +2360,10 @@ func (c *Client) pollVeleroStatus(task protocol.TaskDispatchPayload, object kube
 		volumeReady := !usesVolumeProgress(object)
 		if volumePayload, volumeProgress, volumeMessage, ready := c.buildVolumeProgressPayload(c.taskContext(task), object, &samples); volumePayload != nil {
 			payload["volumeProgress"] = volumePayload
+			if object.Kind == "Backup" && int64FromAny(volumePayload["failedCount"]) > 0 {
+				_ = c.sendTaskFailedWithDetails(task, "VOLUME_BACKUP_FAILED", backupVolumeFailureMessage(volumePayload), map[string]any{"velero": payload})
+				return
+			}
 			if failedCount := int64FromAny(volumePayload["failedCount"]); object.Kind == "Restore" && failedCount > 0 {
 				failureCode, failureMessage := restoreVolumeFailureDetails(volumePayload)
 				_ = c.sendTaskFailedWithDetails(task, failureCode, failureMessage, map[string]any{"velero": payload})
@@ -2356,7 +2373,7 @@ func (c *Client) pollVeleroStatus(task protocol.TaskDispatchPayload, object kube
 			if ready && volumeProgress > progress {
 				progress = volumeProgress
 			}
-			if ready && volumeMessage != "" && status.Phase == "InProgress" {
+			if ready && volumeMessage != "" && (status.Phase == "InProgress" || status.Phase == "WaitingForPluginOperations" || status.Phase == "WaitingForPluginOperationsPartiallyFailed") {
 				message = volumeMessage
 			}
 		}
@@ -2379,9 +2396,7 @@ func (c *Client) pollVeleroStatus(task protocol.TaskDispatchPayload, object kube
 				}
 				return
 			}
-			if status.Message != "" {
-				message = status.Message
-			}
+			message, payload = c.enrichVeleroFailure(c.taskContext(task), object, payload, status, message)
 			if code == "" {
 				code = object.Kind + "_FAILED"
 			}
@@ -2389,7 +2404,7 @@ func (c *Client) pollVeleroStatus(task protocol.TaskDispatchPayload, object kube
 			return
 		}
 		if time.Now().UTC().After(deadline) {
-			_ = c.sendTaskFailed(task, object.Kind+"_STATUS_TIMEOUT", "timed out waiting for Velero "+object.Kind+" to complete")
+			_ = c.sendTaskFailedWithDetails(task, object.Kind+"_STATUS_TIMEOUT", "timed out waiting for Velero "+object.Kind+" to complete", map[string]any{"velero": payload})
 			return
 		}
 		if usesVolumeProgress(object) && !volumeReady && status.ItemsTotal <= 0 {
@@ -2938,6 +2953,9 @@ func (c *Client) enrichVeleroFailure(ctx context.Context, object kube.AppliedObj
 	if status.Message != "" {
 		message = status.Message
 	}
+	if object.Kind == "Backup" {
+		return c.enrichBackupFailure(ctx, object, payload, status, message)
+	}
 	if object.Kind != "Restore" {
 		return message, payload
 	}
@@ -3157,6 +3175,8 @@ func backupStatusResult(status kube.ManifestStatus, elapsed time.Duration) (bool
 		return true, false, 100, "velero backup failed", "BACKUP_FAILED"
 	case "InProgress":
 		return false, false, 70, "Application resource backup is in progress.", ""
+	case "WaitingForPluginOperations", "WaitingForPluginOperationsPartiallyFailed":
+		return false, false, 70, "Waiting for volume preparation and data transfer to complete.", ""
 	case "Finalizing", "FinalizingPartiallyFailed":
 		return false, false, 90, "Backup finalization is in progress.", ""
 	case "New":
@@ -3257,23 +3277,26 @@ func (c *Client) buildVolumeProgressPayload(ctx context.Context, object kube.App
 	items := make([]map[string]any, 0, len(progress.Items))
 	for _, item := range progress.Items {
 		items = append(items, map[string]any{
-			"kind":             item.Kind,
-			"volume":           item.Volume,
-			"pod":              item.Pod,
-			"namespace":        item.Namespace,
-			"startedAt":        item.StartedAt,
-			"name":             item.Name,
-			"phase":            item.Phase,
-			"bytesDone":        item.BytesDone,
-			"totalBytes":       item.TotalBytes,
-			"incrementalBytes": item.IncrementalBytes,
-			"incrementalKnown": item.IncrementalKnown,
-			"cacheStats":       item.CacheStats,
-			"knownTotal":       item.KnownTotal,
-			"message":          item.Message,
-			"errorCode":        item.ErrorCode,
-			"createdAt":        item.CreatedAt,
-			"elapsedSeconds":   item.ElapsedSeconds,
+			"snapshotReady":        item.SnapshotReady,
+			"temporaryVolumeReady": item.TemporaryVolumeReady,
+			"preparationMessage":   item.PreparationMessage,
+			"kind":                 item.Kind,
+			"volume":               item.Volume,
+			"pod":                  item.Pod,
+			"namespace":            item.Namespace,
+			"startedAt":            item.StartedAt,
+			"name":                 item.Name,
+			"phase":                item.Phase,
+			"bytesDone":            item.BytesDone,
+			"totalBytes":           item.TotalBytes,
+			"incrementalBytes":     item.IncrementalBytes,
+			"incrementalKnown":     item.IncrementalKnown,
+			"cacheStats":           item.CacheStats,
+			"knownTotal":           item.KnownTotal,
+			"message":              item.Message,
+			"errorCode":            item.ErrorCode,
+			"createdAt":            item.CreatedAt,
+			"elapsedSeconds":       item.ElapsedSeconds,
 		})
 	}
 	payload := map[string]any{
@@ -3302,15 +3325,22 @@ func (c *Client) buildVolumeProgressPayload(ctx context.Context, object kube.App
 }
 
 func restoreVolumeFailureDetails(volumePayload map[string]any) (string, string) {
-	code := "RESTORE_VOLUME_DEPENDENCY_MISSING"
+	code := "RESTORE_VOLUME_DATA_PATH_FAILED"
 	message := "Volume data restore validation failed."
 	if items, ok := volumePayload["items"].([]map[string]any); ok {
 		for _, item := range items {
+			phase := strings.TrimSpace(fmt.Sprint(item["phase"]))
+			if phase != "" && phase != "<nil>" && !strings.EqualFold(phase, "Failed") && !strings.EqualFold(phase, "FailedValidation") {
+				continue
+			}
 			if itemCode := strings.TrimSpace(fmt.Sprint(item["errorCode"])); itemCode != "" && itemCode != "<nil>" {
 				code = itemCode
 			}
 			if detail := strings.TrimSpace(fmt.Sprint(item["message"])); detail != "" && detail != "<nil>" {
 				message = detail
+				if strings.Contains(strings.ToLower(detail), "read-only file system") {
+					code = "RESTORE_VOLUME_FILESYSTEM_READ_ONLY"
+				}
 				break
 			}
 		}
@@ -3907,6 +3937,7 @@ func (c *Client) sendVeleroBackupEvent(backup kube.VeleroBackupSummary) error {
 		items, _ := volumePayload["items"].([]map[string]any)
 		states := make([]string, 0, len(items))
 		for _, item := range items {
+			states = append(states, fmt.Sprintf("%v/preparation/%v/%v/%v", item["name"], item["snapshotReady"], item["temporaryVolumeReady"], item["preparationMessage"]))
 			states = append(states, fmt.Sprintf("%v/%v/%v/%v/%v/%v/%v", item["kind"], item["name"], item["phase"], item["startedAt"], item["knownTotal"], item["bytesDone"], item["totalBytes"]))
 			if stats, err := json.Marshal(item["cacheStats"]); err == nil {
 				states = append(states, fmt.Sprintf("%v/%s", item["name"], stats))
@@ -4269,6 +4300,13 @@ func (c *Client) sendTaskCompleted(task protocol.TaskDispatchPayload, veleroPayl
 	if c.ledger.abortRequested(task.TaskID) {
 		return context.Canceled
 	}
+	if task.Type == "backup" && task.Backup != nil && task.Backup.DataProtectionMode == "snapshot-crash-consistent" {
+		verified, err := c.verifiedSnapshotCompletion(task, veleroPayload)
+		if err != nil {
+			return c.sendTaskFailedWithDetails(task, "SNAPSHOT_COMPLETION_UNPROVEN", err.Error(), map[string]any{"requestedConsistency": "snapshot-crash-consistent"})
+		}
+		veleroPayload = verified
+	}
 	switch task.Type {
 	case "cache-settings", "cache-cleanup", "agent-upgrade", "velero-upgrade", "oadp-upgrade":
 		c.requestRuntimeRefresh()
@@ -4348,6 +4386,21 @@ func (c *Client) sendTaskFailed(task protocol.TaskDispatchPayload, code string, 
 func (c *Client) sendTaskFailedWithDetails(task protocol.TaskDispatchPayload, code string, text string, details map[string]any) error {
 	if c.ledger.abortRequested(task.TaskID) {
 		return context.Canceled
+	}
+	if task.Type == "backup" {
+		code, details = backupFailureDetails(code, text, details)
+	}
+	if task.Type == "backup" && task.Backup != nil && task.Backup.DataProtectionMode == "snapshot-crash-consistent" {
+		if canceler, ok := c.applier.(interface {
+			RequestSnapshotBackupCancellation(context.Context, string, string, string, string) error
+		}); ok {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			err := canceler.RequestSnapshotBackupCancellation(ctx, c.cfg.Namespace, task.Backup.VeleroBackupName, task.TaskID, task.CommandID)
+			cancel()
+			if err != nil && c.logger != nil {
+				c.logger.Warn("failed to request snapshot operation cancellation", "task_id", task.TaskID, "error", err)
+			}
+		}
 	}
 	if isRecoveryTask(task.Type) {
 		if details == nil {

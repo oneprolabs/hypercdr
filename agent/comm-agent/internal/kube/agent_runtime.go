@@ -612,6 +612,11 @@ func (r *KubernetesAgentRuntime) UpgradeVelero(ctx context.Context, options Vele
 	if strings.TrimSpace(options.Image) == "" {
 		return fmt.Errorf("velero image is required")
 	}
+	if supportsBackupPVCRefreshImage(options.Image) {
+		if err := r.ensureCSIUpgradePermissions(ctx, namespace); err != nil {
+			return err
+		}
+	}
 	if err := r.PrepareVeleroUpgrade(ctx, namespace); err != nil {
 		return err
 	}
@@ -630,7 +635,19 @@ func (r *KubernetesAgentRuntime) UpgradeVelero(ctx context.Context, options Vele
 	}
 	serverContainer := map[string]any{"name": "velero", "image": options.Image, "imagePullPolicy": "Always"}
 	if options.ConcurrentBackups > 0 {
-		serverContainer["args"] = []string{"server", "--default-volumes-to-fs-backup", fmt.Sprintf("--concurrent-backups=%d", options.ConcurrentBackups), "--plugin-dir=/plugins"}
+		serverContainer["args"] = []string{"server", "--default-volumes-to-fs-backup", "--features=EnableCSI", fmt.Sprintf("--concurrent-backups=%d", options.ConcurrentBackups), "--plugin-dir=/plugins"}
+	} else {
+		current, err := r.client.AppsV1().Deployments(namespace).Get(ctx, deploymentName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		args := []string{"server", "--default-volumes-to-fs-backup", "--plugin-dir=/plugins"}
+		for _, container := range current.Spec.Template.Spec.Containers {
+			if container.Name == "velero" && len(container.Args) > 0 {
+				args = append([]string(nil), container.Args...)
+			}
+		}
+		serverContainer["args"] = enableVeleroCSI(args)
 	}
 	podSpec := map[string]any{"containers": []map[string]any{serverContainer}}
 	if len(initContainers) > 0 {
@@ -656,7 +673,11 @@ func (r *KubernetesAgentRuntime) UpgradeVelero(ctx context.Context, options Vele
 	if options.NodeAgentConcurrency > 0 {
 		nodeAgentContainer["args"] = []string{"node-agent", "server", "--node-agent-configmap=node-agent-config", "--backup-repository-configmap=backup-repository-config"}
 	}
-	daemonSetPatch, _ := json.Marshal(map[string]any{"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"annotations": map[string]string{"hypercdr.io/velero-upgrade-at": time.Now().UTC().Format(time.RFC3339Nano), "hypercdr.io/cache-persistence-supported": cacheCapability, "hypercdr.io/cache-isolation-supported": isolationCapability, "hypercdr.io/cache-persistence-image": options.Image}}, "spec": map[string]any{"containers": []map[string]any{nodeAgentContainer}}}}})
+	refreshCapability := ""
+	if supportsBackupPVCRefreshImage(options.Image) {
+		refreshCapability = "v1"
+	}
+	daemonSetPatch, _ := json.Marshal(map[string]any{"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"annotations": map[string]string{"hypercdr.io/velero-upgrade-at": time.Now().UTC().Format(time.RFC3339Nano), "hypercdr.io/cache-persistence-supported": cacheCapability, "hypercdr.io/cache-isolation-supported": isolationCapability, "hypercdr.io/cache-persistence-image": options.Image, "hypercdr.io/backup-pvc-refresh-supported": refreshCapability, "hypercdr.io/backup-pvc-refresh-image": options.Image}}, "spec": map[string]any{"containers": []map[string]any{nodeAgentContainer}}}}})
 	if _, err := r.client.AppsV1().DaemonSets(namespace).Patch(ctx, daemonSetName, types.StrategicMergePatchType, daemonSetPatch, metav1.PatchOptions{}); err != nil {
 		return fmt.Errorf("update node-agent daemonset: %w", err)
 	}
@@ -671,9 +692,16 @@ func (r *KubernetesAgentRuntime) UpgradeVelero(ctx context.Context, options Vele
 		if err != nil {
 			return err
 		}
-		serverReady := deployment.Status.Replicas > 0 && deployment.Status.UpdatedReplicas == deployment.Status.Replicas && deployment.Status.AvailableReplicas == deployment.Status.Replicas
-		nodesReady := daemonSet.Status.DesiredNumberScheduled > 0 && daemonSet.Status.UpdatedNumberScheduled == daemonSet.Status.DesiredNumberScheduled && daemonSet.Status.NumberReady == daemonSet.Status.DesiredNumberScheduled && daemonSet.Status.NumberUnavailable == 0
+		serverReady := deployment.Status.ObservedGeneration >= deployment.Generation && deployment.Status.Replicas > 0 && deployment.Status.UpdatedReplicas == deployment.Status.Replicas && deployment.Status.AvailableReplicas == deployment.Status.Replicas
+		nodesReady := daemonSet.Status.ObservedGeneration >= daemonSet.Generation && daemonSet.Status.DesiredNumberScheduled > 0 && daemonSet.Status.UpdatedNumberScheduled == daemonSet.Status.DesiredNumberScheduled && daemonSet.Status.NumberReady == daemonSet.Status.DesiredNumberScheduled && daemonSet.Status.NumberUnavailable == 0
 		if serverReady && nodesReady {
+			if deployment.Spec.Template.Annotations["hypercdr.io/storage-on-demand-image"] != options.Image || deployment.Spec.Template.Annotations["hypercdr.io/storage-on-demand-supported"] != onDemandCapability {
+				return fmt.Errorf("Velero upgrade capability metadata does not match the requested image; reconcile the deployment before running Sync or Drill")
+			}
+			annotations := daemonSet.Spec.Template.Annotations
+			if annotations["hypercdr.io/cache-persistence-image"] != options.Image || annotations["hypercdr.io/cache-persistence-supported"] != cacheCapability || annotations["hypercdr.io/cache-isolation-supported"] != isolationCapability || annotations["hypercdr.io/backup-pvc-refresh-image"] != options.Image || annotations["hypercdr.io/backup-pvc-refresh-supported"] != refreshCapability {
+				return fmt.Errorf("node-agent upgrade capability metadata does not match the requested image; reconcile the daemonset before running Sync or Drill")
+			}
 			if cacheCapability == "v1" {
 				rootPath, indexEnabled, indexBudget, drillEnabled, drillBudget := "/var/lib/hypercdr/cache", true, 5, false, 50
 				for _, container := range daemonSet.Spec.Template.Spec.Containers {
@@ -762,7 +790,30 @@ func (r *KubernetesAgentRuntime) ensureVeleroPerformanceConfig(ctx context.Conte
 	} else if err != nil {
 		return err
 	} else {
-		current.Data = map[string]string{"node-agent-config.json": string(data)}
+		var previous map[string]json.RawMessage
+		if raw := current.Data["node-agent-config.json"]; strings.TrimSpace(raw) != "" {
+			if err := json.Unmarshal([]byte(raw), &previous); err != nil {
+				return fmt.Errorf("preserve node-agent configuration: %w", err)
+			}
+		}
+		for key, value := range config {
+			encoded, err := json.Marshal(value)
+			if err != nil {
+				return err
+			}
+			if previous == nil {
+				previous = map[string]json.RawMessage{}
+			}
+			previous[key] = encoded
+		}
+		data, err = json.Marshal(previous)
+		if err != nil {
+			return err
+		}
+		if current.Data == nil {
+			current.Data = map[string]string{}
+		}
+		current.Data["node-agent-config.json"] = string(data)
 		_, err = configMaps.Update(ctx, current, metav1.UpdateOptions{})
 	}
 	if err != nil {
@@ -784,7 +835,24 @@ func (r *KubernetesAgentRuntime) ensureVeleroPerformanceConfig(ctx context.Conte
 	if err != nil {
 		return err
 	}
-	repositoryConfig.Data = map[string]string{"kopia": string(repositoryData)}
+	if options.CacheLimitMB <= 0 {
+		return nil
+	}
+	if repositoryConfig.Data == nil {
+		repositoryConfig.Data = map[string]string{}
+	}
+	previousRepository := map[string]any{}
+	if raw := repositoryConfig.Data["kopia"]; strings.TrimSpace(raw) != "" {
+		if err := json.Unmarshal([]byte(raw), &previousRepository); err != nil {
+			return fmt.Errorf("preserve backup repository configuration: %w", err)
+		}
+	}
+	previousRepository["cacheLimitMB"] = cacheLimitMB
+	repositoryData, err = json.Marshal(previousRepository)
+	if err != nil {
+		return err
+	}
+	repositoryConfig.Data["kopia"] = string(repositoryData)
 	_, err = configMaps.Update(ctx, repositoryConfig, metav1.UpdateOptions{})
 	return err
 }

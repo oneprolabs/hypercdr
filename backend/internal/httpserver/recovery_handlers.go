@@ -469,6 +469,21 @@ func (r *Router) retryRecoveryTask(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	payload := cloneStringAnyMap(original.Payload)
+	if original.RestorePointID != "" {
+		point, found, loadErr := r.store.GetRestorePoint(original.RestorePointID)
+		if loadErr != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "restore_point_load_failed"})
+			return
+		}
+		if !found || point.TenantID != original.TenantID || point.Status != "available" {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "restore_point_unavailable"})
+			return
+		}
+		payload["veleroBackupName"] = point.VeleroBackupName
+	}
+	for _, key := range []string{"recoveryStages", "volumeProgress", "progressMetrics", "failureDetails", "lastStatusAt", "percent", "etaSeconds", "syncedBytes", "speedBytesPerSecond", "sizeProgressV2"} {
+		delete(payload, key)
+	}
 	payload["retryOfTaskId"] = original.ID
 	payload["requestedBy"] = requestActor(req)
 	task, err := r.store.CreateTask(store.TaskInput{ClusterID: original.ClusterID, AppID: original.AppID, ProtectionPlanID: original.ProtectionPlanID, RestorePointID: original.RestorePointID, Type: original.Type, Status: "queued", CommandID: store.NewPublicID(), Payload: payload})

@@ -27,11 +27,27 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 	if err != nil {
 		return Task{}, err
 	}
+	input.Payload = nil
+	if err := json.Unmarshal(payloadRaw, &input.Payload); err != nil {
+		return Task{}, err
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return Task{}, err
 	}
 	defer tx.Rollback()
+	if input.Type == "velero-upgrade" {
+		if _, err := tx.Exec(`select id from clusters where id=nullif($1,'')::uuid for update`, input.ClusterID); err != nil {
+			return Task{}, err
+		}
+		var busy bool
+		if err := tx.QueryRow(`select exists(select 1 from tasks where cluster_id=$1 and completed_at is null and status not in ('succeeded','failed','cancelled','canceled') and (type='velero-upgrade' or (type in ('backup','restore','drill','takeover','failback','storage-sync','schedule-sync') and (status <> 'queued' or sync_admitted_at is not null))))`, input.ClusterID).Scan(&busy); err != nil {
+			return Task{}, err
+		}
+		if busy {
+			return Task{}, ErrCacheConfigurationBusy
+		}
+	}
 	tenantID := input.TenantID
 	if tenantID == "" {
 		tenantID = DefaultTenantID
@@ -64,6 +80,13 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 		}
 	}
 	if err := validateTaskReferences(tx, input, tenantID); err != nil {
+		return Task{}, err
+	}
+	if err := snapshotTaskDataProtection(tx, &input); err != nil {
+		return Task{}, err
+	}
+	payloadRaw, err = json.Marshal(input.Payload)
+	if err != nil {
 		return Task{}, err
 	}
 	if input.Type == "drill" || input.Type == "restore" || input.Type == "takeover" || (input.Type == "protection-cleanup" && input.Payload["cleanupMode"] == "drill") {
@@ -213,6 +236,11 @@ func (s *PostgresStore) CreateTask(input TaskInput) (Task, error) {
 		task.Type, task.Status, task.CommandID, payloadRaw, now)
 	if err != nil {
 		return Task{}, err
+	}
+	if task.Type == "velero-upgrade" && task.Payload["syncSettingsApply"] == true {
+		if _, err := tx.Exec(`update cluster_sync_settings set apply_task_id=$2 where cluster_id=$1`, task.ClusterID, task.ID); err != nil {
+			return Task{}, err
+		}
 	}
 	if task.Type == "task-abort" {
 		patch, err := json.Marshal(map[string]any{"abortTaskId": task.ID, "abortRequested": true, "abortFailed": false, "lastStatusAt": now.Format(time.RFC3339Nano)})
@@ -520,9 +548,9 @@ func (s *PostgresStore) UpdateTaskStatus(input TaskStatusInput) (Task, bool, err
 		    started_at = case when $7 then coalesce(started_at, $9) else started_at end,
 		    completed_at = case when $8 then coalesce(completed_at, $9) else completed_at end,
 		    dispatched_at = case when $2 = 'dispatched' then coalesce(dispatched_at, $9) else dispatched_at end
-		where id = $1
+		where id = $1 and (not $12 or (type='backup' and status='queued' and sync_admitted_at is null and dispatched_at is null and completed_at is null))
 	`, input.TaskID, input.Status, input.Progress, input.ErrorCode, input.ErrorMessage,
-		input.MarkAccepted, input.MarkStarted, input.MarkDone, now, payloadRaw, input.RestorePointID)
+		input.MarkAccepted, input.MarkStarted, input.MarkDone, now, payloadRaw, input.RestorePointID, input.OnlyQueuedSync)
 	if err != nil {
 		return Task{}, false, err
 	}

@@ -7,29 +7,30 @@ import (
 )
 
 type protectionPlanResponse struct {
-	ID                   string                  `json:"id"`
-	TenantID             string                  `json:"tenantId"`
-	SourceClusterID      string                  `json:"sourceClusterId"`
-	AppID                string                  `json:"appId"`
-	AppIDs               []string                `json:"appIds"`
-	ScopeType            string                  `json:"scopeType"`
-	IncludedResources    []string                `json:"includedResources"`
-	ResourceSelection    store.ResourceSelection `json:"resourceSelection"`
-	LabelSelector        store.LabelSelector     `json:"labelSelector"`
-	IncludeClusterScoped bool                    `json:"includeClusterScoped"`
-	StorageRepoID        string                  `json:"storageRepoId"`
-	PolicyID             string                  `json:"policyId"`
-	TargetClusterID      string                  `json:"targetClusterId"`
-	ExcludedResources    []string                `json:"excludedResources"`
-	PreHooks             []map[string]any        `json:"preHooks"`
-	PostHooks            []map[string]any        `json:"postHooks"`
-	Status               string                  `json:"status"`
-	CreatedAt            time.Time               `json:"createdAt"`
-	UpdatedAt            time.Time               `json:"updatedAt"`
-	ActivationTask       *store.Task             `json:"activationTask,omitempty"`
-	CleanupTask          *store.Task             `json:"cleanupTask,omitempty"`
-	StorageTasks         *[]store.Task           `json:"storageTasks,omitempty"`
-	Warning              string                  `json:"warning,omitempty"`
+	DataProtection       store.DataProtectionSettings `json:"dataProtection"`
+	ID                   string                       `json:"id"`
+	TenantID             string                       `json:"tenantId"`
+	SourceClusterID      string                       `json:"sourceClusterId"`
+	AppID                string                       `json:"appId"`
+	AppIDs               []string                     `json:"appIds"`
+	ScopeType            string                       `json:"scopeType"`
+	IncludedResources    []string                     `json:"includedResources"`
+	ResourceSelection    store.ResourceSelection      `json:"resourceSelection"`
+	LabelSelector        store.LabelSelector          `json:"labelSelector"`
+	IncludeClusterScoped bool                         `json:"includeClusterScoped"`
+	StorageRepoID        string                       `json:"storageRepoId"`
+	PolicyID             string                       `json:"policyId"`
+	TargetClusterID      string                       `json:"targetClusterId"`
+	ExcludedResources    []string                     `json:"excludedResources"`
+	PreHooks             []map[string]any             `json:"preHooks"`
+	PostHooks            []map[string]any             `json:"postHooks"`
+	Status               string                       `json:"status"`
+	CreatedAt            time.Time                    `json:"createdAt"`
+	UpdatedAt            time.Time                    `json:"updatedAt"`
+	ActivationTask       *store.Task                  `json:"activationTask,omitempty"`
+	CleanupTask          *store.Task                  `json:"cleanupTask,omitempty"`
+	StorageTasks         *[]store.Task                `json:"storageTasks,omitempty"`
+	Warning              string                       `json:"warning,omitempty"`
 }
 
 func protectionPlanPayloadContract(pattern string) (payloadContract, int, bool) {

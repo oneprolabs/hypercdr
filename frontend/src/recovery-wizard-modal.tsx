@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { RecoverySelect } from './components/recovery-select';
 import { recoveryAdvancedOptions, selectedAdvancedMappings } from './lib/recovery-advanced-options';
-import { drillSteps, drillScopeError, recoveryNamespaceMappings, recoveryNamespaceMappingError } from './lib/drill-wizard';
+import { drillSteps, drillScopeError, recoveryNamespaceMappings, recoveryNamespaceMappingError, recoveryPackageNamespaces, recoveryApplicationResources } from './lib/drill-wizard';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertCircle,
@@ -322,7 +322,7 @@ export function RecoveryWizardModal(props: Props) {
     return () => { cancelled = true; };
   }, [open, mode, drillStep, targetClusterOption?.id, cacheRefreshKey]);
   const restorePointUnavailable = Boolean(contentsError && /restore.?point.?not.?found|no longer available/i.test(contentsError));
-  const packageNamespaces = Array.from(new Set(contents.map(item => item.namespace).filter((value): value is string => Boolean(value)))).sort();
+  const packageNamespaces = recoveryPackageNamespaces(contents);
   const availableRestoreNamespaces = packageNamespaces.length > 0 ? packageNamespaces : (config.restoreNamespaces || []).filter(Boolean);
   const selectedRestoreNamespaces = (config.restoreNamespaces || availableRestoreNamespaces).filter(namespace => availableRestoreNamespaces.includes(namespace));
   const mergedRestorePackage = availableRestoreNamespaces.length > 1;
@@ -387,7 +387,7 @@ export function RecoveryWizardModal(props: Props) {
       if (request !== contentRequest.current) return false;
       const resources = result.resources || [];
       setContents(resources);
-      const namespaces = Array.from(new Set(resources.map(item => item.namespace).filter((value): value is string => Boolean(value)))).sort();
+      const namespaces = recoveryPackageNamespaces(resources);
       updateConfig({ contentCatalogLoaded: true, persistentDataExpected: resources.some(item => ['PersistentVolumeClaim', 'PersistentVolume', 'VolumeSnapshot'].includes(item.kind)), restorePackageNamespaces: namespaces.length > 0 ? namespaces : config.restorePackageNamespaces, restoreNamespaces: namespaces.length > 0 ? namespaces : config.restoreNamespaces });
       return true;
     } catch (error) {
@@ -401,7 +401,7 @@ export function RecoveryWizardModal(props: Props) {
     }
   };
 
-  const uniqueContents = Array.from(contents.reduce((items, item) => {
+  const uniqueContents = Array.from(recoveryApplicationResources(contents).reduce((items, item) => {
     const identity = [item.apiVersion, item.kind, item.namespace || '', item.name].join('|');
     if (!items.has(identity)) items.set(identity, item);
     return items;

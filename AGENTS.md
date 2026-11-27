@@ -46,3 +46,7 @@ updated documentation.
 - Enforce tenant scope in storage and API paths, not only in the UI.
 - Keep user-facing pages consistent with shared components and design tokens.
 - Preserve backward compatibility for installed agents during rolling upgrades.
+- Velero image changes must atomically reconcile image-bound capability annotations
+  and preserve EnableCSI. Use the managed runtime upgrade path; never use a bare
+  image replacement. Verify both server and node-agent readiness and capability
+  metadata before declaring an installation or upgrade successful.

@@ -20,6 +20,14 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "consistency-recovery-manifest" {
+		fmt.Fprintln(os.Stderr, "application coordination components are no longer supported; use CSI snapshots")
+		os.Exit(1)
+	}
+	if len(os.Args) > 1 && os.Args[1] == "consistency-recover" {
+		fmt.Fprintln(os.Stderr, "application coordination components are no longer supported; use CSI snapshots")
+		os.Exit(1)
+	}
 	if len(os.Args) > 1 && os.Args[1] == "cache-usage" {
 		if err := cacheusage.Run(context.Background(), os.Args[2:], os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -88,6 +96,8 @@ func main() {
 			return
 		}
 	}
+
+	go wsclient.RunSnapshotCleanup(ctx, cfg, logger, applier)
 
 	var collector inventory.Collector
 	if strings.EqualFold(cfg.InventoryMode, "kubernetes") {

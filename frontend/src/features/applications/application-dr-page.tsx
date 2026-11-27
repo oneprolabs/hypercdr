@@ -9,6 +9,7 @@ import { listProtectionPlans, createProtectionPlan, updateProtectionPlan, activa
 import { useBusinessPermission } from '../../auth/business-access';
 import { listApplications, updateApplicationProtection } from '../../api/applications';
 import { requestClusterInventory, getInventoryRequestStatus } from '../../api/inventory';
+import { listClusters } from '../../api/clusters';
 import NamespaceDetailDrawer from './namespace-detail-drawer';
 import { useNamespaceDetail } from './use-namespace-detail';
 import NamespaceResourcesDrawer from './namespace-resources-drawer';
@@ -20,7 +21,8 @@ import {
   History, Layers, ListChecks, MoreVertical, Play, Plus, RefreshCw, Search, Server,
   ShieldCheck, ShieldOff, Trash2, Upload, X, Zap,
 } from 'lucide-react';
-import type { Props as DrWizardProps } from '../../dr-configuration-modal';
+import type { Props as DrWizardProps, ProtectConfig } from '../../dr-configuration-modal';
+import { initialDataProtection } from '../recovery/data-protection-model';
 import type { BackupContentResource, RecoveryWizardConfig } from '../../recovery-wizard-modal';
 import { lazyWithUpgradeRecovery } from '../../app/lazy-page';
 import { DialogModuleFrame, preloadDialog, useDialogPreload } from '../../app/dialog-module';
@@ -119,6 +121,8 @@ export default function ApplicationDrPage(props: {
   const [protectSubmitting, setProtectSubmitting] = useState(false);
   const protectSubmittingRef = useRef(false);
 	const cleanupSubmittingRef = useRef(false);
+	const cleanupPollGeneration = useRef(0);
+	useEffect(() => () => { cleanupPollGeneration.current += 1; }, [currentClusterId]);
 	const [cleaningPlanIds, setCleaningPlanIds] = useState<string[]>([]);
 	const [configuringPlanIds, setConfiguringPlanIds] = useState<string[]>([]);
 	const [configuringAppNames, setConfiguringAppNames] = useState<string[]>([]);
@@ -132,7 +136,8 @@ export default function ApplicationDrPage(props: {
   const [guidedProtectWizard, setGuidedProtectWizard] = useState(false);
   const [protectWizardMode, setProtectWizardMode] = useState<'create' | 'modify'>('create');
   const [protectWizardStep, setProtectWizardStep] = useState<1 | 2 | 3 | 4 | 5 | 6>(1);
-  const [protectConfig, setProtectConfig] = useState({
+  const [protectConfig, setProtectConfig] = useState<ProtectConfig>({
+    dataProtection: initialDataProtection(),
     scope: 'all',
     labels: '',
     labelConditions: [] as Array<{ key: string; operator: 'Equals' | 'Not Equals'; value: string }>,
@@ -2081,6 +2086,7 @@ export default function ApplicationDrPage(props: {
         ...prev,
         scope: 'all',
         targetCluster: '',
+        dataProtection: initialDataProtection(),
         storageId: '',
         policy: '',
         includeAllResources: true,
@@ -2251,6 +2257,7 @@ export default function ApplicationDrPage(props: {
       setProtectConfig(prev => ({
         ...prev,
         storageId: plan.storageRepoId || '',
+        dataProtection: initialDataProtection(plan),
         policy: plan.policyId || 'manual',
         targetCluster: clusters.find(cluster => cluster.id === plan.targetClusterId)?.name || '',
         mergeNamespaces: unitMembers(selectedApp).length > 1,
@@ -2268,6 +2275,7 @@ export default function ApplicationDrPage(props: {
     }
     setResourceCatalogLoaded(discoveredResourceOptions.namespaceScoped.length > 0);
     setProtectWizardMode('modify');
+    setGuidedProtectWizard(false);
     setProtectWizardStep(1);
     setProtectWizardOpen(true);
     warmWizardResourceCatalog(selectedApp);
@@ -2291,6 +2299,7 @@ export default function ApplicationDrPage(props: {
       return;
     }
 	cleanupSubmittingRef.current = true;
+	const cleanupGeneration = ++cleanupPollGeneration.current;
 	setConfiguringPlanIds(previous => previous.filter(id => !planIds.includes(id)));
 	setConfiguringAppNames(previous => previous.filter(name => !targetApps.some(app => app.name === name)));
 	setCleaningPlanIds(prev => Array.from(new Set([...prev, ...planIds])));
@@ -2300,6 +2309,7 @@ export default function ApplicationDrPage(props: {
 	setProtectionPlans(prev => prev.map(plan => planIds.includes(plan.id) ? { ...plan, status: 'cleaning' } : plan));
     try {
       const responses = await Promise.all(planIds.map(planId => deleteProtectionPlan(planId, forceCleanup)));
+	  if (cleanupGeneration !== cleanupPollGeneration.current) return;
       setProtectionPlans(previous => previous.map(plan => {
         const response = responses.find(item => item.id === plan.id);
         return response ? { ...plan, ...response } : plan;
@@ -2312,6 +2322,7 @@ export default function ApplicationDrPage(props: {
         ));
       }
     } catch (error) {
+		if (cleanupGeneration !== cleanupPollGeneration.current) return;
 		await refreshPlatformData();
       toast('Failed to cleanup resources: ' + (error instanceof Error ? error.message : 'unknown error'));
 		setCleaningPlanIds(prev => prev.filter(id => !planIds.includes(id)));
@@ -2322,22 +2333,18 @@ export default function ApplicationDrPage(props: {
       const next = { ...prev };
       targetApps.forEach(app => {
         const key = appOverrideKey(app);
-        next[key] = {
-          ...(next[key] || {}),
-          stage: 'run',
-          protectionStatus: 'protected',
-          isProtected: true,
-          status: 'Protected',
-        };
+        delete next[key];
       });
       return next;
     });
     setSelectedRunApps([]);
     toast('Cleanup submitted');
-    const pollCleanup = (remaining: number) => {
+    const pollCleanup = () => {
       window.setTimeout(async () => {
+        if (cleanupGeneration !== cleanupPollGeneration.current) return;
         try {
           const response = await listProtectionPlans();
+          if (cleanupGeneration !== cleanupPollGeneration.current) return;
           const remainingPlans = listItems(response).filter(plan => planIds.includes(plan.id));
           setProtectionPlans(previous => previous.map(plan => remainingPlans.find(item => item.id === plan.id) || plan));
           const failedPlans = remainingPlans.filter(plan => plan.status === 'cleanup_failed');
@@ -2346,8 +2353,8 @@ export default function ApplicationDrPage(props: {
             cleanupSubmittingRef.current = false;
             await refreshPlatformData();
             toast('Cleanup failed. Open the task details to review the cause, then retry or select Force cleanup.');
-          } else if (remainingPlans.length > 0 && remaining > 0) {
-            pollCleanup(remaining - 1);
+          } else if (remainingPlans.length > 0) {
+            pollCleanup();
           } else if (remainingPlans.length === 0) {
             setProtectionPlans(prev => prev.filter(plan => !planIds.includes(plan.id)));
             setAppUiOverrides(prev => {
@@ -2372,22 +2379,14 @@ export default function ApplicationDrPage(props: {
 			cleanupSubmittingRef.current = false;
 			await refreshPlatformData();
             toast('Cleanup completed. Application returned to Setup DR.');
-		  } else {
-			setCleaningPlanIds(previous => previous.filter(id => !planIds.includes(id)));
-			cleanupSubmittingRef.current = false;
           }
         } catch {
-		  if (remaining > 0) {
-			pollCleanup(remaining - 1);
-		  } else {
-			setCleaningPlanIds(previous => previous.filter(id => !planIds.includes(id)));
-			cleanupSubmittingRef.current = false;
-		  }
+		  if (cleanupGeneration === cleanupPollGeneration.current) pollCleanup();
         }
       }, 3000);
     };
     void refreshPlatformData();
-    pollCleanup(40);
+    pollCleanup();
   };
 
   const openDrillCleanup = async () => {
@@ -2543,6 +2542,7 @@ export default function ApplicationDrPage(props: {
         const savePlan = existingPlanId ? (input: Record<string, unknown>) => updateProtectionPlan(existingPlanId, input) : createProtectionPlan;
         const createdPlan = await savePlan({
           sourceClusterId: currentClusterId,
+          dataProtection: protectConfig.dataProtection,
           appIds: group.map(meta => meta.apiId),
           scopeType,
           includedResources: protectConfig.scope === 'filter' && !protectConfig.includeAllResources ? protectConfig.includedResources : [],
@@ -2753,6 +2753,33 @@ export default function ApplicationDrPage(props: {
   };
 
   const protectWizardProps: DrWizardProps = {
+    applicationConsistencyProfiles: currentCluster?.applicationConsistencyProfiles,
+    snapshotCapabilities: currentCluster?.capabilities,
+    snapshotSourceClusterId: currentClusterId,
+    snapshotCapabilitiesCollectedAt: currentCluster?.capabilitiesCollectedAt,
+    snapshotNamespaces: protectWizardMode === 'modify' ? selectedRunRows.flatMap(row => unitMembers(row).map(member => member.namespace || member.name)) : wizardTargetNames.flatMap(name => {
+      const app = apps.find(item => item.name === name);
+      return app ? unitMembers(app).map(member => member.namespace || member.name) : [name];
+    }),
+    onRequestSnapshotPrerequisites: async () => {
+      const members = protectWizardMode === 'modify' ? selectedRunRows.flatMap(row => unitMembers(row)) : wizardTargetNames.flatMap(name => {
+        const app = apps.find(item => item.name === name);
+        return app ? unitMembers(app) : [];
+      });
+      const namespaces = new Set<string>();
+      if (!currentClusterId || !members.length) throw new Error('Select a source cluster and application first.');
+      const namespaceErrors: Record<string, string> = {};
+      for (const member of members) {
+        const namespace = member.namespace || member.name;
+        if (namespaces.has(namespace)) continue;
+        namespaces.add(namespace);
+        try { await refreshResourceCatalog(member); }
+        catch (error) { namespaceErrors[namespace] = error instanceof Error ? error.message : 'Namespace inventory could not be read.'; }
+      }
+      const cluster = listItems(await listClusters()).find(item => item.id === currentClusterId);
+      if (!cluster) throw new Error('Source cluster is no longer available.');
+      return { capabilities: cluster.capabilities || [], collectedAt: cluster.capabilitiesCollectedAt, namespaceErrors };
+    },
     open: protectWizardOpen,
     step: protectWizardStep,
     setStep: setProtectWizardStep,
@@ -2895,14 +2922,14 @@ export default function ApplicationDrPage(props: {
                         <>
                           <button
                             disabled={!canManageSync || selectedRunApps.length !== 1 || selectedRunHasCleanupRunning || resourceCatalogLoading}
-                            title="Edit protection configuration"
+                            title="Edit DR configuration"
                             onClick={() => {
                               setAppBulkMenuOpen(false);
                               void modifyProtection();
                             }}
                             className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left text-xs font-bold text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50/70 disabled:text-slate-300"
                           >
-                            <span className="flex items-center gap-2"><Edit2 size={14} className="text-blue-500" />Edit</span>
+                            <span className="flex items-center gap-2"><Edit2 size={14} className="text-blue-500" />Edit DR configuration</span>
                             {selectedRunApps.length !== 1 && <em className="rounded bg-slate-100 px-1 py-0.5 text-[9px] not-italic text-slate-400">Single</em>}
                           </button>
                           <button

@@ -3,6 +3,38 @@ import test from 'node:test';
 import { syncVolumeSummary, syncVolumeDisplay } from './sync-volume-model.ts';
 
 const task = { id: 'sync', createdAt: '2026-11-05T02:00:00Z', payload: {} };
+
+test('unobserved preparation stages have no timeline timestamp', () => {
+  const csiTask = { ...task, payload: { dataProtectionMode: 'snapshot-crash-consistent' } };
+  const sample = phase => ({ taskId: 'sync', createdAt: '2026-11-05T02:00:01Z', payload: { velero: { volumeProgress: { items: [{ kind: 'DataUpload', name: 'one', phase }] } } } });
+  const pending = syncVolumeSummary(csiTask, [sample('New')]);
+  assert.equal(pending.snapshotStartedAt, '');
+  assert.equal(pending.temporaryVolumeStartedAt, '');
+  assert.equal(pending.transferStartedAt, '');
+  const accepted = sample('Accepted');
+  assert.ok(syncVolumeSummary(csiTask, [accepted]).snapshotStartedAt);
+  assert.equal(syncVolumeSummary(csiTask, [accepted]).temporaryVolumeStartedAt, '');
+  accepted.payload.velero.volumeProgress.items[0].snapshotReady = true;
+  assert.ok(syncVolumeSummary(csiTask, [accepted]).temporaryVolumeStartedAt);
+  assert.equal(syncVolumeSummary(csiTask, [accepted]).transferStartedAt, '');
+  assert.equal(syncVolumeSummary(task, [accepted]).snapshotStartedAt, '');
+  assert.equal(syncVolumeSummary(task, [accepted]).temporaryVolumeStartedAt, '');
+});
+
+test('CSI preparation evidence is independent of transfer and file-level mode', () => {
+  const sample = { taskId: 'sync', createdAt: '2026-11-05T02:00:01Z', payload: { velero: { volumeProgress: { discoveryComplete: true, discoveryCount: 2, items: [
+    { kind: 'DataUpload', name: 'one', namespace: 'app', volume: 'data', phase: 'Accepted', snapshotReady: true, temporaryVolumeReady: false },
+    { kind: 'DataUpload', name: 'two', namespace: 'db', volume: 'data', phase: 'InProgress', bytesDone: 10 },
+  ] } } } };
+  const csi = syncVolumeDisplay({ ...task, payload: { dataProtectionMode: 'snapshot-crash-consistent' } }, [sample]);
+  assert.equal(csi.csi, true);
+  assert.equal(csi.discoveryComplete, true);
+  assert.equal(csi.showTransfer, true);
+  assert.equal(csi.volumes.filter(volume => volume.snapshotReady).length, 2);
+  assert.equal(csi.volumes.filter(volume => volume.temporaryVolumeReady).length, 1);
+  assert.equal(csi.percent, undefined);
+  assert.equal(syncVolumeDisplay(task, [sample]).csi, false);
+});
 const event = (items, at = '2026-11-05T02:00:01Z') => ({ taskId: 'sync', createdAt: at, payload: { velero: { volumeProgress: { bytesDone: items.reduce((sum, item) => sum + (item.bytesDone || 0), 0), items } } } });
 const items = [
   { name: 'a', phase: 'InProgress', knownTotal: true, bytesDone: 1024, totalBytes: 2048 },
@@ -11,13 +43,13 @@ const items = [
   { name: 'd', phase: 'New', knownTotal: true, totalBytes: 500 },
 ];
 
-test('list and details hide transfer until discovery closes even when bytes are moving', () => {
+test('transfer is visible as soon as any volume starts even before discovery closes', () => {
   const sample = event([{ name: 'a', phase: 'InProgress', bytesDone: 40, totalBytes: 100, knownTotal: true }]);
   Object.assign(sample.payload.velero.volumeProgress, { discoveryComplete: false, discoveryCount: 0, knownTotal: true, allTotalsKnown: true });
   const summary = syncVolumeSummary(task, [sample]);
   assert.equal(summary.discoveryComplete, false);
   assert.equal(summary.percent, undefined);
-  assert.equal(syncVolumeDisplay(task, [sample]).showTransfer, false);
+  assert.equal(syncVolumeDisplay(task, [sample]).showTransfer, true);
   assert.equal(summary.transferStartedAt, '2026-11-05T02:00:01.000Z');
   sample.payload.velero.volumeProgress.allTotalsKnown = false;
   assert.equal(syncVolumeDisplay(task, [sample]).percent, undefined);
@@ -128,7 +160,7 @@ test('a newly observed volume invalidates an older discovery scope', () => {
   assert.equal(summary.progressStarted, false);
   assert.equal(summary.percent, undefined);
   assert.equal(summary.discoveryCompletedAt, '');
-  assert.equal(syncVolumeDisplay(task, [first, later]).showTransfer, false);
+  assert.equal(syncVolumeDisplay(task, [first, later]).showTransfer, true);
 });
 
 test('unknown size blocks overall percentage even after discovery completes', () => {

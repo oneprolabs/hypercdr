@@ -34,12 +34,12 @@ type clusterUnregisterQueuedResponse struct {
 	Warning string     `json:"warning"`
 }
 type clusterInventoryRequest struct {
-	RequestID                  string   `json:"requestId"`
-	Scope                      string   `json:"scope"`
-	Namespace                  string   `json:"namespace"`
-	IncludeDetails             bool     `json:"includeDetails"`
-	Reason                     string   `json:"reason"`
-	IncludeRecentVeleroObjects bool     `json:"includeRecentVeleroObjects"`
+	RequestID                  string `json:"requestId"`
+	Scope                      string `json:"scope"`
+	Namespace                  string `json:"namespace"`
+	IncludeDetails             bool   `json:"includeDetails"`
+	Reason                     string `json:"reason"`
+	IncludeRecentVeleroObjects bool   `json:"includeRecentVeleroObjects"`
 }
 type clusterInventorySentResponse struct {
 	Status    string `json:"status"`
@@ -66,6 +66,11 @@ func clusterPayloadContract(pattern string) (payloadContract, int, bool) {
 	c := payloadContract{}
 	status := 200
 	switch pattern {
+	case "GET /api/v1/clusters/{id}/sync-settings":
+		c.Response = reflect.TypeFor[clusterSyncSettingsResponse]()
+	case "PUT /api/v1/clusters/{id}/sync-settings":
+		c.Request = reflect.TypeFor[store.ClusterSyncSettings]()
+		c.Response = reflect.TypeFor[clusterSyncSettingsResponse]()
 	case "GET /api/v1/clusters/{id}/cache-settings":
 		c.Response = reflect.TypeFor[clusterCacheResponse]()
 	case "PUT /api/v1/clusters/{id}/cache-settings":

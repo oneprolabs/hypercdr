@@ -10,6 +10,9 @@ export type SyncVolume = {
   totalBytes: number;
   knownTotal: boolean;
   percent?: number;
+  snapshotReady: boolean;
+  temporaryVolumeReady: boolean;
+  preparationMessage: string;
 };
 
 const nonnegative = (value: unknown): number => {
@@ -17,10 +20,13 @@ const nonnegative = (value: unknown): number => {
   return Number.isFinite(numeric) ? Math.max(0, numeric) : 0;
 };
 
-export function syncVolumeSummary(task: ApiTask, events: ApiTaskEvent[]) {
+export function syncVolumeSummary(task: ApiTask, events: ApiTaskEvent[], now = Date.now()) {
+  const csi = task.payload?.dataProtectionMode === 'snapshot-crash-consistent';
   const samples = events.filter(event => !event.taskId || event.taskId === task.id)
     .map(event => ({ at: Date.parse(event.createdAt) || 0, progress: event.payload?.velero?.volumeProgress }));
   if (task.payload?.volumeProgress) samples.push({ at: Date.parse(String(task.payload.lastStatusAt || task.completedAt || task.createdAt)) || 0, progress: task.payload.volumeProgress });
+  const observation = task.payload?.backupObservation;
+  if (observation?.details?.volumeProgress) samples.push({ at: Date.parse(String(observation.observedAt)) || 0, progress: observation.details.volumeProgress });
   samples.sort((left, right) => left.at - right.at);
   const progress = samples.filter(sample => sample.progress && typeof sample.progress === 'object').at(-1)?.progress;
   const items = Array.isArray(progress?.items) ? progress.items : [];
@@ -35,6 +41,9 @@ export function syncVolumeSummary(task: ApiTask, events: ApiTaskEvent[]) {
       : !started ? 'Waiting' : !item.knownTotal || totalBytes <= 0 ? 'Scanning' : 'Syncing';
     return {
       id: `${item.kind || 'volume'}/${item.name || index}`,
+      snapshotReady: item.snapshotReady === true || csi && started,
+      temporaryVolumeReady: item.temporaryVolumeReady === true || csi && started,
+      preparationMessage: String(item.preparationMessage || item.message || ''),
       label: item.volume ? [item.pod, item.volume].filter(Boolean).join(' / ') : String(item.name || `Volume ${index + 1}`),
       context: [item.namespace, item.pod, item.volume ? item.name : undefined].filter(Boolean).join(' / '),
       state, started, bytesDone, totalBytes, knownTotal: item.knownTotal === true && totalBytes > 0,
@@ -52,10 +61,29 @@ export function syncVolumeSummary(task: ApiTask, events: ApiTaskEvent[]) {
   const discoveryComplete = samples.some(sample => sample.progress && completeScope(sample.progress) && coversCurrentScope(sample.progress));
   const totalsReady = Boolean(progress && ready(progress));
   const totalBytes = volumes.reduce((total, volume) => total + volume.totalBytes, 0);
-  const bytesDone = progress ? nonnegative(progress.bytesDone) : nonnegative(task.payload?.progressMetrics?.syncedBytes);
+  const bytesDone = volumes.length > 0 ? volumes.reduce((total, volume) => total + volume.bytesDone, 0) : progress ? nonnegative(progress.bytesDone) : nonnegative(task.payload?.progressMetrics?.syncedBytes);
   const observed = samples.filter(sample => sample.progress && typeof sample.progress === 'object');
   const timestamp = (at?: number) => at && at > 0 ? new Date(at).toISOString() : '';
+  const preparationAt = (mounting: boolean) => timestamp(observed.find(sample => Array.isArray(sample.progress.items) && sample.progress.items.some((item: Record<string, unknown>) => {
+    const started = Boolean(item.startedAt) || Number(item.bytesDone) > 0 || ['Prepared', 'InProgress', 'Completed'].includes(String(item.phase));
+    return mounting ? item.temporaryVolumeReady === true || started || item.snapshotReady === true && item.phase === 'Accepted'
+      : item.snapshotReady === true || started || item.kind === 'DataUpload' && item.phase === 'Accepted';
+  }))?.at);
+  const active = count('Scanning') + count('Syncing');
+  const stale = observed.length > 0 && now - observed.at(-1)!.at > 15000;
+  const speed = active > 0 && !stale ? nonnegative(progress?.speedBytesPerSecond) : 0;
+  const waitingForMount = csi ? volumes.filter(volume => volume.state === 'Waiting' && volume.snapshotReady && !volume.temporaryVolumeReady).length : 0;
+  const allDataComplete = discoveryComplete && volumes.length > 0 && count('Completed') === volumes.length;
+  const activity = stale ? 'Status update delayed'
+    : allDataComplete ? 'Volume data processed; verifying and finalizing backup'
+    : waitingForMount > 0 ? `${waitingForMount} volume(s) waiting for temporary volume preparation / mounting${active > 0 ? ` · ${active} volume(s) processing data` : ''}`
+    : active > 0 ? `${active} volume(s) scanning and backing up data`
+    : volumes.length > 0 ? `${count('Waiting')} volume(s) waiting to start` : 'Identifying volumes';
   return {
+    activity, stale, allDataComplete,
+    csi,
+    snapshotStartedAt: csi ? preparationAt(false) : '',
+    temporaryVolumeStartedAt: csi ? preparationAt(true) : '',
     discoveryStartedAt: timestamp(observed[0]?.at),
     discoveryCompletedAt: timestamp(observed.find(sample => completeScope(sample.progress) && coversCurrentScope(sample.progress))?.at),
     transferStartedAt: timestamp(observed.find(sample => Number(sample.progress.bytesDone) > 0 || Array.isArray(sample.progress.items) && sample.progress.items.some((item: Record<string, unknown>) => item && (item.startedAt || ['InProgress', 'Completed'].includes(String(item.phase)))))?.at),
@@ -63,7 +91,8 @@ export function syncVolumeSummary(task: ApiTask, events: ApiTaskEvent[]) {
     lastObservedAt: timestamp(observed.at(-1)?.at),
     volumes,
     bytesDone, totalBytes, discoveryComplete, progressStarted,
-    speedBytesPerSecond: nonnegative(progress?.speedBytesPerSecond),
+    speedBytesPerSecond: speed,
+    etaSeconds: totalsReady && speed > 0 && totalBytes > bytesDone ? Math.ceil((totalBytes - bytesDone) / speed) : 0,
     percent: totalsReady && totalBytes > 0 ? Math.min(100, bytesDone * 100 / totalBytes) : undefined,
     started: volumes.filter(volume => volume.started).length,
     waiting: count('Waiting'), scanning: count('Scanning'), syncing: count('Syncing'), completed: count('Completed'), failed: count('Failed'), canceled: count('Canceled'),
@@ -74,7 +103,7 @@ export function syncVolumeDisplay(task: ApiTask, events: ApiTaskEvent[], complet
   const summary = syncVolumeSummary(task, events);
   return {
     ...summary,
-    showTransfer: completed || summary.discoveryComplete,
-    percent: completed ? 100 : summary.percent,
+    showTransfer: completed || summary.discoveryComplete || summary.started > 0,
+    percent: completed ? 100 : summary.percent === undefined ? undefined : Math.min(99, summary.percent),
   };
 }

@@ -21,10 +21,11 @@ sha256sum -c "hypercdr-installer-$VERSION.sha256"
 mkdir "$WORK/extracted"
 tar -xzf "hypercdr-installer-$VERSION.tar.gz" -C "$WORK/extracted"
 PACKAGE="$WORK/extracted/hypercdr-installer-$VERSION"
-for script in install-blue-green.sh deploy-blue-green.sh platform-upgrade-runner.sh uninstall.sh uninstall-platform.sh; do
+for script in install-blue-green.sh deploy-blue-green.sh platform-upgrade-runner.sh upgrade-cluster-csi-rbac.sh uninstall.sh uninstall-platform.sh; do
   test -x "$PACKAGE/$script"
   bash -n "$PACKAGE/$script"
 done
+cmp "$ROOT_DIR/backend/internal/httpserver/installers/csi-upgrade-rbac.sh" "$PACKAGE/upgrade-cluster-csi-rbac.sh"
 cmp "$WORK/manifest.json" "$PACKAGE/release-manifest.json"
 for service in hypercdr.service hypercdr-upgrade-runner.service; do
   test -s "$PACKAGE/templates/$service"

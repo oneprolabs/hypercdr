@@ -17,9 +17,10 @@ type BackupManifest struct {
 }
 
 type ManifestMetadata struct {
-	Name      string            `json:"name"`
-	Namespace string            `json:"namespace"`
-	Labels    map[string]string `json:"labels,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
+	Name        string            `json:"name"`
+	Namespace   string            `json:"namespace"`
+	Labels      map[string]string `json:"labels,omitempty"`
 }
 
 // BackupManifestSpec mirrors the Velero v1 Backup CR. The wire shape is
@@ -40,6 +41,7 @@ type BackupManifestSpec struct {
 	IncludeClusterResources          *bool                   `json:"includeClusterResources,omitempty"`
 	SnapshotVolumes                  *bool                   `json:"snapshotVolumes,omitempty"`
 	DefaultVolumesToFsBackup         *bool                   `json:"defaultVolumesToFsBackup,omitempty"`
+	SnapshotMoveData                 *bool                   `json:"snapshotMoveData,omitempty"`
 }
 
 type BackupTemplateMetadata struct {
@@ -55,6 +57,9 @@ type BackupBuildInput struct {
 }
 
 func BuildBackupManifest(input BackupBuildInput) (BackupManifest, error) {
+	if input.Command.ConsistencyGroup != nil {
+		return BackupManifest{}, fmt.Errorf("explicit consistency groups require coordinated capture; refusing ordinary backup")
+	}
 	sourceNamespaces := input.Command.SourceNamespaces
 	if len(sourceNamespaces) == 0 && input.Command.SourceNamespace != "" {
 		sourceNamespaces = []string{input.Command.SourceNamespace}
@@ -107,6 +112,9 @@ func BuildBackupManifest(input BackupBuildInput) (BackupManifest, error) {
 	// Velero v1.18's scoped resource fields must never be mixed with the
 	// legacy generic fields. Only custom selections use them; the all mode
 	// intentionally leaves every filter absent to preserve native defaults.
+	if err := configureDataProtection(&manifest.Spec, input.Command.DataProtectionMode); err != nil {
+		return BackupManifest{}, err
+	}
 	if input.Command.ResourceSelection.Mode == "exclude" {
 		manifest.Spec.IncludedResources = nil
 		manifest.Spec.ExcludedResources = nil

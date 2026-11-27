@@ -68,6 +68,19 @@ func (s *PostgresStore) createRestorePoint(input RestorePointInput, finalizeBack
 	if err := validateRestorePointReferences(tx, input, tenantID); err != nil {
 		return RestorePoint{}, err
 	}
+	if !finalizeBackup && input.BackupTaskID != "" {
+		var taskPayload []byte
+		storedTask := Task{ID: input.BackupTaskID}
+		if err := tx.QueryRow(`select type,payload,coalesce(command_id::text,'') from tasks where id=$1 and tenant_id=$2 and (cluster_id is null or cluster_id=$3) and protection_plan_id is not distinct from nullif($4,'')::uuid for update`, input.BackupTaskID, tenantID, input.SourceClusterID, input.ProtectionPlanID).Scan(&storedTask.Type, &taskPayload, &storedTask.CommandID); err != nil {
+			return RestorePoint{}, err
+		}
+		if err := json.Unmarshal(taskPayload, &storedTask.Payload); err != nil {
+			return RestorePoint{}, err
+		}
+		if err := validatePublicationConsistency(tx, storedTask, input); err != nil {
+			return RestorePoint{}, err
+		}
+	}
 	if finalizeBackup {
 		input.Metadata = metadata
 		var conflictingPoint bool
@@ -78,19 +91,27 @@ func (s *PostgresStore) createRestorePoint(input RestorePointInput, finalizeBack
 			return RestorePoint{}, ErrBackupResultConflict
 		}
 		var taskStatus, taskType, publishedPointID string
-		var accepted []byte
-		if err := tx.QueryRow(`select type,status,coalesce(payload->'backupResult','null'::jsonb),coalesce(restore_point_id::text,'') from tasks where id=nullif($1,'')::uuid and tenant_id=$2 and cluster_id=$3 and protection_plan_id=$4 for update`, input.BackupTaskID, tenantID, input.SourceClusterID, input.ProtectionPlanID).Scan(&taskType, &taskStatus, &accepted, &publishedPointID); err != nil {
+		var accepted, taskPayload []byte
+		var commandID string
+		if err := tx.QueryRow(`select type,status,coalesce(payload->'backupResult','null'::jsonb),coalesce(restore_point_id::text,''),payload,coalesce(command_id::text,'') from tasks where id=nullif($1,'')::uuid and tenant_id=$2 and cluster_id=$3 and protection_plan_id=$4 for update`, input.BackupTaskID, tenantID, input.SourceClusterID, input.ProtectionPlanID).Scan(&taskType, &taskStatus, &accepted, &publishedPointID, &taskPayload, &commandID); err != nil {
 			return RestorePoint{}, err
 		}
 		if taskType != "backup" || taskStatus == "failed" || taskStatus == "canceling" || taskStatus == "canceled" || taskStatus == "cancelled" {
 			return RestorePoint{}, ErrBackupResultConflict
+		}
+		storedTask := Task{ID: input.BackupTaskID, Type: taskType, CommandID: commandID}
+		if err := json.Unmarshal(taskPayload, &storedTask.Payload); err != nil {
+			return RestorePoint{}, err
+		}
+		if err := validatePublicationConsistency(tx, storedTask, input); err != nil {
+			return RestorePoint{}, err
 		}
 		if string(accepted) != "null" {
 			var snapshot RestorePointInput
 			if err := json.Unmarshal(accepted, &snapshot); err != nil {
 				return RestorePoint{}, err
 			}
-			if snapshot.VeleroBackupName != input.VeleroBackupName || !backupMetricsEqual(snapshot.SizeMetricsV2, input.SizeMetricsV2) {
+			if snapshot.VeleroBackupName != input.VeleroBackupName || !backupMetricsEqual(snapshot.SizeMetricsV2, input.SizeMetricsV2) || !backupConsistencyEqual(snapshot.Metadata, input.Metadata) {
 				return RestorePoint{}, ErrBackupResultConflict
 			}
 			if taskStatus == "succeeded" && publishedPointID != "" {

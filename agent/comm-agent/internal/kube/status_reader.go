@@ -196,23 +196,26 @@ type RestoreResultSummary struct {
 }
 
 type VolumeProgressItem struct {
-	CacheStats       *CacheStats
-	Volume           string
-	Pod              string
-	Namespace        string
-	StartedAt        string
-	Kind             string
-	Name             string
-	Phase            string
-	BytesDone        int64
-	TotalBytes       int64
-	IncrementalBytes int64
-	IncrementalKnown bool
-	KnownTotal       bool
-	Message          string
-	ErrorCode        string
-	CreatedAt        time.Time
-	ElapsedSeconds   int64
+	SnapshotReady        bool
+	TemporaryVolumeReady bool
+	PreparationMessage   string
+	CacheStats           *CacheStats
+	Volume               string
+	Pod                  string
+	Namespace            string
+	StartedAt            string
+	Kind                 string
+	Name                 string
+	Phase                string
+	BytesDone            int64
+	TotalBytes           int64
+	IncrementalBytes     int64
+	IncrementalKnown     bool
+	KnownTotal           bool
+	Message              string
+	ErrorCode            string
+	CreatedAt            time.Time
+	ElapsedSeconds       int64
 }
 
 type VeleroBackupSummary struct {
@@ -412,6 +415,10 @@ func (a *DynamicManifestApplier) GetBackupVolumeProgress(ctx context.Context, na
 		{GVR: schema.GroupVersionResource{Group: "velero.io", Version: "v2alpha1", Resource: "datauploads"}, Kind: "DataUpload", Label: "velero.io/backup-name"},
 	})
 	if backupErr == nil && backup.GetUID() != "" {
+		if snapshotMoveData, _, _ := unstructured.NestedBool(backup.Object, "spec", "snapshotMoveData"); snapshotMoveData {
+			a.enrichSnapshotProgress(ctx, namespace, backup, &progress)
+			return progress, err
+		}
 		marker := backup.GetAnnotations()["hypercdr.io/pod-volume-discovery"]
 		parts := strings.Split(marker, ":")
 		if len(parts) == 2 && parts[0] == string(backup.GetUID()) {

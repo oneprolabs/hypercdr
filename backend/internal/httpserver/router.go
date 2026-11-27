@@ -358,6 +358,9 @@ func validReleaseToken(expected, provided string) bool {
 
 func requiresAdmin(req *http.Request) bool {
 	p := req.URL.Path
+	if strings.HasPrefix(p, "/api/v1/clusters/") && strings.HasSuffix(p, "/sync-settings") && req.Method != http.MethodGet {
+		return true
+	}
 	if strings.HasPrefix(p, "/api/v1/clusters/") && strings.Contains(p, "/cache-settings") && req.Method != http.MethodGet {
 		return true
 	}

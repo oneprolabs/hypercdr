@@ -215,6 +215,11 @@ func taskFailureMessagesFromDetails(details map[string]any) []string {
 		velero = nested
 	}
 	var messages []string
+	for _, message := range stringArrayFromAny(mapFromAny(velero["backupResults"])["errors"]) {
+		if strings.TrimSpace(message) != "" {
+			messages = append(messages, message)
+		}
+	}
 	volumeProgress := mapFromAny(velero["volumeProgress"])
 	for _, raw := range sliceFromAny(volumeProgress["items"]) {
 		item := mapFromAny(raw)
@@ -664,6 +669,9 @@ func isForceStoppedBackupTask(task store.Task) bool {
 }
 
 func (r *Router) createRestorePointFromBackup(task store.Task, veleroPayload map[string]any) (store.RestorePoint, error) {
+	if err := r.validateBackupConsistencyCompletion(task, veleroPayload); err != nil {
+		return store.RestorePoint{}, err
+	}
 	if task.ProtectionPlanID == "" {
 		return store.RestorePoint{}, errors.New("backup restore point requires protection plan id")
 	}

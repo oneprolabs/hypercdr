@@ -13,6 +13,15 @@ DEFAULT_NPM_REGISTRY="https://registry.npmmirror.com"
 DEFAULT_BUILD_ROOT="${RUNTIME_ROOT}/build/platform"
 DEFAULT_CACHE_ROOT="${RUNTIME_ROOT}/cache"
 
+resolve_velero_image_tag() {
+  if [[ -n "${HCDR_VELERO_IMAGE_TAG:-}" ]]; then
+    printf '%s\n' "$HCDR_VELERO_IMAGE_TAG"
+    return
+  fi
+  source "${ROOT_DIR}/scripts/release/dependency-fingerprint.sh"
+  default_velero_image_tag
+}
+
 die() {
   echo "error: $*" >&2
   exit 1

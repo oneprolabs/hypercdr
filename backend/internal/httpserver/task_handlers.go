@@ -309,6 +309,17 @@ func (r *Router) cancelTask(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"task": task, "warning": "Force stop is already in progress.", "reused": true})
 		return
 	}
+	if task.Status == "queued" && task.DispatchedAt.IsZero() {
+		cancelled, changed, err := r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "cancelled", MarkDone: true, OnlyQueuedSync: true, ErrorCode: "SYNC_QUEUE_CANCELLED", ErrorMessage: "Queued sync cancelled by user."})
+		if err != nil {
+			writeJSON(w, 500, map[string]any{"error": "cancel_queued_sync_failed"})
+			return
+		}
+		if changed && cancelled.Status == "cancelled" {
+			writeJSON(w, 200, map[string]any{"task": cancelled})
+			return
+		}
+	}
 	cancelCommandID := store.NewPublicID()
 	cancelTask, err := r.store.CreateTask(store.TaskInput{
 		ClusterID:        task.ClusterID,

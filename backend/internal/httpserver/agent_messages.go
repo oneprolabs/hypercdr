@@ -474,6 +474,10 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 				continue
 			}
 			if existingTask.Type == "agent-upgrade" || existingTask.Type == "velero-upgrade" {
+				completionPatch := taskCompletedPayloadPatch(completed.Payload)
+				if boolPayload(existingTask.Payload, "syncSettingsApply") {
+					completionPatch["syncRuntimeRolloutCompleted"] = true
+				}
 				progress := 70
 				reason := "waiting_for_reconnect"
 				message := "agent deployment updated; waiting for the new agent to reconnect"
@@ -486,7 +490,7 @@ func (r *Router) readAgentMessages(conn *websocket.Conn, clusterID string) {
 					TaskID:      existingTask.ID,
 					Status:      "running",
 					Progress:    progress,
-					Payload:     taskCompletedPayloadPatch(completed.Payload),
+					Payload:     completionPatch,
 					MarkStarted: true,
 				})
 				if err != nil {

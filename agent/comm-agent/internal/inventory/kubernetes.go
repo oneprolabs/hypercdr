@@ -115,6 +115,27 @@ func (c *KubernetesCollector) CollectCapabilities(namespace string) (Snapshot, e
 		})
 	}
 	snapshot.Report.Scope = "capabilities"
+	if snapshotReader, ok := c.reader.(interface {
+		ReadSnapshotVolumePrerequisites(context.Context, string) ([]kube.NamedCapability, error)
+	}); ok && namespace != "" && namespace != "*" {
+		checks, err := snapshotReader.ReadSnapshotVolumePrerequisites(ctx, namespace)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		checks = append(checks, kube.NamedCapability{Type: "CSISnapshotNamespaceInventory", Name: namespace, Fields: map[string]string{"namespace": namespace, "complete": "true", "volumeCount": strconv.Itoa(len(checks))}})
+		snapshot.Report.Capabilities = append(snapshot.Report.Capabilities, buildNamedCapabilityInventory(checks)...)
+	}
+	if workloadReader, ok := c.reader.(interface {
+		ReadConsistencyWorkloadInventory(context.Context, string) ([]kube.NamedCapability, error)
+	}); ok && namespace != "" && namespace != "*" {
+		workloads, err := workloadReader.ReadConsistencyWorkloadInventory(ctx, namespace)
+		fields := map[string]string{"namespace": namespace, "complete": "false", "reason": "Cannot read complete workload inventory; check Agent access and refresh"}
+		if err == nil {
+			fields = map[string]string{"namespace": namespace, "complete": "true", "workloadCount": strconv.Itoa(len(workloads))}
+			snapshot.Report.Capabilities = append(snapshot.Report.Capabilities, buildNamedCapabilityInventory(workloads)...)
+		}
+		snapshot.Report.Capabilities = append(snapshot.Report.Capabilities, protocol.NamedCapabilityInventory{Type: "ConsistencyNamespaceInventory", Name: namespace, Fields: fields})
+	}
 	snapshot.Report.Namespace = namespace
 	return snapshot, nil
 }

@@ -67,6 +67,9 @@ func backupCompletionMetrics(payload protocol.TaskCompletedPayload) map[string]a
 }
 
 func (r *Router) acceptBackupCompletion(task store.Task, payload protocol.TaskCompletedPayload) error {
+	if err := r.validateBackupConsistencyCompletion(task, payload.Velero); err != nil {
+		return err
+	}
 	if payload.CommandID != "" && payload.CommandID != task.CommandID {
 		return fmt.Errorf("%w: command does not match task", store.ErrBackupResultConflict)
 	}

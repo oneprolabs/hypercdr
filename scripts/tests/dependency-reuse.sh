@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-jq -e '.schemaVersion == 1 and (.runtime.postgres.targetDigest|test("^sha256:[0-9a-f]{64}$")) and (.runtime.velero.targetDigest|test("^sha256:[0-9a-f]{64}$")) and (.runtime.plugins.targets|length == 3) and .oadpLock' "$root/packaging/dependencies/lock.json" >/dev/null
+jq -e '.schemaVersion == 1 and (.runtime.postgres.targetDigest|test("^sha256:[0-9a-f]{64}$")) and .runtime.velero.buildFromSource and .runtime.velero.sourceAddressed and (.runtime.plugins.targets|length == 3) and .oadpLock' "$root/packaging/dependencies/lock.json" >/dev/null
 bash -n "$root/scripts/release/common.sh" "$root/scripts/release/publish-runtime-images.sh" "$root/scripts/release/sync-velero-plugins.sh"
 echo 'Dependency lock and reuse checks passed'
 runtime="${HCDR_RUNTIME_ROOT:-$(dirname "$root")/hypercdr-runtime}"
@@ -16,7 +16,9 @@ if [[ "${MOCK_MODE}" == locked ]]; then
   [[ "$1 $2 $3" == 'manifest inspect --verbose' ]] || exit 77
   case "$4" in
     *postgres-16) query='.runtime.postgres.targetDigest' ;;
-    *velero-v1.18.2-hcdr.7) query='.runtime.velero.targetDigest' ;;
+    *velero-v1.18.2-hcdr.8-backup-volume-policy-v1-*-isolation-cache-v1)
+      printf '{"Descriptor":{"digest":"sha256:%064d"}}\n' 1
+      exit 0 ;;
     *velero-plugin-for-aws-v1.13.0) query='.runtime.plugins.targets["velero-plugin-for-aws"]' ;;
     *velero-plugin-for-microsoft-azure-v1.13.0) query='.runtime.plugins.targets["velero-plugin-for-microsoft-azure"]' ;;
     *velero-plugin-for-gcp-v1.13.0) query='.runtime.plugins.targets["velero-plugin-for-gcp"]' ;;
@@ -58,3 +60,9 @@ bash "$root/scripts/release/sync-velero-plugins.sh" --registry registry.cn-beiji
 [[ "$(wc -l <"$MOCK_CALLS")" == 5 ]]
 ! grep -Eq '^(pull|build|push|tag) ' "$MOCK_CALLS"
 echo 'Actual runtime and plugin entry points: five target metadata queries, zero layer transfers or builds'
+export HCDR_VELERO_IMAGE_TAG=v1.18.2-hcdr.7
+if bash "$root/scripts/release/publish-runtime-images.sh" --registry registry.cn-beijing.aliyuncs.com/example/hypercdr >"$work/stale.log" 2>&1; then exit 1; fi
+grep -q 'refusing a stale or mutable tag' "$work/stale.log"
+unset HCDR_VELERO_IMAGE_TAG
+if bash "$root/scripts/release/publish-runtime-images.sh" --registry registry.cn-beijing.aliyuncs.com/example/hypercdr --force-velero-build >"$work/force.log" 2>&1; then exit 1; fi
+grep -q 'refusing to overwrite immutable' "$work/force.log"

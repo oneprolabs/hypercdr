@@ -1,6 +1,33 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {drillSteps,drillNamespaceError,drillScopeError,recoveryNamespaceMappings,recoveryNamespaceMappingError} from './drill-wizard.ts';
+import {drillSteps,drillNamespaceError,drillScopeError,recoveryNamespaceMappings,recoveryNamespaceMappingError,recoveryPackageNamespaces,recoveryApplicationResources} from './drill-wizard.ts';
 import { readFileSync } from 'node:fs';
+
+test('internal Velero records remain intact but are not selectable application resources', () => {
+  const resources = [
+    { apiVersion: 'velero.io/v2alpha1', kind: 'DataUpload', namespace: 'hypercdr-agent' },
+    { apiVersion: 'velero.io/v1', kind: 'PodVolumeBackup', namespace: 'hypercdr-agent' },
+    { group: 'velero.io', kind: 'Backup', namespace: 'hypercdr-agent' },
+    { apiVersion: 'example.io/v1', kind: 'DataUpload', namespace: 'app' },
+    { apiVersion: 'v1', kind: 'PersistentVolumeClaim', namespace: 'app' },
+    { apiVersion: 'v1', kind: 'ConfigMap', namespace: 'hypercdr-agent' },
+  ];
+  const original = structuredClone(resources);
+  assert.deepEqual(recoveryApplicationResources(resources), resources.slice(3));
+  assert.deepEqual(resources, original);
+  const wizard = readFileSync(new URL('../recovery-wizard-modal.tsx', import.meta.url), 'utf8');
+  assert.match(wizard, /recoveryApplicationResources\(contents\)\.reduce/);
+});
+
+test('CSI transfer metadata does not expand the application namespace scope', () => {
+  assert.deepEqual(recoveryPackageNamespaces([
+    { apiVersion: 'v1', kind: 'PersistentVolumeClaim', namespace: 'demo-mysql-csi' },
+    { apiVersion: 'apps/v1', kind: 'Deployment', namespace: 'demo-nextcloud' },
+    { apiVersion: 'velero.io/v2alpha1', kind: 'DataUpload', namespace: 'hypercdr-agent' },
+    { apiVersion: 'velero.io/v1', kind: 'PodVolumeBackup', namespace: 'hypercdr-agent' },
+    { apiVersion: 'v1', kind: 'Namespace' },
+  ]), ['demo-mysql-csi', 'demo-nextcloud']);
+  assert.deepEqual(recoveryPackageNamespaces([{ apiVersion: 'v1', kind: 'ConfigMap', namespace: 'hypercdr-agent' }]), ['hypercdr-agent']);
+});
 
 test('namespace mappings follow the selected sources in original and clone modes', () => {
   const config = { namespaceMode: 'original', targetNamespace: 'first', restorePackageNamespaces: ['first', 'second'] };

@@ -83,12 +83,48 @@ func (e KubernetesRestoreExecutor) SubmitRestore(ctx context.Context, manifest v
 	if manifest.Metadata.Labels["hypercdr.io/restore-mode"] == "dataOnly" {
 		return errors.New("data-only restore executor is not enabled")
 	}
+	var strictCreator interface {
+		FindConsistencyRestore(context.Context, kube.Manifest) (bool, error)
+		CreateConsistencyRestore(context.Context, kube.Manifest) error
+	}
+	if manifest.ConsistencyEvidence != nil {
+		var ok bool
+		strictCreator, ok = e.applier.(interface {
+			FindConsistencyRestore(context.Context, kube.Manifest) (bool, error)
+			CreateConsistencyRestore(context.Context, kube.Manifest) error
+		})
+		if !ok {
+			return errors.New("consistency backup verification requires restore identity protection")
+		}
+		object, err := kube.ManifestFromStruct(manifest)
+		if err != nil {
+			return err
+		}
+		found, err := strictCreator.FindConsistencyRestore(ctx, object)
+		if err != nil {
+			return err
+		}
+		if found {
+			return nil
+		}
+	}
 	waiter, ok := e.applier.(kube.VeleroBackupWaiter)
 	if !ok {
 		return errors.New("kubernetes velero backup readiness check is not supported by this executor")
 	}
 	if err := waiter.WaitForVeleroBackup(ctx, manifest.Metadata.Namespace, manifest.Spec.BackupName, 3*time.Minute); err != nil {
 		return fmt.Errorf("velero backup is not available for restore: %w", err)
+	}
+	if manifest.ConsistencyEvidence != nil {
+		verifier, ok := e.applier.(interface {
+			VerifyConsistencyRestoreBackup(context.Context, string, protocol.ConsistencyRestoreEvidence) error
+		})
+		if !ok {
+			return errors.New("destination consistency backup verification is unavailable")
+		}
+		if err := verifier.VerifyConsistencyRestoreBackup(ctx, manifest.Metadata.Namespace, *manifest.ConsistencyEvidence); err != nil {
+			return fmt.Errorf("destination consistency backup verification failed: %w", err)
+		}
 	}
 	if manifest.Metadata.Labels["hypercdr.io/conflict-policy"] == "replace" {
 		replacements, err := restoreNamespaceReplacements(manifest, e.agentNamespace)
@@ -132,6 +168,9 @@ func (e KubernetesRestoreExecutor) SubmitRestore(ctx context.Context, manifest v
 	unstructured, err := kube.ManifestFromStruct(manifest)
 	if err != nil {
 		return err
+	}
+	if strictCreator != nil {
+		return strictCreator.CreateConsistencyRestore(ctx, unstructured)
 	}
 	_, err = e.applier.ApplyManifest(ctx, unstructured)
 	return err

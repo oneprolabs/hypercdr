@@ -1,0 +1,22 @@
+.hbdr-config-drawer .hbdr-edit-backup-method { margin-top: 0; }
+.hbdr-config-drawer.hbdr-config-compact .hbdr-config-body { padding: 14px 18px !important; }
+.hbdr-config-drawer.hbdr-config-compact .hbdr-config-main { gap: 12px !important; }
+.hbdr-config-drawer.hbdr-config-compact .hbdr-config-section { padding: 12px 14px !important; border-radius: 8px !important; box-shadow: none !important; }
+.hbdr-config-drawer.hbdr-config-compact .hbdr-config-section-head { gap: 8px !important; margin: 0 0 10px !important; padding: 0 0 9px !important; }
+.hbdr-config-drawer.hbdr-config-compact .hbdr-config-section-head > svg { padding: 4px; }
+.hbdr-config-drawer.hbdr-config-compact .hbdr-config-settings-list { gap: 8px !important; }
+.hbdr-config-drawer.hbdr-config-compact .hbdr-config-setting-row { min-height: 46px !important; padding: 6px 10px !important; border-radius: 6px !important; }
+.hbdr-config-drawer.hbdr-config-compact .hbdr-config-select-action :is(select, button) { height: 32px !important; border-radius: 5px !important; }
+.hbdr-config-drawer.hbdr-config-compact .hbdr-config-inline-panel { padding: 8px !important; }
+.hbdr-config-drawer.hbdr-config-compact .hbdr-combined-scope-notice { padding: 10px !important; }
+.hbdr-config-drawer.hbdr-config-compact .hbdr-config-advanced-toggle { min-height: 36px !important; padding: 0 14px !important; }
+.hbdr-config-drawer.hbdr-config-compact .hbdr-config-footer { min-height: 56px !important; padding: 9px 18px !important; }
+.hbdr-config-drawer.hbdr-config-compact .hbdr-config-footer button { height: 34px !important; min-width: 84px !important; }
+.hbdr-config-drawer.hbdr-config-compact .hbdr-edit-backup-method .hbdr-protect-wizard-options label { min-height: 60px; padding: 8px 10px; }
+.hbdr-edit-backup-method .hbdr-protect-wizard-options label { gap: 8px; outline-width: 1px; }
+.hbdr-edit-backup-method .hbdr-protect-wizard-options strong { display: block; font-size: 12px; font-weight: 600; }
+.hbdr-edit-backup-method .hbdr-protect-wizard-options small { display: block; margin-top: 4px; color: var(--hc-text-3); font-size: 11.5px; line-height: 1.45; }
+.hbdr-edit-backup-method .hbdr-edit-backup-method-note { margin: 10px 0 0; color: var(--hc-text-3); font-size: 11.5px; font-weight: 400; line-height: 1.45; }
+@media (max-width: 600px) {
+  .hbdr-edit-backup-method .hbdr-protect-wizard-options { grid-template-columns: 1fr; }
+}

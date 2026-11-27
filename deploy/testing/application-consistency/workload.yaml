@@ -1,0 +1,97 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hcdr-consistency-test
+  labels:
+    hypercdr.io/isolated-test: application-consistency
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: hcdr-consistency-test
+  labels:
+    hypercdr.io/isolated-test: application-consistency
+provisioner: driver.longhorn.io
+parameters:
+  numberOfReplicas: "1"
+  fsType: ext4
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ledger
+  namespace: hcdr-consistency-test
+  labels:
+    hypercdr.io/consistency-fixture: writer
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: hcdr-consistency-test
+  resources:
+    requests:
+      storage: 256Mi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: commits
+  namespace: hcdr-consistency-test
+  labels:
+    hypercdr.io/consistency-fixture: writer
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: hcdr-consistency-test
+  resources:
+    requests:
+      storage: 256Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: writer
+  namespace: hcdr-consistency-test
+  labels:
+    hypercdr.io/consistency-fixture: writer
+  annotations:
+    hypercdr.io/allow-offline-backup: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hcdr-consistency-writer
+  template:
+    metadata:
+      labels:
+        app: hcdr-consistency-writer
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: writer
+          image: m.daocloud.io/docker.io/library/python:3.12.8-alpine3.21@sha256:ba13ef990f6e5d13014e9e8d04c02a8fdb0fe53d6dccf6e19147f316e6cc3a84
+          command: [python, -u, /test/writer.py]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 24Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: script
+              mountPath: /test
+              readOnly: true
+            - name: ledger
+              mountPath: /ledger
+            - name: commits
+              mountPath: /commits
+      volumes:
+        - name: script
+          configMap:
+            name: writer-script
+        - name: ledger
+          persistentVolumeClaim:
+            claimName: ledger
+        - name: commits
+          persistentVolumeClaim:
+            claimName: commits

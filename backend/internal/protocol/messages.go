@@ -69,10 +69,11 @@ type ClusterSummary struct {
 }
 
 type AgentSummary struct {
-	Capabilities []string `json:"capabilities,omitempty"`
-	Version      string   `json:"version"`
-	Namespace    string   `json:"namespace"`
-	PodName      string   `json:"podName"`
+	ApplicationConsistency *ApplicationConsistencyCapability `json:"applicationConsistency,omitempty"`
+	Capabilities           []string                          `json:"capabilities,omitempty"`
+	Version                string                            `json:"version"`
+	Namespace              string                            `json:"namespace"`
+	PodName                string                            `json:"podName"`
 }
 
 type VeleroSummary struct {
@@ -523,6 +524,8 @@ type UnregisterCommand struct {
 }
 
 type BackupCommand struct {
+	ConsistencyGroup        *ConsistencyGroup `json:"consistencyGroup,omitempty"`
+	DataProtectionMode      string            `json:"dataProtectionMode,omitempty"`
 	PlanID                  string            `json:"planId,omitempty"`
 	Trigger                 string            `json:"trigger,omitempty"`
 	SourceClusterID         string            `json:"sourceClusterId,omitempty"`
@@ -567,6 +570,8 @@ type BackupCancelCommand struct {
 }
 
 type ScheduleSyncCommand struct {
+	ConsistencyGroup        *ConsistencyGroup `json:"consistencyGroup,omitempty"`
+	DataProtectionMode      string            `json:"dataProtectionMode,omitempty"`
 	PlanID                  string            `json:"planId"`
 	ScheduleName            string            `json:"scheduleName"`
 	Cron                    string            `json:"cron"`
@@ -610,6 +615,7 @@ type ProtectionCleanupCommand struct {
 }
 
 type RestoreCommand struct {
+	ConsistencyEvidence        *ConsistencyRestoreEvidence          `json:"consistencyEvidence,omitempty"`
 	NamespaceReadiness         map[string]RestoreNamespaceReadiness `json:"namespaceReadiness,omitempty"`
 	RestorePointID             string                               `json:"restorePointId"`
 	VeleroBackupName           string                               `json:"veleroBackupName"`

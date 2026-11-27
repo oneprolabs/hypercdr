@@ -63,6 +63,14 @@ func (r *Router) runSchedulerTickLocked(now time.Time) {
 		}
 	}
 	r.reconcilePlatformSchedules(now)
+	r.reconcileClusterSyncSettings()
+	if clusters, err := r.store.ListClusters(); err == nil {
+		for _, cluster := range clusters {
+			if conn, online := r.hub.get(cluster.ID); online {
+				r.redispatchPendingSyncTasks(cluster.ID, conn)
+			}
+		}
+	}
 	r.schedulePlanCapacity(now)
 	due, err := r.store.ListDueProtectionPlanSchedules(now)
 	if err != nil {

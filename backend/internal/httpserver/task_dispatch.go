@@ -7,6 +7,7 @@ import (
 	"github.com/gorilla/websocket"
 	"hypercdr-platform/platform/backend/internal/protocol"
 	"hypercdr-platform/platform/backend/internal/store"
+	"sort"
 	"strings"
 	"time"
 )
@@ -59,12 +60,58 @@ func (r *Router) findTask(taskID string) (store.Task, bool, error) {
 	return store.Task{}, false, nil
 }
 
+var errSyncWaiting = errors.New("waiting for cluster sync capacity or configuration")
+
+func (r *Router) redispatchPendingSyncTasks(clusterID string, conn *websocket.Conn) {
+	tasks, err := r.store.ListTasks(clusterID)
+	if err != nil {
+		return
+	}
+	sort.Slice(tasks, func(first, second int) bool {
+		if tasks[first].CreatedAt.Equal(tasks[second].CreatedAt) {
+			return tasks[first].ID < tasks[second].ID
+		}
+		return tasks[first].CreatedAt.Before(tasks[second].CreatedAt)
+	})
+	for _, task := range tasks {
+		if task.Status != "queued" || !task.CompletedAt.IsZero() {
+			continue
+		}
+		if task.Type == "velero-upgrade" && boolPayload(task.Payload, "syncSettingsApply") {
+			if err := r.dispatchStoredTask(conn, task); err == nil {
+				_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "dispatched"})
+			}
+			continue
+		}
+		if task.Type != "backup" && task.Type != "restore" && task.Type != "drill" && task.Type != "takeover" && task.Type != "storage-sync" && task.Type != "schedule-sync" {
+			continue
+		}
+		admitted, err := r.store.AdmitSyncTask(task.ID, task.ClusterID, task.TenantID)
+		if err != nil || !admitted {
+			continue
+		}
+		if !r.resumeQueuedStoragePreflight(task) {
+			if task.Type == "backup" {
+				r.dispatchBackupTask(task)
+			} else if err := r.dispatchStoredTask(conn, task); err == nil {
+				_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: task.ID, Status: "dispatched"})
+			}
+		}
+	}
+}
+
 func (r *Router) redispatchPendingTasks(clusterID string, conn *websocket.Conn) {
 	tasks, err := r.store.ListTasks(clusterID)
 	if err != nil {
 		r.logger.Error("failed to list tasks for redispatch", "cluster_id", clusterID, "error", err)
 		return
 	}
+	sort.Slice(tasks, func(first, second int) bool {
+		if tasks[first].CreatedAt.Equal(tasks[second].CreatedAt) {
+			return tasks[first].ID < tasks[second].ID
+		}
+		return tasks[first].CreatedAt.Before(tasks[second].CreatedAt)
+	})
 	for _, task := range tasks {
 		if r.backgroundContext().Err() != nil {
 			return
@@ -76,10 +123,19 @@ func (r *Router) redispatchPendingTasks(clusterID string, conn *websocket.Conn) 
 		if task.Status != "queued" && task.Status != "dispatched" {
 			continue
 		}
+		if task.Type == "backup" && task.Status == "queued" {
+			admitted, err := r.store.AdmitSyncTask(task.ID, task.ClusterID, task.TenantID)
+			if err != nil || !admitted {
+				continue
+			}
+		}
 		if task.Status == "queued" && r.resumeQueuedStoragePreflight(task) {
 			continue
 		}
 		if err := r.dispatchStoredTask(conn, task); err != nil {
+			if errors.Is(err, errSyncWaiting) {
+				continue
+			}
 			r.logger.Error("failed to redispatch task", "cluster_id", clusterID, "task_id", task.ID, "error", err)
 			_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{
 				TaskID:       task.ID,
@@ -150,12 +206,39 @@ func (r *Router) resumeQueuedStoragePreflight(task store.Task) bool {
 }
 
 func (r *Router) dispatchStoredTask(conn *websocket.Conn, task store.Task) error {
+	switch task.Type {
+	case "backup", "restore", "drill", "takeover", "failback", "storage-sync", "schedule-sync":
+		admitted, err := r.store.AdmitSyncTask(task.ID, task.ClusterID, task.TenantID)
+		if err != nil {
+			return err
+		}
+		if !admitted {
+			return errSyncWaiting
+		}
+	}
 	if task.Type == "unregister" && boolPayload(task.Payload, "cleanupObjectStorage") && !boolPayload(task.Payload, "unregisterPreflightCompleted") {
 		return errors.New("unregister object-storage preflight is not complete")
 	}
 	dispatch, err := r.buildStoredTaskDispatch(task)
 	if err != nil {
 		return err
+	}
+	if dispatch.Payload.Restore != nil && dispatch.Payload.Restore.ConsistencyEvidence != nil {
+		r.hub.mu.RLock()
+		defer r.hub.mu.RUnlock()
+		if r.hub.sessions[task.ClusterID] != conn || !r.hub.consistencyRestore[task.ClusterID] {
+			return errors.New("consistency restore capability does not belong to the dispatch connection")
+		}
+		return r.writeAgentMessage(conn, dispatch)
+	}
+	if dispatch.Payload.Backup != nil && dispatch.Payload.Backup.ConsistencyGroup != nil {
+		r.hub.mu.RLock()
+		defer r.hub.mu.RUnlock()
+		profile := dispatch.Payload.Backup.ConsistencyGroup.ApplicationProfile
+		if r.hub.sessions[task.ClusterID] != conn || !r.hub.consistency[task.ClusterID][profile] {
+			return errors.New("application consistency capability does not belong to the dispatch connection")
+		}
+		return r.writeAgentMessage(conn, dispatch)
 	}
 	return r.writeAgentMessage(conn, dispatch)
 }
@@ -201,6 +284,34 @@ func supportedControlPlaneHandoverAction(action string) bool {
 }
 
 func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[protocol.TaskDispatchPayload], error) {
+	var consistencyGroup *protocol.ConsistencyGroup
+	snapshotSupported := false
+	if task.Type == "backup" || task.Type == "schedule-sync" {
+		if task.Payload["dataProtectionMode"] == "snapshot-crash-consistent" {
+			snapshotSupported = r.snapshotBackupDispatchSupported(task)
+		}
+		if task.Payload["dataProtectionMode"] == "application-consistent" {
+			var err error
+			consistencyGroup, err = r.applicationConsistencyDispatchGroup(task)
+			if err != nil {
+				return protocol.Message[protocol.TaskDispatchPayload]{}, err
+			}
+		}
+		if task.ProtectionPlanID != "" && r.store != nil {
+			plan, found, err := r.store.GetProtectionPlan(task.ProtectionPlanID)
+			if err != nil || !found || plan.TenantID != task.TenantID || plan.SourceClusterID != task.ClusterID {
+				return protocol.Message[protocol.TaskDispatchPayload]{}, errors.New("protection plan unavailable in task tenant")
+			}
+			if consistencyGroup == nil && !snapshotSupported && (plan.DataProtection.Mode != "live-filesystem" || plan.DataProtection.Group != nil) {
+				return protocol.Message[protocol.TaskDispatchPayload]{}, errors.New("persisted strict data protection requires coordinated dispatch; refusing legacy fallback")
+			}
+		}
+		mode, hasMode := task.Payload["dataProtectionMode"]
+		group, hasGroup := task.Payload["consistencyGroup"]
+		if consistencyGroup == nil && !snapshotSupported && ((hasMode && mode != "" && mode != "live-filesystem") || (hasGroup && group != nil)) {
+			return protocol.Message[protocol.TaskDispatchPayload]{}, errors.New("strict data protection requires capability-gated coordinated dispatch; refusing legacy fallback")
+		}
+	}
 	commandID := task.CommandID
 	if commandID == "" {
 		commandID = store.NewPublicID()
@@ -265,6 +376,8 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 			sourceNamespaces = []string{sourceNamespace}
 		}
 		payload.Backup = &protocol.BackupCommand{
+			DataProtectionMode:      stringPayload(task.Payload, "dataProtectionMode"),
+			ConsistencyGroup:        consistencyGroup,
 			PlanID:                  task.ProtectionPlanID,
 			Trigger:                 firstNonEmptyString(stringPayload(task.Payload, "trigger"), "manual"),
 			SourceClusterID:         task.ClusterID,
@@ -421,12 +534,17 @@ func (r *Router) buildStoredTaskDispatch(task store.Task) (protocol.Message[prot
 		}
 		if task.RestorePointID != "" {
 			if point, ok, err := r.store.GetRestorePoint(task.RestorePointID); err == nil && ok {
+				if err := r.attachConsistencyRestoreEvidence(task, point, payload.Restore); err != nil {
+					return protocol.Message[protocol.TaskDispatchPayload]{}, err
+				}
 				if index, ready := restorePointContentIndex(point); ready && index.Status == "ready" && !index.Truncated {
 					payload.Restore.ReadinessExpectationsKnown = true
 					payload.Restore.RuntimeWorkloadsExpected, payload.Restore.ExpectedPVCs = readinessExpectationsFromCatalog(index.Resources, sourceNamespaces)
 					payload.Restore.NamespaceReadiness = namespaceReadinessFromCatalog(index.Resources, sourceNamespaces)
 					payload.Restore.ContentCatalogLoaded = true
 				}
+			} else {
+				return protocol.Message[protocol.TaskDispatchPayload]{}, errors.New("restore point is unavailable for verified dispatch")
 			}
 		}
 	case "unregister":

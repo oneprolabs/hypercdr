@@ -1,4 +1,5 @@
 import React from 'react';
+import { SYNC_ERROR_CATALOG } from './sync-error-catalog';
 import { AlertTriangle, Boxes, Calendar, ClipboardList, Clock, FileCog, Gauge, HardDrive, KeyRound, MoreVertical, Network, RefreshCw, Settings2, User, X } from 'lucide-react';
 import { formatLocalDateTime, parseUTCInstant } from '../../lib/date-time';
 import type { AppItem, ResourceCategoryKey, ResourceKindSummary, ResourceRef } from '../clusters/types';
@@ -10,6 +11,7 @@ import { syncVolumeDisplay } from './sync-volume-model';
 import { TransferProgress } from './transfer-progress';
 import { backupRestorePointChanges } from './recovery-detail-model';
 import { TimelineItem } from './timeline-item';
+import { followTimeline } from './timeline-scroll';
 import { workloadReadinessEvents, workloadReadinessSnapshot, type WorkloadTimelineEvent } from './workload-readiness';
 import { groupTaskEventsByStage, keyTaskEvents, latestVisibleTaskEvent, reachedTaskStages } from './task-stage-model';
 export { groupTaskEventsByStage, keyTaskEvents, latestVisibleTaskEvent, reachedTaskStages } from './task-stage-model';
@@ -288,6 +290,7 @@ export type ErrorMessageDefinition = {
 };
 
 export const ERROR_MESSAGE_CATALOG: ErrorMessageDefinition[] = [
+  ...SYNC_ERROR_CATALOG,
   {
     code: '100000',
     aliases: ['TASK_FAILED', 'UNKNOWN_ERROR'],
@@ -549,6 +552,7 @@ export function normalizeErrorCode(code?: string): string {
 
 export function resolveErrorCode(rawCode: string | undefined, message: string): string {
   const normalized = normalizeErrorCode(rawCode);
+  if (SYNC_ERROR_CATALOG.some(item => item.code === normalized)) return normalized;
   const matched = ERROR_MESSAGE_CATALOG.find(item => item.match?.(message));
   if (matched) return matched.code;
   if (rawCode && normalized !== '100000') return normalized;
@@ -707,6 +711,10 @@ function taskFailureSolution(code: string, details: string[], fallback: string):
 }
 
 export function TaskProcessTimeline({ task, events }: { task: ApiTask; events: ApiTaskEvent[] }) {
+  const timelineRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (timelineRef.current) return followTimeline(timelineRef.current);
+  }, [task.id]);
   const terminal = !isActiveTaskStatus(task.status);
   const visibleEvents = keyTaskEvents(events.filter(event => !event.taskId || event.taskId === task.id));
   const stageGroups = groupTaskEventsByStage(task, visibleEvents);
@@ -723,7 +731,7 @@ export function TaskProcessTimeline({ task, events }: { task: ApiTask; events: A
   }
   const workloadEvents = workloadReadinessEvents(task, events);
   return (
-    <div className="hbdr-task-detail-section">
+    <div className="hbdr-task-detail-section" ref={timelineRef}>
       <div className="hbdr-task-stage-groups" aria-label="Task stages" aria-live="polite">
         {reachedStages.map(stage => {
           const stageEvents = stage.events.filter(event => !(stage.id === 'backing_up_data' && ['progress', 'backup_progress'].includes(event.reason) && event.level !== 'error' && event.level !== 'warning' && event.level !== 'warn' && event.payload?.velero?.volumeProgress));
@@ -806,6 +814,9 @@ export type TaskStatusDisplay = {
 
 /** Stable two-line status model: stage title on line one, event/data on line two. */
 export function taskStatusDisplay(task: ApiTask, events: ApiTaskEvent[]): TaskStatusDisplay {
+	if (task.type === 'backup' && task.status === 'queued' && !(Date.parse(task.dispatchedAt || '') > 0) && !(Date.parse(task.startedAt || '') > 0)) {
+		return { stage: 'Queued', detail: 'Waiting for cluster capacity, configuration, or agent availability.', dataTransfer: false };
+	}
   if (task.status === 'canceling' && task.payload?.abortRequested) {
     return { stage: 'Aborting', detail: task.errorMessage || 'Waiting for the agent to stop task execution.', dataTransfer: false };
   }
@@ -831,7 +842,7 @@ export function taskStatusDisplay(task: ApiTask, events: ApiTaskEvent[]): TaskSt
       stage: summary.showTransfer ? 'Backing Up Data' : 'Discovering volume data',
       detail: !summary.showTransfer ? `Volumes discovered: ${summary.volumes.length}`
         : summary.percent !== undefined ? `${formatBytes(summary.bytesDone)} / ${formatBytes(summary.totalBytes)}${summary.speedBytesPerSecond > 0 ? ` · ${formatBytesPerSecond(summary.speedBytesPerSecond)}` : ''} · Estimated`
-        : `Processed ${formatBytes(summary.bytesDone)} · Updating volume statistics`,
+        : `Processed ${formatBytes(summary.bytesDone)} · Completed ${summary.completed}/${summary.volumes.length} · ${summary.activity}`,
       progress: summary.showTransfer ? summary.percent : undefined,
       dataTransfer: summary.showTransfer,
     };

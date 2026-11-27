@@ -295,6 +295,10 @@ func (r *Router) syncStorageRepository(w http.ResponseWriter, req *http.Request)
 			},
 		},
 	}
+	if admitted, err := r.store.AdmitSyncTask(task.ID, task.ClusterID, task.TenantID); err != nil || !admitted {
+		writeJSON(w, http.StatusAccepted, storageSyncQueuedResponse{Task: task, Warning: "Storage task is queued until cluster configuration is ready."})
+		return
+	}
 	if err := r.writeAgentMessage(conn, dispatch); err != nil {
 		r.logger.Error("failed to dispatch storage sync task", "task_id", task.ID, "error", err)
 		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{
@@ -532,6 +536,9 @@ func (r *Router) dispatchStorageSyncTaskForPlanActivationAttempt(clusterID strin
 				Config:       config,
 			},
 		},
+	}
+	if admitted, err := r.store.AdmitSyncTask(task.ID, task.ClusterID, task.TenantID); err != nil || !admitted {
+		return task, "Storage task is queued until cluster configuration is ready.", err
 	}
 	if err := r.writeAgentMessage(conn, dispatch); err != nil {
 		_, _, _ = r.store.UpdateTaskStatus(store.TaskStatusInput{

@@ -245,6 +245,16 @@ func (p *pvcBackupItemAction) createVolumeSnapshot(
 		vsLabels[k] = v
 	}
 	vsLabels[velerov1api.BackupNameLabel] = label.GetValidName(backup.Name)
+	var snapshotAnnotations map[string]string
+	if backup.Labels["hypercdr.io/managed-by"] == "hypercdr" && backup.Labels["hypercdr.io/task-id"] != "" && backup.UID != "" {
+		vsLabels["hypercdr.io/managed-by"] = "hypercdr"
+		snapshotAnnotations = map[string]string{
+			"hypercdr.io/snapshot-backup-uid":       string(backup.UID),
+			"hypercdr.io/snapshot-task-id":          backup.Labels["hypercdr.io/task-id"],
+			"hypercdr.io/snapshot-backup-name":      backup.Name,
+			"hypercdr.io/snapshot-backup-namespace": backup.Namespace,
+		}
+	}
 
 	// Craft the vs object to be created
 	vs = &snapshotv1api.VolumeSnapshot{
@@ -252,6 +262,7 @@ func (p *pvcBackupItemAction) createVolumeSnapshot(
 			GenerateName: "velero-" + pvc.Name + "-",
 			Namespace:    pvc.Namespace,
 			Labels:       vsLabels,
+			Annotations:  snapshotAnnotations,
 		},
 		Spec: snapshotv1api.VolumeSnapshotSpec{
 			Source: snapshotv1api.VolumeSnapshotSource{
@@ -469,6 +480,11 @@ func (p *pvcBackupItemAction) Progress(
 
 	dataUpload, err := getDataUpload(context.Background(), p.crClient, backup.Namespace, operationID)
 	if err != nil {
+		if apierrors.IsTimeout(err) || apierrors.IsServerTimeout(err) || apierrors.IsTooManyRequests(err) || apierrors.IsServiceUnavailable(err) {
+			p.log.WithError(err).Warn("DataUpload observation temporarily unavailable; retrying on next progress check")
+			progress.Description = "Waiting for Kubernetes API to resume DataUpload observation"
+			return progress, nil
+		}
 		p.log.Errorf(
 			"fail to get DataUpload for backup %s/%s by operation ID %s: %s",
 			backup.Namespace, backup.Name, operationID, err.Error(),

@@ -237,6 +237,7 @@ func TestUpgradeVeleroReconcilesProviderPlugins(t *testing.T) {
 	labels := map[string]string{"app": "velero"}
 	nodeLabels := map[string]string{"app": "node-agent"}
 	client := fake.NewSimpleClientset(
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "node-agent-config", Namespace: "hypercdr-agent"}, Data: map[string]string{"extra": "keep", "node-agent-config.json": `{"backupPVC":{"longhorn":{"storageClass":"backup-only"}},"loadAffinity":[],"loadConcurrency":{"globalConfig":1}}`}},
 		&storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: "fast"}, Provisioner: "csi.example.test"},
 		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "hypercdr-agent"}, Rules: []rbacv1.PolicyRule{{APIGroups: []string{"apps"}, Resources: []string{"daemonsets"}, Verbs: []string{"get", "patch", "update"}}, {APIGroups: []string{"apiextensions.k8s.io"}, Resources: []string{"customresourcedefinitions"}, Verbs: []string{"get", "list", "watch", "create", "patch", "update", "delete"}}}},
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "velero", Namespace: "hypercdr-agent"}, Spec: appsv1.DeploymentSpec{Selector: &metav1.LabelSelector{MatchLabels: labels}, Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "velero", Image: "old"}}, InitContainers: []corev1.Container{{Name: "velero-plugin-for-aws", Image: "old-plugin"}}}}}, Status: appsv1.DeploymentStatus{Replicas: 1, UpdatedReplicas: 1, AvailableReplicas: 1}},
@@ -263,6 +264,9 @@ func TestUpgradeVeleroReconcilesProviderPlugins(t *testing.T) {
 	if deployment.Spec.Template.Spec.Containers[0].ImagePullPolicy != corev1.PullAlways {
 		t.Fatalf("velero image pull policy = %q, want Always", deployment.Spec.Template.Spec.Containers[0].ImagePullPolicy)
 	}
+	if deployment.Spec.Template.Annotations["hypercdr.io/storage-on-demand-image"] != deployment.Spec.Template.Spec.Containers[0].Image || deployment.Spec.Template.Annotations["hypercdr.io/storage-on-demand-supported"] != "" {
+		t.Fatal("upgrade must bind capability metadata to the new image without inheriting unsupported capabilities")
+	}
 	for _, container := range deployment.Spec.Template.Spec.InitContainers {
 		if container.ImagePullPolicy != corev1.PullAlways {
 			t.Fatalf("plugin %s image pull policy = %q, want Always", container.Name, container.ImagePullPolicy)
@@ -270,6 +274,9 @@ func TestUpgradeVeleroReconcilesProviderPlugins(t *testing.T) {
 	}
 	if got := deployment.Spec.Template.Spec.Containers[0].Args; !containsString(got, "--concurrent-backups=2") {
 		t.Fatalf("velero args missing concurrent backup setting: %v", got)
+	}
+	if got := deployment.Spec.Template.Spec.Containers[0].Args; !containsString(got, "--features=EnableCSI") {
+		t.Fatalf("velero args missing CSI support: %v", got)
 	}
 	daemonSet, err := client.AppsV1().DaemonSets("hypercdr-agent").Get(context.Background(), "node-agent", metav1.GetOptions{})
 	if err != nil {
@@ -290,6 +297,9 @@ func TestUpgradeVeleroReconcilesProviderPlugins(t *testing.T) {
 	}
 	if !strings.Contains(configMap.Data["node-agent-config.json"], `"storageClass":"fast"`) {
 		t.Fatalf("unexpected node-agent config: %v", configMap.Data)
+	}
+	if configMap.Data["extra"] != "keep" || !strings.Contains(configMap.Data["node-agent-config.json"], `"backupPVC":{"longhorn":{"storageClass":"backup-only"}}`) || !strings.Contains(configMap.Data["node-agent-config.json"], `"globalConfig":2`) {
+		t.Fatalf("upgrade discarded snapshot temporary-volume configuration or failed to update managed settings: %v", configMap.Data)
 	}
 	repositoryConfig, err := client.CoreV1().ConfigMaps("hypercdr-agent").Get(context.Background(), "backup-repository-config", metav1.GetOptions{})
 	if err != nil || !strings.Contains(repositoryConfig.Data["kopia"], `"cacheLimitMB":5120`) {

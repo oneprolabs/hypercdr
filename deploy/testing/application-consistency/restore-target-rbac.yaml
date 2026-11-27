@@ -1,0 +1,33 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: hcdr-isolated-restore
+  namespace: hcdr-consistency-restored-runner
+  labels:
+    hypercdr.io/isolated-test: application-consistency
+rules:
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims, configmaps, pods, events]
+    verbs: [get, list, watch, create, update, patch]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+  - apiGroups: [apps]
+    resources: [deployments, replicasets]
+    verbs: [get, list, watch, create, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: hcdr-isolated-restore
+  namespace: hcdr-consistency-restored-runner
+  labels:
+    hypercdr.io/isolated-test: application-consistency
+subjects:
+  - kind: ServiceAccount
+    name: velero
+    namespace: hcdr-consistency-velero
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: hcdr-isolated-restore

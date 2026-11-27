@@ -47,6 +47,9 @@ func size(path string) (int64, error) {
 	var total int64
 	err := filepath.WalkDir(path, func(_ string, entry fs.DirEntry, err error) error {
 		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
 			return err
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
@@ -55,6 +58,9 @@ func size(path string) (int64, error) {
 		if entry.Type().IsRegular() {
 			info, err := entry.Info()
 			if err != nil {
+				if os.IsNotExist(err) {
+					return nil
+				}
 				return err
 			}
 			total += info.Size()
@@ -100,6 +106,14 @@ func acquire(root, identity string, budget int64, checkSpace func(string) error)
 		return nil, err
 	}
 	defer guard.Close()
+	allocationLock, err := os.OpenFile(filepath.Join(root, ".allocation"), os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0600)
+	if err != nil {
+		return nil, err
+	}
+	defer allocationLock.Close()
+	if err := syscall.Flock(int(allocationLock.Fd()), syscall.LOCK_EX); err != nil {
+		return nil, err
+	}
 	key := fmt.Sprintf("%x", sha256.Sum256([]byte(identity)))
 	leaseLock, err := lock(filepath.Join(root, key+".lock"), true)
 	if err != nil {
@@ -135,6 +149,9 @@ func acquire(root, identity string, budget int64, checkSpace func(string) error)
 		}
 		info, err := entry.Info()
 		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
 			leaseLock.Close()
 			return nil, err
 		}

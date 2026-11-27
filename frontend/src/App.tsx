@@ -1,4 +1,5 @@
 import { HyperCDRMark } from './components/hypercdr-mark';
+import { clearBillingReturn } from './features/saas/billing-return';
 import { BusinessAccessProvider, userHasBusinessPermission } from './auth/business-access';
 import { sessionMutationScope } from './app/session-mutation';
 import { replaceApplicationTags } from './api/applications';
@@ -1593,6 +1594,7 @@ export default function App({ modules = [], loginSupplement, profileComponent: P
   }, [activeModule, authSession?.user.systemAdmin, hasEnterpriseAuditModule, productCapabilities.advancedAudit?.enabled, productCapabilities.advancedIdentity?.enabled, visibleExtensionModules, view, modules]);
 
   const openView = (nextView: View, options: { preserveSelectedCluster?: boolean; diagnosticTaskId?: string } = {}) => {
+    if (nextView !== 'extension:license') clearBillingReturn(window.history, window.location.href);
     setClusterPickerOpen(false);
     setTaskOperationFocus([]);
     prefetchView(nextView);

@@ -192,6 +192,10 @@ case "$VELERO_IMAGE" in
   *-isolation-cache-v1|*-isolation-cache-v1@sha256:*) CACHE_ISOLATION_SUPPORTED="v1" ;;
 esac
 VELERO_AWS_PLUGIN_IMAGE="{{VELERO_AWS_PLUGIN_IMAGE}}"
+BACKUP_PVC_REFRESH_SUPPORTED=""
+case "$VELERO_IMAGE" in
+  *backup-volume-policy-v1*) BACKUP_PVC_REFRESH_SUPPORTED="v1" ;;
+esac
 VELERO_AZURE_PLUGIN_IMAGE="{{VELERO_AZURE_PLUGIN_IMAGE}}"
 VELERO_GCP_PLUGIN_IMAGE="{{VELERO_GCP_PLUGIN_IMAGE}}"
 EXECUTOR_MODE="kubernetes"
@@ -1325,6 +1329,17 @@ fi
 if [[ "$INSTALL_VELERO" == "true" ]]; then
 log_section "Velero workloads"
 log_info "Creating or updating Velero server and node-agent"
+INSTALL_CONCURRENT_BACKUPS=4
+existing_velero_args="$(kubectl -n "$NAMESPACE" get deployment velero --ignore-not-found -o jsonpath='{range .spec.template.spec.containers[?(@.name=="velero")].args[*]}{.}{"\n"}{end}')" || fail "Unable to read existing Velero concurrency"
+for argument in $existing_velero_args; do
+  case "$argument" in
+    --concurrent-backups=*) INSTALL_CONCURRENT_BACKUPS="${argument#*=}" ;;
+  esac
+done
+existing_node_config="$(kubectl -n "$NAMESPACE" get configmap node-agent-config --ignore-not-found -o name)" || fail "Unable to read existing node-agent configuration"
+if [[ -z "$existing_node_config" ]]; then
+  kubectl -n "$NAMESPACE" create configmap node-agent-config --from-literal="node-agent-config.json={\"loadConcurrency\":{\"globalConfig\":4,\"prepareQueueLength\":4},${CACHE_PVC_CONFIG}}" --dry-run=client -o yaml | kubectl_apply_retry
+fi
 cat <<YAML | kubectl_apply_retry
 apiVersion: v1
 kind: ServiceAccount
@@ -1353,21 +1368,6 @@ subjects:
   - kind: ServiceAccount
     name: velero
     namespace: ${NAMESPACE}
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: node-agent-config
-  namespace: ${NAMESPACE}
-data:
-  node-agent-config.json: |
-    {
-      "loadConcurrency": {
-        "globalConfig": 2,
-        "prepareQueueLength": 4
-      },
-      ${CACHE_PVC_CONFIG}
-    }
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -1430,7 +1430,8 @@ ${IMAGE_PULL_SECRETS_BLOCK}
           args:
             - server
             - --default-volumes-to-fs-backup
-            - --concurrent-backups=2
+            - --features=EnableCSI
+            - --concurrent-backups=${INSTALL_CONCURRENT_BACKUPS}
             - --plugin-dir=/plugins
           env:
             - name: VELERO_SCRATCH_DIR
@@ -1487,6 +1488,8 @@ spec:
       annotations:
         hypercdr.io/cache-persistence-supported: "${CACHE_PERSISTENCE_SUPPORTED}"
         hypercdr.io/cache-isolation-supported: "${CACHE_ISOLATION_SUPPORTED}"
+        hypercdr.io/backup-pvc-refresh-supported: "${BACKUP_PVC_REFRESH_SUPPORTED}"
+        hypercdr.io/backup-pvc-refresh-image: "${VELERO_IMAGE}"
         hypercdr.io/cache-persistence-image: "${VELERO_IMAGE}"
     spec:
       serviceAccountName: velero
@@ -1628,6 +1631,9 @@ rules:
   - apiGroups: ["storage.k8s.io"]
     resources: ["storageclasses", "csidrivers"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["create"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingressclasses"]
     verbs: ["get", "list", "watch"]
@@ -1640,6 +1646,9 @@ rules:
   - apiGroups: ["snapshot.storage.k8s.io"]
     resources: ["volumesnapshotclasses"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots"]
+    verbs: ["get", "list", "watch", "update", "delete"]
   - apiGroups: ["cert-manager.io"]
     resources: ["clusterissuers"]
     verbs: ["get", "list", "watch"]
@@ -1777,6 +1786,30 @@ if [[ "$AGENT_DEPLOYMENT_EXISTS" == "true" && "$RESET_AGENT_CREDENTIAL" == "true
   log_ok "Existing comm-agent deployment restarted with the new bootstrap token"
 fi
 log_ok "comm-agent deployment submitted in namespace ${NAMESPACE}"
+verify_velero_runtime_contract() {
+  local actual_image node_image capability_image capability server_args node_cache_image node_cache node_isolation node_refresh_image node_refresh
+  actual_image="$(kubectl -n "$NAMESPACE" get deployment velero -o 'jsonpath={.spec.template.spec.containers[?(@.name=="velero")].image}')" || return 1
+  node_image="$(kubectl -n "$NAMESPACE" get daemonset node-agent -o 'jsonpath={.spec.template.spec.containers[?(@.name=="node-agent")].image}')" || return 1
+  capability_image="$(kubectl -n "$NAMESPACE" get deployment velero -o 'jsonpath={.spec.template.metadata.annotations.hypercdr\.io/storage-on-demand-image}')" || return 1
+  capability="$(kubectl -n "$NAMESPACE" get deployment velero -o 'jsonpath={.spec.template.metadata.annotations.hypercdr\.io/storage-on-demand-supported}')" || return 1
+  server_args="$(kubectl -n "$NAMESPACE" get deployment velero -o 'jsonpath={.spec.template.spec.containers[?(@.name=="velero")].args}')" || return 1
+  node_cache_image="$(kubectl -n "$NAMESPACE" get daemonset node-agent -o 'jsonpath={.spec.template.metadata.annotations.hypercdr\.io/cache-persistence-image}')" || return 1
+  node_cache="$(kubectl -n "$NAMESPACE" get daemonset node-agent -o 'jsonpath={.spec.template.metadata.annotations.hypercdr\.io/cache-persistence-supported}')" || return 1
+  node_isolation="$(kubectl -n "$NAMESPACE" get daemonset node-agent -o 'jsonpath={.spec.template.metadata.annotations.hypercdr\.io/cache-isolation-supported}')" || return 1
+  node_refresh_image="$(kubectl -n "$NAMESPACE" get daemonset node-agent -o 'jsonpath={.spec.template.metadata.annotations.hypercdr\.io/backup-pvc-refresh-image}')" || return 1
+  node_refresh="$(kubectl -n "$NAMESPACE" get daemonset node-agent -o 'jsonpath={.spec.template.metadata.annotations.hypercdr\.io/backup-pvc-refresh-supported}')" || return 1
+  if [[ "$actual_image" != "$VELERO_IMAGE" || "$node_image" != "$VELERO_IMAGE" || "$capability_image" != "$actual_image" || "$capability" != "$STORAGE_ON_DEMAND_SUPPORTED" || "$server_args" != *"--features=EnableCSI"* ]]; then
+    log_error "Velero runtime configuration is inconsistent: reconcile the server image, storage capability annotations and EnableCSI before running Sync or Drill. Re-run this installer; do not replace only the image."
+    return 1
+  fi
+  if [[ "$node_cache_image" != "$node_image" || "$node_cache" != "$CACHE_PERSISTENCE_SUPPORTED" || "$node_isolation" != "$CACHE_ISOLATION_SUPPORTED" || "$node_refresh_image" != "$node_image" || "$node_refresh" != "$BACKUP_PVC_REFRESH_SUPPORTED" ]]; then
+    log_error "Node-agent runtime capabilities do not match the installed image. Re-run this installer before Sync or Drill."
+    return 1
+  fi
+}
+if [[ "$INSTALL_VELERO" == "true" ]]; then
+  verify_velero_runtime_contract || exit 1
+fi
 if [[ "$WAIT_READY" == "true" ]]; then
   log_section "Readiness"
   log_info "Waiting for HyperCDR workloads to become ready in namespace ${NAMESPACE}"

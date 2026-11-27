@@ -38,7 +38,7 @@ func (c *Client) runAbortableTask(task protocol.TaskDispatchPayload, execute fun
 	if c.taskRuns == nil {
 		c.taskRuns = map[string]*abortableTaskRun{}
 	}
-	if c.taskRuns[task.TaskID] != nil || c.ledger.abortRequested(task.TaskID) {
+	if c.taskRunsClosed || c.taskRuns[task.TaskID] != nil || c.ledger.abortRequested(task.TaskID) {
 		c.taskRunMu.Unlock()
 		return
 	}
@@ -67,6 +67,20 @@ func (c *Client) runAbortableTask(task protocol.TaskDispatchPayload, execute fun
 	execute()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		_ = c.sendTaskFailed(task, "TASK_DEADLINE_EXCEEDED", "The task exceeded its execution deadline. Check cluster and storage health before retrying.")
+	}
+}
+
+func (c *Client) stopTaskRuns() {
+	c.taskRunMu.Lock()
+	c.taskRunsClosed = true
+	runs := make([]*abortableTaskRun, 0, len(c.taskRuns))
+	for _, run := range c.taskRuns {
+		run.cancel()
+		runs = append(runs, run)
+	}
+	c.taskRunMu.Unlock()
+	for _, run := range runs {
+		<-run.done
 	}
 }
 

@@ -1182,7 +1182,8 @@ func (s *PostgresStore) ApplyInventory(input InventoryInput) (Cluster, bool, err
 	defer tx.Rollback()
 	var clusterTenantID string
 	var existingNamespaceAPIsJSON []byte
-	if err := tx.QueryRow(`select tenant_id, coalesce(metadata->'namespaceAPIs', '[]'::jsonb) from clusters where id=$1`, input.ClusterID).Scan(&clusterTenantID, &existingNamespaceAPIsJSON); errors.Is(err, sql.ErrNoRows) {
+	var existingCapabilitiesJSON []byte
+	if err := tx.QueryRow(`select tenant_id, coalesce(metadata->'namespaceAPIs', '[]'::jsonb), coalesce(metadata->'capabilities', '[]'::jsonb) from clusters where id=$1 for update`, input.ClusterID).Scan(&clusterTenantID, &existingNamespaceAPIsJSON, &existingCapabilitiesJSON); errors.Is(err, sql.ErrNoRows) {
 		return Cluster{}, false, nil
 	} else if err != nil {
 		return Cluster{}, false, err
@@ -1193,6 +1194,11 @@ func (s *PostgresStore) ApplyInventory(input InventoryInput) (Cluster, bool, err
 			return Cluster{}, false, fmt.Errorf("decode cached namespace APIs: %w", err)
 		}
 		input.NamespaceAPIs = mergeNamespaceAPIs(existing, input.NamespaceAPIs, input.CapabilityNamespace)
+		var capabilities []ClusterCapability
+		if err := json.Unmarshal(existingCapabilitiesJSON, &capabilities); err != nil {
+			return Cluster{}, false, fmt.Errorf("decode cached capabilities: %w", err)
+		}
+		input.Capabilities = mergeSnapshotNamespaceCapabilities(capabilities, input.Capabilities, input.CapabilityNamespace, input.CollectedAt)
 	}
 
 	result, err := tx.Exec(`
@@ -1897,21 +1903,24 @@ func (s *PostgresStore) GetProtectionPlan(id string) (ProtectionPlan, bool, erro
 		       coalesce(pp.target_cluster_id::text, ''), pp.excluded_resources, pp.pre_hooks, pp.post_hooks,
 		       pp.plan_storage_size, coalesce(pps.next_fire_at, '0001-01-01'::timestamptz), coalesce(pps.enabled, false),
 		       coalesce(pp.latest_sync_task_id::text, ''), coalesce(pp.latest_recovery_task_id::text, ''),
-		       pp.status, pp.created_at, pp.updated_at
+		       pp.status, pp.created_at, pp.updated_at, pp.data_protection
 		from protection_plans pp
 		left join protection_plan_schedules pps on pps.protection_plan_id = pp.id
 		where pp.id = $1
 	`, id)
 	var item ProtectionPlan
-	var includedResources, resourceSelection, labelSelector, excludedResources, preHooks, postHooks, planStorageSize []byte
+	var includedResources, resourceSelection, labelSelector, excludedResources, preHooks, postHooks, planStorageSize, dataProtection []byte
 	if err := row.Scan(&item.ID, &item.TenantID, &item.SourceClusterID, &item.AppID, &item.ScopeType,
 		&includedResources, &resourceSelection, &labelSelector, &item.IncludeClusterScoped, &item.StorageRepoID, &item.PolicyID,
 		&item.TargetClusterID, &excludedResources, &preHooks, &postHooks, &planStorageSize,
 		&item.NextFireAt, &item.ScheduleEnabled, &item.LatestSyncTaskID, &item.LatestRecoveryTaskID, &item.Status,
-		&item.CreatedAt, &item.UpdatedAt); err != nil {
+		&item.CreatedAt, &item.UpdatedAt, &dataProtection); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ProtectionPlan{}, false, nil
 		}
+		return ProtectionPlan{}, false, err
+	}
+	if err := decodePlanDataProtection(dataProtection, &item); err != nil {
 		return ProtectionPlan{}, false, err
 	}
 	_ = json.Unmarshal(includedResources, &item.IncludedResources)

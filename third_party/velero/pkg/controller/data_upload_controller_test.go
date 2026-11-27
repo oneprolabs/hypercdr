@@ -920,6 +920,9 @@ func TestFindDataUploadForPod(t *testing.T) {
 		// Call the findDataUploadForPod function
 		requests := r.findDataUploadForPod(t.Context(), test.pod)
 		test.checkFunc(test.du, requests)
+		stored := &velerov2alpha1api.DataUpload{}
+		require.NoError(t, r.client.Get(ctx, kbclient.ObjectKeyFromObject(test.du), stored))
+		assert.Equal(t, test.du.Status.Phase, stored.Status.Phase)
 		r.client.Delete(ctx, test.du, &kbclient.DeleteOptions{})
 		if test.pod != nil {
 			r.client.Delete(ctx, test.pod, &kbclient.DeleteOptions{})

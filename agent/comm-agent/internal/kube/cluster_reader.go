@@ -15,6 +15,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -237,8 +238,18 @@ func (r *KubernetesClusterReader) readNamedCapabilities(ctx context.Context) ([]
 	} else {
 		complete = false
 	}
-	items = append(items, r.readDynamicNamedCapabilities(ctx, schema.GroupVersionResource{Group: "snapshot.storage.k8s.io", Version: "v1", Resource: "volumesnapshotclasses"}, "VolumeSnapshotClass", "driver")...)
-	items = append(items, r.readDynamicNamedCapabilities(ctx, schema.GroupVersionResource{Group: "cert-manager.io", Version: "v1", Resource: "clusterissuers"}, "ClusterIssuer", "")...)
+	for _, resource := range []struct {
+		gvr         schema.GroupVersionResource
+		kind        string
+		driverField string
+	}{
+		{schema.GroupVersionResource{Group: "snapshot.storage.k8s.io", Version: "v1", Resource: "volumesnapshotclasses"}, "VolumeSnapshotClass", "driver"},
+		{schema.GroupVersionResource{Group: "cert-manager.io", Version: "v1", Resource: "clusterissuers"}, "ClusterIssuer", ""},
+	} {
+		capabilities, scanned := r.readDynamicNamedCapabilities(ctx, resource.gvr, resource.kind, resource.driverField)
+		items = append(items, capabilities...)
+		complete = complete && scanned
+	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].Type != items[j].Type {
 			return items[i].Type < items[j].Type
@@ -248,23 +259,26 @@ func (r *KubernetesClusterReader) readNamedCapabilities(ctx context.Context) ([]
 	return items, complete
 }
 
-func (r *KubernetesClusterReader) readDynamicNamedCapabilities(ctx context.Context, gvr schema.GroupVersionResource, capabilityType, driverField string) []NamedCapability {
+func (r *KubernetesClusterReader) readDynamicNamedCapabilities(ctx context.Context, gvr schema.GroupVersionResource, capabilityType, driverField string) ([]NamedCapability, bool) {
 	if r.dynamic == nil {
-		return nil
+		return nil, false
 	}
 	list, err := r.dynamic.Resource(gvr).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil
+		return nil, apierrors.IsNotFound(err)
 	}
 	items := make([]NamedCapability, 0, len(list.Items))
 	for _, item := range list.Items {
+		if item.GetDeletionTimestamp() != nil {
+			continue
+		}
 		driver := ""
 		if driverField != "" {
 			driver, _, _ = unstructured.NestedString(item.Object, driverField)
 		}
 		items = append(items, NamedCapability{Type: capabilityType, Name: item.GetName(), Driver: driver})
 	}
-	return items
+	return items, true
 }
 
 func (r *KubernetesClusterReader) readAPIResources() []APIResource {

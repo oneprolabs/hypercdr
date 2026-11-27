@@ -1,4 +1,5 @@
 import type { ResourceSummary } from '../clusters/types';
+import type { DataProtectionSettings } from './data-protection-model';
 
 export type PolicyComposition = 'manual' | 'combined' | 'schedule' | 'retention';
 
@@ -83,6 +84,7 @@ export type ApiPolicy = {
 };
 
 export type ApiProtectionPlan = {
+  dataProtection?: DataProtectionSettings;
   preHooks?: Record<string, unknown>[];
   postHooks?: Record<string, unknown>[];
   id: string;

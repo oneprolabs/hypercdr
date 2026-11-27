@@ -1,20 +1,24 @@
 package velero
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"sort"
 
+	"hypercdr-platform/agent/comm-agent/internal/consistency"
 	"hypercdr-platform/agent/comm-agent/pkg/protocol"
 )
 
 type RestoreManifest struct {
-	APIVersion           string              `json:"apiVersion"`
-	Kind                 string              `json:"kind"`
-	Metadata             ManifestMetadata    `json:"metadata"`
-	Spec                 RestoreManifestSpec `json:"spec"`
-	StorageClassMappings map[string]string   `json:"-"`
-	ImageMappings        map[string]string   `json:"-"`
+	APIVersion           string                               `json:"apiVersion"`
+	Kind                 string                               `json:"kind"`
+	Metadata             ManifestMetadata                     `json:"metadata"`
+	Spec                 RestoreManifestSpec                  `json:"spec"`
+	StorageClassMappings map[string]string                    `json:"-"`
+	ImageMappings        map[string]string                    `json:"-"`
+	ConsistencyRules     string                               `json:"-"`
+	ConsistencyEvidence  *protocol.ConsistencyRestoreEvidence `json:"-"`
 }
 
 type RestoreManifestSpec struct {
@@ -35,6 +39,7 @@ type RestoreBuildInput struct {
 	TaskType       string
 	AgentNamespace string
 	Command        protocol.RestoreCommand
+	Consistency    *consistency.Record
 }
 
 type TypedLocalObjectReference struct {
@@ -51,6 +56,16 @@ type ResourceModifierConfigMap struct {
 }
 
 func BuildRestoreManifest(input RestoreBuildInput) (RestoreManifest, error) {
+	if err := protocol.ValidateConsistencyRestoreEvidence(input.Command); err != nil {
+		return RestoreManifest{}, err
+	}
+	if input.Command.ConsistencyEvidence != nil {
+		if input.Consistency != nil {
+			return RestoreManifest{}, fmt.Errorf("restore consistency evidence has multiple sources")
+		}
+		record := input.Command.ConsistencyEvidence.Record
+		input.Consistency = &record
+	}
 	if input.Command.VeleroBackupName == "" {
 		return RestoreManifest{}, fmt.Errorf("restore velero backup name is required")
 	}
@@ -66,12 +81,16 @@ func BuildRestoreManifest(input RestoreBuildInput) (RestoreManifest, error) {
 	if agentNamespace == "" {
 		agentNamespace = "hypercdr-agent"
 	}
+	restoreTaskID := input.TaskID
+	if input.Command.ConsistencyEvidence != nil {
+		restoreTaskID = fmt.Sprintf("%x", sha256.Sum256([]byte(input.TaskID)))
+	}
 
 	manifest := RestoreManifest{
 		APIVersion: "velero.io/v1",
 		Kind:       "Restore",
 		Metadata: ManifestMetadata{
-			Name:      restoreName(sourceNamespace, input.TaskID),
+			Name:      restoreName(sourceNamespace, restoreTaskID),
 			Namespace: agentNamespace,
 			Labels: map[string]string{
 				"hypercdr.io/task-id":          input.TaskID,
@@ -105,6 +124,14 @@ func BuildRestoreManifest(input RestoreBuildInput) (RestoreManifest, error) {
 	} else if input.Command.TargetNamespace != "" && input.Command.TargetNamespace != sourceNamespace {
 		manifest.Spec.NamespaceMapping = map[string]string{sourceNamespace: input.Command.TargetNamespace}
 	}
+	if input.Consistency != nil {
+		rules, err := BuildConsistencyRestoreRules(*input.Consistency, sourceNamespaces)
+		if err != nil {
+			return RestoreManifest{}, err
+		}
+		manifest.ConsistencyRules = rules
+		manifest.ConsistencyEvidence = input.Command.ConsistencyEvidence
+	}
 	return manifest, nil
 }
 
@@ -130,7 +157,7 @@ func BuildRestoreResourceModifierConfigMap(manifest RestoreManifest) ResourceMod
 			Labels:    manifest.Metadata.Labels,
 		},
 		Data: map[string]string{
-			"resource-modifiers.yaml": restoreResourceModifierYAML(namespaces, preserveNodePorts, resetPodNetwork, manifest.StorageClassMappings, manifest.ImageMappings),
+			"resource-modifiers.yaml": restoreResourceModifierYAML(namespaces, preserveNodePorts, resetPodNetwork, manifest.StorageClassMappings, manifest.ImageMappings) + manifest.ConsistencyRules,
 		},
 	}
 }

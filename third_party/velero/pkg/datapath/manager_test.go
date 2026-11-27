@@ -84,3 +84,24 @@ func TestCreateMicroServiceBRWatcher(t *testing.T) {
 	ret = m.GetAsyncBR("job-1")
 	assert.Nil(t, ret)
 }
+
+func TestReleaseCompletedSlotKeepsWatcherUntilCleanup(t *testing.T) {
+	manager := NewManager(1)
+	watcher, err := manager.CreateMicroServiceBRWatcher(t.Context(), nil, nil, nil, "test", "completed", "velero", "pod", "container", "upload", Callbacks{}, false, nil)
+	require.NoError(t, err)
+	manager.ReleaseAsyncBRSlot("missing")
+	_, err = manager.CreateFileSystemBR("blocked", "test", t.Context(), nil, "velero", Callbacks{}, nil)
+	require.ErrorIs(t, err, ConcurrentLimitExceed)
+	manager.ReleaseAsyncBRSlot("completed")
+	manager.ReleaseAsyncBRSlot("completed")
+	require.Same(t, watcher, manager.GetAsyncBR("completed"))
+	_, err = manager.CreateFileSystemBR("next", "test", t.Context(), nil, "velero", Callbacks{}, nil)
+	require.NoError(t, err)
+	_, err = manager.CreateFileSystemBR("excess", "test", t.Context(), nil, "velero", Callbacks{}, nil)
+	require.ErrorIs(t, err, ConcurrentLimitExceed)
+	manager.RemoveAsyncBR("completed")
+	require.Nil(t, manager.GetAsyncBR("completed"))
+	require.Empty(t, manager.released)
+	_, err = manager.CreateFileSystemBR("still-blocked", "test", t.Context(), nil, "velero", Callbacks{}, nil)
+	require.ErrorIs(t, err, ConcurrentLimitExceed)
+}

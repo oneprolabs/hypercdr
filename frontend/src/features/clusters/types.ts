@@ -144,6 +144,9 @@ export interface Cluster {
   };
   apiResources?: ClusterAPIResource[];
   namespaceApis?: ClusterNamespaceAPI[];
+  capabilities?: import('../recovery/data-protection-model').SnapshotCapability[];
+  capabilitiesCollectedAt?: string;
+  applicationConsistencyProfiles?: string[];
   namespaces: number;
   applications: number;
   agentVersion: string;

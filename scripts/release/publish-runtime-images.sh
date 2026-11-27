@@ -8,7 +8,7 @@ source "${SCRIPT_DIR}/common.sh"
 
 REGISTRY="${HCDR_IMAGE_REGISTRY:-}"
 POSTGRES_SOURCE="${HCDR_POSTGRES_SOURCE_IMAGE:-postgres:16}"
-VELERO_TAG="${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.7}"
+VELERO_TAG="$(resolve_velero_image_tag)"
 FORCE_VELERO_BUILD="false"
 
 while [[ $# -gt 0 ]]; do
@@ -43,16 +43,19 @@ else
 fi
 
 VELERO_TARGET="$(image_ref "${REGISTRY}" "velero" "${VELERO_TAG}")"
-VELERO_DIGEST="$(jq -er '.runtime.velero.targetDigest' "${ROOT_DIR}/packaging/dependencies/lock.json")"
-if [[ "${FORCE_VELERO_BUILD}" != "true" ]]; then
-  if dependency_target_matches_digest "${VELERO_TARGET}" "${VELERO_DIGEST}"; then
-    log "Velero image already published: ${VELERO_TARGET}"
-    exit 0
-  else
-    status=$?
-    [[ "$status" == 1 ]] || die "Velero verification failed; refusing automatic rebuild"
-  fi
+source "${SCRIPT_DIR}/dependency-fingerprint.sh"
+EXPECTED_VELERO_TAG="$(default_velero_image_tag)"
+[[ "$VELERO_TAG" == "$EXPECTED_VELERO_TAG" ]] || die "Velero release image must match current source: ${EXPECTED_VELERO_TAG}; refusing a stale or mutable tag"
+if VELERO_DIGEST="$(docker_manifest_digest "$VELERO_TARGET")"; then
+  [[ "$VELERO_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || die "invalid Velero image digest"
+  [[ "$FORCE_VELERO_BUILD" != true ]] || die "refusing to overwrite immutable Velero image ${VELERO_TARGET}"
+  log "Reusing source-addressed Velero image: ${VELERO_TARGET}@${VELERO_DIGEST}"
+  exit 0
+else
+  status=$?
+  [[ "$status" == 1 ]] || die "Velero verification failed; refusing automatic rebuild"
 fi
 log "Building pinned HyperCDR Velero image from third_party/velero"
 "${SCRIPT_DIR}/build-velero.sh" \
   --registry "${REGISTRY}" --tag "${VELERO_TAG}" --push
+docker_manifest_digest "$VELERO_TARGET" >/dev/null || die "published Velero image could not be verified"

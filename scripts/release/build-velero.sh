@@ -8,7 +8,7 @@ source "${SCRIPT_DIR}/common.sh"
 REGISTRY="${HCDR_IMAGE_REGISTRY:-}"
 REGISTRY_CONFIG="${HCDR_REGISTRY_CONFIG:-${ROOT_DIR}/config/registries.conf}"
 REGISTRY_PROFILE="${HCDR_REGISTRY_PROFILE:-}"
-IMAGE_TAG="${HCDR_VELERO_IMAGE_TAG:-v1.18.2-hcdr.7}"
+IMAGE_TAG="${HCDR_VELERO_IMAGE_TAG:-}"
 PUSH="false"
 
 while [[ $# -gt 0 ]]; do
@@ -23,6 +23,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ -z "${IMAGE_TAG}" ]]; then IMAGE_TAG="$(resolve_velero_image_tag)"; fi
 if [[ -z "${REGISTRY}" ]]; then
   source "${ROOT_DIR}/scripts/lib/registry-config.sh"
   load_registry_profile "${REGISTRY_CONFIG}" "${REGISTRY_PROFILE}"

@@ -1,6 +1,9 @@
 import type { ClusterNode, ClusterStorageClass } from '../clusters/types';
 
 export type ApiCluster = {
+  capabilities?: import('./data-protection-model').SnapshotCapability[];
+  capabilitiesCollectedAt?: string;
+  applicationConsistencyProfiles?: string[];
   id: string;
   clusterType?: string;
   cloudProvider?: string;

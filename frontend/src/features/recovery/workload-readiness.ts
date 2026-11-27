@@ -74,6 +74,11 @@ export function workloadReadinessEvents(task: ApiTask, events: ApiTaskEvent[]): 
       states.set(key, object.State);
       const missing = object.State === 'Missing';
       const ready = object.State === 'Bound';
+      if (ready) {
+        for (const row of rows.values()) {
+          if (row.id.startsWith(`${key}-`) && row.status === 'waiting') row.status = 'completed';
+        }
+      }
       const id = `${key}-${at}`;
       rows.set(id, { id, at: object.Since || at, summary: `${object.Namespace ? `${object.Namespace} / ` : ''}PVC ${object.Name}: ${missing ? 'Missing after restore' : ready ? 'Bound' : object.State || 'Pending'}.`, status: missing ? 'warning' : ready ? 'completed' : 'waiting', detail: object.Message || (missing ? 'An expected persistent volume claim was not found in its restored namespace.' : undefined) });
     }
@@ -88,8 +93,14 @@ export function workloadReadinessEvents(task: ApiTask, events: ApiTaskEvent[]): 
       const displayName = object.DisplayName || matchingWorkload?.Name || object.Name;
       const subject = `${object.Namespace ? `${object.Namespace} / ` : ''}${displayName}${object.Container && object.Container !== displayName ? ` / ${object.Container}` : ''}`;
       const ready = object.State === 'Ready';
-      const action = /imagepull|errimage|backoff/i.test(object.Reason || '') ? 'Image pull failed' : ready ? 'Ready' : object.State === 'Scheduling' ? 'Waiting for scheduling' : object.State === 'Initializing' ? 'Initializing' : object.State === 'Waiting for readiness' ? 'Started; waiting for readiness checks' : 'Starting';
-      const warning = /failed|error|backoff|unschedulable|unhealthy/i.test(object.Reason || '') || (previous?.startsWith('Ready/') && !ready);
+      const waitingForPVC = !ready && /pod has unbound immediate PersistentVolumeClaims/i.test(object.Message || '') && /FailedScheduling|Unschedulable/i.test(object.Reason || '');
+      const action = waitingForPVC ? 'Waiting for storage volumes to become ready' : /imagepull|errimage|backoff/i.test(object.Reason || '') ? 'Image pull failed' : ready ? 'Ready' : object.State === 'Scheduling' ? 'Waiting for scheduling' : object.State === 'Initializing' ? 'Initializing' : object.State === 'Waiting for readiness' ? 'Started; waiting for readiness checks' : 'Starting';
+      const warning = !waitingForPVC && (/failed|error|backoff|unschedulable|unhealthy/i.test(object.Reason || '') || (previous?.startsWith('Ready/') && !ready));
+      if (ready) {
+        for (const row of rows.values()) {
+          if (row.id.startsWith(`object-${key}-`) && row.status === 'waiting') row.status = 'completed';
+        }
+      }
       const id = `object-${key}-${at}`;
       rows.set(id, { id, at: object.Since || at, summary: `${subject}: ${action}.`, status: ready ? 'completed' : warning ? 'warning' : 'waiting', detail: `${object.Name}${object.Node ? ` · Node ${object.Node}` : ''}\n${object.Reason || ''}${object.Message ? `: ${object.Message}` : ''}`, image: /imagepull|errimage|backoff/i.test(object.Reason || '') ? object.Images?.[object.Container] : undefined });
     }
@@ -100,6 +111,9 @@ export function workloadReadinessEvents(task: ApiTask, events: ApiTaskEvent[]): 
     }
   }
   if (latestPayload?.readinessStage === 'succeeded' || latestPayload?.readiness?.Ready) {
+    for (const row of rows.values()) {
+      if (row.status === 'waiting') row.status = 'completed';
+    }
     const at = String(latestPayload.readinessObservedAt || task.completedAt || '');
     const elapsed = Math.max(0, Math.floor((Date.parse(at) - Date.parse(latestPayload.readinessStartedAt || '')) / 1000));
     rows.set('completed', { id: 'completed', at, summary: `All workloads are ready.${Number.isFinite(elapsed) ? ` Completed in ${elapsed}s.` : ''}`, status: 'completed' });

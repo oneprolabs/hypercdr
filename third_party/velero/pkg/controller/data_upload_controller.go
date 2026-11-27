@@ -78,6 +78,7 @@ type DataUploadReconciler struct {
 	vgdpCounter           *exposer.VgdpCounter
 	loadAffinity          []*kube.LoadAffinity
 	backupPVCConfig       map[string]velerotypes.BackupPVC
+	backupPVCConfigMap    string
 	podResources          corev1api.ResourceRequirements
 	preparingTimeout      time.Duration
 	metrics               *metrics.ServerMetrics
@@ -297,6 +298,25 @@ func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 		return ctrl.Result{}, nil
 	} else if du.Status.Phase == velerov2alpha1api.DataUploadPhaseAccepted {
+		pod := &corev1api.Pod{}
+		if err := r.client.Get(ctx, types.NamespacedName{Namespace: du.Namespace, Name: du.Name}, pod); err == nil {
+			if pod.Spec.NodeName == r.nodeName && pod.Labels[velerov1api.DataUploadLabel] == du.Name && metav1.IsControlledBy(pod, du) {
+				if pod.Status.Phase == corev1api.PodRunning {
+					original := du.DeepCopy()
+					r.prepareDataUpload(du)
+					if err := r.client.Patch(ctx, du, client.MergeFromWithOptions(original, client.MergeFromWithOptimisticLock{})); err != nil {
+						return ctrl.Result{}, err
+					}
+					return ctrl.Result{Requeue: true}, nil
+				}
+				if unrecoverable, reason := kube.IsPodUnrecoverable(pod, log); unrecoverable {
+					r.tryCancelDataUpload(ctx, du, fmt.Sprintf("exposing pod %s/%s is in abnormal status: %s", pod.Namespace, pod.Name, reason))
+					return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+				}
+			}
+		} else if !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, err
+		}
 		if peekErr := ep.PeekExposed(ctx, getOwnerObject(du)); peekErr != nil {
 			log.Errorf("Cancel du %s/%s because of expose error %s", du.Namespace, du.Name, peekErr)
 
@@ -312,7 +332,7 @@ func (r *DataUploadReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			}
 		}
 
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	} else if du.Status.Phase == velerov2alpha1api.DataUploadPhasePrepared {
 		log.Infof("Data upload is prepared and should be processed by %s (%s)", du.Status.Node, r.nodeName)
 
@@ -472,6 +492,7 @@ func (r *DataUploadReconciler) startCancelableDataPath(asyncBR datapath.AsyncBR,
 
 func (r *DataUploadReconciler) OnDataUploadCompleted(ctx context.Context, namespace string, duName string, result datapath.Result) {
 	defer r.dataPathMgr.RemoveAsyncBR(duName)
+	r.dataPathMgr.ReleaseAsyncBRSlot(duName)
 
 	log := r.logger.WithField("dataupload", duName)
 
@@ -693,7 +714,12 @@ func (r *DataUploadReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 func (r *DataUploadReconciler) findDataUploadForPod(ctx context.Context, podObj client.Object) []reconcile.Request {
 	pod := podObj.(*corev1api.Pod)
-	du, err := findDataUploadByPod(r.client, *pod)
+	name := pod.Labels[velerov1api.DataUploadLabel]
+	if name == "" {
+		return nil
+	}
+	du := &velerov2alpha1api.DataUpload{}
+	err := r.client.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: name}, du)
 	log := r.logger.WithFields(logrus.Fields{
 		"Backup pod": pod.Name,
 	})
@@ -713,50 +739,7 @@ func (r *DataUploadReconciler) findDataUploadForPod(ctx context.Context, podObj 
 		return []reconcile.Request{}
 	}
 
-	if pod.Status.Phase == corev1api.PodRunning {
-		log.Info("Preparing dataupload")
-		if err = UpdateDataUploadWithRetry(context.Background(), r.client, types.NamespacedName{Namespace: du.Namespace, Name: du.Name}, log,
-			func(du *velerov2alpha1api.DataUpload) bool {
-				if isDataUploadInFinalState(du) {
-					log.Warnf("dataupload %s is terminated, abort setting it to prepared", du.Name)
-					return false
-				}
-
-				r.prepareDataUpload(du)
-				return true
-			}); err != nil {
-			log.WithError(err).Warn("failed to update dataupload, prepare will halt for this dataupload")
-			return []reconcile.Request{}
-		}
-	} else if unrecoverable, reason := kube.IsPodUnrecoverable(pod, log); unrecoverable { // let the abnormal backup pod failed early
-		err := UpdateDataUploadWithRetry(context.Background(), r.client, types.NamespacedName{Namespace: du.Namespace, Name: du.Name}, r.logger.WithField("dataupload", du.Name),
-			func(dataUpload *velerov2alpha1api.DataUpload) bool {
-				if dataUpload.Spec.Cancel {
-					return false
-				}
-
-				dataUpload.Spec.Cancel = true
-				dataUpload.Status.Message = fmt.Sprintf("Cancel dataupload because the exposing pod %s/%s is in abnormal status for reason %s", pod.Namespace, pod.Name, reason)
-
-				return true
-			})
-
-		if err != nil {
-			log.WithError(err).Warn("failed to cancel dataupload, and it will wait for prepare timeout")
-			return []reconcile.Request{}
-		}
-		log.Infof("Exposed pod is in abnormal status(reason %s) and dataupload is marked as cancel", reason)
-	} else {
-		return []reconcile.Request{}
-	}
-
-	request := reconcile.Request{
-		NamespacedName: types.NamespacedName{
-			Namespace: du.Namespace,
-			Name:      du.Name,
-		},
-	}
-	return []reconcile.Request{request}
+	return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: du.Namespace, Name: du.Name}}}
 }
 
 func (r *DataUploadReconciler) prepareDataUpload(du *velerov2alpha1api.DataUpload) {
@@ -920,8 +903,12 @@ func (r *DataUploadReconciler) setupExposeParam(du *velerov2alpha1api.DataUpload
 	log := r.logger.WithField("dataupload", du.Name)
 
 	if du.Spec.SnapshotType == velerov2alpha1api.SnapshotTypeCSI {
+		backupPVCConfig, err := r.currentBackupPVCConfig(du.Namespace)
+		if err != nil {
+			return nil, err
+		}
 		pvc := &corev1api.PersistentVolumeClaim{}
-		err := r.client.Get(context.Background(), types.NamespacedName{
+		err = r.client.Get(context.Background(), types.NamespacedName{
 			Namespace: du.Spec.SourceNamespace,
 			Name:      du.Spec.SourcePVC,
 		}, pvc)
@@ -1007,7 +994,7 @@ func (r *DataUploadReconciler) setupExposeParam(du *velerov2alpha1api.DataUpload
 			ExposeTimeout:         r.preparingTimeout,
 			VolumeSize:            pvc.Spec.Resources.Requests[corev1api.ResourceStorage],
 			Affinity:              r.loadAffinity,
-			BackupPVCConfig:       r.backupPVCConfig,
+			BackupPVCConfig:       backupPVCConfig,
 			Resources:             r.podResources,
 			NodeOS:                nodeOS,
 			PriorityClassName:     r.dataMovePriorityClass,

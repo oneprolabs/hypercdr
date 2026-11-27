@@ -35,6 +35,7 @@ type Manager struct {
 	cocurrentNum int
 	trackerLock  sync.Mutex
 	tracker      map[string]AsyncBR
+	released     map[string]bool
 }
 
 // NewManager creates the data path manager to manage concurrent data path instances
@@ -42,6 +43,7 @@ func NewManager(cocurrentNum int) *Manager {
 	return &Manager{
 		cocurrentNum: cocurrentNum,
 		tracker:      map[string]AsyncBR{},
+		released:     map[string]bool{},
 	}
 }
 
@@ -50,11 +52,12 @@ func (m *Manager) CreateFileSystemBR(jobName string, requestorType string, ctx c
 	m.trackerLock.Lock()
 	defer m.trackerLock.Unlock()
 
-	if len(m.tracker) >= m.cocurrentNum {
+	if len(m.tracker)-len(m.released) >= m.cocurrentNum {
 		return nil, ConcurrentLimitExceed
 	}
 
 	m.tracker[jobName] = FSBRCreator(jobName, requestorType, client, namespace, callbacks, log)
+	delete(m.released, jobName)
 
 	return m.tracker[jobName], nil
 }
@@ -66,12 +69,13 @@ func (m *Manager) CreateMicroServiceBRWatcher(ctx context.Context, client client
 	defer m.trackerLock.Unlock()
 
 	if !resume {
-		if len(m.tracker) >= m.cocurrentNum {
+		if len(m.tracker)-len(m.released) >= m.cocurrentNum {
 			return nil, ConcurrentLimitExceed
 		}
 	}
 
 	m.tracker[taskName] = MicroServiceBRWatcherCreator(client, kubeClient, mgr, taskType, taskName, namespace, podName, containerName, associatedObject, callbacks, log)
+	delete(m.released, taskName)
 
 	return m.tracker[taskName], nil
 }
@@ -82,6 +86,19 @@ func (m *Manager) RemoveAsyncBR(jobName string) {
 	defer m.trackerLock.Unlock()
 
 	delete(m.tracker, jobName)
+	delete(m.released, jobName)
+}
+
+func (m *Manager) ReleaseAsyncBRSlot(jobName string) {
+	m.trackerLock.Lock()
+	defer m.trackerLock.Unlock()
+
+	if _, exists := m.tracker[jobName]; exists {
+		if m.released == nil {
+			m.released = map[string]bool{}
+		}
+		m.released[jobName] = true
+	}
 }
 
 // GetAsyncBR returns the file system backup/restore data path instance for the specified job name

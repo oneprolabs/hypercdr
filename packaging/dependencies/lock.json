@@ -8,8 +8,9 @@
       "targetDigest": "sha256:72d22ce26d04fe56a5384e9f6b026152d1cf05db602a7a3524a3ed337d5f5752"
     },
     "velero": {
-      "version": "v1.18.2-hcdr.7",
-      "targetDigest": "sha256:37cbd27986bdcdc62c419b999fd17383d46ef53c56e4b8a149036e441db4cb1f"
+      "version": "v1.18.2-hcdr.8",
+      "buildFromSource": true,
+      "sourceAddressed": true
     },
     "plugins": {
       "version": "v1.13.0",

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"hypercdr-platform/agent/comm-agent/internal/kube"
 	"hypercdr-platform/agent/comm-agent/internal/velero"
@@ -87,6 +89,50 @@ func (e KubernetesBackupExecutor) BuildBackupManifest(task protocol.TaskDispatch
 func (e KubernetesBackupExecutor) SubmitBackup(ctx context.Context, manifest velero.BackupManifest) error {
 	if e.applier == nil {
 		return errors.New("kubernetes manifest applier is not configured")
+	}
+	if manifest.Spec.SnapshotMoveData != nil && *manifest.Spec.SnapshotMoveData {
+		preflightCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		runtimeChecker, ok := e.applier.(interface {
+			CheckSnapshotRuntime(context.Context, string) error
+		})
+		if !ok {
+			return errors.New("CSI runtime checker unavailable; upgrade the Agent before using snapshot backups")
+		}
+		if err := runtimeChecker.CheckSnapshotRuntime(preflightCtx, manifest.Metadata.Namespace); err != nil {
+			return err
+		}
+		preflight, ok := e.applier.(interface {
+			PrepareSnapshotBackup(context.Context, []string) (map[string]string, error)
+		})
+		if !ok {
+			return errors.New("snapshot prerequisite checker unavailable; refusing unchecked snapshot capture")
+		}
+		annotations, err := preflight.PrepareSnapshotBackup(preflightCtx, manifest.Spec.IncludedNamespaces)
+		if err != nil {
+			return fmt.Errorf("snapshot prerequisites failed: %w", err)
+		}
+		if optimizer, ok := e.applier.(interface {
+			ConfigureBackupVolumes(context.Context, string, []string) error
+		}); ok {
+			optimizationCtx, optimizationCancel := context.WithTimeout(preflightCtx, 15*time.Second)
+			optimizationErr := optimizer.ConfigureBackupVolumes(optimizationCtx, manifest.Metadata.Namespace, manifest.Spec.IncludedNamespaces)
+			optimizationCancel()
+			if optimizationErr != nil {
+				slog.Warn("backup temporary volume optimization unavailable; retaining standard CSI configuration", "error", optimizationErr)
+			}
+		}
+		merged := make(map[string]string, len(manifest.Metadata.Annotations)+len(annotations))
+		for key, value := range manifest.Metadata.Annotations {
+			merged[key] = value
+		}
+		for key, value := range annotations {
+			if existing := merged[key]; existing != "" && existing != value {
+				return fmt.Errorf("snapshot class annotation conflicts with verified selection")
+			}
+			merged[key] = value
+		}
+		manifest.Metadata.Annotations = merged
 	}
 	unstructured, err := kube.ManifestFromStruct(manifest)
 	if err != nil {

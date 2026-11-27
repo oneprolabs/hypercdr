@@ -1,5 +1,24 @@
 #!/usr/bin/env bash
 
+velero_source_fingerprint() {
+  (
+    set -o pipefail
+    cd "$ROOT_DIR" || return 1
+    git ls-files --cached --others --exclude-standard -z -- third_party/velero scripts/release/build-velero.sh scripts/release/common.sh scripts/release/dependency-fingerprint.sh scripts/release/publish-runtime-images.sh scripts/lib/registry-config.sh packaging/dependencies/lock.json \
+      | sort -zu | while IFS= read -r -d '' input; do
+          [[ ! -f "$input" ]] || sha256sum "$input"
+        done || return 1
+    printf '%s\n' "platform=${HCDR_BUILD_PLATFORM:-linux/amd64}" "restic=${HCDR_RESTIC_VERSION:-0.15.0}"
+  ) | sha256sum | cut -d' ' -f1
+}
+
+default_velero_image_tag() {
+  local fingerprint
+  fingerprint="$(velero_source_fingerprint)" || return 1
+  [[ "$fingerprint" =~ ^[0-9a-f]{64}$ ]] || return 1
+  printf 'v1.18.2-hcdr.8-backup-volume-policy-v1-%.40s-isolation-cache-v1\n' "$fingerprint"
+}
+
 velero_input_fingerprint() {
   local input base digest
   input="$(

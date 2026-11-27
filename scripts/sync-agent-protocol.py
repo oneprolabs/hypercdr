@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-FILES = ('messages.go', 'contract.go', 'codec.go', 'contract_test.go')
+FILES = ('messages.go', 'contract.go', 'codec.go', 'contract_test.go', 'consistency.go', 'consistency_test.go', 'consistency_evidence.go', 'consistency_evidence_test.go', 'consistency_evidence_validation.go', 'consistency_result_validation.go', 'consistency_result_validation_test.go', 'snapshot_backup.go', 'snapshot_backup_test.go')
 
 
 def main():

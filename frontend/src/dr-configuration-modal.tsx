@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import { ScopedResourceSelector, type ScopedResourceOption, type ScopedResourceSelection, resourceSelectionValid as isResourceSelectionValid } from './components/scoped-resource-selector';
+import { EditBackupMethod } from './components/edit-backup-method';
 
 export type ProtectWizardStep = 1 | 2 | 3 | 4 | 5 | 6;
 
@@ -94,6 +95,7 @@ type TargetClusterOption = {
 };
 
 export type ProtectConfig = {
+  dataProtection?: import('./features/recovery/data-protection-model').DataProtectionSettings;
   scope: string;
   labels: string;
   labelConditions: LabelCondition[];
@@ -117,6 +119,12 @@ export type ProtectConfig = {
 };
 
 export type Props = {
+  applicationConsistencyProfiles?: string[];
+  snapshotCapabilities?: import('./features/recovery/data-protection-model').SnapshotCapability[];
+  snapshotCapabilitiesCollectedAt?: string;
+  snapshotNamespaces?: string[];
+  snapshotSourceClusterId?: string;
+  onRequestSnapshotPrerequisites?: () => Promise<import('./features/recovery/data-protection-model').SnapshotPrerequisiteInventory>;
   open: boolean;
   step: ProtectWizardStep;
   setStep: (step: ProtectWizardStep) => void;
@@ -304,8 +312,8 @@ export function DrConfigurationModal(props: Props) {
     onFinish,
     submitting = false,
     targetSummary,
-    targetCount,
-    targetNames,
+    targetCount: configuredTargetCount,
+    targetNames: configuredTargetNames,
     protectConfig,
     setProtectConfig,
     showAddRuleForm,
@@ -334,7 +342,10 @@ export function DrConfigurationModal(props: Props) {
     onRegisterCluster,
     onCreatePolicy,
   } = props;
+  const targetNames = [...new Set(props.snapshotNamespaces || configuredTargetNames)];
+  const targetCount = targetNames.length || configuredTargetCount;
   const [includeFilterOpen, setIncludeFilterOpen] = useState(false);
+  const [backupMethodValid, setBackupMethodValid] = useState(protectConfig.dataProtection?.mode !== 'snapshot-crash-consistent' && protectConfig.dataProtection?.mode !== 'application-consistent');
   const [editingIncludeIndex, setEditingIncludeIndex] = useState<number | null>(null);
   const [includeFilterType, setIncludeFilterType] = useState<'resource' | 'label'>('resource');
   const [newIncludeRule, setNewIncludeRule] = useState<ExcludeRule>({ group: '', resource: '', name: '', version: '', labels: '' });
@@ -369,7 +380,7 @@ export function DrConfigurationModal(props: Props) {
   const resourceSelectionValid = multiNamespaceFilterDisabled || isResourceSelectionValid(protectConfig.resourceSelection);
   const selectedTargetCluster = targetClusterOptions.find(cluster => cluster.name === protectConfig.targetCluster);
   const targetCompatible = !selectedTargetCluster || selectedTargetCluster.compatible;
-  const canSave = Boolean(resourceSelectionValid && protectConfig.storageId && targetCompatible);
+  const canSave = Boolean(resourceSelectionValid && protectConfig.storageId && targetCompatible && backupMethodValid);
   void filteredPolicyOptions;
   void paginatedPolicyOptions;
   void wizardPolicySearchQuery;
@@ -621,7 +632,7 @@ export function DrConfigurationModal(props: Props) {
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 32 }}
             transition={{ duration: 0.18, ease: 'easeOut' }}
-            className="hbdr-filter-drawer hbdr-config-dialog hbdr-config-drawer"
+            className="hbdr-filter-drawer hbdr-config-dialog hbdr-config-drawer hbdr-config-compact"
           >
             <header className="hbdr-filter-drawer-head hbdr-config-header">
               <div>
@@ -633,7 +644,8 @@ export function DrConfigurationModal(props: Props) {
 
             <div className="hbdr-filter-drawer-body hbdr-config-body">
               <main className="hbdr-config-main">
-                {targetCount > 1 && (
+                <EditBackupMethod open={open} scopeKey={props.snapshotSourceClusterId || ''} namespaces={props.snapshotNamespaces || targetNames} value={protectConfig.dataProtection} onChange={dataProtection => setProtectConfig(previous => ({ ...previous, dataProtection }))} onCheck={props.onRequestSnapshotPrerequisites} onValidityChange={setBackupMethodValid} />
+                {configuredTargetCount > 1 && (
                   <section className="hbdr-config-selected-namespaces">
                     <div className="hbdr-config-selected-head">
                       <div className="hbdr-config-selected-title">
@@ -684,7 +696,7 @@ export function DrConfigurationModal(props: Props) {
                   <div className="hbdr-config-inline-panel">
                     {multiNamespaceFilterDisabled ? <div className="hbdr-combined-scope-notice">
                       <ShieldCheck size={17} />
-                      <div><strong>All application resources</strong><span>Multi-namespace protection always uses the complete resource scope. Custom selection is available only for a single namespace.</span></div>
+                      <div><strong>All application resources</strong><span>Multi-namespace plans include all application resources.</span></div>
                       <em>Full backup</em>
                     </div> : <ScopedResourceSelector
                       purpose="backup"
@@ -812,14 +824,13 @@ export function DrConfigurationModal(props: Props) {
                     <span><Settings2 size={16} />Hooks</span>
                     <em>Not supported yet</em>
                   </div>
-                  <p>Pre- and post-operation scripts are not available in this version.</p>
                 </section>
               </main>
             </div>
 
             <footer className="hbdr-filter-drawer-actions hbdr-config-footer">
               <div className="hbdr-config-footer-status">
-                <span className={canSave ? 'is-ready' : ''}>{canSave ? 'Ready' : !resourceSelectionValid ? 'Select at least one included resource' : !protectConfig.storageId ? 'Repository required' : 'Select a compatible target cluster'}</span>
+                <span className={canSave ? 'is-ready' : ''}>{canSave ? 'Ready' : !backupMethodValid ? 'Verify CSI support or select file-level backup' : !resourceSelectionValid ? 'Select at least one included resource' : !protectConfig.storageId ? 'Repository required' : 'Select a compatible target cluster'}</span>
               </div>
               <button type="button" onClick={onClose}>Cancel</button>
               <button type="button" className="hbdr-config-save" disabled={!canSave || submitting} onClick={onFinish}>

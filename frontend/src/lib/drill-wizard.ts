@@ -3,6 +3,12 @@ export const drillSteps = [
  ['Target','Cluster and namespace'],
  ['Review','Confirm drill settings'],
 ] as const;
+export function recoveryApplicationResources<Resource extends { apiVersion?: string; group?: string }>(resources: Resource[]): Resource[] {
+ return resources.filter(item => item.group !== 'velero.io' && item.apiVersion?.split('/')[0] !== 'velero.io');
+}
+export function recoveryPackageNamespaces(resources: Array<{ namespace?: string; apiVersion?: string; group?: string; kind?: string }>) {
+ return Array.from(new Set(recoveryApplicationResources(resources).map(item => item.namespace).filter((value): value is string => Boolean(value)))).sort();
+}
 export function drillNamespaceError(namespace:string) {
  return /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(namespace) && namespace.length<=63 ? '' : 'Namespace must be 1–63 lowercase letters, numbers or hyphens, and start and end with a letter or number.';
 }

@@ -60,6 +60,10 @@ func (r *Router) createProtectionPlan(w http.ResponseWriter, req *http.Request) 
 	if actor, ok := requestUser(req); ok {
 		input.TenantID = actor.TenantID
 	}
+	if !stampDataProtectionRiskAcceptance(req, &input.DataProtection) {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "authenticated_risk_acceptance_required"})
+		return
+	}
 	if input.TenantID != "" {
 		clusters, _ := r.store.ListClusters()
 		clusterAllowed := func(id string) bool {
@@ -185,6 +189,10 @@ func (r *Router) createProtectionPlan(w http.ResponseWriter, req *http.Request) 
 	if err != nil {
 		if errors.Is(err, store.ErrProtectionPlanBusy) || errors.Is(err, store.ErrProtectionPlanIdentity) {
 			writeJSON(w, http.StatusConflict, map[string]any{"error": "protection_plan_update_conflict", "message": err.Error()})
+			return
+		}
+		if errors.Is(err, store.ErrDataProtectionSettings) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_data_protection", "message": err.Error()})
 			return
 		}
 		var conflict *store.ApplicationAlreadyProtectedError
@@ -442,6 +450,7 @@ func (r *Router) storageBindingActivationAction(clusterID string, storageRepoID 
 
 func protectionPlanActivationResponse(item store.ProtectionPlan, activationTask *store.Task, warning string) protectionPlanResponse {
 	return protectionPlanResponse{
+		DataProtection:       item.DataProtection,
 		ID:                   item.ID,
 		TenantID:             item.TenantID,
 		SourceClusterID:      item.SourceClusterID,

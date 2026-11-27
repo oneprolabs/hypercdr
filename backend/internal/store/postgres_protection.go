@@ -67,6 +67,7 @@ func (s *PostgresStore) saveProtectionPlan(id string, input ProtectionPlanInput)
 		primary = appIDs[0]
 	}
 	plan := ProtectionPlan{
+		DataProtection:       input.DataProtection,
 		ID:                   newID(),
 		TenantID:             input.TenantID,
 		SourceClusterID:      input.SourceClusterID,
@@ -119,6 +120,15 @@ func (s *PostgresStore) saveProtectionPlan(id string, input ProtectionPlanInput)
 			return ProtectionPlan{}, ErrProtectionPlanBusy
 		}
 		plan.ID = id
+		if input.DataProtection.Mode == "" && input.DataProtection.Group == nil {
+			var persisted []byte
+			if err := tx.QueryRow(`select data_protection from protection_plans where id=$1`, id).Scan(&persisted); err != nil {
+				return ProtectionPlan{}, err
+			}
+			if err := decodePlanDataProtection(persisted, &plan); err != nil {
+				return ProtectionPlan{}, err
+			}
+		}
 	}
 	// Validate relationships in the same transaction as insertion. Handlers are
 	// not the only caller: schedules and edition integrations also create plans.
@@ -144,6 +154,10 @@ func (s *PostgresStore) saveProtectionPlan(id string, input ProtectionPlanInput)
 		if !valid {
 			return ProtectionPlan{}, ErrTenantResourceMismatch
 		}
+	}
+	dataProtection, err := validatePlanDataProtection(tx, &plan)
+	if err != nil {
+		return ProtectionPlan{}, err
 	}
 	// Lock the application rows so concurrent requests for the same app cannot
 	// both pass the ownership check and create duplicate plans.
@@ -183,6 +197,9 @@ func (s *PostgresStore) saveProtectionPlan(id string, input ProtectionPlanInput)
 		if err != nil {
 			return ProtectionPlan{}, err
 		}
+		if _, err := tx.Exec(`update protection_plans set data_protection=$2 where id=$1`, plan.ID, dataProtection); err != nil {
+			return ProtectionPlan{}, err
+		}
 		// Pause the previous schedule atomically; activation enables the new
 		// schedule only after storage is ready. Manual policies stay disabled.
 		if _, err := tx.Exec(`update protection_plan_schedules set enabled=false, next_fire_at=null, updated_at=$2 where protection_plan_id=$1`, id, now); err != nil {
@@ -205,6 +222,9 @@ func (s *PostgresStore) saveProtectionPlan(id string, input ProtectionPlanInput)
 		plan.IncludeClusterScoped, plan.StorageRepoID, plan.PolicyID, plan.TargetClusterID,
 		excludedResources, preHooks, postHooks, plan.Status, now)
 	if err != nil {
+		return ProtectionPlan{}, err
+	}
+	if _, err := tx.Exec(`update protection_plans set data_protection=$2 where id=$1`, plan.ID, dataProtection); err != nil {
 		return ProtectionPlan{}, err
 	}
 	for _, appID := range appIDs {
@@ -373,7 +393,7 @@ func (s *PostgresStore) ListProtectionPlans(clusterID string) ([]ProtectionPlan,
 		       coalesce(pp.target_cluster_id::text, ''), pp.excluded_resources, pp.pre_hooks, pp.post_hooks,
 		       pp.plan_storage_size, coalesce(pps.next_fire_at, '0001-01-01'::timestamptz), coalesce(pps.enabled, false),
 		       coalesce(pp.latest_sync_task_id::text, ''), coalesce(pp.latest_recovery_task_id::text, ''),
-		       pp.status, pp.created_at, pp.updated_at
+		       pp.status, pp.created_at, pp.updated_at, pp.data_protection
 		from protection_plans pp
 		left join protection_plan_schedules pps on pps.protection_plan_id = pp.id
 	`
@@ -394,12 +414,15 @@ func (s *PostgresStore) ListProtectionPlans(clusterID string) ([]ProtectionPlan,
 	planMap := map[string]*ProtectionPlan{}
 	for rows.Next() {
 		var item ProtectionPlan
-		var includedResources, resourceSelection, labelSelector, excludedResources, preHooks, postHooks, planStorageSize []byte
+		var includedResources, resourceSelection, labelSelector, excludedResources, preHooks, postHooks, planStorageSize, dataProtection []byte
 		if err := rows.Scan(&item.ID, &item.TenantID, &item.SourceClusterID, &item.AppID, &item.ScopeType,
 			&includedResources, &resourceSelection, &labelSelector, &item.IncludeClusterScoped, &item.StorageRepoID, &item.PolicyID,
 			&item.TargetClusterID, &excludedResources, &preHooks, &postHooks, &planStorageSize,
 			&item.NextFireAt, &item.ScheduleEnabled, &item.LatestSyncTaskID, &item.LatestRecoveryTaskID, &item.Status,
-			&item.CreatedAt, &item.UpdatedAt); err != nil {
+			&item.CreatedAt, &item.UpdatedAt, &dataProtection); err != nil {
+			return nil, err
+		}
+		if err := decodePlanDataProtection(dataProtection, &item); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(includedResources, &item.IncludedResources)
@@ -534,6 +557,13 @@ func (s *PostgresStore) DeleteProtectionPlan(id string) (ProtectionPlan, bool, e
 	if _, err := tx.Exec(`delete from protection_plan_apps where plan_id = $1`, id); err != nil {
 		return ProtectionPlan{}, false, err
 	}
+	var protectionData []byte
+	if err := tx.QueryRow(`select data_protection from protection_plans where id=$1`, id).Scan(&protectionData); err != nil {
+		return ProtectionPlan{}, false, err
+	}
+	if err := decodePlanDataProtection(protectionData, &item); err != nil {
+		return ProtectionPlan{}, false, err
+	}
 	if _, err := tx.Exec(`delete from protection_plans where id = $1`, id); err != nil {
 		return ProtectionPlan{}, false, err
 	}
@@ -654,6 +684,13 @@ func (s *PostgresStore) CleanupProtectionPlanRecords(id string) (ProtectionPlan,
 		return ProtectionPlan{}, false, err
 	}
 	if _, err := tx.Exec(`delete from protection_plan_apps where plan_id = $1`, id); err != nil {
+		return ProtectionPlan{}, false, err
+	}
+	var protectionData []byte
+	if err := tx.QueryRow(`select data_protection from protection_plans where id=$1`, id).Scan(&protectionData); err != nil {
+		return ProtectionPlan{}, false, err
+	}
+	if err := decodePlanDataProtection(protectionData, &item); err != nil {
 		return ProtectionPlan{}, false, err
 	}
 	if _, err := tx.Exec(`delete from protection_plans where id = $1`, id); err != nil {

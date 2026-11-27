@@ -7,6 +7,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"hypercdr-platform/platform/backend/internal/protocol"
 )
 
 const DefaultTenantID = "00000000-0000-0000-0000-000000000001"
@@ -138,6 +140,10 @@ type MigrationRepository interface {
 // ClusterRepository defines the persisted cluster operations.
 type ClusterRepository interface {
 	GetClusterCacheSettings(clusterID string) (ClusterCacheSettings, error)
+	GetClusterSyncSettings(clusterID string) (ClusterSyncSettings, error)
+	SaveClusterSyncSettings(clusterID string, settings ClusterSyncSettings) error
+	EnsureClusterSyncSettings(clusterID string) error
+	AdmitSyncTask(taskID, clusterID, tenantID string) (bool, error)
 	SaveClusterCacheSettings(clusterID string, settings ClusterCacheSettings) error
 	ListClusters() ([]Cluster, error)
 	UpdateCluster(input ClusterUpdateInput) (Cluster, bool, error)
@@ -522,60 +528,61 @@ type CommunityMigrationSession struct {
 }
 
 type Cluster struct {
-	NodeCacheUsageSupported    bool                  `json:"nodeCacheUsageSupported,omitempty"`
-	CacheUsage                 map[string]any        `json:"cacheUsage,omitempty"`
-	CacheState                 map[string]any        `json:"cacheState,omitempty"`
-	ID                         string                `json:"id"`
-	TenantID                   string                `json:"tenantId"`
-	Name                       string                `json:"name"`
-	ClusterType                string                `json:"clusterType,omitempty"`
-	CloudProvider              string                `json:"cloudProvider,omitempty"`
-	CloudRegion                string                `json:"cloudRegion,omitempty"`
-	CloudClusterID             string                `json:"cloudClusterId,omitempty"`
-	KubeVersion                string                `json:"kubeVersion"`
-	Status                     string                `json:"status"`
-	ConnectionStatus           string                `json:"connectionStatus"`
-	NodeCount                  int                   `json:"nodeCount"`
-	NamespaceCount             int                   `json:"namespaceCount"`
-	ApplicationCount           int                   `json:"applicationCount"`
-	ActiveTasks                int                   `json:"activeTasks"`
-	AgentVersion               string                `json:"agentVersion"`
-	AgentImage                 string                `json:"agentImage,omitempty"`
-	AgentImageID               string                `json:"agentImageId,omitempty"`
-	AgentImageDigest           string                `json:"agentImageDigest,omitempty"`
-	LatestAgentVersion         string                `json:"latestAgentVersion,omitempty"`
-	LatestAgentImage           string                `json:"latestAgentImage,omitempty"`
-	LatestAgentImageDigest     string                `json:"latestAgentImageDigest,omitempty"`
-	AgentUpgradeAvailable      bool                  `json:"agentUpgradeAvailable,omitempty"`
-	AgentUpgradeStatus         string                `json:"agentUpgradeStatus,omitempty"`
-	AgentUpgradeProgress       int                   `json:"agentUpgradeProgress,omitempty"`
-	VeleroVersion              string                `json:"veleroVersion,omitempty"`
-	VeleroStatus               string                `json:"veleroStatus"`
-	VeleroImage                string                `json:"veleroImage,omitempty"`
-	VeleroImageDigest          string                `json:"veleroImageDigest,omitempty"`
-	VeleroServerReady          bool                  `json:"veleroServerReady,omitempty"`
-	VeleroNodeAgentDesired     int32                 `json:"veleroNodeAgentDesired,omitempty"`
-	VeleroNodeAgentReady       int32                 `json:"veleroNodeAgentReady,omitempty"`
-	VeleroNodeAgentImageDigest string                `json:"veleroNodeAgentImageDigest,omitempty"`
-	LatestVeleroVersion        string                `json:"latestVeleroVersion,omitempty"`
-	LatestVeleroImage          string                `json:"latestVeleroImage,omitempty"`
-	LatestVeleroImageDigest    string                `json:"latestVeleroImageDigest,omitempty"`
-	VeleroUpgradeAvailable     bool                  `json:"veleroUpgradeAvailable,omitempty"`
-	VeleroUpgradeStatus        string                `json:"veleroUpgradeStatus,omitempty"`
-	VeleroUpgradeProgress      int                   `json:"veleroUpgradeProgress,omitempty"`
-	InventoryHash              string                `json:"inventoryHash,omitempty"`
-	Nodes                      []ClusterNode         `json:"nodes,omitempty"`
-	StorageClasses             []ClusterStorageClass `json:"storageClasses,omitempty"`
-	RestoreCachePolicy         RestoreCachePolicy    `json:"restoreCachePolicy"`
-	APIResources               []ClusterAPIResource  `json:"apiResources,omitempty"`
-	NamespaceAPIs              []ClusterNamespaceAPI `json:"namespaceAPIs,omitempty"`
-	Capabilities               []ClusterCapability   `json:"capabilities,omitempty"`
-	CapabilitiesCollectedAt    time.Time             `json:"capabilitiesCollectedAt,omitempty"`
-	CapabilitiesComplete       bool                  `json:"capabilitiesComplete,omitempty"`
-	Role                       string                `json:"role"`
-	IsDefault                  bool                  `json:"isDefault"`
-	RegisteredAt               time.Time             `json:"registeredAt"`
-	LastSeenAt                 time.Time             `json:"lastSeenAt"`
+	ApplicationConsistencyProfiles []string              `json:"applicationConsistencyProfiles,omitempty"`
+	NodeCacheUsageSupported        bool                  `json:"nodeCacheUsageSupported,omitempty"`
+	CacheUsage                     map[string]any        `json:"cacheUsage,omitempty"`
+	CacheState                     map[string]any        `json:"cacheState,omitempty"`
+	ID                             string                `json:"id"`
+	TenantID                       string                `json:"tenantId"`
+	Name                           string                `json:"name"`
+	ClusterType                    string                `json:"clusterType,omitempty"`
+	CloudProvider                  string                `json:"cloudProvider,omitempty"`
+	CloudRegion                    string                `json:"cloudRegion,omitempty"`
+	CloudClusterID                 string                `json:"cloudClusterId,omitempty"`
+	KubeVersion                    string                `json:"kubeVersion"`
+	Status                         string                `json:"status"`
+	ConnectionStatus               string                `json:"connectionStatus"`
+	NodeCount                      int                   `json:"nodeCount"`
+	NamespaceCount                 int                   `json:"namespaceCount"`
+	ApplicationCount               int                   `json:"applicationCount"`
+	ActiveTasks                    int                   `json:"activeTasks"`
+	AgentVersion                   string                `json:"agentVersion"`
+	AgentImage                     string                `json:"agentImage,omitempty"`
+	AgentImageID                   string                `json:"agentImageId,omitempty"`
+	AgentImageDigest               string                `json:"agentImageDigest,omitempty"`
+	LatestAgentVersion             string                `json:"latestAgentVersion,omitempty"`
+	LatestAgentImage               string                `json:"latestAgentImage,omitempty"`
+	LatestAgentImageDigest         string                `json:"latestAgentImageDigest,omitempty"`
+	AgentUpgradeAvailable          bool                  `json:"agentUpgradeAvailable,omitempty"`
+	AgentUpgradeStatus             string                `json:"agentUpgradeStatus,omitempty"`
+	AgentUpgradeProgress           int                   `json:"agentUpgradeProgress,omitempty"`
+	VeleroVersion                  string                `json:"veleroVersion,omitempty"`
+	VeleroStatus                   string                `json:"veleroStatus"`
+	VeleroImage                    string                `json:"veleroImage,omitempty"`
+	VeleroImageDigest              string                `json:"veleroImageDigest,omitempty"`
+	VeleroServerReady              bool                  `json:"veleroServerReady,omitempty"`
+	VeleroNodeAgentDesired         int32                 `json:"veleroNodeAgentDesired,omitempty"`
+	VeleroNodeAgentReady           int32                 `json:"veleroNodeAgentReady,omitempty"`
+	VeleroNodeAgentImageDigest     string                `json:"veleroNodeAgentImageDigest,omitempty"`
+	LatestVeleroVersion            string                `json:"latestVeleroVersion,omitempty"`
+	LatestVeleroImage              string                `json:"latestVeleroImage,omitempty"`
+	LatestVeleroImageDigest        string                `json:"latestVeleroImageDigest,omitempty"`
+	VeleroUpgradeAvailable         bool                  `json:"veleroUpgradeAvailable,omitempty"`
+	VeleroUpgradeStatus            string                `json:"veleroUpgradeStatus,omitempty"`
+	VeleroUpgradeProgress          int                   `json:"veleroUpgradeProgress,omitempty"`
+	InventoryHash                  string                `json:"inventoryHash,omitempty"`
+	Nodes                          []ClusterNode         `json:"nodes,omitempty"`
+	StorageClasses                 []ClusterStorageClass `json:"storageClasses,omitempty"`
+	RestoreCachePolicy             RestoreCachePolicy    `json:"restoreCachePolicy"`
+	APIResources                   []ClusterAPIResource  `json:"apiResources,omitempty"`
+	NamespaceAPIs                  []ClusterNamespaceAPI `json:"namespaceAPIs,omitempty"`
+	Capabilities                   []ClusterCapability   `json:"capabilities,omitempty"`
+	CapabilitiesCollectedAt        time.Time             `json:"capabilitiesCollectedAt,omitempty"`
+	CapabilitiesComplete           bool                  `json:"capabilitiesComplete,omitempty"`
+	Role                           string                `json:"role"`
+	IsDefault                      bool                  `json:"isDefault"`
+	RegisteredAt                   time.Time             `json:"registeredAt"`
+	LastSeenAt                     time.Time             `json:"lastSeenAt"`
 }
 
 type RestoreCachePolicy struct {
@@ -904,49 +911,51 @@ type PolicyInput struct {
 }
 
 type ProtectionPlan struct {
-	ID                   string            `json:"id"`
-	TenantID             string            `json:"tenantId"`
-	SourceClusterID      string            `json:"sourceClusterId"`
-	AppID                string            `json:"appId"`
-	AppIDs               []string          `json:"appIds"`
-	ScopeType            string            `json:"scopeType"`
-	IncludedResources    []string          `json:"includedResources,omitempty"`
-	ResourceSelection    ResourceSelection `json:"resourceSelection"`
-	LabelSelector        LabelSelector     `json:"labelSelector,omitempty"`
-	IncludeClusterScoped bool              `json:"includeClusterScoped"`
-	StorageRepoID        string            `json:"storageRepoId,omitempty"`
-	PolicyID             string            `json:"policyId,omitempty"`
-	TargetClusterID      string            `json:"targetClusterId,omitempty"`
-	ExcludedResources    []string          `json:"excludedResources,omitempty"`
-	PreHooks             []map[string]any  `json:"preHooks,omitempty"`
-	PostHooks            []map[string]any  `json:"postHooks,omitempty"`
-	PlanStorageSize      map[string]any    `json:"planStorageSize,omitempty"`
-	NextFireAt           time.Time         `json:"nextFireAt,omitempty"`
-	ScheduleEnabled      bool              `json:"scheduleEnabled,omitempty"`
-	LatestSyncTaskID     string            `json:"latestSyncTaskId,omitempty"`
-	LatestRecoveryTaskID string            `json:"latestRecoveryTaskId,omitempty"`
-	Status               string            `json:"status"`
-	CreatedAt            time.Time         `json:"createdAt"`
-	UpdatedAt            time.Time         `json:"updatedAt"`
+	DataProtection       DataProtectionSettings `json:"dataProtection"`
+	ID                   string                 `json:"id"`
+	TenantID             string                 `json:"tenantId"`
+	SourceClusterID      string                 `json:"sourceClusterId"`
+	AppID                string                 `json:"appId"`
+	AppIDs               []string               `json:"appIds"`
+	ScopeType            string                 `json:"scopeType"`
+	IncludedResources    []string               `json:"includedResources,omitempty"`
+	ResourceSelection    ResourceSelection      `json:"resourceSelection"`
+	LabelSelector        LabelSelector          `json:"labelSelector,omitempty"`
+	IncludeClusterScoped bool                   `json:"includeClusterScoped"`
+	StorageRepoID        string                 `json:"storageRepoId,omitempty"`
+	PolicyID             string                 `json:"policyId,omitempty"`
+	TargetClusterID      string                 `json:"targetClusterId,omitempty"`
+	ExcludedResources    []string               `json:"excludedResources,omitempty"`
+	PreHooks             []map[string]any       `json:"preHooks,omitempty"`
+	PostHooks            []map[string]any       `json:"postHooks,omitempty"`
+	PlanStorageSize      map[string]any         `json:"planStorageSize,omitempty"`
+	NextFireAt           time.Time              `json:"nextFireAt,omitempty"`
+	ScheduleEnabled      bool                   `json:"scheduleEnabled,omitempty"`
+	LatestSyncTaskID     string                 `json:"latestSyncTaskId,omitempty"`
+	LatestRecoveryTaskID string                 `json:"latestRecoveryTaskId,omitempty"`
+	Status               string                 `json:"status"`
+	CreatedAt            time.Time              `json:"createdAt"`
+	UpdatedAt            time.Time              `json:"updatedAt"`
 }
 
 type ProtectionPlanInput struct {
-	TenantID             string            `json:"-"`
-	SourceClusterID      string            `json:"sourceClusterId"`
-	AppID                string            `json:"appId"`
-	AppIDs               []string          `json:"appIds"`
-	ScopeType            string            `json:"scopeType"`
-	IncludedResources    []string          `json:"includedResources"`
-	ResourceSelection    ResourceSelection `json:"resourceSelection"`
-	LabelSelector        LabelSelector     `json:"labelSelector"`
-	IncludeClusterScoped bool              `json:"includeClusterScoped"`
-	StorageRepoID        string            `json:"storageRepoId"`
-	PolicyID             string            `json:"policyId"`
-	TargetClusterID      string            `json:"targetClusterId"`
-	ExcludedResources    []string          `json:"excludedResources"`
-	PreHooks             []map[string]any  `json:"preHooks"`
-	PostHooks            []map[string]any  `json:"postHooks"`
-	Status               string            `json:"status"`
+	DataProtection       DataProtectionSettings `json:"dataProtection"`
+	TenantID             string                 `json:"-"`
+	SourceClusterID      string                 `json:"sourceClusterId"`
+	AppID                string                 `json:"appId"`
+	AppIDs               []string               `json:"appIds"`
+	ScopeType            string                 `json:"scopeType"`
+	IncludedResources    []string               `json:"includedResources"`
+	ResourceSelection    ResourceSelection      `json:"resourceSelection"`
+	LabelSelector        LabelSelector          `json:"labelSelector"`
+	IncludeClusterScoped bool                   `json:"includeClusterScoped"`
+	StorageRepoID        string                 `json:"storageRepoId"`
+	PolicyID             string                 `json:"policyId"`
+	TargetClusterID      string                 `json:"targetClusterId"`
+	ExcludedResources    []string               `json:"excludedResources"`
+	PreHooks             []map[string]any       `json:"preHooks"`
+	PostHooks            []map[string]any       `json:"postHooks"`
+	Status               string                 `json:"status"`
 }
 
 // ResourceSelection captures the user-facing resource-type selection used by
@@ -955,6 +964,18 @@ type ProtectionPlanInput struct {
 // empty selection. "custom" carries independent namespace/cluster scopes.
 // Legacy fields above remain only for rolling-agent protocol compatibility;
 // legacy Filter plans are migrated to the scoped model.
+type DataProtectionSettings struct {
+	Mode                string                        `json:"mode"`
+	Group               *protocol.ConsistencyGroup    `json:"group,omitempty"`
+	RiskAcknowledgement string                        `json:"riskAcknowledgement,omitempty"`
+	RiskAcceptance      *DataProtectionRiskAcceptance `json:"riskAcceptance,omitempty"`
+}
+
+type DataProtectionRiskAcceptance struct {
+	ActorID    string    `json:"actorId"`
+	AcceptedAt time.Time `json:"acceptedAt"`
+}
+
 type ResourceSelection struct {
 	Mode            string   `json:"mode"`
 	NamespaceScoped []string `json:"namespaceScoped,omitempty"`
@@ -1094,6 +1115,7 @@ type TaskInput struct {
 }
 
 type TaskStatusInput struct {
+	OnlyQueuedSync bool
 	TaskID         string
 	RestorePointID string
 	Status         string

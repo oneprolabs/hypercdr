@@ -453,6 +453,7 @@ func (s *nodeAgentServer) run() {
 		podLabels,
 		podAnnotations,
 	)
+	dataUploadReconciler.SetBackupPVCConfigMap(s.config.nodeAgentConfig)
 	if err := dataUploadReconciler.SetupWithManager(s.mgr); err != nil {
 		s.logger.WithError(err).Fatal("Unable to create the data upload controller")
 	}

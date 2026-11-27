@@ -22,7 +22,7 @@ fi
 (
   cd "${ROOT_DIR}/agent/comm-agent"
   GOTOOLCHAIN=auto "${GO_BIN}" test ./pkg/protocol ./internal/wsclient
-  GOTOOLCHAIN=auto "${GO_BIN}" build -trimpath -o "${OUTPUT_FILE}" ./cmd/comm-agent
+  CGO_ENABLED=0 GOTOOLCHAIN=auto "${GO_BIN}" build -trimpath -o "${OUTPUT_FILE}" ./cmd/comm-agent
 )
 
 sha256sum "${OUTPUT_FILE}" | tee "${OUTPUT_FILE}.sha256"

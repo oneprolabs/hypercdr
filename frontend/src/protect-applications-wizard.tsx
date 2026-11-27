@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, ChevronLeft, ChevronRight, Plus, Search, ShieldCheck, X } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, LoaderCircle, Plus, Search, ShieldCheck, X } from 'lucide-react';
 import { apiGet, apiDelete, apiPost } from './api/client';
 import type { Props, ProtectWizardStep } from './dr-configuration-modal';
 import { ScopedResourceSelector, resourceSelectionValid, type ScopedResourceDrafts } from './components/scoped-resource-selector';
@@ -12,9 +12,10 @@ import { ClusterRegistrationChoices } from './features/clusters/cluster-registra
 import { ClusterPlatformRegistrationFields } from './features/clusters/cluster-platform-registration-fields';
 import { ClusterCommandRegistrationFields } from './features/clusters/cluster-command-registration-fields';
 import { uploadRegistrationKubeconfig, inspectRegistrationCluster, startRegistrationTask, cancelRegistrationTask } from './features/clusters/cluster-registration-service';
+import { backupExecutionExplanation, fileLevelConsentValid, snapshotPrerequisiteResult, snapshotPrerequisiteSummary, snapshotSetupGuidance } from './features/recovery/data-protection-model';
 
 const steps = [
-  ['Scope', 'Entire namespace'],
+  ['Protection', 'Entire namespace'],
   ['Target', 'Recovery cluster'],
   ['Storage', 'Backup repository'],
   ['Policy', 'Schedule and retention'],
@@ -29,6 +30,31 @@ type RegistrationTask = { id: string; status: string; progress?: number; errorMe
 export function ProtectApplicationsWizard(props: Props & { onResourcesChanged: () => Promise<unknown> }) {
   const scopeDrafts = useRef<ScopedResourceDrafts>({});
   const [noTargetSelected, setNoTargetSelected] = useState(false);
+  const [fileLevelRiskAccepted, setFileLevelRiskAccepted] = useState(false);
+  const [snapshotResult, setSnapshotResult] = useState<(ReturnType<typeof snapshotPrerequisiteResult> & { key: string; message?: string }) | null>(null);
+  const [snapshotRetry, setSnapshotRetry] = useState(0);
+  const [snapshotHelpOpen, setSnapshotHelpOpen] = useState(false);
+  const snapshotRefreshRef = useRef(props.onRequestSnapshotPrerequisites);
+  snapshotRefreshRef.current = props.onRequestSnapshotPrerequisites;
+  const snapshotScopeKey = JSON.stringify([props.snapshotSourceClusterId, [...new Set(props.snapshotNamespaces || props.targetNames)].sort()]);
+  useEffect(() => {
+    if (!props.open) { setSnapshotHelpOpen(false); setSnapshotResult(null); return; }
+    let canceled = false;
+    setSnapshotResult(null);
+    const refresh = async () => {
+      try {
+        if (!snapshotRefreshRef.current) throw new Error('CSI detection is unavailable.');
+        const inventory = await snapshotRefreshRef.current();
+        const result = snapshotPrerequisiteResult(inventory, props.snapshotNamespaces || props.targetNames, Date.now());
+        if (!canceled) setSnapshotResult({ ...result, key: snapshotScopeKey });
+      } catch (error) {
+        if (!canceled) setSnapshotResult({ key: snapshotScopeKey, ...snapshotPrerequisiteResult({ capabilities: [] }, props.snapshotNamespaces || props.targetNames, Date.now()), message: error instanceof Error ? error.message : 'Unable to read source storage.' });
+      }
+    };
+    void refresh();
+    return () => { canceled = true; };
+  }, [props.open, snapshotScopeKey, snapshotRetry]);
+  useEffect(() => { if (!props.open) setFileLevelRiskAccepted(false); }, [props.open]);
   useEffect(() => { if (!props.open) setNoTargetSelected(false); }, [props.open]);
   useEffect(() => { if (!props.open) scopeDrafts.current = {}; }, [props.open]);
   const [policyQuery, setPolicyQuery] = useState('');
@@ -137,7 +163,15 @@ export function ProtectApplicationsWizard(props: Props & { onResourcesChanged: (
   const selectedRepo = props.storage.find(repo => repo.id === props.protectConfig.storageId);
   const selectedPolicy = props.policyOptions.find(policy => policy.id === props.protectConfig.policy);
   const scopeValid = props.targetCount > 1 || resourceSelectionValid(props.protectConfig.resourceSelection);
-  const canNext = scopeValid && (props.step === 1 || props.step === 5
+  const currentSnapshotResult = snapshotResult?.key === snapshotScopeKey ? snapshotResult : null;
+  const snapshotChecks = currentSnapshotResult?.checks || [];
+  const snapshotSummary = snapshotPrerequisiteSummary(snapshotChecks);
+  const snapshotRefreshing = !currentSnapshotResult;
+  const snapshotAvailable = currentSnapshotResult?.status === 'supported';
+  const snapshotUnavailableReason = snapshotRefreshing ? 'Checking CSI snapshot support…' : currentSnapshotResult.status === 'unsupported' ? 'Selected storage does not meet CSI snapshot requirements.' : `CSI detection failed. ${currentSnapshotResult.message || 'Complete snapshot inventory could not be verified.'}`;
+  const groupError = props.protectConfig.dataProtection?.mode !== 'application-consistent' ? ''
+    : 'Application stop/freeze coordination is no longer supported. Select CSI snapshots to continue.';
+  const canNext = scopeValid && !groupError && (props.protectConfig.dataProtection?.mode !== 'snapshot-crash-consistent' || snapshotAvailable) && (props.protectConfig.dataProtection?.mode !== 'live-filesystem' || fileLevelRiskAccepted) && fileLevelConsentValid(props.protectConfig.dataProtection, fileLevelRiskAccepted) && (props.step === 1 || props.step === 5
     || props.step === 2 && ((!props.protectConfig.targetCluster && noTargetSelected) || Boolean(selectedTarget?.compatible && selectedTarget.connectionStatus === 'online'))
     || props.step === 3 && Boolean(selectedRepo)
     || props.step === 4 && (props.protectConfig.policy === 'manual' || Boolean(selectedPolicy)));
@@ -250,12 +284,12 @@ export function ProtectApplicationsWizard(props: Props & { onResourcesChanged: (
           })}
         </nav>
         <main className="hbdr-protect-wizard-content">
-          {props.step === 1 && <section><h3>Application scope</h3><p>Review the namespaces and choose which resources this protection plan will include.</p>{props.targetCount > 1 && <div className="hbdr-protect-wizard-scope-summary"><div className="hbdr-protect-wizard-summary"><strong>{props.targetSummary}</strong><span>{props.targetNames.join(', ')}</span></div><fieldset className="hbdr-protect-wizard-scope-mode"><legend>Protection mode</legend><label><input type="radio" name="wizard-scope-mode" checked={!props.protectConfig.mergeNamespaces} onChange={() => props.setProtectConfig(prev => ({ ...prev, mergeNamespaces: false }))}/><span><strong>Independent</strong><small>Protect each namespace as its own application scope.</small></span></label><label><input type="radio" name="wizard-scope-mode" checked={Boolean(props.protectConfig.mergeNamespaces)} onChange={() => props.setProtectConfig(prev => ({ ...prev, mergeNamespaces: true, scope: 'all', includeAllResources: true, includedResources: [], excludedResources: [], labelSelector: { matchLabels: {}, matchExpressions: [] }, resourceSelection: { mode: 'all', namespaceScoped: [], clusterScoped: [] } }))}/><span><strong>Merge</strong><small>Protect all selected namespaces together as one scope.</small></span></label></fieldset></div>}{props.targetCount > 1 ? <p>Multi-namespace protection always includes all application resources.</p> : <ScopedResourceSelector purpose="backup" drafts={scopeDrafts} customUnavailableReason={props.targetClusterOptions.find(cluster => cluster.isCurrent)?.clusterType === 'openshift' ? 'OpenShift OADP currently supports the default scope only.' : undefined} value={props.protectConfig.resourceSelection} onChange={resourceSelection => props.setProtectConfig(prev => ({ ...prev, scope: 'all', includeAllResources: resourceSelection.mode === 'all', resourceSelection, includedResources: [], excludedResources: [], labelSelector: { matchLabels: {}, matchExpressions: [] } }))} namespaceResources={props.namespaceResourceOptions || []} customResourcesLoaded={props.customResourcesLoaded} onRequestCustomResources={props.onRequestCustomResources} />}</section>}
           {props.step === 2 && <section><h3>Target cluster</h3><p>Optionally choose a default recovery cluster.</p><div className="hbdr-protect-wizard-selection-tools"><label><Search size={17}/><input value={targetQuery} onChange={event => setTargetQuery(event.target.value)} placeholder="Search clusters" /></label><div><button type="button" onClick={() => void props.onResourcesChanged()}>Refresh</button><button type="button" onClick={() => openCreate('target')}><Plus size={15} />Register cluster</button></div></div><div className="hbdr-protect-wizard-options"><label className={!props.protectConfig.targetCluster && noTargetSelected ? 'is-selected' : ''}><input type="radio" name="target-cluster" checked={!props.protectConfig.targetCluster && noTargetSelected} onChange={() => { setNoTargetSelected(true); props.setProtectConfig(prev => ({ ...prev, targetCluster: '' })); }}/><span className="hbdr-protect-wizard-card-copy"><strong>No target</strong><small>Select a target cluster when running a Drill.</small></span></label>{targets.map(cluster => <label key={cluster.id} className={props.protectConfig.targetCluster === cluster.name ? 'is-selected' : ''}><input type="radio" name="target-cluster" checked={props.protectConfig.targetCluster === cluster.name} disabled={!cluster.compatible} onChange={() => props.setProtectConfig(prev => ({ ...prev, targetCluster: cluster.name }))}/><span className="hbdr-protect-wizard-card-copy"><span className="hbdr-protect-wizard-card-heading"><strong>{cluster.name}</strong><em>{cluster.connectionStatus || 'Unknown'}</em></span><small title={`${cluster.clusterType || 'Kubernetes'} · ${cluster.version} · ${cluster.region} · ${cluster.nodes} nodes · ${cluster.namespaces ?? '—'} namespaces · ${cluster.applications} applications${cluster.compatible ? '' : ` · ${cluster.incompatibilityReason || 'Incompatible cluster'}`}`}>{cluster.clusterType || 'Kubernetes'} · {cluster.version} · {cluster.region} · {cluster.nodes} nodes · {cluster.namespaces ?? '—'} namespaces · {cluster.applications} applications{!cluster.compatible && ` · ${cluster.incompatibilityReason || 'Incompatible cluster'}`}</small></span></label>)}{targets.length === 0 && <p>No clusters match the search.</p>}</div><div className="hbdr-protect-wizard-pagination"><span>Showing {targets.length} of {props.targetClusterOptions.length} clusters</span></div></section>}
           {props.step === 3 && <section><h3>Backup repository</h3><p>Select a repository for recovery points or create one within this flow.</p><div className="hbdr-protect-wizard-selection-tools"><label><Search size={17}/><input value={storageQuery} onChange={event => setStorageQuery(event.target.value)} placeholder="Search repositories" /></label><div><button type="button" onClick={() => openCreate('storage')}><Plus size={15} />New storage</button></div></div><div className="hbdr-protect-wizard-options">{repositories.map(repo => <label key={repo.id} className={props.protectConfig.storageId === repo.id ? 'is-selected' : ''}><input type="radio" name="storage-repo" checked={props.protectConfig.storageId === repo.id} onChange={() => props.setProtectConfig(prev => ({ ...prev, storageId: repo.id }))}/><span className="hbdr-protect-wizard-card-copy"><span className="hbdr-protect-wizard-card-heading"><strong>{repo.name}</strong><em>{repo.type}</em></span><small title={`Bucket / path: ${repo.bucket || '—'} · Endpoint: ${repo.endpoint || '—'}`}>Bucket / path: {repo.bucket || '—'} · Endpoint: {repo.endpoint || '—'}</small></span></label>)}{repositories.length === 0 && <p>No repositories match the search.</p>}</div><div className="hbdr-protect-wizard-pagination"><span>Showing {repositories.length} of {props.storage.length} repositories</span></div></section>}
           {props.step === 4 && <section><h3>Protection policy</h3><p>Optionally choose a policy for scheduled backups.</p><div className="hbdr-protect-wizard-policy-tools"><label><Search size={17}/><input value={policyQuery} onChange={event => { setPolicyQuery(event.target.value); setPolicyPage(1); }} placeholder="Search policies" /></label><button type="button" onClick={() => openCreate('policy')}><Plus size={15}/>New policy</button></div><div className="hbdr-protect-wizard-options"><label className={props.protectConfig.policy === 'manual' ? 'is-selected' : ''}><input type="radio" name="protection-policy" checked={props.protectConfig.policy === 'manual'} onChange={() => props.setProtectConfig(prev => ({ ...prev, policy: 'manual' }))}/><span className="hbdr-protect-wizard-card-copy"><strong>No policy</strong><small>Run backups manually. You can assign a policy later.</small></span></label>{pagePolicies.map(policy => <label key={policy.id} className={props.protectConfig.policy === policy.id ? 'is-selected' : ''}><input type="radio" name="protection-policy" checked={props.protectConfig.policy === policy.id} onChange={() => props.setProtectConfig(prev => ({ ...prev, policy: policy.id }))}/><span className="hbdr-protect-wizard-card-copy"><span className="hbdr-protect-wizard-card-heading"><strong>{policy.name}</strong><em>{policy.type}</em></span><small title={`Schedule: ${policy.schedule} · Retention: ${policy.retention} · ${policy.status} · ${policy.bound ? `${policy.bound} applications bound` : 'No applications bound'}`}>Schedule: {policy.schedule} · Retention: {policy.retention} · {policy.status} · {policy.bound ? `${policy.bound} applications bound` : 'No applications bound'}</small></span></label>)}{policies.length === 0 && <p>No policies match the search.</p>}</div><div className="hbdr-protect-wizard-pagination"><span>Showing {policies.length ? (currentPage - 1) * pageSize + 1 : 0}–{Math.min(currentPage * pageSize, policies.length)} of {policies.length}</span><div><button type="button" disabled={currentPage === 1} onClick={() => setPolicyPage(currentPage - 1)} aria-label="Previous policy page"><ChevronLeft size={16}/></button><span>{currentPage} / {pageCount}</span><button type="button" disabled={currentPage === pageCount} onClick={() => setPolicyPage(currentPage + 1)} aria-label="Next policy page"><ChevronRight size={16}/></button></div></div></section>}
           {props.step === 5 && <section><h3>Review protection</h3><p>Check the selections before creating the protection plan.</p><div className="hbdr-protect-review-groups"><section aria-label="Scope settings"><h4><span>1</span>Scope</h4><dl>
             <div><dt>Applications</dt><dd>{props.targetNames.join(', ')}</dd></div>
+            <div><dt>Backup method</dt><dd>{props.protectConfig.dataProtection?.mode === 'application-consistent' ? 'Application-consistent CSI snapshots' : props.protectConfig.dataProtection?.mode === 'snapshot-crash-consistent' ? 'CSI snapshot data movement · Crash-consistent' : 'Live file-level · Application consistency not guaranteed'}</dd></div>
             {props.targetCount > 1 && <div><dt>Protection mode</dt><dd>{props.protectConfig.mergeNamespaces ? 'Merge namespaces into one application scope' : 'Independent protection for each namespace'}</dd></div>}
             <div><dt>Resource scope</dt><dd>{props.targetCount > 1 || props.protectConfig.resourceSelection.mode === 'all' ? 'Default' : 'Custom'}
               {props.targetCount > 1 || props.protectConfig.resourceSelection.mode === 'all' ? <small>All namespace-scoped resource types are included. New resource types are included automatically. Cluster-scoped resources are excluded.</small> : <>
@@ -277,7 +311,59 @@ export function ProtectApplicationsWizard(props: Props & { onResourcesChanged: (
             <div><dt>Policy</dt><dd>{selectedPolicy?.name || 'Manual only'}<small>{selectedPolicy ? `Schedule: ${selectedPolicy.schedule} · Retention: ${selectedPolicy.retention}` : ''}</small></dd></div>
           </dl></section></div></section>}
 
+          {props.step === 1 && <section className="hbdr-protect-backup-method hbdr-protect-settings" aria-label="Protection settings">
+            <h3>Protection settings</h3>
+            <p>Choose how to back up your data and which resources to protect.</p>
+            <div className="hbdr-protect-settings-panel">
+            <h4>Backup method</h4>
+            <div className="hbdr-protect-wizard-options">
+              <label className={`${props.protectConfig.dataProtection?.mode === 'snapshot-crash-consistent' ? 'is-selected' : ''} ${!snapshotAvailable ? 'is-unavailable' : ''}`}>
+                <input type="radio" name="backup-method" disabled={!snapshotAvailable} checked={props.protectConfig.dataProtection?.mode === 'snapshot-crash-consistent'} onChange={() => { setFileLevelRiskAccepted(false); props.setProtectConfig(previous => ({ ...previous, dataProtection: { mode: 'snapshot-crash-consistent' } })); }} />
+                <span className="hbdr-protect-wizard-card-copy"><strong>CSI snapshots <span className="hbdr-backup-recommended">Recommended</span></strong><small>Back up stable snapshots with crash consistency. Applications keep running.</small></span>
+              </label>
+              <label className={props.protectConfig.dataProtection?.mode === 'live-filesystem' ? 'is-selected' : ''}>
+                <input type="radio" name="backup-method" checked={props.protectConfig.dataProtection?.mode === 'live-filesystem'} onClick={() => { setFileLevelRiskAccepted(true); props.setProtectConfig(previous => ({ ...previous, dataProtection: { mode: 'live-filesystem', riskAcknowledgement: 'live-filesystem-no-application-consistency-v1' } })); }} onChange={() => undefined} />
+                <span className="hbdr-protect-wizard-card-copy"><strong>File-level backup</strong><small>Read live files without snapshots. Files may change during backup; restored data consistency is not guaranteed.</small></span>
+              </label>
+            </div>
+            {!snapshotAvailable && <>
+              {snapshotRefreshing ? <div className="hbdr-protect-backup-status"><span role="status" aria-live="polite" className="hbdr-protect-backup-checking"><LoaderCircle size={14} className="animate-spin" aria-hidden="true" />{snapshotUnavailableReason}</span></div> : <>
+                <details className="hbdr-csi-volume-details" key={`${snapshotScopeKey}:${snapshotRetry}`}>
+                  <summary><span>{snapshotSummary.namespaces} namespace{snapshotSummary.namespaces === 1 ? '' : 's'} · {snapshotSummary.volumes} {snapshotSummary.unverifiedNamespaces ? 'checked ' : ''}volume{snapshotSummary.volumes === 1 ? '' : 's'}: {snapshotSummary.supported} supported · {snapshotSummary.unsupported} unsupported{snapshotSummary.failed > 0 && ` · ${snapshotSummary.failed} detection failed`}{snapshotSummary.unverifiedNamespaces > 0 && ` · ${snapshotSummary.unverifiedNamespaces} namespace${snapshotSummary.unverifiedNamespaces === 1 ? '' : 's'} not verified`}</span></summary>
+                  <div className="hbdr-csi-volume-groups">
+                    <table><caption className="sr-only">Volume snapshot support across selected namespaces</caption><thead><tr><th scope="col">Namespace</th><th scope="col">PVC</th><th scope="col">Storage / CSI driver</th><th scope="col">CSI status</th><th scope="col">Reason / next step</th></tr></thead><tbody>
+                      {snapshotChecks.flatMap(check => check.volumes.length ? check.volumes.map(volume => <tr key={JSON.stringify([check.namespace, volume.name])}>
+                        <td>{check.namespace}</td><td>{volume.name}</td><td>{volume.fields?.storageClass || '—'}<small>{volume.driver || 'No CSI driver'}</small></td>
+                        <td><span className={`hbdr-csi-volume-state is-${volume.fields?.status === 'configured' ? 'supported' : volume.fields?.status === 'unsupported' ? 'unsupported' : 'failed'}`}>{volume.fields?.status === 'configured' ? 'Supported' : volume.fields?.status === 'unsupported' ? 'Unsupported' : 'Detection failed'}</span></td>
+                        <td>{volume.fields?.status === 'configured' ? 'CSI prerequisites configured.' : <>{volume.fields?.reason || 'Volume support could not be verified.'}<small>{snapshotSetupGuidance(volume)}</small></>}</td>
+                      </tr>) : [<tr key={JSON.stringify([check.namespace, null])}>
+                        <td>{check.namespace}</td><td>—</td><td>—</td>
+                        <td><span className={`hbdr-csi-volume-state is-${check.status === 'configured' ? 'supported' : 'failed'}`}>{check.status === 'configured' ? 'No volumes' : 'Detection failed'}</span></td>
+                        <td>{check.status === 'configured' ? 'No persistent volumes in this namespace.' : check.error || currentSnapshotResult?.message || 'Complete volume inventory is unavailable. Check Agent connectivity and permissions, then recheck.'}</td>
+                      </tr>])}
+                    </tbody></table>
+                  </div>
+                </details>
+                <div className="hbdr-protect-backup-status"><button type="button" onClick={() => setSnapshotRetry(previous => previous + 1)}>Recheck</button><button type="button" onClick={() => setSnapshotHelpOpen(true)}>How to enable CSI snapshots?</button></div>
+              </>}
+            </>}
+            {groupError && <p role="alert">{groupError}</p>}
+            <section className="hbdr-protect-settings-scope"><h4>Resources to protect</h4>{props.targetCount > 1 && <div className="hbdr-protect-wizard-scope-summary"><div className="hbdr-protect-wizard-summary"><strong>{props.targetSummary}</strong><span>{props.targetNames.join(', ')}</span></div><fieldset className="hbdr-protect-wizard-scope-mode"><legend>Protection mode</legend><label><input type="radio" name="wizard-scope-mode" checked={!props.protectConfig.mergeNamespaces} onChange={() => props.setProtectConfig(prev => ({ ...prev, mergeNamespaces: false }))}/><span><strong>Independent</strong><small>Protect each namespace as its own application scope.</small></span></label><label><input type="radio" name="wizard-scope-mode" checked={Boolean(props.protectConfig.mergeNamespaces)} onChange={() => props.setProtectConfig(prev => ({ ...prev, mergeNamespaces: true, scope: 'all', includeAllResources: true, includedResources: [], excludedResources: [], labelSelector: { matchLabels: {}, matchExpressions: [] }, resourceSelection: { mode: 'all', namespaceScoped: [], clusterScoped: [] } }))}/><span><strong>Merge</strong><small>Protect all selected namespaces together as one scope.</small></span></label></fieldset></div>}{props.targetCount > 1 ? <p>Multi-namespace protection always includes all application resources.</p> : <ScopedResourceSelector purpose="backup" drafts={scopeDrafts} customUnavailableReason={props.targetClusterOptions.find(cluster => cluster.isCurrent)?.clusterType === 'openshift' ? 'OpenShift OADP currently supports the default scope only.' : undefined} value={props.protectConfig.resourceSelection} onChange={resourceSelection => props.setProtectConfig(prev => ({ ...prev, scope: 'all', includeAllResources: resourceSelection.mode === 'all', resourceSelection, includedResources: [], excludedResources: [], labelSelector: { matchLabels: {}, matchExpressions: [] } }))} namespaceResources={props.namespaceResourceOptions || []} customResourcesLoaded={props.customResourcesLoaded} onRequestCustomResources={props.onRequestCustomResources} />}</section>
+            </div>
+          </section>}
         </main>
+        {snapshotHelpOpen && <ResourceCreateDrawer title="Enable CSI snapshots" kind="cluster" onClose={() => setSnapshotHelpOpen(false)} actions={<button type="button" onClick={() => setSnapshotHelpOpen(false)}>Done</button>}>
+          <p>Ask your cluster administrator to check these requirements:</p>
+          <ol className="hbdr-csi-setup-steps">
+            <li>Use CSI-backed volumes with a storage driver that supports snapshots. Installing snapshot components cannot add support to an incompatible driver.</li>
+            <li>Install the Kubernetes snapshot CRDs and snapshot controller, and enable the CSI driver's external-snapshotter sidecar.</li>
+            <li>Configure a VolumeSnapshotClass matching each volume's CSI driver.</li>
+            <li>Keep the HyperCDR Agent connected and up to date, with permission to read volume and snapshot resources. After updating configuration, click Recheck.</li>
+            <li>Validate snapshot creation and recovery using an isolated test volume before relying on it.</li>
+          </ol>
+          {snapshotChecks.filter(result => result.status !== 'configured').map(result => <section key={result.namespace}><h4>{result.namespace}</h4>{result.volumes.length ? result.volumes.filter(volume => volume.fields?.status !== 'configured').map(volume => <p key={volume.name}><strong>{volume.name}</strong>: {snapshotSetupGuidance(volume)}</p>) : <p>Fresh CSI inventory is unavailable. Check Agent connectivity, version and permissions.</p>}</section>)}
+          <p>CSI provides driver-level crash consistency, not application consistency or atomic snapshots across volumes. HyperCDR does not stop or freeze applications.</p>
+        </ResourceCreateDrawer>}
       </div>
       <footer className="hbdr-protect-wizard-footer"><span>Step {props.step} of 5</span><div><button type="button" onClick={closeWizard}>Cancel</button><button type="button" disabled={props.step === 1} onClick={() => props.setStep((props.step - 1) as ProtectWizardStep)}>Back</button><button type="button" className="is-primary" disabled={!canNext || props.submitting} onClick={goNext}>{props.step === 5 ? props.submitting ? 'Saving…' : 'Create protection' : 'Next'}<ChevronRight size={16}/></button></div></footer>
       {inlineCreate === 'policy' && <ResourceCreateDrawer title="New DR Policy" kind="policy" onClose={() => closeInline()} actions={<><button type="button" disabled={creationBusy || !policyForm.name.trim()} onClick={() => void createResource()}>{creationBusy ? 'Saving...' : 'Save Policy'}</button><button type="button" onClick={() => closeInline()}>Cancel</button></>}><PolicyFormFields policyForm={policyForm} setPolicyForm={setPolicyForm} />{creationError && <p role="alert">{creationError}</p>}</ResourceCreateDrawer>}

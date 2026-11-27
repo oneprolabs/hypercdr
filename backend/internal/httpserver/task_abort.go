@@ -39,6 +39,17 @@ func (r *Router) abortTask(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, 200, map[string]any{"task": target, "reused": true})
 		return
 	}
+	if target.Type == "backup" && target.Status == "queued" && target.DispatchedAt.IsZero() {
+		cancelled, changed, err := r.store.UpdateTaskStatus(store.TaskStatusInput{TaskID: target.ID, Status: "cancelled", MarkDone: true, OnlyQueuedSync: true, ErrorCode: "SYNC_QUEUE_CANCELLED", ErrorMessage: "Queued sync cancelled by user."})
+		if err != nil {
+			writeJSON(w, 500, map[string]any{"error": "cancel_queued_sync_failed"})
+			return
+		}
+		if changed && cancelled.Status == "cancelled" {
+			writeJSON(w, 200, map[string]any{"task": cancelled})
+			return
+		}
+	}
 	if !r.hub.supportsTaskAbort(target.ClusterID) {
 		writeJSON(w, 409, map[string]any{"error": "task_abort_agent_unavailable", "message": "The task's Comm-agent must be online and upgraded before force abort."})
 		return

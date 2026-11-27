@@ -124,6 +124,24 @@ func TestRestoreVolumeFailureDetailsPreservesStartTimeout(t *testing.T) {
 	}
 }
 
+func TestRestoreVolumeFailureDetailsClassifiesDataPathErrors(t *testing.T) {
+	for _, scenario := range []struct {
+		message string
+		code    string
+	}{
+		{"Kopia restore: open /target/file: read-only file system", "RESTORE_VOLUME_FILESYSTEM_READ_ONLY"},
+		{"Kopia restore: input/output error", "RESTORE_VOLUME_DATA_PATH_FAILED"},
+	} {
+		code, message := restoreVolumeFailureDetails(map[string]any{"items": []map[string]any{
+			{"phase": "Completed", "message": "completed successfully", "errorCode": ""},
+			{"phase": "Failed", "message": scenario.message, "errorCode": ""},
+		}})
+		if code != scenario.code || message != scenario.message {
+			t.Fatalf("got (%q, %q), want (%q, %q)", code, message, scenario.code, scenario.message)
+		}
+	}
+}
+
 func TestRecoveryStagesIgnoreWeightedPercentAndMissingMarkers(t *testing.T) {
 	for _, progress := range []int{2, 90, 95, 100} {
 		p := withRecoveryStages(protocol.TaskDispatchPayload{Type: "drill"}, map[string]any{"restoreCache": map[string]any{"usable": true}}, progress, "running", "", "")

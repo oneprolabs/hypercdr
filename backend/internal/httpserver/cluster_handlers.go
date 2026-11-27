@@ -77,6 +77,7 @@ func (r *Router) listClusters(w http.ResponseWriter, req *http.Request) {
 	visibleClusters := clusters[:0]
 	for _, item := range clusters {
 		if tenantVisible(req, item.TenantID) {
+			item.ApplicationConsistencyProfiles = r.hub.applicationConsistencyProfiles(item.ID)
 			visibleClusters = append(visibleClusters, item)
 		}
 	}
@@ -353,6 +354,9 @@ func (r *Router) completeVeleroUpgradeAfterHeartbeat(cluster store.Cluster) {
 	}
 	for _, task := range tasks {
 		if task.Type != "velero-upgrade" || isTerminalTaskStatus(task.Status) {
+			continue
+		}
+		if boolPayload(task.Payload, "syncSettingsApply") && !boolPayload(task.Payload, "syncRuntimeRolloutCompleted") {
 			continue
 		}
 		expectedDigest := strings.TrimSpace(stringPayload(task.Payload, "expectedDigest"))
@@ -1451,13 +1455,18 @@ func (r *Router) upgradeClusterVelero(w http.ResponseWriter, req *http.Request) 
 			break
 		}
 	}
+	syncSettings, syncErr := r.store.GetClusterSyncSettings(clusterID)
+	if syncErr != nil {
+		writeJSON(w, 500, map[string]any{"error": "sync_settings_failed"})
+		return
+	}
 	task, err := r.store.CreateTask(store.TaskInput{ClusterID: clusterID, Type: "velero-upgrade", Status: "queued", CommandID: store.NewPublicID(), Payload: map[string]any{
 		"requestedBy": requestActor(req),
 		"operation":   map[bool]string{true: "repair", false: "upgrade"}[input.Repair],
 		"clusterId":   clusterID, "namespace": r.dataProtectionNamespaceForCluster(clusterID), "image": targetImage, "version": target.Version, "releaseId": target.ID,
 		"expectedDigest": targetDigest, "deploymentName": "velero", "daemonSetName": "node-agent",
 		"awsPluginImage": awsPlugin.Image, "azurePluginImage": azurePlugin.Image, "gcpPluginImage": gcpPlugin.Image,
-		"concurrentBackups": 2, "nodeAgentConcurrency": 2, "prepareQueueLength": 4,
+		"concurrentBackups": syncSettings.MaxSyncTasks, "nodeAgentConcurrency": syncSettings.NodeTransferConcurrency, "prepareQueueLength": 4,
 		"cacheStorageClass": cacheStorageClass, "cacheResidentThresholdMB": 1024, "cacheLimitMB": 5120,
 		"crdsUrl": func() string {
 			// Packaging-only HyperCDR builds do not change the upstream Velero

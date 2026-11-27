@@ -2,6 +2,43 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { workloadReadinessSnapshot, workloadReadinessEvents } from './workload-readiness.ts';
 
+const readinessSample = (at, objects, ready = false) => ({ createdAt: at, payload: { velero: { readinessObservedAt: at, readinessStartedAt: '2026-11-27T03:49:00Z', readiness: { Ready: ready, Objects: objects } } } });
+
+test('unbound PVC scheduling is ordinary waiting and completes when the pod becomes ready', () => {
+  const pod = { Kind: 'Pod', Namespace: 'nextcloud', UID: 'pod-1', Name: 'app-1', State: 'Scheduling', Reason: 'Unschedulable', Message: '0/1 nodes are available: pod has unbound immediate PersistentVolumeClaims.' };
+  const pending = readinessSample('2026-11-27T03:49:50Z', [pod]);
+  const waiting = workloadReadinessEvents({ status: 'running', payload: {} }, [pending]);
+  const row = waiting.find(row => row.id.startsWith('object-'));
+  assert.equal(row.status, 'waiting');
+  assert.match(row.summary, /Waiting for storage volumes/);
+  assert.ok(!waiting.some(row => row.id.startsWith('object-') && row.status === 'warning'));
+  const ready = readinessSample('2026-11-27T03:50:05Z', [{ ...pod, State: 'Ready', Reason: '', Message: '' }], true);
+  const completed = workloadReadinessEvents({ status: 'succeeded', payload: {} }, [pending, ready]);
+  assert.ok(completed.every(row => row.status === 'completed'));
+});
+
+test('resource readiness resolves only its own historical waits while other resources still wait', () => {
+  const pvc = { Kind: 'PersistentVolumeClaim', Namespace: 'first', Name: 'data', State: 'Pending' };
+  const other = { ...pvc, Namespace: 'second' };
+  const rows = workloadReadinessEvents({ status: 'running', payload: {} }, [
+    readinessSample('2026-11-27T03:49:50Z', [pvc, other]),
+    readinessSample('2026-11-27T03:50:05Z', [{ ...pvc, State: 'Bound' }, other]),
+  ]);
+  assert.equal(rows.find(row => row.summary === 'first / PVC data: Pending.').status, 'completed');
+  assert.equal(rows.find(row => row.summary === 'second / PVC data: Pending.').status, 'waiting');
+});
+
+test('real scheduling errors remain warnings and unsuccessful tasks do not complete waits', () => {
+  for (const status of ['running', 'failed', 'cancelled']) {
+    const rows = workloadReadinessEvents({ status, payload: {} }, [readinessSample('2026-11-27T03:49:50Z', [
+      { Kind: 'Pod', UID: 'pod-1', Name: 'app-1', State: 'Scheduling', Reason: 'Unschedulable', Message: '0/1 nodes are available: Insufficient cpu.' },
+      { Kind: 'PersistentVolumeClaim', Name: 'data', State: 'Pending' },
+    ])]);
+    assert.equal(rows.find(row => row.id.startsWith('object-')).status, 'warning');
+    assert.equal(rows.find(row => row.summary.includes('PVC data')).status, 'waiting');
+  }
+});
+
 test('PVC blockers appear in both the summary and detailed events with namespace ownership', () => {
   const task = { status: 'running', payload: { readinessObservedAt: new Date().toISOString(), readiness: { WorkloadCount: 4, ReadyWorkloads: 4, Objects: [{ Namespace: 'nextcloud', Kind: 'PersistentVolumeClaim', Name: 'data', State: 'Missing' }] } } };
   assert.match(workloadReadinessSnapshot(task, []).summary, /nextcloud\/data: Missing/);

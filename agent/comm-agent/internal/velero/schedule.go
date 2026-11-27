@@ -57,6 +57,12 @@ type ScheduleBuildInput struct {
 }
 
 func BuildScheduleManifest(input ScheduleBuildInput) (ScheduleManifest, error) {
+	if input.Command.DataProtectionMode != "" && input.Command.DataProtectionMode != "live-filesystem" {
+		return ScheduleManifest{}, fmt.Errorf("strict or unknown data protection mode requires per-run coordinated validation; refusing native Velero schedule")
+	}
+	if input.Command.ConsistencyGroup != nil {
+		return ScheduleManifest{}, fmt.Errorf("explicit consistency groups require coordinated scheduling; refusing native Velero schedule")
+	}
 	if input.Command.PlanID == "" {
 		return ScheduleManifest{}, fmt.Errorf("schedule plan id is required")
 	}
@@ -131,6 +137,9 @@ func BuildScheduleManifest(input ScheduleBuildInput) (ScheduleManifest, error) {
 			template.ExcludedClusterScopedResources = []string{"*"}
 		}
 		template.IncludeClusterResources = nil
+	}
+	if err := configureDataProtection(&template, input.Command.DataProtectionMode); err != nil {
+		return ScheduleManifest{}, err
 	}
 	return ScheduleManifest{
 		APIVersion: "velero.io/v1",

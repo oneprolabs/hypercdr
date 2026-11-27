@@ -285,6 +285,12 @@ func (a *DynamicManifestApplier) WaitForVeleroBackup(ctx context.Context, namesp
 			phase, _, _ := unstructured.NestedString(backup.Object, "status", "phase")
 			switch phase {
 			case "Completed", "PartiallyFailed":
+				moveData, _, _ := unstructured.NestedBool(backup.Object, "spec", "snapshotMoveData")
+				if moveData {
+					if err := a.CheckSnapshotRuntime(ctx, namespace); err != nil {
+						return fmt.Errorf("CSI data-mover restore is unavailable on the target: %w; volume data was not restored", err)
+					}
+				}
 				return nil
 			case "Failed", "FailedValidation":
 				return fmt.Errorf("Velero backup %q in namespace %q is %s", name, namespace, phase)

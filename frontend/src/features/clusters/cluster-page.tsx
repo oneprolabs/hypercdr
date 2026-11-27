@@ -24,8 +24,9 @@ import { ClusterRegistrationEmptyState } from './cluster-registration-empty-stat
 import type { ApiProtectionPlan } from '../recovery/types';
 import { buildDRTopology, type DRRelationship } from './dr-topology';
 const ClusterCacheSettingsDrawer = lazyWithUpgradeRecovery(() => import('./cluster-cache-settings-drawer').then(module => ({ default: module.ClusterCacheSettingsDrawer })));
+const ClusterSyncSettingsDrawer = lazyWithUpgradeRecovery(() => import('./cluster-sync-settings-drawer').then(module => ({ default: module.ClusterSyncSettingsDrawer })));
 const DRTopologyView = lazyWithUpgradeRecovery(() => import('./dr-topology-view'));
-const clusterDialogModules = [ClusterCacheSettingsDrawer, DRTopologyView];
+const clusterDialogModules = [ClusterCacheSettingsDrawer, ClusterSyncSettingsDrawer, DRTopologyView];
 
 type ApiList<T>={items:T[]};
 type ClusterRegistrationType='native-kubernetes'|'huaweicloud-cce'|'openshift';
@@ -125,6 +126,7 @@ export default function ClusterPage(props: {
   const canDeleteBackupData = useBusinessPermission('backup.delete');
   useDialogPreload(clusterDialogModules);
   const [cacheCluster, setCacheCluster] = useState<Cluster | null>(null);
+  const [syncCluster, setSyncCluster] = useState<Cluster | null>(null);
   const [licenseGuideOpen, setLicenseGuideOpen] = useState(false);
   const [upgradeTarget, setUpgradeTarget] = useState<Cluster | null>(null);
   const [veleroUpgradeTarget, setVeleroUpgradeTarget] = useState<Cluster | null>(null);
@@ -630,6 +632,7 @@ export default function ClusterPage(props: {
                         {inList && <button disabled={!canManageCluster} onClick={event => { setClusterMenuId(null); changeClusterView('cards'); openRename(cluster, event); }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"><Edit2 size={15} />Rename</button>}
                         {inList && !(cluster.isDefault || cluster.id === defaultClusterId) && <button disabled={!canManageCluster} onClick={event => { setClusterMenuId(null); setDefaultCluster(cluster, event); }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"><Star size={15} />Set as default</button>}
                         {canUpgrade && <button onMouseEnter={() => preloadDialog(ClusterCacheSettingsDrawer)} onFocus={() => preloadDialog(ClusterCacheSettingsDrawer)} onClick={() => { setClusterMenuId(null); setCacheCluster(cluster); }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"><Settings2 size={15} />Cache settings</button>}
+                        {canUpgrade && <button onMouseEnter={() => preloadDialog(ClusterSyncSettingsDrawer)} onClick={() => { setClusterMenuId(null); setSyncCluster(cluster); }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"><Settings2 size={15} />Sync settings</button>}
                         <button disabled={!canUnregisterCluster} title={!canUnregisterCluster ? "Your role cannot unregister clusters." : undefined} onClick={(event) => openUnregister(cluster, event)} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-rose-600 hover:bg-rose-50"><Trash2 size={15} />Unregister Cluster</button>
                       </motion.div>
                     </>, document.querySelector('.premium-app') || document.body)
@@ -677,6 +680,7 @@ export default function ClusterPage(props: {
 
   return (
     <motion.div key="clusters" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="hbdr-clusters-page">
+      {syncCluster && <DialogModuleFrame module={ClusterSyncSettingsDrawer} title="Sync settings" onClose={() => setSyncCluster(null)}><ClusterSyncSettingsDrawer clusterId={syncCluster.id} name={syncCluster.name} onClose={() => setSyncCluster(null)} /></DialogModuleFrame>}
       {cacheCluster && <DialogModuleFrame module={ClusterCacheSettingsDrawer} title="Cache settings" onClose={() => setCacheCluster(null)}><ClusterCacheSettingsDrawer clusterId={cacheCluster.id} name={cacheCluster.name} onClose={() => setCacheCluster(null)} onSaved={() => { void onRefreshRegistration(); }} /></DialogModuleFrame>}
       <div className="hbdr-clusters-workspace">
       <SearchBar title="Clusters" desc="Register clusters and maintain the default cluster." />
